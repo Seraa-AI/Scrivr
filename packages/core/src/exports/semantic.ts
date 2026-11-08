@@ -12,7 +12,7 @@
  */
 
 import type { Node as PmNode, Mark as PmMark, Schema } from "prosemirror-model";
-import type { WrapMode, XAlign } from "../layout/AnchoredObjects";
+import { normalizeImageAttrs, type WrapMode, type XAlign } from "../layout/AnchoredObjects";
 
 // ── The unit ──────────────────────────────────────────────────────────────
 
@@ -163,6 +163,21 @@ export const IMAGE_NODE_ATTRS: Record<keyof SemanticImage, string> = {
   align: "xAlign",
 };
 
+/** The image a node is, as an agent reads it, or null when it is not an image. */
+export function semanticImage(node: PmNode): SemanticImage | null {
+  if (node.type.name !== "image") return null;
+  const placed = normalizeImageAttrs(node);
+  const { src, alt } = node.attrs;
+  return {
+    src: typeof src === "string" ? src : "",
+    alt: typeof alt === "string" ? alt : "",
+    width: placed.width,
+    height: placed.height,
+    wrap: placed.wrapMode,
+    align: placed.xAlign,
+  };
+}
+
 /** One inline run of a unit's text and the formatting marks around it. */
 export interface InlineSpan {
   text: string;
@@ -197,17 +212,29 @@ export interface SemanticPart {
 }
 
 /**
- * One pending review record as an agent reads it. `at`/`length` place it in the
- * text of the list it appears in: `unit.text`, `part.text` or `cell.text`.
+ * One pending act of review as an agent reads it. `at`/`length` place it in the
+ * text owning the `changes` array it is in: `unit.text`, `part.text` or
+ * `cell.text`.
  */
 export interface SemanticChange {
   type: "suggestedDelete" | "suggestedInsert" | "suggestedAttrs";
-  /** What it removes or adds; "\n" for a paragraph break, "" for an attribute change. */
+  /**
+   * What it removes or adds: "\n" for a paragraph or line break, "" for an
+   * attribute change or an object. Another author's work inside it is not part
+   * of it, though its extent spans it.
+   */
   text: string;
   /** Offset into the owning text. Absent when a node handler overrides the unit's text. */
   at?: number;
-  /** How much of the owning text it covers: 0 for a deletion, the block for an attribute change. */
+  /**
+   * How much of the owning text it spans. Always 0 for a deletion, which is
+   * not in the proposed text.
+   */
   length?: number;
+  /**
+   * The act's id: the one to pass to `reviewChanges`. Every piece of one act —
+   * both halves of a replacement or a move, a block and its text — shares it.
+   */
   id?: string;
   authorId?: string;
   status?: string;
@@ -216,14 +243,21 @@ export interface SemanticChange {
   groupId?: string;
   /** Shared by the two halves of one move. */
   moveId?: string;
-  /** `suggestedAttrs` only: what the block was. */
+  /**
+   * `suggestedAttrs` only: what it was before. A block: its former styling,
+   * with `level` for a heading and `nodeType` when the type changed. A list
+   * change: `{ list: [...] }`, the list types it sat in, outermost first. A
+   * formatting change: `{ marks: [...] }`, the text's formatting marks before.
+   */
   oldAttrs?: Record<string, unknown>;
+  /** The image an inserted or deleted image is. */
+  image?: SemanticImage;
 }
 
 /**
  * A review record written on a node rather than on its text. `covers` spans
  * the node's text; `after` sits where it ends, as a paragraph break does. A
- * covering insertion reads the node's proposed text.
+ * covering insertion with no text of its own reads the text it covers.
  */
 export interface SemanticNodeChange {
   change: SemanticChange;
@@ -313,13 +347,15 @@ export interface SemanticHandlers {
  */
 export interface UnitCtx {
   readonly schema: Schema;
+  /** The document being read. A review act can span nodes, so naming one needs all of it. */
+  readonly doc: PmNode;
   /** Serialize one block, or an ordered group of blocks, to markdown. */
   toMarkdown(nodes: PmNode | readonly PmNode[]): string;
   /** Plain text for embedding; folds semantic mark handlers. */
   toText(nodes: PmNode | readonly PmNode[]): string;
   /** Inline formatting runs; reconstructs `toText` exactly (formatting marks only). */
   toSpans(nodes: PmNode | readonly PmNode[]): InlineSpan[];
-  /** Review changes found while applying semantic mark handlers. */
+  /** Review changes from the mark handlers and `nodeChanges`, placed in `toText`'s text. */
   toChanges(nodes: PmNode | readonly PmNode[]): SemanticChange[];
   /** A block's non-default styling attrs (align/indent/font/…), or undefined. */
   attrsOf(node: PmNode): Record<string, unknown> | undefined;

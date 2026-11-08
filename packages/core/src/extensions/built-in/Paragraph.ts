@@ -8,7 +8,7 @@ import {
   type DocxNodeHandler,
   type DocxBlockTransform,
 } from "../../exports/docx";
-import type { SemanticImage, SemanticNodeHandler } from "../../exports/semantic";
+import { semanticImage, type SemanticNodeHandler } from "../../exports/semantic";
 import type { PdfNodeHandler } from "../../exports/pdf";
 import type { Node as PmNode } from "prosemirror-model";
 import { normalizeImageAttrs } from "../../layout/AnchoredObjects";
@@ -26,19 +26,6 @@ function soleImage(node: PmNode, isRemoved: (node: PmNode) => boolean): PmNode |
     else if (!child.isText || (child.text ?? "").trim() !== "") other += 1;
   });
   return images.length === 1 && other === 0 ? images[0] ?? null : null;
-}
-
-function semanticImage(image: PmNode): SemanticImage {
-  const placed = normalizeImageAttrs(image);
-  const { src, alt } = image.attrs;
-  return {
-    src: typeof src === "string" ? src : "",
-    alt: typeof alt === "string" ? alt : "",
-    width: placed.width,
-    height: placed.height,
-    wrap: placed.wrapMode,
-    align: placed.xAlign,
-  };
 }
 
 /**
@@ -222,8 +209,9 @@ export const Paragraph = Extension.create({
       return xml("w:p", undefined, [...lead, ...children]);
     };
     const semanticHandler: SemanticNodeHandler = (node, ctx) => {
-      const image = soleImage(node, (child) => ctx.isRemoved(child));
-      return image ? { type: "image", image: semanticImage(image) } : { type: "paragraph" };
+      const sole = soleImage(node, (child) => ctx.isRemoved(child));
+      const image = sole && semanticImage(sole);
+      return image ? { type: "image", image } : { type: "paragraph" };
     };
     return {
       docx: { nodes: { paragraph: handler } },

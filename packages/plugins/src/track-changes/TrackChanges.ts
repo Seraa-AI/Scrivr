@@ -239,8 +239,6 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
   },
 
   addExports() {
-    // The proposed view: deleted text leaves the semantic text, inserted text
-    // stays, and every pending record is reported where it sits.
     return {
       semantic: {
         marks: { trackedDelete: dropDeleted, trackedInsert: keepInserted },

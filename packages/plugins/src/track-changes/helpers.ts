@@ -252,7 +252,7 @@ export const updateBlockNodesAttrs = (
   return Fragment.fromArray(updatedNodes);
 };
 
-const isTrackedRecord = (value: unknown): value is Partial<TrackedAttrs> =>
+export const isTrackedRecord = (value: unknown): value is Partial<TrackedAttrs> =>
   typeof value === "object" && value !== null;
 
 /**

@@ -8,7 +8,7 @@ import { ServerEditor, StarterKit, Table } from "@scrivr/core";
 import type { SemanticChange, SemanticUnit } from "@scrivr/core";
 import { TextSelection } from "@scrivr/core/pm";
 import { toSemanticUnits, unitRichHash } from "@scrivr/export-semantic";
-import { reviewChanges, TrackChanges, TrackChangesStatus } from "@scrivr/plugins";
+import { changeActs, reviewChanges, TrackChanges, TrackChangesStatus, trackChangesPluginKey } from "@scrivr/plugins";
 
 type DocNode = Record<string, unknown>;
 
@@ -240,5 +240,144 @@ describe("the rich hash", () => {
     const id = before.changes?.[0]?.id ?? "";
     expect(reviewChanges(editor, { accepted: [], rejected: [id] }).status).toBe("applied");
     expect(unitRichHash(unitOf(editor, "a"))).not.toBe(unitRichHash(before));
+  });
+});
+
+describe("one act reads under one id", () => {
+  const cell = (id: string, text: string): DocNode => ({ type: "tableCell", content: [para(id, text)] });
+
+  it("everywhere a whole deleted table is read: unit, parts and cells", () => {
+    const editor = editorWith([para("p0", "before"), {
+      type: "table", attrs: { nodeId: "t" },
+      content: [
+        { type: "tableRow", attrs: { nodeId: "r1" }, content: [cell("a", "a1"), cell("b", "b1")] },
+        { type: "tableRow", attrs: { nodeId: "r2" }, content: [cell("c", "c2"), cell("d", "d2")] },
+      ],
+    }, para("p9", "after")]);
+    const { doc } = editor.getState();
+    const start = doc.child(0).nodeSize;
+    editor.applyTransaction(editor.getState().tr.delete(start, start + doc.child(1).nodeSize));
+    const table = unitOf(editor, "t");
+    const ids = new Set([
+      ...(table.changes ?? []).map((c) => c.id),
+      ...(table.parts ?? []).flatMap((p) => p.changes ?? []).map((c) => c.id),
+      ...(table.cells?.rows ?? []).flatMap((r) => r.cells).flatMap((c) => c.changes ?? []).map((c) => c.id),
+    ]);
+    expect(ids.size).toBe(1);
+    expect(table.changes).toHaveLength(1);
+  });
+
+  it("for a deletion nested several levels deep", () => {
+    const item = (id: string, text: string): DocNode => ({ type: "listItem", content: [para(id, text)] });
+    const editor = editorWith([para("p0", "before"), {
+      type: "bulletList", attrs: { nodeId: "l" },
+      content: [item("i1", "one"), item("i2", "two")],
+    }]);
+    const { doc } = editor.getState();
+    const start = doc.child(0).nodeSize;
+    editor.applyTransaction(editor.getState().tr.delete(start, start + doc.child(1).nodeSize));
+    const list = units(editor).find((u) => u.type === "list");
+    const deletions = list?.changes?.filter((c) => c.type === "suggestedDelete") ?? [];
+    expect(deletions.map((c) => c.text)).toEqual(["onetwo"]);
+    const partIds = (list?.parts ?? []).flatMap((p) => p.changes ?? []).map((c) => c.id);
+    expect(new Set([...partIds, deletions[0]?.id])).toEqual(new Set([deletions[0]?.id]));
+  });
+});
+
+describe("a deleted hard break", () => {
+  it("leaves the proposed text and reads as a deleted newline", () => {
+    const editor = editorWith([{
+      type: "paragraph", attrs: { nodeId: "p" },
+      content: [{ type: "text", text: "ab" }, { type: "hardBreak" }, { type: "text", text: "cd" }],
+    }]);
+    editor.applyTransaction(editor.getState().tr.delete(3, 4));
+    const unit = unitOf(editor, "p");
+    expect(unit.text).toBe("abcd");
+    expect(unit.changes?.map(shape)).toEqual([{ type: "suggestedDelete", text: "\n", at: 2, length: 0 }]);
+  });
+
+  it("reads as many changes as the acts a reviewer decides, with the break among them", () => {
+    const editor = editorWith([{
+      type: "paragraph", attrs: { nodeId: "p" },
+      content: [{ type: "text", text: "ab" }, { type: "hardBreak" }, { type: "text", text: "cd" }],
+    }]);
+    editor.applyTransaction(editor.getState().tr.delete(2, 5));
+    const unit = unitOf(editor, "p");
+    expect(unit.text).toBe("ad");
+    const acts = changeActs(trackChangesPluginKey.getState(editor.getState())?.changeSet.pending ?? []);
+    expect(unit.changes?.map((c) => c.id).sort()).toEqual(acts.map((a) => a.primary.id).sort());
+    expect(unit.changes?.map(shape)).toContainEqual({ type: "suggestedDelete", text: "\n", at: 1, length: 0 });
+  });
+
+  it("is part of a deleted block's text, which keeps all of it", () => {
+    const editor = editorWith([para("a", "Alpha"), {
+      type: "paragraph", attrs: { nodeId: "p" },
+      content: [{ type: "text", text: "ab" }, { type: "hardBreak" }, { type: "text", text: "cd" }],
+    }]);
+    const { doc } = editor.getState();
+    editor.applyTransaction(editor.getState().tr.delete(doc.child(0).nodeSize, doc.content.size));
+    const unit = unitOf(editor, "p");
+    expect(unit.text).toBe("");
+    expect(unit.changes?.map(shape)).toEqual([{ type: "suggestedDelete", text: "ab\ncd", at: 0, length: 0 }]);
+  });
+});
+
+describe("authors working inside each other's changes", () => {
+  it("reads an insertion another author typed inside once", () => {
+    const editor = editorWith([para("a", "Alpha")]);
+    editor.applyTransaction(editor.getState().tr.insertText("NEW", 1));
+    editor.commands.setTrackChangesUserID("bob");
+    editor.applyTransaction(editor.getState().tr.insertText("x", 3));
+    const changes = unitOf(editor, "a").changes ?? [];
+    expect(changes.filter((c) => c.authorId === "alice").map(shape)).toEqual([{ type: "suggestedInsert", text: "NEW", at: 0, length: 4 }]);
+    expect(changes.filter((c) => c.authorId === "bob").map(shape)).toEqual([{ type: "suggestedInsert", text: "x", at: 2, length: 1 }]);
+  });
+
+  it("reads a deletion spanning another author's insertion as one deletion of all of it", () => {
+    const editor = editorWith([para("a", "Alpha"), para("b", "Beta")]);
+    editor.applyTransaction(editor.getState().tr.insertText("NEW", 9));
+    editor.commands.setTrackChangesUserID("bob");
+    const { doc } = editor.getState();
+    editor.applyTransaction(editor.getState().tr.delete(doc.child(0).nodeSize, doc.content.size));
+    const bob = (unitOf(editor, "b").changes ?? []).filter((c) => c.authorId === "bob");
+    expect(bob.map(shape)).toEqual([{ type: "suggestedDelete", text: "BNEWeta", at: 0, length: 0 }]);
+  });
+});
+
+describe("a formatting change", () => {
+  it("reads as an attribute change over the formatted text, with the marks it had", () => {
+    const editor = editorWith([para("a", "Alpha one")]);
+    const bold = editor.getState().schema.marks["bold"];
+    if (!bold) throw new Error("no bold");
+    editor.applyTransaction(editor.getState().tr.addMark(1, 6, bold.create()));
+    const changes = unitOf(editor, "a").changes ?? [];
+    expect(changes.map(shape)).toEqual([{ type: "suggestedAttrs", text: "", at: 0, length: 5 }]);
+    expect(changes[0]?.oldAttrs).toEqual({ marks: [] });
+  });
+});
+
+describe("a wrapped or structurally moved node", () => {
+  it("reads as an insertion", () => {
+    const editor = editorWith([{
+      type: "bulletList",
+      attrs: tracked("wrap_with_node", "alice"),
+      content: [{ type: "listItem", content: [para("i", "one")] }],
+    }, {
+      type: "paragraph",
+      attrs: { nodeId: "s", ...tracked("structure", "alice", { moveNodeId: "m" }) },
+      content: [{ type: "text", text: "moved" }],
+    }]);
+    expect(units(editor).find((u) => u.type === "list")?.changes?.map(shape)).toEqual([{ type: "suggestedInsert", text: "one", at: 0, length: 3 }]);
+    expect(unitOf(editor, "s").changes?.map((c) => [c.type, c.moveId])).toEqual([["suggestedInsert", "m"]]);
+  });
+});
+
+describe("a deleted image", () => {
+  it("says which image is removed", () => {
+    const editor = editorWith([{ type: "paragraph", attrs: { nodeId: "fig" }, content: [{ type: "image", attrs: { src: "https://example.com/a.png", alt: "A" } }] }]);
+    editor.applyTransaction(editor.getState().tr.delete(1, 2));
+    const [change] = unitOf(editor, "fig").changes ?? [];
+    expect(change?.type).toBe("suggestedDelete");
+    expect(change?.image).toMatchObject({ src: "https://example.com/a.png", alt: "A" });
   });
 });

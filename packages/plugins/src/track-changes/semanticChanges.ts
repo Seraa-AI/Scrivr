@@ -2,126 +2,134 @@
  * What each tracked record means to an agent reading the semantic lane. The
  * walker places what these return; this decides what they say.
  */
+import { describeInlineMark, isTrackedMark, semanticImage } from "@scrivr/core";
 import type { SemanticChange, SemanticMarkHandler, SemanticNodeChange, UnitCtx } from "@scrivr/core";
-import type { Node as PMNode } from "@scrivr/core/pm";
+import { EditorState } from "@scrivr/core/pm";
+import type { Mark, Node as PMNode } from "@scrivr/core/pm";
 
-import { CHANGE_OPERATION, CHANGE_STATUS } from "./types";
+import { findChanges } from "./findChanges";
+import { getBlockInlineTrackedData, isTrackedRecord, isValidTrackableMark, markRecords } from "./helpers";
+import { changeActs } from "./reviewPlan";
+import { CHANGE_OPERATION, CHANGE_STATUS, type TrackedAttrs } from "./types";
 
-type Entry = Record<string, unknown>;
+type TrackedRecord = Partial<TrackedAttrs>;
 
-const isEntry = (value: unknown): value is Entry => typeof value === "object" && value !== null;
+const actIdsByDoc = new WeakMap<PMNode, ReadonlyMap<string, string>>();
 
-/** A mark's or node's records; a mark with none still stands for one change. */
-function entriesOf(raw: unknown): Entry[] {
-  const list = Array.isArray(raw) ? raw : raw ? [raw] : [];
-  const entries = list.filter(isEntry);
-  return entries.length > 0 ? entries : [{}];
+/** Each record's act, named by its primary record: the id `reviewChanges` decides the act by. */
+function actIds(doc: PMNode): ReadonlyMap<string, string> {
+  const cached = actIdsByDoc.get(doc);
+  if (cached) return cached;
+  const ids = new Map<string, string>();
+  for (const { primary, records } of changeActs(findChanges(EditorState.create({ doc })).changes)) {
+    for (const record of records) ids.set(record.id, primary.id);
+  }
+  actIdsByDoc.set(doc, ids);
+  return ids;
 }
 
-const stringField = (entry: Entry, key: string) => {
-  const value = entry[key];
-  return typeof value === "string" ? value : undefined;
-};
-
-/** Per read: each record id seen so far, and the root it resolved to. */
-const rootsByRead = new WeakMap<UnitCtx, Map<string, string>>();
-
-/**
- * The record an act is named by. Pieces of one act — the text a new block was
- * created with, the cells of a deleted row, a deletion later typing split
- * apart, the reference a split leaves — report it, so one act reads as one
- * change. A piece names the record it is part of, which may itself be a piece
- * of an enclosing one; the walker reads a container before its content, so the
- * enclosing record has been resolved by then.
- */
-function rootId(entry: Entry, ctx: UnitCtx): string | undefined {
-  const id = stringField(entry, "id");
-  const partOf = entry["operation"] === CHANGE_OPERATION.reference
-    ? stringField(entry, "referenceId")
-    : stringField(entry, "creationId") ?? stringField(entry, "deletionId") ?? stringField(entry, "continuesId");
-  const roots = rootsByRead.get(ctx) ?? new Map<string, string>();
-  rootsByRead.set(ctx, roots);
-  const root = partOf !== undefined ? roots.get(partOf) ?? partOf : id;
-  if (id !== undefined && root !== undefined) roots.set(id, root);
-  return root;
-}
-
-function describe(type: SemanticChange["type"], text: string, entry: Entry, ctx: UnitCtx): SemanticChange {
-  const id = rootId(entry, ctx);
-  const authorId = stringField(entry, "authorID");
-  const status = stringField(entry, "status");
-  const createdAt = entry["createdAt"];
-  const groupId = stringField(entry, "groupId");
-  const moveId = stringField(entry, "moveId") ?? stringField(entry, "moveNodeId");
+function describe(type: SemanticChange["type"], text: string, record: TrackedRecord, ctx: UnitCtx): SemanticChange {
+  const id = record.id === undefined ? undefined : actIds(ctx.doc).get(record.id) ?? record.id;
+  const moveId = record.moveId ?? record.moveNodeId;
   return {
     type,
     text,
     ...(id !== undefined ? { id } : {}),
-    ...(authorId !== undefined ? { authorId } : {}),
-    ...(status !== undefined ? { status } : {}),
-    ...(typeof createdAt === "number" ? { createdAt } : {}),
-    ...(groupId !== undefined ? { groupId } : {}),
+    ...(record.authorID !== undefined ? { authorId: record.authorID } : {}),
+    ...(record.status !== undefined ? { status: record.status } : {}),
+    ...(record.createdAt !== undefined ? { createdAt: record.createdAt } : {}),
+    ...(record.groupId !== undefined ? { groupId: record.groupId } : {}),
     ...(moveId !== undefined ? { moveId } : {}),
   };
 }
 
+/** A review mark's records; one with none still stands for one change. */
+const reviewRecords = (mark: Mark): TrackedRecord[] => {
+  const records = markRecords(mark);
+  return records.length > 0 ? records : [{}];
+};
+
 /** Inserted text stays in the proposed text, and is reported as proposed. */
 export const keepInserted: SemanticMarkHandler = (run, mark, ctx) => ({
   text: run.text,
-  changes: [...(run.changes ?? []), ...entriesOf(mark.attrs["dataTracked"]).map((e) => describe("suggestedInsert", run.text, e, ctx))],
+  changes: [...(run.changes ?? []), ...reviewRecords(mark).map((r) => describe("suggestedInsert", run.text, r, ctx))],
 });
 
 /** Deleted text leaves the proposed text, and is kept as the change that removes it. */
 export const dropDeleted: SemanticMarkHandler = (run, mark, ctx) => ({
   text: "",
-  changes: [...(run.changes ?? []), ...entriesOf(mark.attrs["dataTracked"]).map((e) => describe("suggestedDelete", run.text, e, ctx))],
+  changes: [...(run.changes ?? []), ...reviewRecords(mark).map((r) => describe("suggestedDelete", run.text, r, ctx))],
 });
 
 /** The block as it was before an attribute change, in the vocabulary of `attrsOf`. */
-function formerAttrs(node: PMNode, entry: Entry, ctx: UnitCtx): Record<string, unknown> {
-  const oldTypeName = stringField(entry, "oldNodeTypeName");
+function formerAttrs(node: PMNode, record: TrackedRecord, ctx: UnitCtx): Record<string, unknown> {
+  const oldTypeName = "oldNodeTypeName" in record ? record.oldNodeTypeName : undefined;
   const oldType = (oldTypeName !== undefined ? ctx.schema.nodes[oldTypeName] : undefined) ?? node.type;
-  const oldAttrs = entry["oldAttrs"];
-  const former = oldType.create(isEntry(oldAttrs) ? oldAttrs : null);
+  const former = oldType.create("oldAttrs" in record ? record.oldAttrs : null);
   const level = former.attrs["level"];
   return {
     ...(ctx.attrsOf(former) ?? {}),
+    // `attrsOf` leaves level out as structure; here it is what changed.
     ...(typeof level === "number" ? { level } : {}),
     ...(oldType !== node.type ? { nodeType: oldType.name } : {}),
   };
 }
 
-function listTypes(entry: Entry): string[] {
-  const oldList = entry["oldList"];
-  return Array.isArray(oldList) ? oldList.filter(isEntry).flatMap((level) => stringField(level, "type") ?? []) : [];
-}
+const listTypes = (record: TrackedRecord): string[] =>
+  "oldList" in record && Array.isArray(record.oldList) ? record.oldList.map((level) => level.type) : [];
 
-const NODE_CHANGES: Partial<Record<string, (node: PMNode, entry: Entry, ctx: UnitCtx) => SemanticNodeChange>> = {
-  [CHANGE_OPERATION.insert]: (_node, e, ctx) => ({ change: describe("suggestedInsert", "", e, ctx), place: "covers" }),
-  [CHANGE_OPERATION.move]: (_node, e, ctx) => ({ change: describe("suggestedInsert", "", e, ctx), place: "covers" }),
-  [CHANGE_OPERATION.delete]: (_node, e, ctx) => ({ change: describe("suggestedDelete", "", e, ctx), place: "covers" }),
-  [CHANGE_OPERATION.node_join]: (_node, e, ctx) => ({ change: describe("suggestedDelete", "\n", e, ctx), place: "after" }),
-  // A split is reported once, through the reference its first block holds.
-  [CHANGE_OPERATION.reference]: (_node, e, ctx) => ({ change: describe("suggestedInsert", "\n", e, ctx), place: "after" }),
-  [CHANGE_OPERATION.set_node_attributes]: (node, e, ctx) => ({
-    change: { ...describe("suggestedAttrs", "", e, ctx), oldAttrs: formerAttrs(node, e, ctx) },
+/** What an inserted or deleted node adds or removes, beyond its text. */
+const objectOf = (node: PMNode) => {
+  const image = semanticImage(node);
+  return image ? { image } : {};
+};
+
+const insertion = (node: PMNode, record: TrackedRecord, ctx: UnitCtx): SemanticNodeChange =>
+  ({ change: { ...describe("suggestedInsert", "", record, ctx), ...objectOf(node) }, place: "covers" });
+
+const NODE_CHANGES: Partial<Record<CHANGE_OPERATION, (node: PMNode, record: TrackedRecord, ctx: UnitCtx) => SemanticNodeChange>> = {
+  [CHANGE_OPERATION.insert]: insertion,
+  [CHANGE_OPERATION.move]: insertion,
+  // A container added around content, which is inserted with it.
+  [CHANGE_OPERATION.wrap_with_node]: insertion,
+  // A block's copy at the place a structural change moved it to.
+  [CHANGE_OPERATION.structure]: insertion,
+  [CHANGE_OPERATION.delete]: (node, r, ctx) =>
+    ({ change: { ...describe("suggestedDelete", "", r, ctx), ...objectOf(node) }, place: "covers" }),
+  [CHANGE_OPERATION.node_join]: (_node, r, ctx) => ({ change: describe("suggestedDelete", "\n", r, ctx), place: "after" }),
+  // A split is one act with the reference its first block holds; reported there.
+  [CHANGE_OPERATION.reference]: (_node, r, ctx) => ({ change: describe("suggestedInsert", "\n", r, ctx), place: "after" }),
+  [CHANGE_OPERATION.set_node_attributes]: (node, r, ctx) => ({
+    change: { ...describe("suggestedAttrs", "", r, ctx), oldAttrs: formerAttrs(node, r, ctx) },
     place: "covers",
   }),
-  [CHANGE_OPERATION.list_change]: (_node, e, ctx) => ({
-    change: { ...describe("suggestedAttrs", "", e, ctx), oldAttrs: { list: listTypes(e) } },
+  [CHANGE_OPERATION.list_change]: (_node, r, ctx) => ({
+    change: { ...describe("suggestedAttrs", "", r, ctx), oldAttrs: { list: listTypes(r) } },
     place: "covers",
   }),
 };
 
-/** The pending records written on a node itself. */
+const isPending = (record: TrackedRecord) => record.status === CHANGE_STATUS.pending;
+
+/** A formatting change on text: the marks the text had before it. */
+function formattingChanges(node: PMNode, ctx: UnitCtx): SemanticNodeChange[] {
+  const formatting = node.marks.filter((mark) => !isTrackedMark(mark.type.name));
+  return formatting.filter(isValidTrackableMark).flatMap((mark) =>
+    markRecords(mark).filter(isPending).map((record) => {
+      const before = record.operation === CHANGE_OPERATION.insert ? formatting.filter((m) => m !== mark) : formatting;
+      return {
+        change: { ...describe("suggestedAttrs", "", record, ctx), oldAttrs: { marks: before.map(describeInlineMark) } },
+        place: "covers",
+      };
+    }),
+  );
+}
+
+/** The pending records written on a node itself, or on the formatting of its text. */
 export function nodeChanges(node: PMNode, ctx: UnitCtx): SemanticNodeChange[] {
-  const raw = node.attrs["dataTracked"];
-  const records = (Array.isArray(raw) ? raw : raw ? [raw] : []).filter(isEntry);
-  return records
-    .filter((record) => record["status"] === CHANGE_STATUS.pending)
-    .flatMap((record) => {
-      const operation = stringField(record, "operation");
-      const toChange = operation !== undefined ? NODE_CHANGES[operation] : undefined;
-      return toChange ? [toChange(node, record, ctx)] : [];
-    });
+  if (node.isText) return formattingChanges(node, ctx);
+  return (getBlockInlineTrackedData(node) ?? []).filter(isTrackedRecord).filter(isPending).flatMap((record) => {
+    const toChange = record.operation === undefined ? undefined : NODE_CHANGES[record.operation];
+    return toChange ? [toChange(node, record, ctx)] : [];
+  });
 }

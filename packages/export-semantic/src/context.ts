@@ -4,12 +4,12 @@ import type {
   InlineMark,
   InlineSpan,
   SemanticChange,
-  SemanticHandlers,
   SemanticMarkHandler,
   SemanticRun,
   UnitCtx,
 } from "@scrivr/core";
 import type { Mark as PmMark, Node as PmNode } from "@scrivr/core/pm";
+import type { NodeChanges } from "./collectHandlers";
 
 /**
  * Attrs excluded from `attrsOf` — not user styling. Identity/level bookkeeping
@@ -75,8 +75,6 @@ function describeAttrs(node: PmNode): Record<string, unknown> | undefined {
 
 const NEWLINE_SPAN: InlineSpan = { text: "\n", marks: [] };
 
-type NodeChanges = NonNullable<SemanticHandlers["nodeChanges"]>;
-
 /** A node's spans and the review changes in them, placed by offset into their text. */
 interface Extracted {
   spans: InlineSpan[];
@@ -85,49 +83,57 @@ interface Extracted {
 
 const textOf = (spans: readonly InlineSpan[]) => spans.map((s) => s.text).join("");
 
-const shifted = (changes: readonly SemanticChange[], by: number): SemanticChange[] =>
-  changes.map((c) => ({ ...c, at: (c.at ?? 0) + by }));
+const isLineBreak = (node: PmNode) => node.type.name === "hardBreak";
+
+const endOf = (change: SemanticChange) => (change.at ?? 0) + (change.length ?? 0);
 
 /**
- * One record reads as one change. Pieces that touch join, as a deletion split
- * across formatting runs does; a piece inside a record covering a whole node is
- * already part of it, as a new paragraph's text is part of the new paragraph.
+ * One act reads as one change. Its pieces join wherever they fall — split
+ * across formatting runs, around another author's work, a block and its text —
+ * spanning from the first to the last, with the text of each in order. An
+ * insertion with no text of its own (a moved block, a line break) reads the
+ * text it spans.
  */
-function mergePieces(changes: readonly SemanticChange[]): SemanticChange[] {
+function mergeActs(changes: readonly SemanticChange[], text: string): SemanticChange[] {
   const out: SemanticChange[] = [];
+  const slot = new Map<string, number>();
   for (const change of changes) {
-    const prev = out[out.length - 1];
-    if (prev && prev.id !== undefined && prev.id === change.id && prev.type === change.type) {
-      const start = prev.at ?? 0;
-      const end = start + (prev.length ?? 0);
-      const at = change.at ?? 0;
-      const changeEnd = at + (change.length ?? 0);
-      if (at === end) {
-        out[out.length - 1] = { ...prev, text: prev.text + change.text, length: changeEnd - start };
-        continue;
-      }
-      if (at >= start && changeEnd <= end) continue;
+    const key = change.id === undefined ? undefined : `${change.type}:${change.id}`;
+    const index = key === undefined ? undefined : slot.get(key);
+    const prev = index === undefined ? undefined : out[index];
+    if (index === undefined || prev === undefined) {
+      if (key !== undefined) slot.set(key, out.length);
+      out.push(change);
+      continue;
     }
-    out.push(change);
+    const at = Math.min(prev.at ?? 0, change.at ?? 0);
+    out[index] = { ...prev, text: prev.text + change.text, at, length: Math.max(endOf(prev), endOf(change)) - at };
   }
-  return out;
+  return out.map((change) =>
+    change.type === "suggestedInsert" && change.text === "" && (change.length ?? 0) > 0
+      ? { ...change, text: text.slice(change.at ?? 0, endOf(change)) }
+      : change,
+  );
 }
 
-/** Join block children with a newline, dropping empty ones, and place their changes in the result. */
-function joinExtracted(parts: readonly Extracted[]): Extracted {
+/**
+ * Join children's spans — with `separator` between non-empty ones, for block
+ * children — and place their changes in the joined text.
+ */
+function joinExtracted(parts: readonly Extracted[], separator: InlineSpan | null): Extracted {
   const spans: InlineSpan[] = [];
   const changes: SemanticChange[] = [];
   let offset = 0;
   for (const part of parts) {
-    if (part.spans.length > 0 && spans.length > 0) {
-      spans.push(NEWLINE_SPAN);
-      offset += 1;
+    if (separator && part.spans.length > 0 && spans.length > 0) {
+      spans.push(separator);
+      offset += separator.text.length;
     }
-    changes.push(...shifted(part.changes, offset));
+    changes.push(...part.changes.map((c) => ({ ...c, at: (c.at ?? 0) + offset })));
     spans.push(...part.spans);
     offset += textOf(part.spans).length;
   }
-  return { spans, changes: mergePieces(changes) };
+  return { spans, changes: mergeActs(changes, textOf(spans)) };
 }
 
 /**
@@ -143,19 +149,20 @@ function extractSemantic(
   nodeChangers: readonly NodeChanges[],
   ctx: UnitCtx,
 ): Extracted {
-  // A node's own records are read before its content's, so a contributor sees
-  // a container before what it contains.
-  const own = nodeChangers.flatMap((changesOf) => changesOf(node, ctx));
   const content = extractContent(node, markHandlers, nodeChangers, ctx);
-  const text = textOf(content.spans);
+  const own = nodeChangers.flatMap((changesOf) => changesOf(node, ctx));
   if (own.length === 0) return content;
+  const text = textOf(content.spans);
   const covers: SemanticChange[] = [];
   const after: SemanticChange[] = [];
   for (const { change, place } of own) {
     if (place === "after") after.push({ ...change, at: text.length, length: 0 });
-    else covers.push({ ...change, ...(change.type === "suggestedInsert" ? { text } : {}), at: 0, length: text.length });
+    else if (change.type === "suggestedDelete") {
+      // A deleted line break has no span left to read it by.
+      covers.push({ ...change, text: change.text || (isLineBreak(node) ? "\n" : ""), at: 0, length: 0 });
+    } else covers.push({ ...change, at: 0, length: text.length });
   }
-  return { spans: content.spans, changes: mergePieces([...covers, ...content.changes, ...after]) };
+  return { spans: content.spans, changes: mergeActs([...covers, ...content.changes, ...after], text) };
 }
 
 function extractContent(
@@ -178,9 +185,10 @@ function extractContent(
     return { spans, changes };
   }
 
-  // Preserve the semantic boundary of an explicit line break. Other inline leaf
-  // nodes (e.g. images) have no intrinsic plain text.
-  if (node.type.name === "hardBreak") return { spans: [NEWLINE_SPAN], changes: [] };
+  // Preserve the semantic boundary of an explicit line break, unless the
+  // proposed view leaves it out. Other inline leaf nodes (e.g. images) have no
+  // intrinsic plain text.
+  if (isLineBreak(node)) return { spans: ctx.isRemoved(node) ? [] : [NEWLINE_SPAN], changes: [] };
 
   const parts: Extracted[] = [];
   node.forEach((child) => {
@@ -189,15 +197,9 @@ function extractContent(
 
   // A textblock (paragraph, heading) concatenates its inline runs; a block
   // container (list, table, cell) joins its block children with newlines.
-  if (!node.isTextblock) return joinExtracted(parts);
-  const changes: SemanticChange[] = [];
-  let offset = 0;
-  for (const part of parts) {
-    changes.push(...shifted(part.changes, offset));
-    offset += textOf(part.spans).length;
-  }
-  return { spans: parts.flatMap((p) => p.spans), changes: mergePieces(changes) };
+  return joinExtracted(parts, node.isTextblock ? null : NEWLINE_SPAN);
 }
+
 
 /**
  * Build the producer context: the bridge to the editor's markdown serializer
@@ -214,11 +216,12 @@ export function createUnitCtx(
 
   const extractAll = (nodes: PmNode | readonly PmNode[]): Extracted => {
     const list = Array.isArray(nodes) ? nodes : [nodes];
-    return joinExtracted(list.map((n) => extractSemantic(n, markHandlers, nodeChangers, ctx)));
+    return joinExtracted(list.map((n) => extractSemantic(n, markHandlers, nodeChangers, ctx)), NEWLINE_SPAN);
   };
 
   const ctx: UnitCtx = {
     schema,
+    doc: editor.getState().doc,
     toMarkdown(nodes) {
       const list = Array.isArray(nodes) ? nodes : [nodes];
       // Wrap the block(s) in a fresh doc so the serializer renders them as

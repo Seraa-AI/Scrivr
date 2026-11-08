@@ -7,7 +7,8 @@ import type {
   SemanticMarkHandler,
 } from "@scrivr/core";
 
-type NodeChanges = NonNullable<SemanticHandlers["nodeChanges"]>;
+/** One contributed `nodeChanges`. */
+export type NodeChanges = NonNullable<SemanticHandlers["nodeChanges"]>;
 
 export interface ResolvedHandlers {
   nodes: Record<string, SemanticNodeHandler>;

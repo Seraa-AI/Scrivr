@@ -99,9 +99,8 @@ export function walkSemantic(
       text,
     };
     // Offsets index the walker's own text; a handler that overrides it gets none.
-    const changes = result.text === undefined || result.text === ctx.toText(nodes)
-      ? ctx.toChanges(nodes)
-      : ctx.toChanges(nodes).map(unplaced);
+    const placed = ctx.toChanges(nodes);
+    const changes = result.text === undefined || result.text === ctx.toText(nodes) ? placed : placed.map(unplaced);
     if (changes.length > 0) unit.changes = changes;
     if (headingLevel !== undefined) unit.headingLevel = headingLevel;
     // Block styling markdown can't express (alignment, indent, font, …), taken
