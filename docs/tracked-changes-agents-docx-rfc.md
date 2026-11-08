@@ -306,8 +306,13 @@ index `part.text`, which is where an agent edits.
 | `node_split` | `suggestedInsert`, `text: "\n"`, at the end of the first block. It is reported through its `reference` and has one id |
 | `set_attrs` | `suggestedAttrs`, `oldAttrs` = the former styling attrs as `attrsOf` filters them, plus `level` for a heading and `nodeType` when the type changed |
 | `list_change` | `suggestedAttrs`, `oldAttrs: { list: ["bulletList", …] }`, outermost list first, `[]` when it was in none |
-| row insert / delete | on the table unit, covering the row's text; the cell records are folded in by root |
-| `reference`, `wrap_with_node`, `structure` | only through the act they belong to |
+| row insert / delete | on the table unit, covering the row's text; the cell records are folded into the row's act |
+| `reference` | the split it belongs to (see `node_split`) |
+| `wrap_with_node` | `suggestedInsert` covering the container added around its content |
+| `structure` | `suggestedInsert` covering the copy a structural change moved, with `moveId` |
+| formatting (`mark-change`) | `suggestedAttrs` covering the formatted text, `oldAttrs: { marks: [...] }` = the text's formatting marks before |
+| hard break deleted | leaves the proposed text; `suggestedDelete`, `text: "\n"`, `length: 0` |
+| image inserted / deleted | `suggestedInsert` / `suggestedDelete` with `image` saying which image |
 
 ### Example
 
@@ -746,30 +751,37 @@ section is what is true.
 
 | PR | Landed | What it changed |
 |---|---|---|
-| **A** | branch `feat/agents-read-tracked-changes` (not yet merged) | `SemanticChange` gained `suggestedInsert`, `suggestedAttrs`, `at`, `length`, `moveId` and `oldAttrs`. `SemanticPart` gained `changes`. `SemanticHandlers` gained `nodeChanges`. `extractSemantic` places every change by offset into unit, part and cell text, and merges the pieces of one record. TrackChanges reports insertions, block insertions and deletions, joins, splits, heading and list changes, rows and moves (`track-changes/semanticChanges.ts`). The rich hashes cover `changes` only when there are some. `getRichBlocks` keeps a block proposed for deletion that has no live copy (D9). The auto-diff ignores the `changes` an agent hands back. `AiToolkit.reviewChanges` passes decisions through. Scenarios 10–13 (agent half) and 15–18 are covered in `plugins/.../__tests__/semanticReview.test.ts` and `ai/.../__tests__/AiToolkit.review.test.ts` |
+| **A** | branch `feat/agents-read-tracked-changes` (not yet merged) | `SemanticChange` gained `suggestedInsert`, `suggestedAttrs`, `at`, `length`, `moveId`, `oldAttrs` and `image`. `SemanticPart` gained `changes`. `SemanticHandlers` gained `nodeChanges`; `UnitCtx` gained `doc`; `semanticImage` is exported from core. `extractSemantic` places every change by offset into unit, part and cell text, and merges the pieces of one act wherever they fall. TrackChanges reports the records in the table above (`track-changes/semanticChanges.ts`), each under its act's id from `changeActs`. A deleted hard break leaves the proposed text. The rich hashes cover `changes` only when there are some. `getRichBlocks` keeps a block proposed for deletion that has no live copy (D9). The auto-diff puts the document's own changes back on a returned unit, its parts and its cells before comparing. `AiToolkit.reviewChanges` passes decisions through, and the playground agent reviews by id with a `review_changes` tool. Scenarios 10–13 (agent half) and 15–18 are covered in `plugins/.../__tests__/semanticReview.test.ts` and `ai/.../__tests__/AiToolkit.review.test.ts` |
 | **B** | — | Not built. DOCX revisions |
 
 ### Where PR A differs from the design above
 
-- **Roots resolve through the whole chain, not one hop.** A deleted row's text
-  names its paragraph, which names its cell, which names the row (`deletionId`
-  at each level). So `rootId` remembers, for each read, the root every record
-  id resolved to. The walker now reads a node's own records *before* its
-  content, so an enclosing record is always resolved first.
+- **A change's id is its act's primary record, not a root computed from
+  `creationId`/`deletionId`/`continuesId`.** It is read once per document from
+  `changeActs`, the one answer to what a decision covers, so the ids agree
+  however deep the act nests and in whatever order the walker reads it. Both
+  halves of a replacement or a move therefore share one `id` too (D1, as
+  refined). `UnitCtx.doc` is new for this: an act spans nodes, so naming it
+  needs the document.
+- **Pieces of one act merge wherever they fall**, not only when adjacent. One
+  act reads as exactly one change: its `text` is its own pieces in order, its
+  extent spans from the first to the last, and another author's work inside it
+  stays its own change.
+- **A covering deletion has `length: 0` and its text is everything it
+  deletes.** A covering insertion with no text of its own (a moved block, a
+  line break) reads the text it spans.
 - **`nodeChanges` receives the `UnitCtx`**, like a node handler does:
-  `(node, ctx) => SemanticNodeChange[]`. The context is needed to describe a
-  former block through `attrsOf`. `SemanticNodeChange`, the
+  `(node, ctx) => SemanticNodeChange[]`, and is called for text nodes too, which
+  is how a formatting change is reported. `SemanticNodeChange`, the
   `{ change, place }` pair, is exported as a named type.
-- **A deleted row's text reads without cell separators** (`"a1b1"`). The cells'
-  deletions merge into the row's one change. Its pieces have no proposed text
-  to join with a newline.
-- **A covering insertion takes its text from the walker**, which sets it to the
-  node's proposed text. TrackChanges reports `""` for it.
+- **`SemanticChange.image`** says which image an inserted or deleted image is,
+  reusing `SemanticImage`. A deleted image's unit still reads as a paragraph,
+  as #229 decided.
+- **A deleted row's text reads without cell separators** (`"a1b1"`). Its
+  pieces have no proposed text to join with a newline.
 
 ### Not shipped in PR A
 
-- A deleted hard break still reads as `"\n"` in `text`, as it did before. The
-  proposed view leaves out deleted text but not a deleted break. Left as it
-  was to keep PR A within its scope.
-- The root-names-no-record case (Risks) did not arise in the scenarios. The
-  reported id is still the root.
+- Deleting text across a hard break ("b⏎c") reads as three changes, because
+  the engine records three acts, and a reviewer decides three. The lane follows
+  `changeActs`. Making one gesture one act is an engine change.
