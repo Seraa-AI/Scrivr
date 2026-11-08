@@ -82,6 +82,34 @@ describe("an agent sees structural changes", () => {
     ]);
   });
 
+  it("hands back two blocks sharing an id unchanged, as no edit at all", () => {
+    const { editor, ai } = build([para("p", "Alpha"), para("p", "Beta")]);
+    editor.applyTransaction(editor.getState().tr.delete(0, editor.getState().doc.child(0).nodeSize));
+    const before = editor.getState().doc;
+    expect(ai.applyRichEdit(ai.getRichBlocks())).toEqual({ applied: false, changed: [], stale: [], notFound: [], rejected: [] });
+    expect(editor.getState().doc.eq(before)).toBe(true);
+  });
+
+  it("hands back two list items sharing an id unchanged, as no edit at all", () => {
+    const item = (text: string): DocNode => ({ type: "listItem", content: [para("i", text)] });
+    const { editor, ai } = build([{ type: "bulletList", attrs: { nodeId: "l" }, content: [item("one"), item("two")] }]);
+    const firstItem = editor.getState().doc.child(0).child(0);
+    editor.applyTransaction(editor.getState().tr.delete(1, 1 + firstItem.nodeSize));
+    const before = editor.getState().doc;
+    expect(ai.applyRichEdit(ai.getRichBlocks())).toEqual({ applied: false, changed: [], stale: [], notFound: [], rejected: [] });
+    expect(editor.getState().doc.eq(before)).toBe(true);
+  });
+
+  it("refuses an edit to the copy proposed for deletion, and edits the live copy", () => {
+    const { editor, ai } = build([para("p", "Alpha"), para("p", "Beta")]);
+    editor.applyTransaction(editor.getState().tr.delete(0, editor.getState().doc.child(0).nodeSize));
+    const [deleted, live] = ai.getRichBlocks();
+    if (!deleted || !live) throw new Error("two units");
+    const result = ai.applyRichEdit([{ ...deleted, text: "Revived", spans: [{ text: "Revived", marks: [] }] }, { ...live, text: "Gamma", spans: [{ text: "Gamma", marks: [] }] }]);
+    expect(result).toMatchObject({ changed: ["p"], rejected: ["p"] });
+    expect(ai.getRichBlocks().map((u) => u.text)).toEqual(["", "Gamma"]);
+  });
+
   it("reads a moved block once, where it went", () => {
     const { editor, ai } = build([para("a", "Alpha"), para("b", "Beta"), para("c", "Gamma")]);
     const state = editor.getState();

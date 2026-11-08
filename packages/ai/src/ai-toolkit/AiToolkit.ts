@@ -139,6 +139,22 @@ function isSemanticUnit(item: RichBlockEdit | SemanticUnit): item is SemanticUni
   return "nodeIds" in item && Array.isArray(item.nodeIds);
 }
 
+/**
+ * Looks items up by id in document order: the nth call for an id gives its nth
+ * copy. A split or a list Enter can leave two blocks with one id, so a unit
+ * handed back is matched with the copy it was read as, not the last one.
+ */
+function copiesInOrder<T>(items: readonly T[], idOf: (item: T) => string): (id: string) => T | undefined {
+  const copies = new Map<string, T[]>();
+  for (const item of items) copies.set(idOf(item), [...(copies.get(idOf(item)) ?? []), item]);
+  const seen = new Map<string, number>();
+  return (id) => {
+    const nth = seen.get(id) ?? 0;
+    seen.set(id, nth + 1);
+    return copies.get(id)?.[nth];
+  };
+}
+
 interface ChangeHolder {
   changes?: SemanticChange[];
 }
@@ -157,8 +173,8 @@ function withCurrentChanges<T extends ChangeHolder>(item: T, current: ChangeHold
 /** `withCurrentChanges` on a unit and on each of its parts and cells, all of which its hash covers. */
 function unitWithCurrentChanges(unit: SemanticUnit, current: SemanticUnit): SemanticUnit {
   const copy = withCurrentChanges(unit, current);
-  const currentParts = new Map((current.parts ?? []).map((part) => [part.nodeId, part]));
-  if (unit.parts) copy.parts = unit.parts.map((part) => withCurrentChanges(part, currentParts.get(part.nodeId)));
+  const currentPartOf = copiesInOrder(current.parts ?? [], (part) => part.nodeId);
+  if (unit.parts) copy.parts = unit.parts.map((part) => withCurrentChanges(part, currentPartOf(part.nodeId)));
   if (unit.cells) {
     copy.cells = {
       rows: unit.cells.rows.map((row, r) => ({
@@ -442,15 +458,23 @@ export class AiToolkitAPI {
   ): { applied: boolean; changed: string[]; stale: string[]; notFound: string[]; rejected: string[] } {
     const authorID = options.authorID ?? "AI Assistant";
 
-    // Current rich hash per block — the freshness base for both auto-diff
-    // (which units changed) and the stale guard (did the doc move under us).
+    // The units as they stand — the freshness base for both auto-diff (which
+    // units changed) and the stale guard (did the doc move under us). A unit
+    // handed back is compared with the same copy of its id it was read as; an
+    // edit named only by id means the live copy, which is where it lands.
+    const read = unitsToRead(toSemanticUnits(this.editor, { groupBlocks: false }), this.editor.getState().doc);
+    const currentCopyOf = copiesInOrder(read, (u) => u.id);
     const currentUnits = new Map<string, SemanticUnit>();
     const currentHashByNodeId = new Map<string, string>();
-    for (const u of unitsToRead(toSemanticUnits(this.editor, { groupBlocks: false }), this.editor.getState().doc)) {
-      currentUnits.set(u.id, u);
-      currentHashByNodeId.set(u.id, unitRichHash(u));
+    for (const u of read) {
+      if (!u.proposedForDeletion || !currentUnits.has(u.id)) {
+        currentUnits.set(u.id, u);
+        currentHashByNodeId.set(u.id, unitRichHash(u));
+      }
       for (const part of u.parts ?? []) {
-        currentHashByNodeId.set(part.nodeId, semanticPartRichHash(part));
+        if (!part.proposedForDeletion || !currentHashByNodeId.has(part.nodeId)) {
+          currentHashByNodeId.set(part.nodeId, semanticPartRichHash(part));
+        }
       }
     }
 
@@ -474,7 +498,7 @@ export class AiToolkitAPI {
       if (isSemanticUnit(item)) {
         const nodeId = item.nodeIds[0];
         if (!nodeId) continue;
-        const currentUnit = currentUnits.get(nodeId);
+        const currentUnit = currentCopyOf(nodeId);
         if (currentUnit === undefined) {
           notFound.push(nodeId);
           continue;
@@ -486,6 +510,11 @@ export class AiToolkitAPI {
           continue;
         }
         if (unitRichHash(unitWithCurrentChanges(item, currentUnit)) === current) continue; // unchanged — skip
+        // A block proposed for deletion is not there to edit.
+        if (currentUnit.proposedForDeletion) {
+          rejected.push(nodeId);
+          continue;
+        }
         if (currentUnit.type === "image") {
           if (stableStringify(item.attrs ?? {}) === stableStringify(currentUnit.attrs ?? {})) queueImageLayout(nodeId, item.image);
           else rejected.push(nodeId);
@@ -496,14 +525,18 @@ export class AiToolkitAPI {
         // parts are the edit surface. Diff those leaves and never send the
         // container itself to the leaf-only merge engine.
         if (item.parts || currentUnit.parts) {
-          const currentParts = new Map((currentUnit.parts ?? []).map((part) => [part.nodeId, part]));
+          const currentPartOf = copiesInOrder(currentUnit.parts ?? [], (part) => part.nodeId);
           for (const part of item.parts ?? []) {
-            const currentPart = currentParts.get(part.nodeId);
+            const currentPart = currentPartOf(part.nodeId);
             if (!currentPart) {
               notFound.push(part.nodeId);
               continue;
             }
             if (semanticPartRichHash(withCurrentChanges(part, currentPart)) === semanticPartRichHash(currentPart)) continue;
+            if (currentPart.proposedForDeletion) {
+              rejected.push(part.nodeId);
+              continue;
+            }
             resolved.push(editForPart(part));
             changed.push(part.nodeId);
           }
