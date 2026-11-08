@@ -70,6 +70,18 @@ describe("an agent sees structural changes", () => {
     expect(result.rejected).toEqual(["b"]);
   });
 
+  it("keeps a deleted block that shares its id with a live one, as a split leaves", () => {
+    const { editor, ai } = build([para("p", "AlphaBeta")]);
+    editor.applyTransaction(editor.getState().tr.split(6));
+    expect(ai.reviewChanges({ accepted: ai.getRichBlocks().flatMap((u) => u.changes ?? []).flatMap((c) => c.id ?? []), rejected: [] }).status).toBe("applied");
+    const first = editor.getState().doc.child(0);
+    editor.applyTransaction(editor.getState().tr.delete(0, first.nodeSize));
+    expect(ai.getRichBlocks().map((u) => [u.text, u.changes?.map((c) => [c.type, c.text])])).toEqual([
+      ["", [["suggestedDelete", "Alpha"]]],
+      ["Beta", undefined],
+    ]);
+  });
+
   it("reads a moved block once, where it went", () => {
     const { editor, ai } = build([para("a", "Alpha"), para("b", "Beta"), para("c", "Gamma")]);
     const state = editor.getState();
@@ -86,7 +98,7 @@ describe("an agent sees structural changes", () => {
     expect(ai.applyRichEdit(units).changed).toEqual([]);
   });
 
-  it("nor a returned list whose parts left out their changes", () => {
+  it("nor a returned list whose parts left out their changes (regression guard)", () => {
     const { editor, ai } = build([{
       type: "bulletList",
       content: [{ type: "listItem", content: [para("i1", "one")] }, { type: "listItem", content: [para("i2", "two")] }],

@@ -9,7 +9,7 @@ import { toCoreSpans } from "./spans";
 import { UniqueId } from "./UniqueId";
 import { GhostText, ghostTextPluginKey } from "./GhostText";
 import { AiCaret, aiCaretPluginKey } from "./AiCaret";
-import { findLiveNodeById, isShadowNode, reviewChanges, shadowRanges, trackAsSuggestion } from "@scrivr/plugins";
+import { findLiveNodeById, isShadowNode, moveShadowRanges, reviewChanges, trackAsSuggestion } from "@scrivr/plugins";
 import { aiToolkitRegistry } from "./aiToolkitRegistry";
 import { applyRichDiffAsSuggestion, buildAcceptedTextMap, type RichBlockEdit } from "@scrivr/plugins";
 
@@ -95,34 +95,26 @@ export class AiSuggestionsAPI {
 }
 
 /**
- * The units an agent reads: one per id. A pending move leaves a shadow carrying
- * the same ids as the moved copy, which the export walks like any block; the
- * agent reads and edits the live copy, so the shadow's unit and parts are left
- * out. A block proposed for deletion has no live copy, so it stays, for the
- * agent to read and review. Units come in document order, so the nth unit or
- * part for an id is the nth copy of it — which is why a shadow's parts are
- * counted even though they are dropped.
+ * The units an agent reads: one per id. A pending move leaves a copy of the
+ * moved block where it was, under the same ids; that copy's unit and parts are
+ * left out. Any other unit stays — a block proposed for deletion included.
+ * Units come in document order, so the nth unit or part for an id is its nth copy.
  */
 function unitsToRead(units: SemanticUnit[], doc: PmNode): SemanticUnit[] {
-  const shadows = shadowRanges(doc);
-  if (shadows.length === 0) return units;
-  const live = new Map<string, boolean[]>();
+  const moved = moveShadowRanges(doc);
+  if (moved.length === 0) return units;
+  const leftBehind = new Map<string, boolean[]>();
   doc.descendants((node, pos) => {
     const id = node.attrs["nodeId"];
     if (typeof id !== "string") return true;
-    const copies = live.get(id) ?? [];
-    copies.push(!isShadowNode(node, pos, shadows));
-    live.set(id, copies);
+    leftBehind.set(id, [...(leftBehind.get(id) ?? []), isShadowNode(node, pos, moved)]);
     return true;
   });
   const seen = new Map<string, number>();
-  /** Keep the nth copy of an id unless it is a shadow of a copy live elsewhere. */
   const isKept = (id: string) => {
     const nth = seen.get(id) ?? 0;
     seen.set(id, nth + 1);
-    const copies = live.get(id) ?? [];
-    if (copies[nth] ?? true) return true;
-    return !copies.some(Boolean);
+    return !(leftBehind.get(id)?.[nth] ?? false);
   };
   return units.flatMap((unit) => {
     const unitIsKept = isKept(unit.id);
@@ -147,10 +139,13 @@ function isSemanticUnit(item: RichBlockEdit | SemanticUnit): item is SemanticUni
   return "nodeIds" in item && Array.isArray(item.nodeIds);
 }
 
+interface ChangeHolder {
+  changes?: SemanticChange[];
+}
+
 /**
- * `item` with `current`'s review changes in place of its own — on the item and
- * on each of its parts and cells. An agent cannot edit `changes`, so whatever
- * it hands back there must not read as an edit.
+ * `item` with `current`'s review changes in place of its own. An agent cannot
+ * edit `changes`, so whatever it hands back there must not read as an edit.
  */
 function withCurrentChanges<T extends ChangeHolder>(item: T, current: ChangeHolder | undefined): T {
   const copy = { ...item };
@@ -159,10 +154,7 @@ function withCurrentChanges<T extends ChangeHolder>(item: T, current: ChangeHold
   return copy;
 }
 
-interface ChangeHolder {
-  changes?: SemanticChange[];
-}
-
+/** `withCurrentChanges` on a unit and on each of its parts and cells, all of which its hash covers. */
 function unitWithCurrentChanges(unit: SemanticUnit, current: SemanticUnit): SemanticUnit {
   const copy = withCurrentChanges(unit, current);
   const currentParts = new Map((current.parts ?? []).map((part) => [part.nodeId, part]));
@@ -391,6 +383,11 @@ export class AiToolkitAPI {
    * block (grouping bypassed) so the edit round-trips mechanically; container
    * units still expose their inner leaves via `parts`.
    *
+   * With TrackChanges, `text` is the proposed version and each unit, part and
+   * cell lists its pending `changes`, each with the id `reviewChanges` takes.
+   * A block proposed for deletion is included, reading `text: ""` with its
+   * deletion; the copy a pending move leaves behind is not.
+   *
    * Pass `from` / `to` to restrict to blocks overlapping a position range.
    *
    * @example
@@ -410,9 +407,9 @@ export class AiToolkitAPI {
   }
 
   /**
-   * Accept or reject pending changes by the ids `getRichBlocks` reports.
-   * Deciding one record decides its whole act — both halves of a replacement
-   * or a move. Whether an agent may review at all is the host's call
+   * Accept or reject pending changes by the ids `getRichBlocks` reports. The
+   * id decides the whole act — both halves of a replacement or a move, a block
+   * and its text. Whether an agent may review at all is the host's call
    * (`TrackChanges.configure({ canAcceptReject })`); a refusal says why.
    *
    * @example
