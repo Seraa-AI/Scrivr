@@ -17,8 +17,10 @@ Approved by the user on 2026-11-08.
    `layoutTableRowsApart` compatibility flag, which we do not model.
 3. **Backward anchors.** A table *above* a float's anchor moves only if the
    move holds: the anchor stays on its page **and** the float, re-placed at the
-   anchor's new position, clears the table. Otherwise the table stays put and
-   the float overlaps it. Every float a move drags is re-placed from its new
+   anchor's new position, clears the table. Otherwise the table clears only
+   the floats anchored before it, and the floats it would drag overlap it
+   (*approved by the user on 2026-11-08*: the table still honours Decision 1
+   for every float that stays put). Every float a move drags is re-placed from its new
    anchor; no float is left off its anchor or its anchor's page. The rule is
    deterministic and converges within the existing settle cap. See
    [Backward anchors](#backward-anchors).
@@ -31,6 +33,13 @@ Approved by the user on 2026-11-08.
    in one step.
 4. **Re-anchoring on drop is out of scope.** Dragging a float keeps its anchor
    and changes `yOffset`, which matches Word with a locked anchor.
+5. **Stacking moves the image, not its paragraph** (*approved by the user on
+   2026-11-08*). A square float that would overlap one placed before it on
+   the page moves below it; its anchor paragraph stays where the text puts it,
+   as in Word. The offset belongs to the float.
+6. **A float with no fixed point is locked** (*rule proposed 2026-11-08; the
+   trade it makes is a decision for the user* — see
+   [Floats with no fixed point](#floats-with-no-fixed-point)).
 
 ## Problem
 
@@ -249,6 +258,64 @@ whether it wraps, its placement, and how to place it again and compute its
 zone). That record is new; it is the per-float state the settle loop already
 held in local variables, lifted so that a move can ask any float where it
 would land.
+
+### Floats with no fixed point
+
+**The case.** A float whose own wrap moves its own anchor. Typically a
+negative `yOffset` pulls it over the paragraph above its anchor: that
+paragraph wraps around it and grows, the anchor moves down, the float moves
+down with it, the paragraph wraps differently, and so on.
+
+**It has no layout where all three agree.** Take a top-bottom float of height
+`h` placed at `anchor + yOffset` with `yOffset < 0`, over the last line of the
+paragraph above (seed 51 in the fuzz, scenario 39). For the line to clear the
+float it must skip to the float's bottom, `anchor + yOffset + h + margin`. The
+anchor then starts after that line, so `anchor ≥ anchor + yOffset + h + margin
++ line`, which needs `-yOffset ≥ h + margin + line`, false whenever the float
+reaches the line at all. So either the float leaves `anchor + yOffset` ("float
+off its anchor") or the line runs under the image ("text under a float").
+No rule can make both zero for these documents; the rule decides which one
+gives.
+
+**What Word does.**
+
+- ECMA-376 says only that `positionV relativeFrom="paragraph"` positions the
+  object "relative to the paragraph which contains the drawing anchor" (Part 1
+  §20.4.3.5) and defines no layout algorithm or tie-break. Text wraps around
+  an object wherever it is, with no reference to its anchor (§20.4.2.17,
+  §20.4.2.20).
+- LibreOffice imitates Word with the compatibility option *Consider wrapping
+  style when positioning objects* (`CONSIDER_WRAP_ON_OBJECT_POSITION`, on for
+  Word documents). Its help text: "in current versions a straightforward
+  process is used, which is similar to the same process in Microsoft Word",
+  as opposed to the older iterative one. In `anchoredobject.cxx` this mode is
+  what enables `PositionLocked()`: an object, once positioned, is locked. In
+  `flycnt.cxx` (`SwFlyAtContentFrame::MakeAll`) the anchor is not re-formatted
+  for an object in this mode, and when `SwOszControl` detects the position
+  oscillating ("position already occurred -> oscillation") the object is
+  switched to this mode (`SetTmpConsiderWrapInfluence(true)`) and the layout
+  restarted.
+
+So Word's answer is: position once from the anchor, lock, and let the text
+wrap around the locked object, even if that moves the anchor.
+
+**The rule.** A float follows its anchor while settling converges. A wrapping
+float whose own wrap is still moving its anchor after
+`MAX_ANCHOR_SETTLE_PASSES` re-placements in one settle is **locked** where it
+stands: it keeps its placement and its wrap rect, and text wraps around it
+there. A locked float still follows its anchor onto another page (a float
+never paints on a page other than its anchor's). Settling converges by
+construction: every float is either re-placed at most a fixed number of times
+or locked, and a locked float's rect no longer moves.
+
+**The trade (decision for the user).** Locking keeps text clear of the image
+and leaves the float above where `anchor + yOffset` now is, by the amount its
+own wrap grew the text above (usually one line; scenario 30 bounds it by the
+paragraph above). The alternative, ending with every placement on its anchor,
+leaves text under the image instead. The fuzz below shows the swap: text
+under a float 44 → 8, float off its anchor 1 → 45. **Recommendation: lock**
+— it is what Word (as LibreOffice emulates it) does, and overlapping text is
+the worse failure for a reader.
 
 ### The one extension: `ExclusionManager.getNextFreeY` (changed in place)
 
@@ -521,12 +588,6 @@ bottom against the page's whole manager — and scenarios 20–22 and 27 cover i
   100 blocks make it reachable. Carrying floats across chunks means carrying
   the solver's state in `LayoutResumption`, which is not a small change at
   this seam. Pinned by scenario 36.
-- **Floats with no fixed point.** A float whose zone reflows the text its own
-  anchor sits under (a reach-back `yOffset` over the paragraph above) has no
-  layout where text, float and anchor all agree. The settle loop caps it and
-  ends with every placement on its anchor; text above that anchor can then sit
-  under the image. This is most of the remaining "text under float" in the
-  fuzz below.
 - **Re-anchor on drop.** Dragging a float keeps its anchor and changes
   `yOffset` (Decision 4). Moving the anchor to the paragraph under the drop
   point is an existing todo.
