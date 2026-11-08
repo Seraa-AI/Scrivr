@@ -129,7 +129,8 @@ export function applyRichDiffAsSuggestion(
     const found = findLiveNodeById(state.doc, edit.nodeId);
     if (!found) {
       // Held only by content proposed for deletion: there, but not editable.
-      (findNodeById(state.doc, edit.nodeId) ? rejected : notFound).push(edit.nodeId);
+      if (findNodeById(state.doc, edit.nodeId)) rejected.push(edit.nodeId);
+      else notFound.push(edit.nodeId);
       return [];
     }
     // Leaf-only: rich inline edits target a single textblock. A container

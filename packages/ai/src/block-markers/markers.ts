@@ -100,13 +100,19 @@ function resolveMarkers(
   for (const markers of bySource.values()) {
     for (const marker of markers) wanted.set(marker.nodeId, { node: state.doc, pos: -1 });
   }
-  // A pending move leaves a shadow carrying the same id; the marker belongs on the live copy.
+  // A pending move leaves a shadow carrying the same id; the marker belongs on
+  // the live copy. A block only proposed for deletion has no live copy, and is
+  // still on screen until decided, so the marker stays on it.
   const shadows = shadowRanges(state.doc);
+  const deleted = new Map<string, { node: PmNode; pos: number }>();
   state.doc.descendants((node, pos) => {
     const id = node.attrs["nodeId"];
-    if (typeof id === "string" && wanted.get(id)?.pos === -1 && !isShadowNode(node, pos, shadows)) wanted.set(id, { node, pos });
+    if (typeof id !== "string" || wanted.get(id)?.pos !== -1) return true;
+    if (!isShadowNode(node, pos, shadows)) wanted.set(id, { node, pos });
+    else if (!deleted.has(id)) deleted.set(id, { node, pos });
     return true;
   });
+  for (const [id, found] of deleted) if (wanted.get(id)?.pos === -1) wanted.set(id, found);
 
   const out: Array<{ marker: PlacedBlockMarker; node: PmNode; pos: number }> = [];
   for (const markers of bySource.values()) {

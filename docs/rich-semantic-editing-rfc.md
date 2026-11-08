@@ -357,8 +357,9 @@ A pending move retains a deleted shadow and a live copy with the same `nodeId`.
 Core's `findNodeById` now returns the first match accepted by an optional
 predicate, and stops searching once it finds it. Core knows nothing about
 tracking. `findLiveNodeById` in `@scrivr/plugins` owns the predicate for every
-consumer: a pending deletion covering the node's entire range excludes it. This includes empty nodes and descendants of
-deleted containers; testing text marks alone misses both.
+consumer: a pending deletion covering the node's entire range excludes it. This
+includes empty nodes and descendants of deleted containers; testing text marks
+alone misses both.
 
 The ChangeSet is scanned once at structural-batch entry. Its shadow ranges are
 mapped through subsequent transaction steps before each lookup, so an earlier
@@ -377,13 +378,15 @@ parents. Those fixes shipped with the track-changes boundaries work (#228),
 which this phase was reconciled onto; the step budget that bounded a batch went
 with it, since tracking now records a gesture of any length in full.
 
-A batch moves content once: a move or delete overlapping content the batch
-already moved is refused. Agents read one unit per id, the live copy.
+A batch touches content once: a move or delete overlapping content the batch
+already moved or added to is refused, as is adding inside moved content. Agents
+read one unit per id, the live copy.
 
-**Auto-pairing is retained, bounded by identity.** A deletion and an insertion
-in one transaction become a move when their content matches and, where both
-carry a `nodeId`, the ids match too — so two blocks that only read the same are
-not paired. Accepting or rejecting the move uses the existing `moveNodeId`
+**Auto-pairing is bounded by identity.** A deletion and an insertion in one
+transaction become a move when their content matches and, where the deleted
+block carries a `nodeId`, the inserted copy carries the same one — so a new
+block that only reads the same, or another block with the same text, is a
+deletion and an insertion rather than a move. Accepting or rejecting the move uses the existing `moveNodeId`
 relationship to resolve its shadow atomically. Explicit move intent is not
 required by the tracking engine.
 

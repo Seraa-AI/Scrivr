@@ -64,3 +64,89 @@ describe("move replay coordinates", () => {
     expect(editor.getState().doc.textContent).toBe("alphabetagamma");
   });
 });
+
+describe("which deletion and insertion are one move", () => {
+  const ids = (editor: ServerEditor) => {
+    const out: string[] = [];
+    editor.getState().doc.forEach(node => out.push(String(node.attrs["nodeId"])));
+    return out;
+  };
+  const moves = (editor: ServerEditor) => changes(editor).filter(c => c.dataTracked.operation === "move");
+  const paragraph = (editor: ServerEditor, nodeId: string | null, text: string) =>
+    editor.schema.node("paragraph", { nodeId }, editor.schema.text(text));
+
+  it("an insertion earlier in the transaction does not claim the move's deletion", () => {
+    const editor = build();
+    const tr = editor.getState().tr;
+    const alpha = tr.doc.child(0);
+    tr.insert(alpha.nodeSize, paragraph(editor, "new", "new"));
+    tr.delete(0, alpha.nodeSize);
+    tr.insert(tr.doc.content.size, alpha);
+    editor.applyTransaction(tr);
+
+    expect(moves(editor)).toHaveLength(1);
+    editor.commands.setChangeStatuses("rejected", changes(editor).map(c => c.id));
+    expect(ids(editor)).toEqual(["alpha", "beta", "gamma"]);
+  });
+
+  for (const newFirst of [false, true]) {
+    it(`a new block that only reads like a moved one is not its copy (${newFirst ? "new block first" : "move first"})`, () => {
+      const editor = build();
+      const tr = editor.getState().tr;
+      const alpha = tr.doc.child(0);
+      const twin = paragraph(editor, null, "alpha");
+      if (newFirst) tr.insert(alpha.nodeSize + tr.doc.child(1).nodeSize, twin);
+      tr.delete(0, alpha.nodeSize);
+      tr.insert(tr.doc.content.size, alpha);
+      if (!newFirst) tr.insert(tr.doc.child(0).nodeSize, twin);
+      editor.applyTransaction(tr);
+
+      editor.commands.setChangeStatuses("rejected", changes(editor).map(c => c.id));
+      expect(ids(editor)).toEqual(["alpha", "beta", "gamma"]);
+      expect(changes(editor)).toHaveLength(0);
+    });
+  }
+
+  it("deleting one empty paragraph while moving another keeps them apart", () => {
+    const editor = new ServerEditor({
+      extensions: [StarterKit, TrackChanges.configure({ initialStatus: TrackChangesStatus.enabled, canAcceptReject: true })],
+      content: { type: "doc", content: [
+        { type: "paragraph", attrs: { nodeId: "x" } },
+        { type: "paragraph", attrs: { nodeId: "a" }, content: [{ type: "text", text: "alpha" }] },
+        { type: "paragraph", attrs: { nodeId: "e" } },
+        { type: "paragraph", attrs: { nodeId: "c" }, content: [{ type: "text", text: "gamma" }] },
+      ] },
+    });
+    const tr = editor.getState().tr;
+    tr.delete(0, tr.doc.child(0).nodeSize);
+    const emptyAt = tr.doc.child(0).nodeSize;
+    const empty = tr.doc.child(1);
+    tr.delete(emptyAt, emptyAt + empty.nodeSize);
+    tr.insert(tr.doc.content.size, empty);
+    editor.applyTransaction(tr);
+
+    editor.commands.setChangeStatuses("rejected", changes(editor).map(c => c.id));
+    expect(ids(editor)).toEqual(["x", "a", "e", "c"]);
+  });
+
+  it("two blocks that read the same are each their own move", () => {
+    const editor = new ServerEditor({
+      extensions: [StarterKit, TrackChanges.configure({ initialStatus: TrackChangesStatus.enabled, canAcceptReject: true })],
+      content: { type: "doc", content: [["twin", "same"], ["other", "same"], ["end", "end"]].map(([nodeId, text]) => ({
+        type: "paragraph", attrs: { nodeId }, content: [{ type: "text", text }],
+      })) },
+    });
+    const tr = editor.getState().tr;
+    for (const _ of [0, 1]) {
+      const first = tr.doc.child(0);
+      tr.delete(0, first.nodeSize);
+      tr.insert(tr.doc.content.size, first);
+    }
+    editor.applyTransaction(tr);
+    expect(moves(editor)).toHaveLength(2);
+
+    for (const move of moves(editor)) editor.commands.setChangeStatuses("rejected", [move.id]);
+    expect(ids(editor)).toEqual(["twin", "other", "end"]);
+    expect(changes(editor)).toHaveLength(0);
+  });
+});

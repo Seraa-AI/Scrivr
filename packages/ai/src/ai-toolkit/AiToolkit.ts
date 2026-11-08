@@ -93,20 +93,11 @@ export class AiSuggestionsAPI {
 }
 
 /**
- * AiToolkitAPI — the single entry point for all AI interactions with an editor.
- *
- * Obtain via:
- *   import { getAiToolkit } from "@scrivr/plugins";
- *   const ai = getAiToolkit(editor);
- *
- * Never instantiate directly — created by AiToolkit.onEditorReady().
- */
-/** Distinguish a whole `SemanticUnit` (has `nodeIds[]`) from a `RichBlockEdit` (has `nodeId`). */
-/**
  * The units of the live document. A pending move leaves a shadow carrying the
  * same ids, which the export walks like any block; an agent reads and edits the
  * live copy, so the shadow's unit and parts are left out. Units come in
- * document order, so the nth unit for an id is the nth copy of it.
+ * document order, so the nth unit or part for an id is the nth copy of it —
+ * which is why a shadow's parts are counted even though they are dropped.
  */
 function liveUnits(units: SemanticUnit[], doc: PmNode): SemanticUnit[] {
   const shadows = shadowRanges(doc);
@@ -114,7 +105,10 @@ function liveUnits(units: SemanticUnit[], doc: PmNode): SemanticUnit[] {
   const live = new Map<string, boolean[]>();
   doc.descendants((node, pos) => {
     const id = node.attrs["nodeId"];
-    if (typeof id === "string") live.set(id, [...(live.get(id) ?? []), !isShadowNode(node, pos, shadows)]);
+    if (typeof id !== "string") return true;
+    const copies = live.get(id) ?? [];
+    copies.push(!isShadowNode(node, pos, shadows));
+    live.set(id, copies);
     return true;
   });
   const seen = new Map<string, number>();
@@ -124,11 +118,14 @@ function liveUnits(units: SemanticUnit[], doc: PmNode): SemanticUnit[] {
     return live.get(id)?.[nth] ?? true;
   };
   return units.flatMap((unit) => {
-    if (!isLive(unit.id)) return [];
-    return unit.parts ? [{ ...unit, parts: unit.parts.filter((part) => isLive(part.nodeId)) }] : [unit];
+    const unitIsLive = isLive(unit.id);
+    const parts = unit.parts?.filter((part) => isLive(part.nodeId));
+    if (!unitIsLive) return [];
+    return parts ? [{ ...unit, parts }] : [unit];
   });
 }
 
+/** Distinguish a whole `SemanticUnit` (has `nodeIds[]`) from a `RichBlockEdit` (has `nodeId`). */
 function isSemanticUnit(item: RichBlockEdit | SemanticUnit): item is SemanticUnit {
   return "nodeIds" in item && Array.isArray(item.nodeIds);
 }
@@ -152,6 +149,15 @@ function readStringField(item: unknown, key: string): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
+/**
+ * AiToolkitAPI — the single entry point for all AI interactions with an editor.
+ *
+ * Obtain via:
+ *   import { getAiToolkit } from "@scrivr/plugins";
+ *   const ai = getAiToolkit(editor);
+ *
+ * Never instantiate directly — created by AiToolkit.onEditorReady().
+ */
 export class AiToolkitAPI {
   /**
    * AI suggestion overlay API.

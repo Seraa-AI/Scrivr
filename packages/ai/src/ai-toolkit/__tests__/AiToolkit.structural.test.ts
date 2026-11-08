@@ -152,16 +152,16 @@ describe("tracked moves", () => {
     expect(editor.getState().doc).toBe(before);
   });
 
-  it("keeps content-matched delete and insert review atomic", () => {
+  it("keeps a deletion and a new block that reads the same as two decisions, not a move", () => {
     const { editor, ai } = build([para("a", "foo"), para("b", "keep")]);
     ai.applySemanticEdits([
       { kind: "structural", op: "deleteBlock", nodeId: "a" },
       { kind: "structural", op: "insertBlock", anchorNodeId: "b", position: "after", block: { type: "paragraph", spans: [{ text: "foo", marks: [] }] } },
     ]);
-    const moves = changesOf(editor).filter(c => c.dataTracked.operation === "move");
-    expect(moves).toHaveLength(1);
-    editor.commands.setChangeStatuses("rejected", moves.map(move => move.id));
+    expect(changesOf(editor).filter(c => c.dataTracked.operation === "move")).toHaveLength(0);
+    editor.commands.setChangeStatuses("rejected", changesOf(editor).map(c => c.id));
     expect(textOf(editor)).toBe("foo\nkeep");
+    expect(ids(editor)).toEqual(["a", "b"]);
     expect(changesOf(editor)).toHaveLength(0);
   });
 });
@@ -292,6 +292,14 @@ describe("table rows", () => {
     expect(res.applied).toBe(true);
     const marked = changesOf(editor).find((c) => c.type === "node-change" && c.node.type.name === "tableRow");
     expect(marked).toBeDefined();
+  });
+
+  it("marks a row deleted when named by one of its cells", () => {
+    const { editor, ai } = build(doc());
+    const res = ai.applySemanticEdits([{ kind: "structural", op: "deleteTableRow", nodeId: "c3" }]);
+
+    expect(res.changed).toEqual(["c3"]);
+    expect(changesOf(editor).some((c) => c.type === "node-change" && c.node.type.name === "tableRow")).toBe(true);
   });
 });
 
@@ -588,6 +596,60 @@ describe("what one batch can ask of tracking", () => {
     const result = ai.applySemanticEdits([{ kind: "structural", op: "moveListItem", nodeId: "N", anchorNodeId: "p2", position: "after" }]);
 
     expect(result).toMatchObject({ changed: [], rejected: ["N"] });
+  });
+
+  it("shows an agent a list moved down with its items", () => {
+    const { ai } = build([
+      { type: "bulletList", attrs: { nodeId: "list" }, content: [listItem("i1", "p1", "one"), listItem("i2", "p2", "two")] },
+      para("after", "after"),
+    ]);
+    ai.applySemanticEdits([{ kind: "structural", op: "moveBlock", nodeId: "list", anchorNodeId: "after", position: "after" }]);
+
+    const lists = ai.getRichBlocks().filter((unit) => unit.id === "list");
+    expect(lists.map((unit) => (unit.parts ?? []).map((part) => part.nodeId))).toEqual([["p1", "p2"]]);
+  });
+
+  it("refuses both adding to a moved list and moving an item inside it", () => {
+    const { ai } = build([
+      { type: "bulletList", attrs: { nodeId: "list" }, content: [listItem("i1", "p1", "one"), listItem("i2", "p2", "two")] },
+      para("after", "after"),
+    ]);
+    const result = ai.applySemanticEdits([
+      { kind: "structural", op: "moveBlock", nodeId: "list", anchorNodeId: "after", position: "after" },
+      { kind: "structural", op: "insertListItem", anchorNodeId: "p2", position: "after", item: { spans: [{ text: "three", marks: [] }] } },
+      { kind: "structural", op: "moveListItem", nodeId: "p1", anchorNodeId: "p2", position: "after" },
+    ]);
+
+    expect(result.rejected).toEqual(["p2", "p1"]);
+  });
+
+  it("refuses an item added inside a list the batch moved", () => {
+    const { editor, ai } = build([
+      { type: "bulletList", attrs: { nodeId: "list" }, content: [listItem("i1", "p1", "one"), listItem("i2", "p2", "two")] },
+      para("after", "after"),
+    ]);
+    const result = ai.applySemanticEdits([
+      { kind: "structural", op: "moveBlock", nodeId: "list", anchorNodeId: "after", position: "after" },
+      { kind: "structural", op: "insertListItem", anchorNodeId: "p2", position: "after", item: { spans: [{ text: "new", marks: [] }] } },
+    ]);
+
+    expect(result.rejected).toEqual(["p2"]);
+    editor.commands.setChangeStatuses("rejected", changesOf(editor).map((c) => c.id));
+    expect(textOf(editor).trimEnd()).toBe("one\ntwo\nafter");
+  });
+
+  it("refuses moving a list the batch added an item to", () => {
+    const { editor, ai } = build([
+      { type: "bulletList", attrs: { nodeId: "list" }, content: [listItem("i1", "p1", "one"), listItem("i2", "p2", "two")] },
+      para("after", "after"),
+    ]);
+    const result = ai.applySemanticEdits([
+      { kind: "structural", op: "insertListItem", anchorNodeId: "p2", position: "after", item: { spans: [{ text: "new", marks: [] }] } },
+      { kind: "structural", op: "moveBlock", nodeId: "list", anchorNodeId: "after", position: "after" },
+    ]);
+
+    expect(result).toMatchObject({ changed: ["p2"], rejected: ["list"] });
+    expect(changesOf(editor).length).toBeGreaterThan(0);
   });
 
   it("refuses a second move of the same node in one batch", () => {

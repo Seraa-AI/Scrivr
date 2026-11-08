@@ -164,6 +164,7 @@ export interface ApplyDiffResult {
 function applyBlockToTr(
   state: EditorState,
   tr: Transaction,
+  /** The id the caller resolved `found` by, so it can be resolved again after edits. */
   nodeId: string,
   found: ReturnType<typeof findLiveNodeById> & {},
   proposedText: string,

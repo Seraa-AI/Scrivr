@@ -48,7 +48,7 @@ function createLiveResolver(tr: Transaction): ResolveNode {
   };
 }
 
-/** The node an id names, plus the ancestor of `type` that encloses it. */
+/** The `type` node an id names: the node itself, or the one enclosing it. */
 function resolveAncestor(
   doc: PmNode,
   nodeId: string,
@@ -58,8 +58,14 @@ function resolveAncestor(
   const found = resolve(nodeId);
   if (!found) return null;
   if (found.node.type.name === typeName) return found;
-  // Only the leaf the agent sees names its container; a nested list is neither.
-  if (!found.node.isTextblock) return null;
+  // A node holding nodes of this type — a nested list inside an item — could
+  // mean any of them, so it names none.
+  let holdsType = false;
+  found.node.descendants((node) => {
+    holdsType ||= node.type.name === typeName;
+    return !holdsType;
+  });
+  if (holdsType) return null;
   const $pos = doc.resolve(found.pos);
   for (let depth = $pos.depth; depth > 0; depth--) {
     if ($pos.node(depth).type.name === typeName) {
@@ -122,7 +128,7 @@ function applyOne(
   edit: StructuralSemanticEdit,
   result: StructuralEditResult,
   resolve: ResolveNode,
-  moved: Set<PmNode>,
+  batch: BatchRanges,
 ): void {
   const schema = tr.doc.type.schema;
 
@@ -140,7 +146,7 @@ function applyOne(
       const target = resolveTopLevel(tr.doc, edit.nodeId, resolve);
       if (!target) return void rejectOrMiss(tr.doc, edit.nodeId, result);
       // Deleting what this batch moved would take the move's copy and leave its shadow.
-      if (overlapsMoved(tr.doc, target, moved)) return void result.rejected.push(edit.nodeId);
+      if (overlapsBatch(tr, target, batch)) return void result.rejected.push(edit.nodeId);
       tr.delete(target.pos, target.pos + target.node.nodeSize);
       result.changed.push(edit.nodeId);
       return;
@@ -156,8 +162,8 @@ function applyOne(
       if (!anchor) return void rejectOrMiss(tr.doc, edit.anchorNodeId, result);
       // A second move of the same content in one transaction emits a second
       // overlapping delete/insert pair, which tracking pairs wrongly and
-      // replays into a duplicated block. One move per node per batch.
-      if (overlapsMoved(tr.doc, target, moved)) return void result.rejected.push(edit.nodeId);
+      // replays into a duplicated block. Content moves at most once per batch.
+      if (overlapsBatch(tr, target, batch)) return void result.rejected.push(edit.nodeId);
       if (edit.op === "moveListItem") {
         const source = tr.doc.resolve(target.pos);
         const destination = tr.doc.resolve(anchor.pos);
@@ -170,8 +176,9 @@ function applyOne(
       // Moving beside oneself or to the current boundary is already satisfied.
       if (target.pos === anchor.pos || at === target.pos || at === target.pos + target.node.nodeSize) return;
       tr.delete(target.pos, target.pos + target.node.nodeSize);
-      tr.insert(at > target.pos ? at - target.node.nodeSize : at, target.node);
-      moved.add(target.node);
+      const placed = at > target.pos ? at - target.node.nodeSize : at;
+      tr.insert(placed, target.node);
+      batch.moved.push({ from: placed, to: placed + target.node.nodeSize, maps: tr.mapping.maps.length });
       result.changed.push(edit.nodeId);
       return;
     }
@@ -187,14 +194,17 @@ function applyOne(
       );
       const node = body && itemType.createAndFill({}, body);
       if (!node) return void result.rejected.push(edit.anchorNodeId);
-      tr.insert(edit.position === "before" ? item.pos : item.pos + item.node.nodeSize, node);
+      const at = edit.position === "before" ? item.pos : item.pos + item.node.nodeSize;
+      if (insideMoved(tr, at, batch)) return void result.rejected.push(edit.anchorNodeId);
+      tr.insert(at, node);
+      batch.added.push({ from: at, to: at + node.nodeSize, maps: tr.mapping.maps.length });
       result.changed.push(edit.anchorNodeId);
       return;
     }
     case "deleteListItem": {
       const item = resolveAncestor(tr.doc, edit.nodeId, "listItem", resolve);
       if (!item) return void rejectOrMiss(tr.doc, edit.nodeId, result);
-      if (overlapsMoved(tr.doc, item, moved)) return void result.rejected.push(edit.nodeId);
+      if (overlapsBatch(tr, item, batch)) return void result.rejected.push(edit.nodeId);
       deleteContainerChild(tr, item);
       result.changed.push(edit.nodeId);
       return;
@@ -217,14 +227,17 @@ function applyOne(
       }
       const node = rowType.createAndFill({}, cells);
       if (!node) return void result.rejected.push(edit.anchorNodeId);
-      tr.insert(edit.position === "before" ? row.pos : row.pos + row.node.nodeSize, node);
+      const at = edit.position === "before" ? row.pos : row.pos + row.node.nodeSize;
+      if (insideMoved(tr, at, batch)) return void result.rejected.push(edit.anchorNodeId);
+      tr.insert(at, node);
+      batch.added.push({ from: at, to: at + node.nodeSize, maps: tr.mapping.maps.length });
       result.changed.push(edit.anchorNodeId);
       return;
     }
     case "deleteTableRow": {
       const row = resolveAncestor(tr.doc, edit.nodeId, "tableRow", resolve);
       if (!row) return void rejectOrMiss(tr.doc, edit.nodeId, result);
-      if (overlapsMoved(tr.doc, row, moved)) return void result.rejected.push(edit.nodeId);
+      if (overlapsBatch(tr, row, batch)) return void result.rejected.push(edit.nodeId);
       deleteContainerChild(tr, row);
       result.changed.push(edit.nodeId);
       return;
@@ -232,20 +245,49 @@ function applyOne(
   }
 }
 
+/** A range of the batch's own work, and how much of its mapping that predates. */
+interface BatchRange {
+  from: number;
+  to: number;
+  maps: number;
+}
+
 /**
- * Whether the node at `target` is, holds, or sits inside one this batch already
- * moved. Ids cannot answer it: a list item is named by its own id or by a
- * paragraph inside it.
+ * What this batch moved, and what it added inside a list or table. Tracking
+ * replays a batch as one gesture, so a later op that overlaps earlier work
+ * would be recorded wrongly — a second move duplicates a block, and a move of
+ * a list the batch added to cancels both. Content is touched once per batch.
  */
-function overlapsMoved(doc: PmNode, target: { node: PmNode; pos: number }, moved: Set<PmNode>): boolean {
-  const $pos = doc.resolve(target.pos);
-  for (let depth = 0; depth <= $pos.depth; depth++) if (moved.has($pos.node(depth))) return true;
-  let overlaps = moved.has(target.node);
-  target.node.descendants(node => {
-    overlaps ||= moved.has(node);
-    return !overlaps;
+interface BatchRanges {
+  moved: BatchRange[];
+  added: BatchRange[];
+}
+
+/** A range mapped through the steps since it was recorded; it grows with content added inside it. */
+function mapped(tr: Transaction, { from, to, maps }: BatchRange) {
+  const since = tr.mapping.slice(maps);
+  return { from: since.map(from, 1), to: since.map(to, -1) };
+}
+
+/**
+ * Whether `target` overlaps work this batch already did — the node itself,
+ * something inside it, or something holding it. Ids cannot answer it: a list
+ * item is named by its own id or by a paragraph inside it.
+ */
+function overlapsBatch(tr: Transaction, target: { node: PmNode; pos: number }, batch: BatchRanges): boolean {
+  const end = target.pos + target.node.nodeSize;
+  return [...batch.moved, ...batch.added].some((range) => {
+    const { from, to } = mapped(tr, range);
+    return target.pos < to && from < end;
   });
-  return overlaps;
+}
+
+/** Whether `pos` lies inside content this batch moved; beside it is fine. */
+function insideMoved(tr: Transaction, pos: number, batch: BatchRanges): boolean {
+  return batch.moved.some((range) => {
+    const { from, to } = mapped(tr, range);
+    return from < pos && pos < to;
+  });
 }
 
 /** An id the document still holds, in the wrong shape or only as a deleted shadow, is rejected, not "not found". */
@@ -266,7 +308,7 @@ export function applyStructuralEdits(
 ): StructuralEditResult {
   const result: StructuralEditResult = { changed: [], notFound: [], rejected: [] };
   const resolve = createLiveResolver(tr);
-  const moved = new Set<PmNode>();
-  for (const edit of edits) applyOne(tr, edit, result, resolve, moved);
+  const batch: BatchRanges = { moved: [], added: [] };
+  for (const edit of edits) applyOne(tr, edit, result, resolve, batch);
   return result;
 }

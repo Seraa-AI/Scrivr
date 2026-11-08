@@ -54,9 +54,12 @@ function nodeContentEquals(a: Node, b: Node): boolean {
 /** Content taken or written whole; a slice cut open is part of something else. */
 const whole = (slice: Slice) => slice.openStart === 0 && slice.openEnd === 0;
 
-/** A moved node keeps its id, so two blocks that only read the same are not one moved block. */
-const sameIdentity = (a: Node, b: Node) =>
-  !a.attrs["nodeId"] || !b.attrs["nodeId"] || a.attrs["nodeId"] === b.attrs["nodeId"];
+/**
+ * A moved node keeps its id, so a deleted block with one is only moved by a copy
+ * carrying the same id — not by a new block, or another, that only reads the same.
+ */
+const sameIdentity = (inserted: Node, deleted: Node) =>
+  !deleted.attrs["nodeId"] || inserted.attrs["nodeId"] === deleted.attrs["nodeId"];
 
 /**
  * Is `inserted` what `deleted` took away? A floating object alone in its
@@ -264,6 +267,7 @@ export const groupMoveSteps = (
         ) {
           pair(peerStep, step, deletedContent.content.firstChild);
           matched.push(i, g);
+          break;
         }
         continue;
       }
@@ -286,6 +290,7 @@ export const groupMoveSteps = (
         ) {
           pair(peerStep, step, insertedContent.content.firstChild);
           matched.push(i, g);
+          break;
         }
       }
     }

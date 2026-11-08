@@ -20,9 +20,10 @@ order puts the shadow first for a move down the document and last for a move up
 it. `findLiveNodeById` in `@scrivr/plugins` is the one place that decides, and
 every consumer that resolves an id against a tracked document now uses it —
 rich edits, structural edits, drift detection, suggestion overlays and popovers,
-ghost text, streamed insertion, block markers, and citation reveal (which still
-reveals a block proposed for deletion, since it is on screen until decided). Writing into a shadow used
-to succeed, report success, and then evaporate when the deletion was accepted.
+ghost text, streamed insertion, block markers, and citation reveal. Citation
+reveal still reaches a block proposed for deletion, since it is on screen until
+decided. Writing into a shadow used to succeed, report success, and then
+evaporate when the deletion was accepted.
 
 A node is a shadow when a pending deletion covers its whole range, which is how
 an empty node and the children of a deleted container are recognised — neither
@@ -41,13 +42,18 @@ returned the *last* match regardless, despite a comment claiming it stopped at
 the first. Core still knows nothing about tracking; the predicate is what lets
 the plugins layer own that rule.
 
-One batch moves a node once: a move or delete of content the batch already
-moved — the same node by another of its ids, something inside it, or something
-holding it — is refused, since a second overlapping delete/insert pair would
-replay into a duplicated block. A list op named by a nested list, which is
-neither an item nor its text, is refused too.
+A batch touches content once. A move or delete overlapping content the batch
+already moved or added to — the same node by another of its ids, something
+inside it, or something holding it — is refused, and so is adding an item or
+row inside content the batch moved; tracking replays a batch as one gesture, so
+overlapping work would duplicate a block or cancel the batch. A list or table op
+named by a node that holds several of what it acts on, such as a nested list, is
+refused too.
 
 Tracking pairs a deletion with an insertion as a move only when they match, and
-a node carrying an id only with a copy carrying the same id. An insertion
-earlier in a batch no longer claims a move's deletion, and two blocks that only
-read the same — two empty paragraphs — are no longer paired with each other.
+a deleted block carrying an id only with a copy carrying the same id. An
+insertion earlier in a batch no longer claims a move's deletion; a new block,
+or another, that only reads the same as a deleted one — two empty paragraphs, a
+`deleteBlock` beside an `insertBlock` of the same text — is a deletion and an
+insertion, not a move. Block markers stay on a block proposed for deletion,
+which is on screen until decided.

@@ -28,10 +28,6 @@ export const NORMALIZATION_META = "scrivr:normalization";
  * returns whichever comes first — to read or write the block a person sees, use
  * `findLiveNodeById` from `@scrivr/plugins`. `accept` is how that skips the copy
  * without core knowing about tracking.
- *
- * @example
- * findNodeById(doc, "intro");                            // any copy
- * findNodeById(doc, "intro", (node) => node.isTextblock); // the first that passes
  */
 export function findNodeById(
   doc: Node,

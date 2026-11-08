@@ -12,6 +12,7 @@ import { TrackChanges, TrackChangesStatus } from "@scrivr/plugins";
 import { aiCaretPluginKey } from "../AiCaret";
 import { AiToolkit } from "../AiToolkit";
 import { getAiToolkit } from "../aiToolkitRegistry";
+import { moveFirstBlockToEnd } from "../../ai-suggestion/__tests__/helpers";
 
 function serverEditorWithToolkit() {
   return new ServerEditor({
@@ -67,9 +68,7 @@ describe("streaming after a block with a pending move", () => {
         ],
       },
     });
-    const first = editor.getState().doc.child(0);
-    const tr = editor.getState().tr.delete(0, first.nodeSize);
-    editor.applyTransaction(tr.insert(tr.doc.content.size, first));
+    moveFirstBlockToEnd(editor);
     const ai = getAiToolkit(editor);
     if (!ai) throw new Error("no toolkit");
     return { editor, ai };

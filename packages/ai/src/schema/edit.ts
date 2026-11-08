@@ -84,7 +84,7 @@ const anchored = { position: EditPositionSchema, anchorNodeId: z.string().min(1)
 export const StructuralSemanticEditSchema = z.discriminatedUnion("op", [
   structuralOp("insertBlock", { ...anchored, block: SemanticBlockInputSchema }),
   structuralOp("deleteBlock", { nodeId: z.string().min(1) }),
-  // A block of the document itself, moved once per batch.
+  // A top-level block; moved once per batch.
   structuralOp("moveBlock", { ...anchored, nodeId: z.string().min(1) }),
   structuralOp("insertListItem", {
     ...anchored,

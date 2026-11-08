@@ -20,6 +20,7 @@ function recordingContext() {
     moveTo() {}, lineTo() {}, setLineDash() {}, fillRect() {},
     strokeStyle: "", lineWidth: 0, lineCap: "", globalAlpha: 1, fillStyle: "",
   };
+  if (!isContext(ctx)) throw new Error("recording context lacks drawing calls");
   return { ctx, strokes };
 }
 
@@ -59,13 +60,7 @@ describe("the overlay handler", () => {
     }
     const { ctx, strokes } = recordingContext();
 
-    handler(
-      ctx as unknown as CanvasRenderingContext2D,
-      0,
-      defaultPageConfig,
-      charMap,
-      defaultEditorTheme,
-    );
+    handler(ctx, 0, defaultPageConfig, charMap, defaultEditorTheme);
 
     // The margin stripe alone is not the formatting decoration: the underline
     // is an extra stroke over the run whose appearance changes.
@@ -107,7 +102,6 @@ describe("the overlay handler on a block with a pending move", () => {
       });
     }
     const { ctx, strokes } = recordingContext();
-    if (!isContext(ctx)) throw new Error("recording context lacks drawing calls");
 
     handler(ctx, 0, defaultPageConfig, charMap, defaultEditorTheme);
 
