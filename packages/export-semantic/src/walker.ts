@@ -120,6 +120,7 @@ export function walkSemantic(
     if (changes.length === 0 && markdown.length > 0) unit.markdown = markdown;
     if (result.cells !== undefined) unit.cells = result.cells;
     if (result.image !== undefined) unit.image = result.image;
+    if (ctx.isRemoved(anchor)) unit.proposedForDeletion = true;
     // Container units (list, table, …) expose their inner leaf textblocks as
     // individually addressable `parts` — the edit surface. A leaf unit has none.
     const parts = extractParts(nodes, ctx, breadcrumb);
@@ -201,6 +202,7 @@ function collectParts(
         if (attrs) part.attrs = attrs;
         const changes = ctx.toChanges(child);
         if (changes.length > 0) part.changes = changes;
+        if (ctx.isRemoved(child)) part.proposedForDeletion = true;
         out.push(part);
       }
       return; // textblocks hold only inline content — nothing deeper to collect

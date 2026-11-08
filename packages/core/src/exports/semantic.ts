@@ -124,10 +124,15 @@ export interface SemanticUnit {
   markdown?: string;
   /** Structured rows/cells with spans — emitted for tables GFM can't encode. */
   cells?: TableCells;
-  /** Review changes excluded from `text` but preserved for audit/UI use. */
+  /** Pending review changes, each placed in `text`. */
   changes?: SemanticChange[];
   /** The image an `image` unit is — a paragraph holding one image and nothing else. */
   image?: SemanticImage;
+  /**
+   * The block itself is proposed for deletion — not only its text. It reads
+   * empty and cannot be edited or placed after; its deletion is in `changes`.
+   */
+  proposedForDeletion?: true;
 }
 
 /**
@@ -213,6 +218,8 @@ export interface SemanticPart {
   attrs?: Record<string, unknown>;
   /** Review changes inside this part, placed in `text`. Also in the parent unit. */
   changes?: SemanticChange[];
+  /** The leaf itself is proposed for deletion, as on `SemanticUnit`. */
+  proposedForDeletion?: true;
 }
 
 /**
@@ -259,7 +266,10 @@ export interface SemanticChange {
    * formatting change: `{ marks: [...] }`, the text's formatting marks before.
    */
   oldAttrs?: Record<string, unknown>;
-  /** The image an inserted or deleted image is. */
+  /**
+   * The image an inserted or deleted image is. Each image an act adds or
+   * removes is a change of its own, under the act's id.
+   */
   image?: SemanticImage;
 }
 

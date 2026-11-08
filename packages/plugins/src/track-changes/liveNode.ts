@@ -17,7 +17,8 @@ import type { Node as PMNode } from "@scrivr/core/pm";
 import { findNodeById } from "@scrivr/core";
 
 import { findChanges } from "./findChanges";
-import { CHANGE_OPERATION, CHANGE_STATUS } from "./types";
+import { isMoveShadow } from "./helpers";
+import { CHANGE_OPERATION, type TrackedChange } from "./types";
 
 /** Document ranges holding content a pending deletion covers. */
 export type ShadowRange = readonly [from: number, to: number];
@@ -26,7 +27,31 @@ export type ShadowRange = readonly [from: number, to: number];
  * Keyed on the document node: a ProseMirror node is immutable, so an edit
  * produces a different object and the cache misses on its own.
  */
-const shadowCache = new WeakMap<PMNode, readonly ShadowRange[]>();
+interface Shadows {
+  all: readonly ShadowRange[];
+  moves: readonly ShadowRange[];
+}
+
+/**
+ * Keyed on the document node: a ProseMirror node is immutable, so an edit
+ * produces a different object and the cache misses on its own.
+ */
+const shadowCache = new WeakMap<PMNode, Shadows>();
+
+/** One walk of the document's pending deletions, read both ways below. */
+function shadowsOf(doc: PMNode): Shadows {
+  const cached = shadowCache.get(doc);
+  if (cached) return cached;
+  // No tracked-delete mark means the TrackChanges extension is not installed,
+  // so nothing in this document can be a shadow and the walk is waste.
+  const deletions = doc.type.schema.marks["trackedDelete"]
+    ? findChanges(EditorState.create({ doc })).pending.filter((change) => change.dataTracked.operation === CHANGE_OPERATION.delete)
+    : [];
+  const range = (change: TrackedChange): ShadowRange => [change.from, change.to];
+  const shadows = { all: deletions.map(range), moves: deletions.filter(isMoveShadow).map(range) };
+  shadowCache.set(doc, shadows);
+  return shadows;
+}
 
 /**
  * The ranges a pending deletion covers in this document.
@@ -38,26 +63,8 @@ const shadowCache = new WeakMap<PMNode, readonly ShadowRange[]>();
  * are all struck through stays live, which is correct: it is still there.
  */
 export function shadowRanges(doc: PMNode): readonly ShadowRange[] {
-  const cached = shadowCache.get(doc);
-  if (cached) return cached;
-
-  // No tracked-delete mark means the TrackChanges extension is not installed,
-  // so nothing in this document can be a shadow and the walk is waste.
-  const ranges: ShadowRange[] = doc.type.schema.marks["trackedDelete"]
-    ? findChanges(EditorState.create({ doc }))
-        .changes.filter(
-          (change) =>
-            change.dataTracked.operation === CHANGE_OPERATION.delete &&
-            change.dataTracked.status === CHANGE_STATUS.pending,
-        )
-        .map((change): ShadowRange => [change.from, change.to])
-    : [];
-
-  shadowCache.set(doc, ranges);
-  return ranges;
+  return shadowsOf(doc).all;
 }
-
-const moveShadowCache = new WeakMap<PMNode, readonly ShadowRange[]>();
 
 /**
  * The ranges a pending move left behind: where a moved block was, a copy of
@@ -65,15 +72,7 @@ const moveShadowCache = new WeakMap<PMNode, readonly ShadowRange[]>();
  * not content of its own.
  */
 export function moveShadowRanges(doc: PMNode): readonly ShadowRange[] {
-  const cached = moveShadowCache.get(doc);
-  if (cached) return cached;
-  const ranges: ShadowRange[] = doc.type.schema.marks["trackedDelete"]
-    ? findChanges(EditorState.create({ doc }))
-        .pending.filter((change) => change.dataTracked.operation === CHANGE_OPERATION.delete && !!change.dataTracked.moveNodeId)
-        .map((change): ShadowRange => [change.from, change.to])
-    : [];
-  moveShadowCache.set(doc, ranges);
-  return ranges;
+  return shadowsOf(doc).moves;
 }
 
 /** Whether a pending deletion covers this node whole. */

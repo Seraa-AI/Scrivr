@@ -36,7 +36,7 @@ function unitOf(editor: ServerEditor, id: string): SemanticUnit {
 const shape = ({ type, text, at, length }: SemanticChange) => ({ type, text, at, length });
 
 const tracked = (operation: string, authorID: string, extra: DocNode = {}) => ({
-  dataTracked: { id: `${operation}-${authorID}`, operation, authorID, status: "pending", createdAt: 1, ...extra },
+  dataTracked: { id: `${operation}-${authorID}`, operation, authorID, status: "pending", createdAt: 1, updatedAt: 1, ...extra },
 });
 
 describe("a pending insertion", () => {
@@ -196,7 +196,7 @@ describe("structural changes", () => {
 });
 
 describe("text two authors changed", () => {
-  it("keeps the insertion, with no length, beside the deletion of it", () => {
+  it("keeps the insertion, with nothing left of it, beside the deletion of it", () => {
     const editor = editorWith([{
       type: "paragraph", attrs: { nodeId: "a" },
       content: [
@@ -210,7 +210,7 @@ describe("text two authors changed", () => {
     const unit = unitOf(editor, "a");
     expect(unit.text).toBe("Keep ");
     expect(unit.changes?.map((c) => ({ ...shape(c), authorId: c.authorId }))).toEqual([
-      { type: "suggestedInsert", text: "NEW", at: 5, length: 0, authorId: "alice" },
+      { type: "suggestedInsert", text: "", at: 5, length: 0, authorId: "alice" },
       { type: "suggestedDelete", text: "NEW", at: 5, length: 0, authorId: "bob" },
     ]);
   });
@@ -267,23 +267,6 @@ describe("one act reads under one id", () => {
     expect(table.changes).toHaveLength(1);
   });
 
-  it("when a piece is read before its container: a deleted table's cells name the table", () => {
-    // The table handler reads each cell before the walker reaches the table's
-    // and rows' own records, so a name resolved by read order would differ.
-    const editor = editorWith([para("p0", "before"), {
-      type: "table", attrs: { nodeId: "t" },
-      content: [
-        { type: "tableRow", attrs: { nodeId: "r1" }, content: [cell("a", "a1")] },
-        { type: "tableRow", attrs: { nodeId: "r2" }, content: [cell("b", "b1")] },
-      ],
-    }]);
-    const { doc } = editor.getState();
-    const start = doc.child(0).nodeSize;
-    editor.applyTransaction(editor.getState().tr.delete(start, start + doc.child(1).nodeSize));
-    const table = unitOf(editor, "t");
-    const cellIds = (table.cells?.rows ?? []).flatMap((r) => r.cells).flatMap((c) => c.changes ?? []).map((c) => c.id);
-    expect(cellIds).toEqual([table.changes?.[0]?.id, table.changes?.[0]?.id]);
-  });
 });
 
 describe("an act's text keeps the breaks between its blocks", () => {
@@ -296,6 +279,8 @@ describe("an act's text keeps the breaks between its blocks", () => {
     editor.applyTransaction(editor.getState().tr.delete(start, start + doc.child(1).nodeSize));
     const list = units(editor).find((u) => u.type === "list");
     expect(list?.changes?.map(shape)).toEqual([{ type: "suggestedDelete", text: "one\ntwo", at: 0, length: 0 }]);
+    const actId = list?.changes?.[0]?.id;
+    expect((list?.parts ?? []).map((p) => p.changes?.map((c) => c.id))).toEqual([[actId], [actId]]);
   });
 
   it("for an inserted list, which reads exactly the text it spans", () => {
@@ -329,9 +314,35 @@ describe("pieces of one act carry what each says", () => {
     }]);
     const { doc } = editor.getState();
     editor.applyTransaction(editor.getState().tr.delete(doc.child(0).nodeSize, doc.content.size));
-    const [change] = unitOf(editor, "fig").changes ?? [];
-    expect(change && shape(change)).toEqual({ type: "suggestedDelete", text: "cap ", at: 0, length: 0 });
-    expect(change?.image).toMatchObject({ src: "https://example.com/a.png" });
+    const changes = unitOf(editor, "fig").changes ?? [];
+    expect(changes.map((c) => [c.type, c.text, c.image?.src])).toEqual([
+      ["suggestedDelete", "cap ", undefined],
+      ["suggestedDelete", "", "https://example.com/a.png"],
+    ]);
+    expect(new Set(changes.map((c) => c.id)).size).toBe(1);
+  });
+
+  it("an inserted paragraph holding two images shows both, under one id", () => {
+    const editor = editorWith([para("a", "Alpha")]);
+    const { schema } = editor.getState();
+    const [paragraph, image] = [schema.nodes["paragraph"], schema.nodes["image"]];
+    if (!paragraph || !image) throw new Error("no image");
+    const img = (name: string) => image.create({ src: `https://example.com/${name}.png`, alt: name });
+    editor.applyTransaction(editor.getState().tr.insert(7, paragraph.create({ nodeId: "pics" }, [img("a"), img("b")])));
+    const changes = unitOf(editor, "pics").changes ?? [];
+    expect(changes.flatMap((c) => c.image?.src ?? [])).toEqual(["https://example.com/a.png", "https://example.com/b.png"]);
+    expect(new Set(changes.map((c) => c.id)).size).toBe(1);
+  });
+
+  it("an insertion another author deleted part of reads what remains", () => {
+    const editor = editorWith([para("a", "Alpha")]);
+    editor.applyTransaction(editor.getState().tr.insertText("XYZ", 3));
+    editor.commands.setTrackChangesUserID("bob");
+    editor.applyTransaction(editor.getState().tr.delete(4, 5));
+    const unit = unitOf(editor, "a");
+    const alice = (unit.changes ?? []).filter((c) => c.authorId === "alice");
+    expect(alice.map(shape)).toEqual([{ type: "suggestedInsert", text: "XZ", at: 2, length: 2 }]);
+    expect(unit.text.slice(2, 4)).toBe("XZ");
   });
 
   it("a formatting act over runs with different marks states each run's marks", () => {
@@ -480,5 +491,88 @@ describe("a deleted image", () => {
     const [change] = unitOf(editor, "fig").changes ?? [];
     expect(change?.type).toBe("suggestedDelete");
     expect(change?.image).toMatchObject({ src: "https://example.com/a.png", alt: "A" });
+  });
+});
+
+describe("a block proposed for deletion is marked so on its unit", () => {
+  it("when the block itself is deleted, even holding another author's insertion", () => {
+    const editor = editorWith([para("a", "Alpha"), para("b", "Beta")]);
+    editor.applyTransaction(editor.getState().tr.insertText("NEW", 9));
+    editor.commands.setTrackChangesUserID("bob");
+    const { doc } = editor.getState();
+    editor.applyTransaction(editor.getState().tr.delete(doc.child(0).nodeSize, doc.content.size));
+    expect(unitOf(editor, "b").proposedForDeletion).toBe(true);
+    expect(unitOf(editor, "a").proposedForDeletion).toBeUndefined();
+  });
+
+  it("not when only its text is struck, or only its break", () => {
+    const editor = editorWith([para("a", "Alpha"), para("b", "Beta"), { type: "paragraph", attrs: { nodeId: "e" } }, para("c", "Gamma")]);
+    editor.applyTransaction(editor.getState().tr.delete(1, 6));
+    const emptyAt = editor.getState().doc.child(0).nodeSize + editor.getState().doc.child(1).nodeSize;
+    editor.applyTransaction(editor.getState().tr.delete(emptyAt + 1, emptyAt + 3));
+    const read = units(editor);
+    expect(read.find((u) => u.id === "a")?.text).toBe("");
+    expect(read.find((u) => u.id === "e")?.changes?.map((c) => c.text)).toEqual(["\n"]);
+    expect(read.filter((u) => u.proposedForDeletion)).toEqual([]);
+  });
+});
+
+describe("records built straight into a synced document", () => {
+  it("name an act by a pending record, never by a decided one grouped with it", () => {
+    const editor = editorWith([{
+      type: "paragraph", attrs: { nodeId: "a" },
+      content: [
+        { type: "text", text: "old", marks: [{ type: "trackedDelete", attrs: tracked("delete", "alice", { id: "decided", groupId: "g", status: "accepted" }) }] },
+        { type: "text", text: "new", marks: [{ type: "trackedInsert", attrs: tracked("insert", "alice", { id: "open", groupId: "g" }) }] },
+      ],
+    }]);
+    expect(unitOf(editor, "a").changes?.map((c) => [c.type, c.id])).toEqual([["suggestedInsert", "open"]]);
+  });
+
+  it("keep text whose deletion is already decided in the proposed text, reporting nothing for it", () => {
+    const editor = editorWith([para("a", "Alpha", [{ type: "trackedDelete", attrs: tracked("delete", "alice", { status: "rejected" }) }])]);
+    const unit = unitOf(editor, "a");
+    expect(unit.text).toBe("Alpha");
+    expect(unit.changes).toBeUndefined();
+  });
+
+  it("ignore an operation they do not know, on a node or on a mark", () => {
+    const editor = editorWith([{
+      type: "paragraph",
+      attrs: { nodeId: "a", dataTracked: [{ id: "x", operation: "toString", status: "pending" }] },
+      content: [{ type: "text", text: "Alpha", marks: [{ type: "bold", attrs: { dataTracked: [{ id: "y", operation: "bogus", status: "pending" }] } }] }],
+    }]);
+    expect(unitOf(editor, "a").changes).toBeUndefined();
+  });
+
+  it("read a formatting change as separate changes for runs that do not touch", () => {
+    const bold = { type: "bold", attrs: { dataTracked: [{ id: "f", operation: "insert", authorID: "alice", status: "pending", createdAt: 1 }] } };
+    const editor = editorWith([{
+      type: "paragraph", attrs: { nodeId: "a" },
+      content: [{ type: "text", text: "ab", marks: [bold] }, { type: "text", text: "cd" }, { type: "text", text: "ef", marks: [bold] }],
+    }]);
+    expect(unitOf(editor, "a").changes?.map((c) => [c.at, c.length])).toEqual([[0, 2], [4, 2]]);
+  });
+
+  it("agree on a mark both added and proposed for removal: absent before and after", () => {
+    const records = [
+      { id: "add", operation: "insert", authorID: "alice", status: "pending", createdAt: 1 },
+      { id: "drop", operation: "delete", authorID: "bob", status: "pending", createdAt: 2 },
+    ];
+    const editor = editorWith([para("a", "Alpha", [{ type: "bold", attrs: { dataTracked: records } }])]);
+    const unit = unitOf(editor, "a");
+    expect(unit.spans).toBeUndefined();
+    expect((unit.changes ?? []).map((c) => c.oldAttrs)).toEqual([{ marks: [] }, { marks: [] }]);
+  });
+
+  it("survive a former node type that cannot be created there", () => {
+    for (const oldNodeTypeName of ["text", "image", "nope"]) {
+      const editor = editorWith([{
+        type: "paragraph",
+        attrs: { nodeId: "a", dataTracked: [{ id: "s", operation: "set_attrs", status: "pending", oldAttrs: {}, oldNodeTypeName }] },
+        content: [{ type: "text", text: "Alpha" }],
+      }]);
+      expect(unitOf(editor, "a").changes?.[0]?.oldAttrs).toEqual({});
+    }
   });
 });

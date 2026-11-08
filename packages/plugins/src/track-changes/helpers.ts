@@ -22,6 +22,10 @@ export function isValidTrackableMark(mark: Mark) {
   return false;
 }
 
+/** The copy a pending move leaves where the moved content was: its deletion, paired by `moveNodeId`. */
+export const isMoveShadow = ({ dataTracked }: { dataTracked: Partial<TrackedAttrs> }) =>
+  dataTracked.operation === CHANGE_OPERATION.delete && !!dataTracked.moveNodeId;
+
 export function equalMarks(n1: PMNode, n2: PMNode) {
   return (
     n1.marks.length === n2.marks.length &&

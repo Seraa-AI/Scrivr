@@ -24,7 +24,8 @@ const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
 
 const isPending = (record: TrackedRecord) => record.status === CHANGE_STATUS.pending;
 
-const OPERATIONS: ReadonlySet<string> = new Set(Object.values(CHANGE_OPERATION));
+/** A formatting mark is only ever added or removed. */
+const FORMATTING_OPERATIONS: ReadonlySet<CHANGE_OPERATION | undefined> = new Set([CHANGE_OPERATION.insert, CHANGE_OPERATION.delete]);
 
 const actIdsByDoc = new WeakMap<PMNode, ReadonlyMap<string, string>>();
 
@@ -66,7 +67,8 @@ function describe(type: SemanticChange["type"], text: string, record: TrackedRec
 
 /**
  * A review mark's pending records. A mark with no records at all still stands
- * for one change, as documents written before records existed carry them.
+ * for one change, as documents written before records existed carry them; one
+ * whose records are all decided stands for none.
  */
 const reviewRecords = (mark: Mark): TrackedRecord[] => {
   const records = markRecords(mark);
@@ -79,23 +81,45 @@ export const keepInserted: SemanticMarkHandler = (run, mark, ctx) => ({
   changes: [...(run.changes ?? []), ...reviewRecords(mark).map((r) => describe("suggestedInsert", run.text, r, ctx))],
 });
 
-/** Deleted text leaves the proposed text, and is kept as the change that removes it. */
-export const dropDeleted: SemanticMarkHandler = (run, mark, ctx) => ({
-  text: "",
-  changes: [...(run.changes ?? []), ...reviewRecords(mark).map((r) => describe("suggestedDelete", run.text, r, ctx))],
-});
+/**
+ * Deleted text leaves the proposed text, and is kept as the change that removes
+ * it. A deletion already decided proposes nothing — `proposedForDeletion` reads
+ * the same records the same way — so its text stays and nothing is reported.
+ */
+export const dropDeleted: SemanticMarkHandler = (run, mark, ctx) => {
+  const records = reviewRecords(mark);
+  if (records.length === 0) return run;
+  return {
+    text: "",
+    changes: [...(run.changes ?? []), ...records.map((r) => describe("suggestedDelete", run.text, r, ctx))],
+  };
+};
+
+const hasPending = (mark: Mark, operation: CHANGE_OPERATION) =>
+  markRecords(mark).some((record) => record.operation === operation && isPending(record));
 
 /** A formatting mark proposed for removal is left off the proposed text. */
 export const isMarkRemoved = (mark: Mark): boolean =>
-  isValidTrackableMark(mark) &&
-  markRecords(mark).some((record) => record.operation === CHANGE_OPERATION.delete && isPending(record));
+  isValidTrackableMark(mark) && hasPending(mark, CHANGE_OPERATION.delete);
+
+/**
+ * A node type a block could have been instead of this one: never text, and the
+ * same kind of node — block or inline, leaf or not — with every attr it
+ * requires given. A synced record may name anything.
+ */
+function formerType(node: PMNode, name: string | undefined, attrs: Record<string, unknown>) {
+  const type = name !== undefined ? node.type.schema.nodes[name] : undefined;
+  const fits = !!type && !type.isText && type.isBlock === node.type.isBlock && type.isLeaf === node.type.isLeaf &&
+    Object.entries(type.spec.attrs ?? {}).every(([key, spec]) => "default" in spec || key in attrs);
+  return type && fits ? type : node.type;
+}
 
 /** The block as it was before an attribute change, in the vocabulary of `attrsOf`. */
 function formerAttrs(node: PMNode, record: TrackedRecord, ctx: UnitCtx): Record<string, unknown> {
-  const oldTypeName = "oldNodeTypeName" in record ? textOf(record.oldNodeTypeName) : undefined;
-  const oldType = (oldTypeName !== undefined ? ctx.schema.nodes[oldTypeName] : undefined) ?? node.type;
-  const oldAttrs = "oldAttrs" in record && isPlainRecord(record.oldAttrs) ? record.oldAttrs : null;
-  const former = oldType.create(oldAttrs);
+  const oldAttrs = "oldAttrs" in record && isPlainRecord(record.oldAttrs) ? record.oldAttrs : {};
+  const oldType = formerType(node, "oldNodeTypeName" in record ? textOf(record.oldNodeTypeName) : undefined, oldAttrs);
+  // The node's own attrs fill what the record leaves out, so a required one is never missing.
+  const former = oldType.create(oldType === node.type ? { ...node.attrs, ...oldAttrs } : oldAttrs);
   const level = former.attrs["level"];
   return {
     ...(ctx.attrsOf(former) ?? {}),
@@ -122,39 +146,46 @@ const objectOf = (node: PMNode) => {
 const insertion = (node: PMNode, record: TrackedRecord, ctx: UnitCtx): SemanticNodeChange =>
   ({ change: { ...describe("suggestedInsert", "", record, ctx), ...objectOf(node) }, place: "covers" });
 
-const NODE_CHANGES: Partial<Record<CHANGE_OPERATION, (node: PMNode, record: TrackedRecord, ctx: UnitCtx) => SemanticNodeChange>> = {
-  [CHANGE_OPERATION.insert]: insertion,
-  [CHANGE_OPERATION.move]: insertion,
+type NodeReading = (node: PMNode, record: TrackedRecord, ctx: UnitCtx) => SemanticNodeChange;
+
+/**
+ * How each node operation reads. A map, not an object: a synced record may
+ * name any operation, "toString" included, which an object lookup finds on its
+ * prototype. Operations not listed (`node_split`) are read through another
+ * record of their act.
+ */
+const NODE_CHANGES = new Map<string, NodeReading>([
+  [CHANGE_OPERATION.insert, insertion],
+  [CHANGE_OPERATION.move, insertion],
   // A container added around content, which is inserted with it.
-  [CHANGE_OPERATION.wrap_with_node]: insertion,
+  [CHANGE_OPERATION.wrap_with_node, insertion],
   // A block's copy at the place a structural change moved it to.
-  [CHANGE_OPERATION.structure]: insertion,
-  [CHANGE_OPERATION.delete]: (node, r, ctx) =>
-    ({ change: { ...describe("suggestedDelete", "", r, ctx), ...objectOf(node) }, place: "covers" }),
-  [CHANGE_OPERATION.node_join]: (_node, r, ctx) => ({ change: describe("suggestedDelete", "\n", r, ctx), place: "after" }),
+  [CHANGE_OPERATION.structure, insertion],
+  [CHANGE_OPERATION.delete, (node, r, ctx) =>
+    ({ change: { ...describe("suggestedDelete", "", r, ctx), ...objectOf(node) }, place: "covers" })],
+  [CHANGE_OPERATION.node_join, (_node, r, ctx) => ({ change: describe("suggestedDelete", "\n", r, ctx), place: "after" })],
   // A split is one act with the reference its first block holds; reported there.
-  [CHANGE_OPERATION.reference]: (_node, r, ctx) => ({ change: describe("suggestedInsert", "\n", r, ctx), place: "after" }),
-  [CHANGE_OPERATION.set_node_attributes]: (node, r, ctx) => ({
+  [CHANGE_OPERATION.reference, (_node, r, ctx) => ({ change: describe("suggestedInsert", "\n", r, ctx), place: "after" })],
+  [CHANGE_OPERATION.set_node_attributes, (node, r, ctx) => ({
     change: { ...describe("suggestedAttrs", "", r, ctx), oldAttrs: formerAttrs(node, r, ctx) },
     place: "covers",
-  }),
-  [CHANGE_OPERATION.list_change]: (_node, r, ctx) => ({
+  })],
+  [CHANGE_OPERATION.list_change, (_node, r, ctx) => ({
     change: { ...describe("suggestedAttrs", "", r, ctx), oldAttrs: { list: listTypes(r) } },
     place: "covers",
-  }),
-};
+  })],
+]);
 
 /** A formatting change on text: the marks the text had before it. */
 function formattingChanges(node: PMNode, ctx: UnitCtx): SemanticNodeChange[] {
   const formatting = node.marks.filter((mark) => !isTrackedMark(mark.type.name));
+  // What the text had before any pending formatting change: without the marks
+  // proposed as added. Every change on this text states the same.
+  const before = { marks: formatting.filter((m) => !hasPending(m, CHANGE_OPERATION.insert)).map(describeInlineMark) };
   return formatting.filter(isValidTrackableMark).flatMap((mark) =>
-    markRecords(mark).filter(isPending).map((record) => {
-      const before = record.operation === CHANGE_OPERATION.insert ? formatting.filter((m) => m !== mark) : formatting;
-      return {
-        change: { ...describe("suggestedAttrs", "", record, ctx), oldAttrs: { marks: before.map(describeInlineMark) } },
-        place: "covers",
-      };
-    }),
+    markRecords(mark)
+      .filter((record) => isPending(record) && FORMATTING_OPERATIONS.has(record.operation))
+      .map((record): SemanticNodeChange => ({ change: { ...describe("suggestedAttrs", "", record, ctx), oldAttrs: before }, place: "covers" })),
   );
 }
 
@@ -165,7 +196,7 @@ export function nodeChanges(node: PMNode, ctx: UnitCtx): SemanticNodeChange[] {
   if (node.isText) return formattingChanges(node, ctx);
   return (getBlockInlineTrackedData(node) ?? []).filter(isTrackedRecord).filter(isPending).flatMap((record) => {
     const operation = record.operation;
-    const toChange = operation !== undefined && OPERATIONS.has(operation) ? NODE_CHANGES[operation] : undefined;
+    const toChange = operation === undefined ? undefined : NODE_CHANGES.get(operation);
     return toChange ? [toChange(node, record, ctx)] : [];
   });
 }

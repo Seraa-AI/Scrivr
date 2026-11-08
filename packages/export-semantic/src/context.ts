@@ -93,7 +93,8 @@ const endOf = (change: SemanticChange) => (change.at ?? 0) + (change.length ?? 0
  * on the marks its text had, since each change states those.
  */
 const actKey = (change: SemanticChange) => {
-  if (change.id === undefined) return undefined;
+  // Each image an act adds or removes is a change of its own, saying which.
+  if (change.id === undefined || change.image) return undefined;
   const key = `${change.type}:${change.id}`;
   return change.type === "suggestedAttrs" ? `${key}:${stableStringify(change.oldAttrs ?? null)}` : key;
 };
@@ -101,11 +102,10 @@ const actKey = (change: SemanticChange) => {
 /** Two pieces of one change, read in document order. */
 function joinPieces(prev: SemanticChange, next: SemanticChange, separator: string): SemanticChange {
   const text = prev.text && next.text ? prev.text + separator + next.text : prev.text + next.text;
-  const image = prev.image ?? next.image;
   // A deletion is not in the proposed text: it stays where its first piece stood.
-  if (prev.type === "suggestedDelete") return { ...prev, text, length: 0, ...(image ? { image } : {}) };
+  if (prev.type === "suggestedDelete") return { ...prev, text, length: 0 };
   const at = Math.min(prev.at ?? 0, next.at ?? 0);
-  return { ...prev, text, at, length: Math.max(endOf(prev), endOf(next)) - at, ...(image ? { image } : {}) };
+  return { ...prev, text, at, length: Math.max(endOf(prev), endOf(next)) - at };
 }
 
 /**
@@ -192,7 +192,10 @@ function extractContent(node: PmNode, readers: Readers, ctx: UnitCtx): Extracted
       if (run === null) return { spans: [], changes: [] };
     }
     const length = run.text.length;
-    const changes = (run.changes ?? []).map((c) => ({ ...c, at: 0, length }));
+    // An insertion reads what remains of it once every handler has run — a
+    // later one may have proposed deleting it.
+    const changes = (run.changes ?? []).map((c) =>
+      c.type === "suggestedInsert" ? { ...c, text: run.text, at: 0, length } : { ...c, at: 0, length });
     const spans = length > 0 ? [{ text: run.text, marks: formattingMarks(node.marks, readers) }] : [];
     return { spans, changes };
   }
