@@ -5,8 +5,9 @@
  * carry per-cell rectangles and the laid-out child blocks of each cell. The
  * engine:
  *   1. Derives column x-offsets from the table's `grid` widths.
- *   2. Lays out every cell's child blocks (paragraphs, headings, …) inside the
- *      cell's content box (column width minus padding) by reusing `layoutBlock`.
+ *   2. Lays out every cell's child blocks (paragraphs, headings, lists, …)
+ *      inside the cell's content box (column width minus padding), collected
+ *      and measured as the page body's are, list markers and indents included.
  *   3. Sizes the row to its tallest cell; every cell fills that height.
  *
  * Position model (matches the line model so the measure cache can reuse a row
@@ -22,12 +23,13 @@
  */
 import type { Node } from "prosemirror-model";
 import { cellBackground, cellGridSpan, cellVMerge } from "../table/attrs";
-import { layoutBlock, type LayoutBlock, type CellSubBlock } from "./BlockLayout";
+import type { LayoutBlock, CellSubBlock } from "./BlockLayout";
 import type { TextMeasurerLike } from "./TextMeasurer";
 import type { FontConfig } from "./FontConfig";
 import type { FontModifier } from "../extensions/types";
-import { nodeLayout, type InlineRegistry } from "./BlockRegistry";
+import type { InlineRegistry } from "./BlockRegistry";
 import type { LayoutFontResolver } from "../fonts/layoutResolver";
+import { collectChildItems, fitIndent, layoutBlockWithMarker } from "./layoutItems";
 
 /** Horizontal cell padding (left + right) in CSS px. */
 export const CELL_PADDING_H = 6;
@@ -57,22 +59,6 @@ export interface TableRowLayoutContext {
 
 function columnWidth(columns: number[], index: number): number {
   return columns[index] ?? DEFAULT_COLUMN_WIDTH;
-}
-
-/**
- * Visit the blocks a cell lays out. A `transparent` node has no box of its own,
- * so its children take its place, as they do in the body flow.
- */
-function forEachFlowChild(
-  parent: Node,
-  base: number,
-  visit: (node: Node, nodePos: number) => void,
-): void {
-  parent.forEach((node, offset) => {
-    const nodePos = base + offset;
-    if (nodeLayout(node.type).kind === "transparent") forEachFlowChild(node, nodePos + 1, visit);
-    else visit(node, nodePos);
-  });
 }
 
 /**
@@ -115,14 +101,18 @@ export function layoutTableRowCells(
     const cellPos = ctx.rowNodePos + 1 + offsetInRow;
 
     // Lay out the cell's child blocks, stacking `y` relative to the row top.
+    // A page break has no meaning inside a cell.
     const blocks: LayoutBlock[] = [];
     let relY = CELL_PADDING_V;
-    forEachFlowChild(cellNode, cellPos + 1, (childNode, childNodePos) => {
-      const childBlock = layoutBlock(childNode, {
-        nodePos: childNodePos,
-        x: contentX,
+    for (const item of collectChildItems(cellNode, cellPos + 1)) {
+      if (item.isPageBreak) continue;
+      const indent = fitIndent(item.indentLeft, contentWidth);
+      const marker = item.listMarker !== undefined ? { text: item.listMarker, indentLeft: indent } : undefined;
+      const childBlock = layoutBlockWithMarker(item.node, {
+        nodePos: item.nodePos,
+        x: contentX + indent,
         y: relY,
-        availableWidth: contentWidth,
+        availableWidth: contentWidth - indent,
         page: ctx.page,
         measurer: ctx.measurer,
         // No `map`: the CharacterMap is populated at paint time (TableRowStrategy),
@@ -131,10 +121,11 @@ export function layoutTableRowCells(
         ...(ctx.fontModifiers ? { fontModifiers: ctx.fontModifiers } : {}),
         ...(ctx.inlineRegistry ? { inlineRegistry: ctx.inlineRegistry } : {}),
         ...(ctx.fonts ? { fonts: ctx.fonts } : {}),
-      });
+        ...(item.tableColumns ? { tableColumns: item.tableColumns } : {}),
+      }, marker);
       blocks.push(childBlock);
       relY += childBlock.spaceBefore + childBlock.height + childBlock.spaceAfter;
-    });
+    }
 
     const contentHeight = relY - CELL_PADDING_V;
     const cellHeight = contentHeight + 2 * CELL_PADDING_V;

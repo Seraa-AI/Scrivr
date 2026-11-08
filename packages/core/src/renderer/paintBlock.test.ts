@@ -8,6 +8,7 @@ import { defaultPageConfig, defaultPagelessConfig, runPipeline } from "../layout
 import type { LayoutBlock } from "../layout/BlockLayout";
 import { ExtensionManager } from "../extensions/ExtensionManager";
 import { StarterKit } from "../extensions/StarterKit";
+import { Table } from "../extensions/built-in/Table";
 import { defaultEditorTheme } from "../model/theme";
 import { createMeasurer, createTestEditor } from "../test-utils";
 
@@ -68,18 +69,29 @@ describe("painting a block", () => {
   });
 });
 
-describe("every surface paints through paintBlock", () => {
+/**
+ * Text drawn on any canvas while `paint` runs. Spied on the context's
+ * prototype, so it also sees the canvases a surface creates for itself.
+ */
+function textDrawnWhile(paint: () => void): string[] {
+  const fillText = vi.spyOn(Object.getPrototypeOf(canvas()), "fillText");
+  paint();
+  return fillText.mock.calls.map(([text]) => String(text));
+}
+
+describe("every surface draws a list's numbers", () => {
   it("a page", () => {
     const spy = vi.spyOn(painter, "paintBlock");
     const docNode = manager.schema.nodeFromJSON({ type: "doc", content: [list("one", "two")] });
     const layout = runPipeline(docNode, { pageConfig: defaultPageConfig, measurer: createMeasurer(), fontConfig: manager.buildBlockStyles() });
     const page = layout.pages[0];
     if (!page) throw new Error("no page");
-    renderPage({
+    const drawn = textDrawnWhile(() => renderPage({
       ctx: canvas(), page, pageConfig: defaultPageConfig, renderVersion: layout.version,
       currentVersion: () => layout.version, dpr: 1, measurer: createMeasurer(), map: new CharacterMap(),
       blockRegistry: manager.buildBlockRegistry(),
-    });
+    }));
+    expect(drawn).toEqual(expect.arrayContaining(["1.", "2."]));
     expect(markedBlocksPainted(spy)).toEqual(["1.", "2."]);
   });
 
@@ -92,10 +104,30 @@ describe("every surface paints through paintBlock", () => {
       content: { type: "doc", content: [list("one", "two")] },
     });
     const tiles = new TileManager(editor, container);
-    tiles.update();
+    const drawn = textDrawnWhile(() => tiles.update());
+    expect(drawn).toEqual(expect.arrayContaining(["1.", "2."]));
     expect(markedBlocksPainted(spy)).toEqual(expect.arrayContaining(["1.", "2."]));
     tiles.destroy();
     editor.destroy();
     container.remove();
+  });
+
+  it("a table cell", () => {
+    const withTables = new ExtensionManager([StarterKit, Table]);
+    const docNode = withTables.schema.nodeFromJSON({ type: "doc", content: [
+      { type: "table", attrs: { grid: [300] }, content: [{ type: "tableRow", content: [
+        { type: "tableCell", content: [list("in a cell")] },
+      ] }] },
+      { type: "paragraph" },
+    ] });
+    const layout = runPipeline(docNode, { pageConfig: defaultPageConfig, measurer: createMeasurer(), fontConfig: withTables.buildBlockStyles() });
+    const page = layout.pages[0];
+    if (!page) throw new Error("no page");
+    const drawn = textDrawnWhile(() => renderPage({
+      ctx: canvas(), page, pageConfig: defaultPageConfig, renderVersion: layout.version,
+      currentVersion: () => layout.version, dpr: 1, measurer: createMeasurer(), map: new CharacterMap(),
+      blockRegistry: withTables.buildBlockRegistry(),
+    }));
+    expect(drawn).toEqual(expect.arrayContaining(["1."]));
   });
 });

@@ -134,8 +134,10 @@ export interface BlockStrategy {
  * Registry mapping ProseMirror node type names to BlockStrategies.
  *
  * Built by ExtensionManager from all extensions that implement addLayoutHandlers().
- * Consumed by PageRenderer — for each block, PageRenderer calls
- * registry.get(block.blockType)?.render(block, ctx, map).
+ * Consumed through `paintBlock`, which every surface calls for each block: it
+ * looks the block's strategy up here by `blockType` and then draws the block's
+ * list marker. A new surface paints with `paintBlock` rather than calling a
+ * strategy itself, or its lists lose their numbers.
  */
 export class BlockRegistry {
   private readonly strategies = new Map<string, BlockStrategy>();

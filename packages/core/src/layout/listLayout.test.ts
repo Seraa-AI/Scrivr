@@ -12,6 +12,7 @@ import { ServerEditor } from "../ServerEditor";
 import { StarterKit } from "../extensions/StarterKit";
 import { Table } from "../extensions/built-in/Table";
 import { ExtensionManager } from "../extensions/ExtensionManager";
+import { Extension } from "../extensions/Extension";
 import { buildStarterKitContext, createMeasurer, measureTextWidth } from "../test-utils";
 
 /**
@@ -549,5 +550,56 @@ describe("streamed layout of lists", () => {
       ol(li(floating, { type: "pageBreak" }, p("text")), item("second")),
     ] });
     for (const maxBlocks of [1, 2, 3, 5]) expect(shown(streamed(docNode, maxBlocks))).toEqual(shown(laidOut(docNode)));
+  });
+});
+
+/** A table cell holds blocks as the body does, lists included (paste one in and it is there). */
+describe("a list inside a table cell", () => {
+  const manager = new ExtensionManager([StarterKit, Table]);
+  const cellBlocks = (cellContent: Json[]): LayoutBlock[] => {
+    const docNode = manager.schema.nodeFromJSON({ type: "doc", content: [
+      { type: "table", attrs: { grid: [300, 300] }, content: [{ type: "tableRow", content: [
+        { type: "tableCell", content: cellContent },
+        { type: "tableCell", content: [p("other")] },
+      ] }] },
+      { type: "paragraph" },
+    ] });
+    const row = runPipeline(docNode, { pageConfig: defaultPageConfig, measurer: createMeasurer(), fontConfig: manager.buildBlockStyles() })
+      .pages.flatMap((page) => page.blocks).find((block) => block.cells !== undefined);
+    return row?.cells?.[0]?.blocks ?? [];
+  };
+
+  it("lays out every item, numbered and nested, at its level's indent", () => {
+    const blocks = cellBlocks([ol(item("first"), item("second", ul(item("nested"))))]);
+    expect(blocks.map((block) => `${block.node.textContent}:${block.listMarker ?? ""}`))
+      .toEqual(["first:1.", "second:2.", "nested:◦"]);
+    const [first, nested] = [blockOf(blocks, "first"), blockOf(blocks, "nested")];
+    expect(nested.x - first.x).toBe(HALF_INCH);
+    expect(first.listMarkerX).toBe(first.x - QUARTER_INCH);
+  });
+
+  it("keeps the cell's text, with each item's own lines", () => {
+    const blocks = cellBlocks([ul(item("alpha"), item("beta"))]);
+    expect(blocks.map((block) => block.lines.flatMap((line) => line.spans).filter((span) => span.kind === "text").length > 0))
+      .toEqual([true, true]);
+  });
+});
+
+describe("a block container that is not a list", () => {
+  it("lays out the blocks it holds", () => {
+    const Mixed = Extension.create({
+      name: "mixedContainer",
+      addNodes() {
+        return { mixedContainer: { group: "block", content: "(listItem | paragraph)+", toDOM: () => ["div", 0] } };
+      },
+    });
+    const manager = new ExtensionManager([StarterKit, Mixed]);
+    const docNode = manager.schema.nodeFromJSON({ type: "doc", content: [
+      { type: "mixedContainer", content: [item("in an item"), p("loose")] },
+    ] });
+    const blocks = runPipeline(docNode, { pageConfig: defaultPageConfig, measurer: createMeasurer(), fontConfig: manager.buildBlockStyles() })
+      .pages.flatMap((page) => page.blocks);
+    expect(blocks.map((block) => block.node.textContent)).toEqual(["in an item", "loose"]);
+    expect(blocks.map((block) => block.listMarker)).toEqual([undefined, undefined]);
   });
 });

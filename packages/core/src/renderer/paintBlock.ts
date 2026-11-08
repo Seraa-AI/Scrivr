@@ -7,11 +7,12 @@ import { drawBlock } from "./PageRenderer";
 /**
  * Paints one laid-out block: through the strategy registered for its
  * `blockType`, or the default text painter, then its list marker on top —
- * after the block, so a code block's background cannot cover the number.
+ * after the block, so a painter's background cannot cover the number.
  *
- * Every surface that paints blocks (pages, pageless tiles, table cells,
- * header and footer bands) goes through here, so a list's number is drawn
- * wherever its block is. Returns the next line index, as a strategy does.
+ * Every surface that paints blocks goes through here — pages, pageless tiles,
+ * the blocks of a table cell (a cell holds lists like the body does) and
+ * header and footer bands — so a list's number is drawn wherever its block
+ * is. Returns the next line index, as a strategy does.
  */
 export function paintBlock(block: LayoutBlock, renderCtx: BlockRenderContext, map: CharacterMap): number {
   const { ctx, blockRegistry, measurer, pageNumber, lineIndexOffset, theme, markDecorators, inlineRegistry, fontResolutions } =
