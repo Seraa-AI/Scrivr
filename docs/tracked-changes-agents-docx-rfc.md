@@ -279,16 +279,18 @@ export interface SemanticChange {
 
 Invariants, each tested:
 
-- For a `suggestedInsert`, `owner.text.slice(at, at + length)` is the part of
-  `text` still in the proposed view. That is all of it, unless another author
-  has proposed deleting it.
-- For a `suggestedDelete`, `length === 0` and `at` is the gap where the text
+- For a `suggestedInsert`, `owner.text.slice(at, at + length)` is its `text`,
+  except where another author's change sits inside it — an insertion typed
+  into it is in the slice but not in `text`, and a deletion of part of it
+  takes that part out of the slice. Text across blocks keeps the break between
+  them in both.
+- For a `suggestedDelete`, `length === 0` and `at` is where its first piece
   stood.
 - A hard break counts as 1 in `at` (D6), because it is `"\n"` in `text` and in
-  `spans` (`context.ts:114`). An inline image counts as 0.
+  `spans`. A deleted one is in neither. An inline image counts as 0.
 - Changes are listed in document order. Every change in a part or a cell is also
   in its unit's list, re-based on `unit.text`. The same contract as
-  `TableCell.changes` (`semantic.ts:221-222`).
+  `TableCell.changes`.
 
 `SemanticPart` gains `changes?: SemanticChange[]` (NEW field, D8). Its offsets
 index `part.text`, which is where an agent edits.
@@ -298,10 +300,10 @@ index `part.text`, which is where an agent edits.
 | Record | Reported as |
 |---|---|
 | text insert / delete | `suggestedInsert` / `suggestedDelete` with its text |
-| replacement | both halves, sharing `groupId` |
-| text move | `suggestedDelete` + `suggestedInsert`, sharing `moveId` |
-| block move | `suggestedInsert` covering the destination block, with `moveId`. The shadow is not read through `getRichBlocks`, because #229 gives one unit per id. It is in `toSemanticUnits` |
-| block insert / delete | one `suggestedInsert` covering the block, or one `suggestedDelete` with the block's text at 0. Its text records are folded in by root (D1) |
+| replacement | both halves, sharing `id` and `groupId` |
+| text move | `suggestedDelete` + `suggestedInsert`, sharing `id` and `moveId` |
+| block move | `suggestedInsert` covering the destination block, with `moveId`. The copy left behind is not read through `getRichBlocks`: it carries the moved block's ids, and an agent edits by id, so reading both would offer two targets for one block. It is in `toSemanticUnits` |
+| block insert / delete | one `suggestedInsert` covering the block, or one `suggestedDelete` with the block's text at 0. Its text records are folded into the block's act |
 | `node_join` | `suggestedDelete`, `text: "\n"`, at the end of the block |
 | `node_split` | `suggestedInsert`, `text: "\n"`, at the end of the first block. It is reported through its `reference` and has one id |
 | `set_attrs` | `suggestedAttrs`, `oldAttrs` = the former styling attrs as `attrsOf` filters them, plus `level` for a heading and `nodeType` when the type changed |
@@ -310,7 +312,7 @@ index `part.text`, which is where an agent edits.
 | `reference` | the split it belongs to (see `node_split`) |
 | `wrap_with_node` | `suggestedInsert` covering the container added around its content |
 | `structure` | `suggestedInsert` covering the copy a structural change moved, with `moveId` |
-| formatting (`mark-change`) | `suggestedAttrs` covering the formatted text, `oldAttrs: { marks: [...] }` = the text's formatting marks before |
+| formatting (`mark-change`) | `suggestedAttrs` covering the formatted text, `oldAttrs: { marks: [...] }` = the text's formatting marks before; one change per run with different prior marks, all under the act's id. A mark proposed for removal is left off the spans |
 | hard break deleted | leaves the proposed text; `suggestedDelete`, `text: "\n"`, `length: 0` |
 | image inserted / deleted | `suggestedInsert` / `suggestedDelete` with `image` saying which image |
 
@@ -328,7 +330,7 @@ paragraph. A second block was promoted to a heading:
       { "type": "suggestedDelete", "text": "30", "at": 18, "length": 0,
         "id": "c1", "authorId": "AI Assistant", "groupId": "g1", "status": "pending", "createdAt": 1794141158501 },
       { "type": "suggestedInsert", "text": "45", "at": 18, "length": 2,
-        "id": "c2", "authorId": "AI Assistant", "groupId": "g1", "status": "pending", "createdAt": 1794141158501 },
+        "id": "c1", "authorId": "AI Assistant", "groupId": "g1", "status": "pending", "createdAt": 1794141158501 },
       { "type": "suggestedDelete", "text": "\n", "at": 26, "length": 0,
         "id": "c3", "authorId": "jane", "status": "pending", "createdAt": 1794141160020 }
     ]
@@ -343,9 +345,10 @@ paragraph. A second block was promoted to a heading:
 ]
 ```
 
-`ai.reviewChanges({ accepted: ["c2"], rejected: [] })` accepts the whole
-replacement, because `sameReplacement` puts `c1` and `c2` in one act
-(`reviewPlan.ts:134-139`). The result is the engine's own `ReviewOutcome`.
+Both halves of the replacement read under one id, `c1`, the act's.
+`ai.reviewChanges({ accepted: ["c1"], rejected: [] })` accepts the whole
+replacement, because `sameReplacement` puts both records in one act
+(`reviewPlan.ts`). The result is the engine's own `ReviewOutcome`.
 
 ## Design per seam
 
@@ -369,20 +372,20 @@ record covers it.
 
 **`@scrivr/export-semantic`.**
 
-- `extractSemantic` (`context.ts:94-128`) keeps a running offset into the text
+- `extractSemantic` (`export-semantic/src/context.ts`) keeps a running offset into the text
   it builds, in the same pass that builds the spans. It stamps `at`/`length` on
   the changes from each run (after the mark handlers fold) and on each node's
   `nodeChanges`. In a container it follows `joinGroups`' rule: empty groups add
   no `"\n"`. Then it merges adjacent entries with the same `id` and `type` into
   one (D1). It returns offsets relative to the node it was called on.
-- `collectParts` (`walker.ts:170-203`) asks `ctx.toChanges(child)` for each part,
+- `collectParts` (`export-semantic/src/walker.ts`) asks `ctx.toChanges(child)` for each part,
   which gives offsets relative to `part.text`. The unit-level list re-bases the
   same records on `unit.text`.
 - The walker drops `at`/`length` when `result.text` overrides the unit text.
-  This is the same rule that already drops `spans` (`walker.ts:105-112`).
+  This is the same rule that already drops `spans` (`walkSemantic`).
 - `unitRichInput` adds `...(unit.changes?.length ? { changes: unit.changes } : {})`,
   and `semanticPartRichInput` does the same for parts. This follows the
-  `image` precedent (`changeDetection.ts:117`). A unit with no review changes
+  `image` precedent in `unitRichInput`. A unit with no review changes
   hashes exactly as before.
 
 **`@scrivr/plugins`, `TrackChanges.addExports().semantic`.** Owns what every
@@ -408,14 +411,15 @@ record means:
   stays with the host. Without `canAcceptReject: true` the answer is
   `blocked / not-permitted` (`reviewChanges.ts:22-28`).
 - The auto-diff in `applyRichEdit` compares a returned unit as if it carried
-  the current unit's `changes`. The comparison is at `AiToolkit.ts:441`. So an
+  the current unit's `changes`. The comparison is in `applyRichEdit`. So an
   agent that drops or reorders `changes` is not read as editing. `changes` is
   read-only to an agent. It proposes through `spans`, `attrs` and structural
   ops. The stale guard is unchanged. It compares the pinned hash, which now
   moves when a reviewer acts. That is the point.
-- `liveUnits` drops a unit or part only when **another node holds the same id
-  live**. That is the move shadow, as #229 needs. A block proposed for deletion
-  with no live copy stays. It reads `text: ""` with its `suggestedDelete`, so an
+- `liveUnits` (shipped as `unitsToRead`) drops a unit or part only when it is
+  **the copy a pending move left behind**: it carries the moved block's ids, and
+  an agent edits by id, so reading both would give two targets for one block.
+  A block proposed for deletion stays. It reads `text: ""` with its `suggestedDelete`, so an
   agent can see and review it. An edit to it is already reported as rejected,
   because `findLiveNodeById` returns null. See D9.
 
@@ -648,7 +652,7 @@ including the NEW pieces in D7, D8 and D12.
   record merge into one entry and report the root's id. Pieces are a split
   deletion, or a block and the text it created or deleted. The root is
   `creationId ?? deletionId ?? continuesId ?? (referenceId for a reference) ??
-  id`. Deciding any piece decides the act (`reviewPlan.ts:103-107`, `:95-100`),
+  id`. Deciding any piece decides the act (`sameAct` in `reviewPlan.ts`),
   so the reported id always decides what the agent read. Halves of a
   replacement or a move are *not* merged: their meaning differs. `groupId` and
   `moveId` link them.
@@ -722,7 +726,7 @@ including the NEW pieces in D7, D8 and D12.
   `expectedContentHash` from before the upgrade then reads `stale` once. It is
   one-time, and called out in the changeset.
 - **`markdown` disappears from units with pending insertions.** The walker
-  omits `markdown` when `changes` is non-empty (`walker.ts:113-114`). Today that
+  omits `markdown` when `changes` is non-empty (`walkSemantic`). Today that
   means deletions only. With insertions reported, it covers any pending change.
   The alternative mixes CriticMarkup into it. Called out in the changeset.
 - **An agent's review is attributed to the host user.** `reviewedByID` is the
@@ -747,41 +751,66 @@ including the NEW pieces in D7, D8 and D12.
 ## What shipped
 
 Updated as each PR lands. Where this disagrees with the design above, this
-section is what is true.
+section is what is true. Line references in the Problem section are to
+`main`@288119e, before PR A.
 
 | PR | Landed | What it changed |
 |---|---|---|
-| **A** | branch `feat/agents-read-tracked-changes` (not yet merged) | `SemanticChange` gained `suggestedInsert`, `suggestedAttrs`, `at`, `length`, `moveId`, `oldAttrs` and `image`. `SemanticPart` gained `changes`. `SemanticHandlers` gained `nodeChanges`; `UnitCtx` gained `doc`; `semanticImage` is exported from core. `extractSemantic` places every change by offset into unit, part and cell text, and merges the pieces of one act wherever they fall. TrackChanges reports the records in the table above (`track-changes/semanticChanges.ts`), each under its act's id from `changeActs`. A deleted hard break leaves the proposed text. The rich hashes cover `changes` only when there are some. `getRichBlocks` keeps a block proposed for deletion that has no live copy (D9). The auto-diff puts the document's own changes back on a returned unit, its parts and its cells before comparing. `AiToolkit.reviewChanges` passes decisions through, and the playground agent reviews by id with a `review_changes` tool. Scenarios 10–13 (agent half) and 15–18 are covered in `plugins/.../__tests__/semanticReview.test.ts` and `ai/.../__tests__/AiToolkit.review.test.ts` |
+| **A** | branch `feat/agents-read-tracked-changes` (not yet merged) | `SemanticChange` gained `suggestedInsert`, `suggestedAttrs`, `at`, `length`, `moveId`, `oldAttrs` and `image`. `SemanticPart` gained `changes`. `SemanticHandlers` gained `nodeChanges` and `isMarkRemoved`; `UnitCtx` gained `doc`; `semanticImage` is exported from core and `moveShadowRanges` from plugins. `extractSemantic` places every change by offset into unit, part and cell text, and merges the pieces of one act. TrackChanges reports the records in the reading table above (`track-changes/semanticChanges.ts`), each under its act's id from `changeActs` over the pending changes, reading every record field through a type check. A deleted hard break and a formatting mark proposed for removal leave the proposed view. The rich hashes cover `changes` only when there are some. `getRichBlocks` keeps every block but the copy a pending move leaves behind (D9). The auto-diff puts the document's own changes back on a returned unit, its parts and its cells before comparing. `AiToolkit.reviewChanges` passes decisions through; the playground agent reviews by id with a browser-side `review_changes` tool that returns the editor's outcome. Scenarios 10–13 (agent half) and 15–18 are covered in `plugins/.../__tests__/semanticReview.test.ts` and `ai/.../__tests__/AiToolkit.review.test.ts` |
 | **B** | — | Not built. DOCX revisions |
+
+### New public pieces beyond D7, D8 and D12
+
+The user approved these on 2026-11-08:
+
+- `UnitCtx.doc` — required, so code that builds a `UnitCtx` itself must supply
+  it; the changeset says so.
+- `SemanticChange.image`.
+- The `semanticImage` export from `@scrivr/core`.
+
+Added in the second review round, after that approval:
+`SemanticHandlers.isMarkRemoved` (a formatting mark proposed for removal has no
+other way off the spans) and `moveShadowRanges` from `@scrivr/plugins` (the
+move records, not duplicated ids, say what is a move's left-behind copy).
 
 ### Where PR A differs from the design above
 
 - **A change's id is its act's primary record, not a root computed from
   `creationId`/`deletionId`/`continuesId`.** It is read once per document from
-  `changeActs`, the one answer to what a decision covers, so the ids agree
-  however deep the act nests and in whatever order the walker reads it. Both
-  halves of a replacement or a move therefore share one `id` too (D1, as
-  refined). `UnitCtx.doc` is new for this: an act spans nodes, so naming it
-  needs the document.
-- **Pieces of one act merge wherever they fall**, not only when adjacent. One
-  act reads as exactly one change: its `text` is its own pieces in order, its
-  extent spans from the first to the last, and another author's work inside it
-  stays its own change.
-- **A covering deletion has `length: 0` and its text is everything it
-  deletes.** A covering insertion with no text of its own (a moved block, a
-  line break) reads the text it spans.
-- **`nodeChanges` receives the `UnitCtx`**, like a node handler does:
-  `(node, ctx) => SemanticNodeChange[]`, and is called for text nodes too, which
-  is how a formatting change is reported. `SemanticNodeChange`, the
-  `{ change, place }` pair, is exported as a named type.
+  `changeActs` over the pending changes — exactly what the review plan groups —
+  so ids agree however deep the act nests and in whatever order the walker
+  reads it. Both halves of a replacement or a move therefore share one `id`
+  (D1, as refined). `UnitCtx.doc` exists for this: an act spans nodes, so
+  naming it needs the document.
+- **One change per act and type.** An act's pieces merge wherever they fall.
+  Its `text` is its own pieces in order, with the break between pieces from
+  different blocks. An insertion's extent spans from its first piece to its
+  last; a deletion sits where its first piece stood, with `length: 0`. An
+  image carries from whichever piece has it. Another author's change inside it
+  stays its own change. A formatting change merges only touching runs that had
+  the same prior marks, so each change states its runs' marks correctly.
+- **A covering insertion with no text of its own** (a moved block, a line
+  break) reads the text it spans.
+- **`nodeChanges` receives the `UnitCtx`**, like a node handler does, and runs
+  for text nodes too, which is how formatting changes are reported.
+  `SemanticNodeChange`, the `{ change, place }` pair, is exported from
+  `@scrivr/core` and `@scrivr/export-semantic`.
 - **`SemanticChange.image`** says which image an inserted or deleted image is,
-  reusing `SemanticImage`. A deleted image's unit still reads as a paragraph,
-  as #229 decided.
-- **A deleted row's text reads without cell separators** (`"a1b1"`). Its
-  pieces have no proposed text to join with a newline.
+  reusing `SemanticImage`. A deleted image's unit still reads as a paragraph:
+  the image is no longer in the proposed view, so the paragraph no longer is
+  one.
+- **Decided records are not reported**, and malformed record fields are left
+  out rather than passed on.
 
 ### Not shipped in PR A
 
 - Deleting text across a hard break ("b⏎c") reads as three changes, because
   the engine records three acts, and a reviewer decides three. The lane follows
-  `changeActs`. Making one gesture one act is an engine change.
+  `changeActs`.
+
+### Follow-ups
+
+- **One gesture, one act** (engine): a single deletion across a hard break is
+  recorded as three unrelated records, so a reviewer decides it three times and
+  an agent reads three changes. Tracked for the track-changes engine; the
+  semantic lane will read it as one change once the engine records one act.

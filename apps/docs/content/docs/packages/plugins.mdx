@@ -206,16 +206,16 @@ says where it sits:
 | Field | Meaning |
 |-------|---------|
 | `type` | `suggestedInsert`, `suggestedDelete`, or `suggestedAttrs` (a heading, list or formatting change) |
-| `text` | What it adds or removes. `"\n"` for a paragraph or line break |
-| `at`, `length` | Its place in the owning `text`. A deletion has `length: 0`. A hard break counts as one character |
+| `text` | What it adds or removes. `"\n"` for a paragraph or line break; text across blocks keeps the break between them |
+| `at`, `length` | Its place in the owning `text`. A deletion sits where its first piece stood and always has `length: 0`. A hard break counts as one character |
 | `id` | The act's id: the one to pass to `reviewChanges`. Every piece of one act shares it, including both halves of a replacement or a move |
 | `authorId`, `createdAt` | Whose, and when |
-| `groupId` / `moveId` | Shared by the two halves of a replacement or a move |
+| `groupId` / `moveId` | Which kind of pair it belongs to: a replacement (`groupId`) or a move (`moveId`) |
 | `oldAttrs` | For `suggestedAttrs`, what it was: a block's former styling (`{ nodeType: "paragraph" }`, `{ level: 1 }`), a list change's lists (`{ list: ["bulletList"] }`, `[]` for none), or a formatting change's marks (`{ marks: [{ type: "italic" }] }`) |
 | `image` | The image an inserted or deleted image is |
 
-An agent decides changes by those ids. Deciding one half of a replacement or a
-move decides both:
+An agent decides changes by those ids. A replacement or a move lists two
+changes with one id; that id decides both:
 
 ```ts
 const ai = getAiToolkit(editor);

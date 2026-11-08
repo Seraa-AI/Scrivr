@@ -11,14 +11,25 @@ Agents read pending tracked changes and can review them.
   Each change is placed by offset into the text it belongs to: `unit.text`,
   `part.text` or `cell.text`. Its `id` is the act's id, the one to pass to
   `reviewChanges`, shared by every piece of the act.
-- `SemanticPart` gains `changes`. `SemanticHandlers` gains `nodeChanges`, for
-  review records written on a node rather than on its text; it returns the new
-  `SemanticNodeChange` type. `UnitCtx` gains `doc`, the document being read.
-  `semanticImage(node)` is exported from `@scrivr/core`.
+- `SemanticPart` gains `changes`. `UnitRichInput.changes` and
+  `SemanticPartRichInput.changes` carry them into the rich hashes.
+- `SemanticHandlers` gains `nodeChanges`, which runs for every node, text
+  included: it reports records on a block's own attrs and on a text node's
+  formatting marks, returning `SemanticNodeChange[]` (exported from
+  `@scrivr/core` and `@scrivr/export-semantic`). It also gains
+  `isMarkRemoved`, so a formatting mark proposed for removal is left off the
+  proposed spans.
+- `UnitCtx` gains `doc`, the document being read. **It is required:** code
+  that builds a `UnitCtx` itself, such as a mock in a handler test, must now
+  supply it.
+- `semanticImage(node)` is exported from `@scrivr/core`; `moveShadowRanges(doc)`
+  from `@scrivr/plugins`.
 - TrackChanges reports pending insertions, deletions (including line breaks),
   block insertions and deletions, paragraph joins and splits, heading, list and
   formatting changes, wrapped and structurally moved nodes, table rows and
-  moves. The pieces of one act read as one change.
+  moves. An act reads as one change per type: a replacement or a move is its
+  two halves under one id, and a formatting change over text with different
+  prior marks is one change per run, each under the act's id.
 - `ai.reviewChanges(decisions)` accepts or rejects changes by the ids an agent
   read, returning the `ReviewOutcome` type from `@scrivr/plugins`. It is a
   pass-through to `reviewChanges`, so the host's `canAcceptReject` still
@@ -34,8 +45,13 @@ One-time changes to watch for:
   `semanticPartRichHash` now cover `changes` when there are any. A unit with
   none hashes exactly as before. An `expectedContentHash` pinned before the
   upgrade on a unit with any pending change reads `stale` once.
+- **Change ids stored before the upgrade can change.** `SemanticChange.id` is
+  now the act's id: both halves of a replacement or a move, and every piece of
+  a block act, report one id.
 - **A block proposed for deletion now appears in `getRichBlocks`,** reading
-  `text: ""` with its deletion in `changes`. A move's shadow stays out.
-- **A deleted hard break leaves `text`,** where it used to read as `"\n"`.
+  `text: ""` with its deletion in `changes`. Only the copy a pending move
+  leaves behind stays out.
+- **A deleted hard break, and a formatting mark proposed for removal, leave the
+  proposed view,** where they used to read as present.
 - **`markdown` is omitted on units with any pending change,** not only those
   with pending deletions.

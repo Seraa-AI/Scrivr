@@ -167,12 +167,16 @@ Formatting marks (bold, italic, …) need no handler — plain text is unaffecte
 ### Review records on a node (`nodeChanges`)
 
 A record written on a node's own attrs — a block inserted, a paragraph break
-deleted, a heading's level changed — is invisible to mark handlers. Contribute
-`nodeChanges`, which returns `SemanticNodeChange[]` for any node (text nodes
-included). The walker places each one: `covers` spans the node's text, `after`
-sits where it ends (as a paragraph break does). A covering deletion has
-`length: 0`; a covering insertion with no text of its own reads the text it
-covers. Changes sharing an `id` and `type` merge into one, wherever they fall.
+deleted, a heading's level changed — or on a formatting mark of its text is
+invisible to mark handlers. Contribute `nodeChanges`, which returns
+`SemanticNodeChange[]` for every node, text included. The walker places each
+one: `covers` spans the node's text, `after` sits where it ends (as a paragraph
+break does). A deletion has `length: 0`; a covering insertion with no text of
+its own reads the text it covers. Changes sharing an `id` and `type` merge into
+one wherever they fall, their text keeping the break between blocks; a
+`suggestedAttrs` change merges only with touching runs that had the same
+`oldAttrs`. Contribute `isMarkRemoved` to leave a formatting mark proposed for
+removal off the spans.
 
 ```ts
 const nodeChanges: SemanticHandlers['nodeChanges'] = (node) =>
