@@ -925,10 +925,15 @@ function reflowFlowsAgainstExclusions(
     const flow = flows[idx]!;
     const flowY = flow.globalY ?? 0;
     if (flowY >= zoneBottom) break;
-    // Skip atomic flows (image/HR/pageBreak/tableRow) — exclusion reflow only
-    // narrows text flow lines; atomic blocks can never be re-broken around a
-    // wrap zone.
-    if (flow.kind === "leaf" || flow.kind === "tableRow" || flowY + flow.height <= zoneTop) continue;
+    // Leaf flows (image/HR/pageBreak) cannot be re-broken around a wrap zone.
+    if (flow.kind === "leaf" || flowY + flow.height <= zoneTop) continue;
+    // A table cannot be re-broken either, so it moves below the float instead.
+    if (flow.kind === "tableRow") {
+      const moved = moveTableClearOfExclusions(flows, idx, exclusions, zone, pageConfig, geometry);
+      flows = moved.flows;
+      idx = moved.lastRowIndex;
+      continue;
+    }
 
     const wrappedFlow: FlowBlock = {
       ...flow,
@@ -1003,6 +1008,51 @@ function reflowFlowsAgainstExclusions(
   }
 
   return flows;
+}
+
+/**
+ * Move the table holding `rowIndex` below every float on the page it cannot
+ * sit beside. Word wraps a table as one unit and never narrows it, so its rows
+ * on this page move together; rows on earlier pages stay. A table boundary is
+ * a row marked `isLastRow`.
+ */
+function moveTableClearOfExclusions(
+  flows: FlowBlock[],
+  rowIndex: number,
+  exclusions: ExclusionManager,
+  zone: { pageNumber: number; contentX: number; contentWidth: number },
+  pageConfig: PageConfig,
+  geometry: PageGeometry,
+): { flows: FlowBlock[]; lastRowIndex: number } {
+  const isRowOfSameTable = (prev: FlowBlock | undefined): prev is FlowBlock =>
+    prev?.kind === "tableRow" && !prev.isLastRow;
+
+  let start = rowIndex;
+  for (let prev = flows[start - 1]; isRowOfSameTable(prev); prev = flows[start - 1]) {
+    if (geometry.pageAt(prev.globalY ?? 0) !== zone.pageNumber) break;
+    start--;
+  }
+  let end = rowIndex;
+  while (isRowOfSameTable(flows[end]) && flows[end + 1]?.kind === "tableRow") end++;
+
+  const first = flows[start];
+  const last = flows[end];
+  if (!first || !last) return { flows, lastRowIndex: end };
+
+  const top = first.globalY ?? 0;
+  const bottom = (last.globalY ?? 0) + last.height;
+  const clearY = exclusions.getNextFreeY(
+    zone.pageNumber, top, bottom - top, zone.contentX, zone.contentWidth,
+  );
+  if (clearY === top) return { flows, lastRowIndex: end };
+
+  const { startGlobalY } = advanceFlowGlobalY(first, clearY, pageConfig, geometry);
+  const moved = [...flows];
+  moved[start] = { ...first, globalY: startGlobalY, solverPushedThisFlow: true };
+  return {
+    flows: restampGlobalYFrom(moved, start + 1, pageConfig, geometry),
+    lastRowIndex: end,
+  };
 }
 
 /**
