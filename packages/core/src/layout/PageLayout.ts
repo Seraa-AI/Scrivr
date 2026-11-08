@@ -16,6 +16,7 @@ import type { InlineRegistry } from "./BlockRegistry";
 import { nodeLayout } from "./BlockRegistry";
 import { LineBreaker, type InputSpan, type LayoutLine, type LineSpaceProvider } from "./LineBreaker";
 import { ExclusionManager } from "./ExclusionManager";
+import type { ExclusionRect } from "./ExclusionManager";
 import {
   ANCHORED_OBJECT_MARGIN,
   normalizeImageAttrs,
@@ -337,6 +338,8 @@ export interface FlowBlock {
   overlapsWrapZone?: boolean;
   /** Page whose anchored-object exclusion constraints were applied to this flow. */
   wrapZonePage?: number;
+  /** Global y this flow's lines were last laid out at against `wrapZonePage`'s exclusions. */
+  wrapLaidAtY?: number;
   // Phase 1b: cache snapshot taken before this run's measurement.
   preCachedTargetY?: number;
   preCachedPage?: number;
@@ -499,26 +502,53 @@ export function assignGlobalY(
   });
 }
 
+/** Where flow `index` starts when only its predecessor decides. */
+function naturalStartOf(
+  flows: readonly FlowBlock[],
+  index: number,
+  pageConfig: PageConfig,
+  geometry: PageGeometry,
+): number {
+  const flow = flows[index];
+  const prev = flows[index - 1];
+  if (!flow) return 0;
+  if (!prev) return flow.originalGlobalY ?? flow.globalY ?? 0;
+  const prevEnd = advanceFlowGlobalY(prev, prev.globalY ?? 0, pageConfig, geometry).endGlobalY;
+  const gap = prev.isPageBreak ? 0 : collapseMargins(prev.spaceAfter, flow.spaceBefore);
+  return advanceFlowGlobalY(flow, prevEnd + gap, pageConfig, geometry).startGlobalY;
+}
+
+/** Where flow `index` must start, given where it would start on its own. */
+type StartOf = (index: number, naturalStart: number) => number;
+
+const naturally: StartOf = (_index, naturalStart) => naturalStart;
+
+/**
+ * Re-derive flow starts from `startIndex` on, in place, each from its
+ * predecessor; `startOf` re-applies what the floats need of an anchor flow.
+ * Stops at the first flow that does not move: everything after it, a
+ * deliberate push included, still follows from it. Returns the indices that
+ * moved as `[from, to)`, empty when nothing did.
+ */
 function restampGlobalYFrom(
   flows: FlowBlock[],
   startIndex: number,
   pageConfig: PageConfig,
   geometry: PageGeometry,
-): FlowBlock[] {
-  const next = [...flows];
-  for (let i = Math.max(1, startIndex); i < next.length; i++) {
-    const prev = next[i - 1]!;
-    const flow = next[i]!;
-    const prevEnd = advanceFlowGlobalY(
-      prev, prev.globalY ?? 0, pageConfig, geometry,
-    ).endGlobalY;
-    const gap = prev.isPageBreak ? 0 : collapseMargins(prev.spaceAfter, flow.spaceBefore);
-    const { startGlobalY } = advanceFlowGlobalY(
-      flow, prevEnd + gap, pageConfig, geometry,
-    );
-    next[i] = { ...flow, globalY: startGlobalY };
+  startOf: StartOf = naturally,
+): { from: number; to: number } {
+  const from = Math.max(1, startIndex);
+  let to = from;
+  for (let i = from; i < flows.length; i++) {
+    const flow = flows[i];
+    if (!flow) break;
+    const natural = naturalStartOf(flows, i, pageConfig, geometry);
+    const start = startOf(i, natural);
+    if (start === flow.globalY) break;
+    flows[i] = { ...flow, globalY: start, solverPushedThisFlow: start !== natural };
+    to = i + 1;
   }
-  return next;
+  return { from, to };
 }
 
 interface AnchorRef {
@@ -619,302 +649,25 @@ function createPageBarrierProvider(geometry: PageGeometry): PageBarrierProvider 
 }
 
 /**
- * How many times a float may be re-placed while its own wrap zone keeps
- * moving its anchor. Convergence is the normal case and takes one extra pass;
- * the cap only bounds a zone that oscillates between two positions, where the
- * last placement still agrees with the anchor it was computed from.
+ * How many passes one settle may take. Each pass reflows the floats the last
+ * pass moved, then places every float whose inputs changed. Convergence is
+ * the normal case and takes one extra pass; the cap bounds a float with no
+ * fixed point (a zone that reflows the text its own anchor sits under). The
+ * last pass always ends by placing, so every placement agrees with its
+ * anchor; only that float's wrap rect may lag its image.
  */
 const MAX_ANCHOR_SETTLE_PASSES = 4;
-
-function resolveAnchoredObjects(
-  inputFlows: FlowBlock[],
-  pageConfig: PageConfig,
-  geometry: PageGeometry,
-  ctx: MeasureContext,
-): { flows: FlowBlock[]; placements: AnchoredObjectPlacement[] } {
-  let flows = inputFlows;
-  const floats: PlacedFloat[] = [];
-  const contentX = pageConfig.margins.left;
-  const contentRight = pageConfig.pageWidth - pageConfig.margins.right;
-  const contentWidth = contentRight - contentX;
-  const barriers = createPageBarrierProvider(geometry);
-  // Phase 4: one ExclusionManager per page, accumulating every square rect.
-  // Sequential anchors share the same manager so a flow that overlaps two
-  // images on the same page reflows against the union of both rects rather
-  // than one at a time (which lost the prior rect's segments).
-  const exclusionsByPage = new Map<number, ExclusionManager>();
-  const exclusionsFor = (page: number): ExclusionManager => {
-    let exclusions = exclusionsByPage.get(page);
-    if (!exclusions) {
-      exclusions = new ExclusionManager();
-      exclusionsByPage.set(page, exclusions);
-    }
-    return exclusions;
-  };
-
-  // A wrap zone reflows every block it overlaps, including blocks *above*
-  // its own anchor, and can move a table above it. Either moves every anchor
-  // after that point, including those of floats already placed, so a
-  // placement recorded before the reflow describes a position its anchor no
-  // longer has — the image paints away from the text it belongs to.
-  //
-  // The reflow is what settles the anchors, so the two have to converge
-  // rather than run in order: re-place every float whose anchor moved, move
-  // its zone with it, and reflow again until no anchor moves. Each pass
-  // reflows the union of the zone a float leaves and the new one, so a block
-  // the zone has moved off gets its full width back.
-  const settleFrom = (first: PlacedFloat): void => {
-    let pending: Array<{ float: PlacedFloat; vacated?: Band }> = [{ float: first }];
-    for (let pass = 0; ; pass++) {
-      for (const { float, vacated } of pending) {
-        const page = float.placement.page;
-        const exclusions = exclusionsFor(page);
-        const zone = float.zoneOf(float.placement);
-        float.carve(exclusions, page, zone);
-        flows = reflowFlowsAgainstExclusions(
-          flows,
-          exclusions,
-          {
-            pageNumber: page,
-            zoneTop: Math.min(zone.top, vacated?.top ?? zone.top),
-            zoneBottom: Math.max(zone.bottom, vacated?.bottom ?? zone.bottom),
-            contentX,
-            contentWidth,
-          },
-          floats,
-          pageConfig,
-          geometry,
-          ctx,
-        );
-      }
-      if (pass >= MAX_ANCHOR_SETTLE_PASSES) return;
-
-      pending = [];
-      for (const float of floats) {
-        const anchorGlobalY = flows[float.anchorFlowIndex]?.globalY ?? 0;
-        if (anchorGlobalY === float.placement.anchorGlobalY) continue;
-        const previous = float.placement;
-        float.placement = float.place(anchorGlobalY);
-        if (!float.wraps) continue;
-        exclusionsFor(previous.page).removeRectsFor(float.docPos);
-        const vacated = previous.page === float.placement.page ? float.zoneOf(previous) : undefined;
-        pending.push(vacated ? { float, vacated } : { float });
-      }
-      if (pending.length === 0) return;
-    }
-  };
-
-  for (let i = 0; i < flows.length; i++) {
-    const flow = flows[i]!;
-    const anchors = getAnchoredObjectAnchors(flow);
-    if (anchors.length === 0) continue;
-
-    for (const anchor of anchors) {
-      const attrs = anchor.attrs;
-      const width = Math.min(attrs.width, contentWidth);
-      const height = attrs.height;
-      const wrapMode = attrs.wrapMode;
-      const yOffset = attrs.yOffset;
-
-      // anchorGlobalY: the anchor flow's globalY (post anchor-push / stacking).
-      // paintedGlobalY: where the image actually paints (= anchor + yOffset, clamped).
-      // Anchor-push and stacking operate on flow geometry (anchor); paint, exclusion,
-      // and the clamp operate on the painted position. Phase 1 V1 invariant:
-      // image.page === anchor.page (clamp pulls a runaway yOffset back onto the page).
-      let anchorGlobalY = flows[i]!.globalY ?? 0;
-      let pageNumber = barriers.pageForGlobalY(anchorGlobalY);
-      let anchorLocalY = barriers.localYForGlobalY(pageNumber, anchorGlobalY);
-
-      // Anchor-push: a mode that reserves flow space and whose visual extent
-      // overflows its anchor's page moves the anchor flow to the next page
-      // (provided the next page can fit it). yOffset is intentionally not
-      // factored in — the anchor flow's natural fit decides the page; yOffset
-      // only shifts within the resulting page (and clamps if it would escape).
-      //
-      // `behind` and `front` reserve no flow space, so they take no part in
-      // this: pushing their anchor moves text the image never touches, leaving
-      // a hole on the page the reader cannot account for. The clamp below is
-      // what keeps those images on their anchor's page.
-      if (
-        (wrapMode === "square" || wrapMode === "top-bottom") &&
-        !pageConfig.pageless &&
-        anchorLocalY + height > barriers.contentBottomLocal(pageNumber) &&
-        height <= barriers.contentHeight(pageNumber + 1)
-      ) {
-        const pushedGlobalY = barriers.pageStartGlobal(pageNumber + 1);
-        flows = [
-          ...flows.slice(0, i),
-          { ...flows[i]!, globalY: pushedGlobalY, solverPushedThisFlow: true },
-          ...flows.slice(i + 1),
-        ];
-        flows = restampGlobalYFrom(flows, i + 1, pageConfig, geometry);
-        anchorGlobalY = pushedGlobalY;
-        pageNumber = barriers.pageForGlobalY(anchorGlobalY);
-        anchorLocalY = barriers.localYForGlobalY(pageNumber, anchorGlobalY);
-      }
-
-      // Resolve horizontal X — single expression for every non-inline mode.
-      const x = resolveImageX(
-        { width, xAlign: attrs.xAlign, x: attrs.x },
-        contentX,
-        contentWidth,
-        pageConfig.pageWidth,
-      );
-
-      // Square stacking: detect overlap by *painted* rect (anchor + yOffset)
-      // for both the new and prior placements. Stacking shifts the anchor
-      // flow by the same delta as the painted target, preserving yOffset.
-      if (wrapMode === "square") {
-        const newPaintedGlobalY = anchorGlobalY + yOffset;
-        let stackedPaintedGlobalY = newPaintedGlobalY;
-        for (const { placement: placed } of floats) {
-          if (placed.wrapMode !== "square" || placed.page !== pageNumber) continue;
-          const hOverlap = x < placed.x + placed.width && x + width > placed.x;
-          const vOverlap =
-            newPaintedGlobalY < placed.globalY + placed.height &&
-            newPaintedGlobalY + height > placed.globalY;
-          if (hOverlap && vOverlap) {
-            const placedBottomGlobalY = placed.globalY + placed.height + ANCHORED_OBJECT_MARGIN;
-            stackedPaintedGlobalY = Math.max(stackedPaintedGlobalY, placedBottomGlobalY);
-          }
-        }
-        if (stackedPaintedGlobalY > newPaintedGlobalY) {
-          const delta = stackedPaintedGlobalY - newPaintedGlobalY;
-          const stackedAnchorGlobalY = anchorGlobalY + delta;
-          flows = [
-            ...flows.slice(0, i),
-            { ...flows[i]!, globalY: stackedAnchorGlobalY, solverPushedThisFlow: true },
-            ...flows.slice(i + 1),
-          ];
-          flows = restampGlobalYFrom(flows, i + 1, pageConfig, geometry);
-          anchorGlobalY = stackedAnchorGlobalY;
-          pageNumber = barriers.pageForGlobalY(anchorGlobalY);
-          anchorLocalY = barriers.localYForGlobalY(pageNumber, anchorGlobalY);
-        }
-        // Re-check page fit after stacking (anchor-flow geometry, like above).
-        if (
-          !pageConfig.pageless &&
-          anchorLocalY + height > barriers.contentBottomLocal(pageNumber) &&
-          height <= barriers.contentHeight(pageNumber + 1)
-        ) {
-          const pushedGlobalY = barriers.pageStartGlobal(pageNumber + 1);
-          flows = [
-            ...flows.slice(0, i),
-            { ...flows[i]!, globalY: pushedGlobalY, solverPushedThisFlow: true },
-            ...flows.slice(i + 1),
-          ];
-          flows = restampGlobalYFrom(flows, i + 1, pageConfig, geometry);
-          anchorGlobalY = pushedGlobalY;
-          pageNumber = barriers.pageForGlobalY(anchorGlobalY);
-          anchorLocalY = barriers.localYForGlobalY(pageNumber, anchorGlobalY);
-        }
-      }
-
-      // Placement is a pure function of where the anchor sits, so it can be
-      // recomputed when the anchor moves. The clamp keeps the image on its
-      // anchor's page; `clamped` is surfaced for Phase 2's drag overlay
-      // (visual stickiness at the boundary).
-      const placeAt = (
-        atAnchorGlobalY: number,
-        atPage: number,
-      ): AnchoredObjectPlacement => {
-        const desiredGlobalY = atAnchorGlobalY + yOffset;
-        let paintedGlobalY = desiredGlobalY;
-        let clamped = false;
-        if (!pageConfig.pageless) {
-          const pageStart = barriers.pageStartGlobal(atPage);
-          const pageEnd = pageStart + Math.max(0, barriers.contentHeight(atPage) - height);
-          if (paintedGlobalY < pageStart) {
-            paintedGlobalY = pageStart;
-            clamped = paintedGlobalY !== desiredGlobalY;
-          } else if (paintedGlobalY > pageEnd) {
-            paintedGlobalY = pageEnd;
-            clamped = paintedGlobalY !== desiredGlobalY;
-          }
-        }
-        return {
-          docPos: anchor.docPos,
-          page: atPage,
-          x,
-          y: barriers.localYForGlobalY(atPage, paintedGlobalY),
-          width,
-          height,
-          wrapMode,
-          zIndex: attrs.zIndex,
-          node: anchor.node,
-          anchorGlobalY: atAnchorGlobalY,
-          anchorPage: atPage,
-          globalY: paintedGlobalY,
-          ...(clamped ? { clamped: true } : {}),
-        };
-      };
-
-      const margin = attrs.margin;
-      // The zone may not reach above the anchor on the strength of its
-      // margin alone. Blocks above the anchor are what fix the anchor's own
-      // position, so letting the margin band narrow them makes the anchor
-      // depend on a float that depends on the anchor: the block grows, the
-      // anchor drops, the zone follows it off the block, the block shrinks
-      // back. That configuration has no fixed point — it oscillates.
-      //
-      // The image rectangle is a hard constraint and still reflows whatever
-      // it genuinely covers, so a float pulled up by a negative yOffset wraps
-      // the paragraph above it as before. Only the courtesy gap yields.
-      const zoneOf = (at: AnchoredObjectPlacement): Band => {
-        const pageStart = barriers.pageStartGlobal(at.page);
-        const pageEnd = pageStart + barriers.contentHeight(at.page);
-        return {
-          top: Math.max(pageStart, at.globalY - margin, Math.min(at.globalY, at.anchorGlobalY)),
-          bottom: Math.min(pageEnd, at.globalY + height + margin),
-        };
-      };
-
-      const float: PlacedFloat = {
-        anchorFlowIndex: i,
-        docPos: anchor.docPos,
-        wraps: wrapMode === "square" || wrapMode === "top-bottom",
-        placement: placeAt(anchorGlobalY, pageNumber),
-        place: (atAnchorGlobalY) =>
-          placeAt(atAnchorGlobalY, barriers.pageForGlobalY(atAnchorGlobalY)),
-        zoneOf,
-        // Square carves a side zone at the image's painted rectangle; top-bottom
-        // reserves the whole Y band. Both go through the page's shared manager
-        // so a later anchor reflows against the union of every rect on the page.
-        carve: (exclusions, page, zone) => {
-          if (wrapMode === "square") {
-            exclusions.addRect({
-              page,
-              x: x - margin,
-              right: x + width + margin,
-              y: zone.top,
-              bottom: zone.bottom,
-              side: "left",
-              docPos: anchor.docPos,
-            });
-          } else {
-            exclusions.addFullWidthRect({
-              page,
-              y: zone.top,
-              bottom: zone.bottom,
-              contentX,
-              contentWidth,
-              docPos: anchor.docPos,
-            });
-          }
-        },
-      };
-      floats.push(float);
-      if (float.wraps) settleFrom(float);
-    }
-  }
-
-  return { flows, placements: floats.map((float) => float.placement) };
-}
 
 /** A vertical span in continuous-flow coordinates. */
 interface Band {
   top: number;
   bottom: number;
+}
+
+/** Where a float lands, and where its anchor flow has to start for it. */
+interface FloatPlace {
+  placement: AnchoredObjectPlacement;
+  anchorStart: number;
 }
 
 /** A float the solver has placed, and how to place it again. */
@@ -924,98 +677,401 @@ interface PlacedFloat {
   /** Square and top-bottom floats carve a wrap zone; behind and front do not. */
   wraps: boolean;
   placement: AnchoredObjectPlacement;
-  place(anchorGlobalY: number): AnchoredObjectPlacement;
+  /** Place the float from where its anchor flow would start on its own. */
+  place(anchorFlowStart: number): FloatPlace;
   zoneOf(placement: AnchoredObjectPlacement): Band;
-  carve(exclusions: ExclusionManager, page: number, zone: Band): void;
+  exclusionOf(placement: AnchoredObjectPlacement): ExclusionRect;
 }
 
-/**
- * Reflow the latest exclusion zone, and everything below it on the page that
- * any of the page's exclusions now touches.
- *
- * This deliberately does not start at the anchor flow index. `yOffset` makes
- * the painted rectangle independent from anchor order, so an image anchored
- * in paragraph B can exclude text in paragraph A. The Y-range checks below
- * are the only gate: docPos owns the object, geometry drives wrapping.
- *
- * The scan runs past the zone to the page bottom because growing a block or
- * moving a table restamps every flow after it: a paragraph or table carried
- * into an earlier float's rect must wrap around it or clear it too.
- */
-function reflowFlowsAgainstExclusions(
+/** The solver's floats, as the reflow needs them. */
+interface FloatSet {
+  readonly placed: readonly PlacedFloat[];
+  /** Where flow `index` must start for the floats anchored in it. */
+  startOf: StartOf;
+  /** Where every float would sit with the flows as they are now. */
+  currentPlacement(float: PlacedFloat, flows: readonly FlowBlock[]): AnchoredObjectPlacement;
+}
+
+function resolveAnchoredObjects(
   inputFlows: FlowBlock[],
-  exclusions: ExclusionManager,
-  zone: {
-    pageNumber: number;
-    zoneTop: number;
-    zoneBottom: number;
-    contentX: number;
-    contentWidth: number;
-  },
-  floats: readonly PlacedFloat[],
   pageConfig: PageConfig,
   geometry: PageGeometry,
   ctx: MeasureContext,
-): FlowBlock[] {
+): { flows: FlowBlock[]; placements: AnchoredObjectPlacement[] } {
+  const flows = [...inputFlows];
+  const placed: PlacedFloat[] = [];
+  const contentX = pageConfig.margins.left;
+  const contentRight = pageConfig.pageWidth - pageConfig.margins.right;
+  const contentWidth = contentRight - contentX;
+  const barriers = createPageBarrierProvider(geometry);
+  // One ExclusionManager per page holds every float's rect on it, so a flow
+  // beside two floats reflows against both.
+  const exclusionsByPage = new Map<number, ExclusionManager>();
+  const exclusionsFor = (page: number): ExclusionManager => {
+    let exclusions = exclusionsByPage.get(page);
+    if (!exclusions) {
+      exclusions = new ExclusionManager();
+      exclusionsByPage.set(page, exclusions);
+    }
+    return exclusions;
+  };
+  const floatsByFlow = new Map<number, PlacedFloat[]>();
+
+  const floatSet: FloatSet = {
+    placed,
+    startOf: (index, naturalStart) => {
+      let start = naturalStart;
+      for (const float of floatsByFlow.get(index) ?? []) start = float.place(start).anchorStart;
+      return start;
+    },
+    currentPlacement: (float, current) =>
+      float.place(naturalStartOf(current, float.anchorFlowIndex, pageConfig, geometry)).placement,
+  };
+
+  const reflow = (page: number, band: Band | undefined, fromIndex: number): { from: number; to: number } =>
+    reflowFlowsAgainstExclusions(
+      flows,
+      exclusionsFor(page),
+      { pageNumber: page, band, fromIndex, contentX, contentWidth },
+      floatSet,
+      pageConfig,
+      geometry,
+      ctx,
+    );
+
+  // A wrap zone reflows every block it overlaps, including blocks *above*
+  // its own anchor, and can move a table above it. Either moves every anchor
+  // after that point, so a placement recorded before the reflow describes a
+  // position its anchor no longer has.
+  //
+  // The reflow is what settles the anchors, so the two have to converge
+  // rather than run in order. Each pass reflows the pages the last pass
+  // changed — a moved float's old and new band, and the pages its moves
+  // carried flows onto — then places again every float whose anchor flow
+  // moved, or that stacks against one that did.
+  const settleFrom = (first: PlacedFloat): void => {
+    const dirty = new Map<number, Band | undefined>();
+    const markBand = (page: number, band: Band): void => {
+      const known = dirty.get(page);
+      dirty.set(page, known
+        ? { top: Math.min(known.top, band.top), bottom: Math.max(known.bottom, band.bottom) }
+        : band);
+    };
+    // A page that holds exclusions and had flows carried onto it needs a scan.
+    // The page that was just reflowed already scanned to its bottom.
+    const markMoved = (moved: { from: number; to: number }, scanned = 0): void => {
+      for (let i = moved.from; i < moved.to; i++) {
+        const page = geometry.pageAt(flows[i]?.globalY ?? 0);
+        if (page > scanned && exclusionsByPage.has(page) && !dirty.has(page)) dirty.set(page, undefined);
+      }
+    };
+
+    exclusionsFor(first.placement.page).addRect(first.exclusionOf(first.placement));
+    markBand(first.placement.page, first.zoneOf(first.placement));
+
+    // The last pass reflows only from the first float it re-carved onward, so
+    // no anchor it is about to place can move again: it ends consistent.
+    let lockedFrom = 0;
+    for (let pass = 0; ; pass++) {
+      const capped = pass >= MAX_ANCHOR_SETTLE_PASSES;
+      let firstMoved = flows.length;
+      while (dirty.size > 0) {
+        const page = Math.min(...dirty.keys());
+        const band = dirty.get(page);
+        dirty.delete(page);
+        const moved = reflow(page, band, capped ? lockedFrom : 0);
+        if (moved.to > moved.from) {
+          firstMoved = Math.min(firstMoved, moved.from);
+          markMoved(moved, page);
+        }
+      }
+
+      // Place again every float whose anchor flow may have moved, or that
+      // stacks on a page where a float moved. The last pass only places, so
+      // every placement agrees with its anchor; a float with no fixed point
+      // keeps the wrap rect the text was last laid out against.
+      const restacked = new Set<number>();
+      let reCarvedFrom = flows.length;
+      for (const float of placed) {
+        const index = float.anchorFlowIndex;
+        if (index < firstMoved && !restacked.has(float.placement.page)) continue;
+        const anchorFlow = flows[index];
+        if (!anchorFlow) continue;
+        const natural = naturalStartOf(flows, index, pageConfig, geometry);
+        const start = floatSet.startOf(index, natural);
+        if (anchorFlow.globalY !== start) {
+          flows[index] = { ...anchorFlow, globalY: start, solverPushedThisFlow: start !== natural };
+          const moved = restampGlobalYFrom(flows, index + 1, pageConfig, geometry, floatSet.startOf);
+          firstMoved = Math.min(firstMoved, index + 1);
+          markMoved({ from: index, to: Math.max(moved.to, index + 1) });
+        }
+        const next = float.place(start).placement;
+        if (samePlacement(next, float.placement)) continue;
+        const previous = float.placement;
+        float.placement = next;
+        restacked.add(previous.page);
+        restacked.add(next.page);
+        if (!float.wraps || capped) continue;
+        exclusionsFor(previous.page).removeRectsFor(float.docPos);
+        exclusionsFor(next.page).addRect(float.exclusionOf(next));
+        markBand(previous.page, float.zoneOf(previous));
+        markBand(next.page, float.zoneOf(next));
+        reCarvedFrom = Math.min(reCarvedFrom, index);
+      }
+      if (capped || dirty.size === 0) return;
+      lockedFrom = reCarvedFrom;
+    }
+  };
+
+  for (let i = 0; i < flows.length; i++) {
+    const flow = flows[i];
+    if (!flow) continue;
+    for (const anchor of getAnchoredObjectAnchors(flow)) {
+      const float = createPlacedFloat(anchor, i, placed.length);
+      placed.push(float);
+      floatsByFlow.set(i, [...(floatsByFlow.get(i) ?? []), float]);
+      const anchorFlow = flows[i];
+      if (!anchorFlow) continue;
+      const natural = naturalStartOf(flows, i, pageConfig, geometry);
+      const start = floatSet.startOf(i, natural);
+      if (anchorFlow.globalY !== start) {
+        flows[i] = { ...anchorFlow, globalY: start, solverPushedThisFlow: start !== natural };
+        restampGlobalYFrom(flows, i + 1, pageConfig, geometry, floatSet.startOf);
+      }
+      float.placement = float.place(start).placement;
+      if (float.wraps) settleFrom(float);
+    }
+  }
+
+  return { flows, placements: placed.map((float) => float.placement) };
+
+  function createPlacedFloat(anchor: AnchorRef, anchorFlowIndex: number, order: number): PlacedFloat {
+    const attrs = anchor.attrs;
+    const width = Math.min(attrs.width, contentWidth);
+    const { height, wrapMode, yOffset, margin } = attrs;
+    const wraps = wrapMode === "square" || wrapMode === "top-bottom";
+    const x = resolveImageX(
+      { width, xAlign: attrs.xAlign, x: attrs.x },
+      contentX,
+      contentWidth,
+      pageConfig.pageWidth,
+    );
+
+    // Anchor-push: a float that reserves flow space and does not fit below its
+    // anchor on the page sends the anchor flow to the next page (when that
+    // page can hold it). yOffset is not factored in — the anchor's own fit
+    // decides the page; yOffset only shifts within it, clamped. `behind` and
+    // `front` reserve no space, so they never push.
+    const pushedPast = (anchorGlobalY: number, extra: number): number | undefined => {
+      if (!wraps || pageConfig.pageless) return undefined;
+      const page = barriers.pageForGlobalY(anchorGlobalY);
+      const local = barriers.localYForGlobalY(page, anchorGlobalY + extra);
+      return local + height > barriers.contentBottomLocal(page) &&
+        height <= barriers.contentHeight(page + 1)
+        ? barriers.pageStartGlobal(page + 1)
+        : undefined;
+    };
+
+    // Square stacking: a square float that would overlap one placed before it
+    // on the page moves down below it. The offset is the float's own; its
+    // anchor paragraph stays where it is.
+    const stackedPaintedY = (anchorGlobalY: number, page: number): number => {
+      const desired = anchorGlobalY + yOffset;
+      if (wrapMode !== "square") return desired;
+      let painted = desired;
+      for (const other of placed.slice(0, order)) {
+        const p = other.placement;
+        if (p.wrapMode !== "square" || p.page !== page) continue;
+        const hOverlap = x < p.x + p.width && x + width > p.x;
+        const vOverlap = painted < p.globalY + p.height && painted + height > p.globalY;
+        if (hOverlap && vOverlap) painted = Math.max(painted, p.globalY + p.height + ANCHORED_OBJECT_MARGIN);
+      }
+      return painted;
+    };
+
+    const place = (anchorFlowStart: number): FloatPlace => {
+      let anchorStart = landingOf(flows[anchorFlowIndex], anchorFlowStart, pageConfig, geometry);
+      anchorStart = pushedPast(anchorStart, 0) ?? anchorStart;
+      let page = barriers.pageForGlobalY(anchorStart);
+      let painted = stackedPaintedY(anchorStart, page);
+      const overflow = pushedPast(anchorStart, painted - yOffset - anchorStart);
+      if (overflow !== undefined) {
+        anchorStart = overflow;
+        page = barriers.pageForGlobalY(anchorStart);
+        painted = stackedPaintedY(anchorStart, page);
+      }
+
+      // The clamp keeps the image on its anchor's page.
+      let clamped = false;
+      if (!pageConfig.pageless) {
+        const pageStart = barriers.pageStartGlobal(page);
+        const pageEnd = pageStart + Math.max(0, barriers.contentHeight(page) - height);
+        const within = Math.min(Math.max(painted, pageStart), pageEnd);
+        clamped = within !== painted;
+        painted = within;
+      }
+      return {
+        anchorStart,
+        placement: {
+          docPos: anchor.docPos,
+          page,
+          x,
+          y: barriers.localYForGlobalY(page, painted),
+          width,
+          height,
+          wrapMode,
+          zIndex: attrs.zIndex,
+          node: anchor.node,
+          anchorGlobalY: anchorStart,
+          anchorPage: page,
+          globalY: painted,
+          ...(clamped ? { clamped: true } : {}),
+        },
+      };
+    };
+
+    // The zone may not reach above the anchor on the strength of its margin
+    // alone. Blocks above the anchor are what fix the anchor's own position,
+    // so letting the margin band narrow them makes the anchor depend on a
+    // float that depends on the anchor: the block grows, the anchor drops, the
+    // zone follows it off the block, the block shrinks back. That has no fixed
+    // point. The image rectangle itself still reflows whatever it covers.
+    const zoneOf = (at: AnchoredObjectPlacement): Band => {
+      const pageStart = barriers.pageStartGlobal(at.page);
+      const pageEnd = pageStart + barriers.contentHeight(at.page);
+      return {
+        top: Math.max(pageStart, at.globalY - margin, Math.min(at.globalY, at.anchorGlobalY)),
+        bottom: Math.min(pageEnd, at.globalY + height + margin),
+      };
+    };
+
+    // Square carves a side zone at the image's painted rectangle; top-bottom
+    // reserves the whole band.
+    const exclusionOf = (at: AnchoredObjectPlacement): ExclusionRect => {
+      const zone = zoneOf(at);
+      return wrapMode === "square"
+        ? { page: at.page, x: x - margin, right: x + width + margin, y: zone.top, bottom: zone.bottom, side: "left", docPos: anchor.docPos }
+        : { page: at.page, x: contentX, right: contentRight, y: zone.top, bottom: zone.bottom, side: "full", docPos: anchor.docPos };
+    };
+
+    return {
+      anchorFlowIndex,
+      docPos: anchor.docPos,
+      wraps,
+      placement: place(flows[anchorFlowIndex]?.globalY ?? 0).placement,
+      place,
+      zoneOf,
+      exclusionOf,
+    };
+  }
+}
+
+/**
+ * Where an anchor flow's first line actually lands: a first line that does
+ * not fit below `start` goes to the next page, and the float goes with it.
+ */
+function landingOf(
+  flow: FlowBlock | undefined,
+  start: number,
+  pageConfig: PageConfig,
+  geometry: PageGeometry,
+): number {
+  const firstLine = flow?.lines[0];
+  if (!firstLine || pageConfig.pageless) return start;
+  const page = geometry.pageAt(start);
+  const fits = start === geometry.startOf(page) || start + firstLine.lineHeight <= geometry.bottomOf(page);
+  return fits ? start : geometry.startOf(page + 1);
+}
+
+function samePlacement(a: AnchoredObjectPlacement, b: AnchoredObjectPlacement): boolean {
+  return a.page === b.page && a.globalY === b.globalY && a.anchorGlobalY === b.anchorGlobalY;
+}
+
+/**
+ * Reflow one page against all of its exclusions.
+ *
+ * Re-lays every text flow on the page that lies in `band` (where a float's
+ * zone arrived or left), and every one whose wrap no longer matches where it
+ * sits: it touches an exclusion and was not laid out against this page's
+ * exclusions at this y, or it was wrapped here before at another y. A table
+ * that meets a float moves below it. Growing a block or moving a table
+ * restamps what follows, so the scan runs to the page bottom.
+ *
+ * This deliberately does not start at the anchor flow index. `yOffset` makes
+ * the painted rectangle independent from anchor order, so an image anchored
+ * in paragraph B can exclude text in paragraph A. Geometry drives wrapping.
+ *
+ * Returns the indices whose start moved, as `[from, to)`.
+ */
+function reflowFlowsAgainstExclusions(
+  flows: FlowBlock[],
+  exclusions: ExclusionManager,
+  zone: {
+    pageNumber: number;
+    band: Band | undefined;
+    /** Flows before this index are left as they are. */
+    fromIndex: number;
+    contentX: number;
+    contentWidth: number;
+  },
+  floats: FloatSet,
+  pageConfig: PageConfig,
+  geometry: PageGeometry,
+  ctx: MeasureContext,
+): { from: number; to: number } {
   const { measurer, fontConfig, fontModifiers, inlineRegistry, fonts } = ctx;
-  let flows = inputFlows;
-  const zoneTop = zone.zoneTop;
-  const zoneBottom = zone.zoneBottom;
-  const pageBottom = geometry.bottomOf(zone.pageNumber);
+  const page = zone.pageNumber;
+  const pageTop = pageConfig.pageless ? -Infinity : geometry.startOf(page);
+  const pageBottom = pageConfig.pageless ? Infinity : geometry.bottomOf(page);
+  let moved = { from: flows.length, to: flows.length };
+  const noteMoved = (range: { from: number; to: number }): void => {
+    if (range.to <= range.from) return;
+    moved = moved.to > moved.from
+      ? { from: Math.min(moved.from, range.from), to: Math.max(moved.to, range.to) }
+      : range;
+  };
 
   for (let idx = 0; idx < flows.length; idx++) {
-    const flow = flows[idx]!;
+    const flow = flows[idx];
+    if (!flow) break;
     const flowY = flow.globalY ?? 0;
     if (flowY >= pageBottom) break;
+    if (idx < zone.fromIndex) continue;
     // Leaf flows (image/HR/pageBreak) cannot be re-broken around a wrap zone.
-    if (flow.kind === "leaf" || flowY + flow.height <= zoneTop) continue;
+    if (flow.kind === "leaf" || flowY + flow.height <= pageTop) continue;
     // A table cannot be re-broken either, so it moves below the float instead.
     if (flow.kind === "tableRow") {
-      const moved = moveTableClearOfExclusions(
-        flows, idx, exclusions, zone, floats, pageConfig, geometry,
-      );
-      flows = moved.flows;
-      idx = moved.lastRowIndex;
+      if (pageConfig.pageless) continue;
+      const table = moveTableClearOfFloats(flows, idx, zone, floats, pageConfig, geometry);
+      noteMoved(table.moved);
+      idx = table.lastRowIndex;
       continue;
     }
 
     const blockContentX = zone.contentX + flow.indentLeft;
-    const inZone = flowY < zoneBottom;
-    const wrappedOnThisPage = flow.overlapsWrapZone === true && flow.wrapZonePage === zone.pageNumber;
-    const touchesExclusion = exclusions.getNextFreeY(
-      zone.pageNumber, flowY, flow.height, blockContentX, flow.availableWidth,
-    ) !== flowY;
-    if (!inZone && !wrappedOnThisPage && !touchesExclusion) continue;
+    const inBand = zone.band !== undefined && flowY < zone.band.bottom && flowY + flow.height > zone.band.top;
+    const wrappedHere = flow.overlapsWrapZone === true && flow.wrapZonePage === page;
+    const laidHere = wrappedHere && flow.wrapLaidAtY === flowY;
+    const touches = exclusions.getNextFreeY(page, flowY, flow.height, blockContentX, flow.availableWidth) !== flowY;
+    if (!inBand && laidHere) continue;
+    if (!inBand && !wrappedHere && !touches) continue;
 
     const lineSpaceProvider: LineSpaceProvider = (absoluteLineY: number, lineHeight = 1) => {
-      const space = exclusions.getAvailableSegments(
-        zone.pageNumber,
-        absoluteLineY,
-        lineHeight,
-        blockContentX,
-        flow.availableWidth,
-      );
+      const space = exclusions.getAvailableSegments(page, absoluteLineY, lineHeight, blockContentX, flow.availableWidth);
       // ExclusionManager returns segments in the same coordinate space as
       // contentX (here: absolute page-local). LineSpaceProvider's contract
       // requires block-content-relative coords, so translate.
-      const segments = space.segments.map((s) => ({
-        x: s.x - blockContentX,
-        width: s.width,
-      }));
-      // Square wrap with a single full-width-ish image can punch all segments
-      // out without side="full". Skip past the rects so the line breaker
-      // advances past the image instead of dropping words.
+      const segments = space.segments.map((s) => ({ x: s.x - blockContentX, width: s.width }));
+      // Side rects can punch out every segment without a full-width rect.
+      // Skip past every rect on the line so the line breaker advances past
+      // the images instead of dropping words.
       if (segments.length === 0 && space.skipToY === undefined) {
         return {
           segments,
-          skipToY: exclusions.getNextFreeY(
-            zone.pageNumber, absoluteLineY, lineHeight, blockContentX, flow.availableWidth,
-          ),
+          skipToY: exclusions.getNextFreeY(page, absoluteLineY, lineHeight, blockContentX, flow.availableWidth),
         };
       }
-      return space.skipToY !== undefined
-        ? { segments, skipToY: space.skipToY }
-        : { segments };
+      return space.skipToY !== undefined ? { segments, skipToY: space.skipToY } : { segments };
     };
 
     const reflowed = layoutBlock(flow.node, {
@@ -1023,7 +1079,7 @@ function reflowFlowsAgainstExclusions(
       x: blockContentX,
       y: flowY,
       availableWidth: flow.availableWidth,
-      page: zone.pageNumber,
+      page,
       measurer,
       fontConfig,
       ...(fontModifiers ? { fontModifiers } : {}),
@@ -1035,23 +1091,26 @@ function reflowFlowsAgainstExclusions(
     const nextFlow: FlowBlock = {
       ...flow,
       overlapsWrapZone: true,
-      wrapZonePage: zone.pageNumber,
+      wrapZonePage: page,
+      wrapLaidAtY: flowY,
       lines: reflowed.lines,
       height: reflowed.height,
       blockType: reflowed.blockType,
       align: reflowed.align,
       availableWidth: reflowed.availableWidth,
     };
-    flows = [...flows.slice(0, idx), nextFlow, ...flows.slice(idx + 1)];
+    flows[idx] = nextFlow;
 
-    // Restamping re-derives every later flow from its predecessor, dropping
-    // any push it carried; only do it when this block's end actually moved.
+    // Restamping re-derives later flows from their predecessors; only do it
+    // when this block's end actually moved.
     const endBefore = advanceFlowGlobalY(flow, flowY, pageConfig, geometry).endGlobalY;
     const endAfter = advanceFlowGlobalY(nextFlow, flowY, pageConfig, geometry).endGlobalY;
-    if (endAfter !== endBefore) flows = restampGlobalYFrom(flows, idx + 1, pageConfig, geometry);
+    if (endAfter !== endBefore) {
+      noteMoved(restampGlobalYFrom(flows, idx + 1, pageConfig, geometry, floats.startOf));
+    }
   }
 
-  return flows;
+  return moved;
 }
 
 /** A row whose table goes on after it, so the next flow is that table's next row. */
@@ -1059,6 +1118,11 @@ function continuesTable(row: FlowBlock | undefined): row is FlowBlock {
   return row?.kind === "tableRow" && !row.isLastRow;
 }
 
+function bandsOverlap(a: Band, b: Band): boolean {
+  return a.top < b.bottom && a.bottom > b.top;
+}
+
+/** The band from the first row's top to the last row's bottom. */
 function tableExtent(flows: readonly FlowBlock[], start: number, end: number): Band {
   const first = flows[start];
   const last = flows[end];
@@ -1069,68 +1133,109 @@ function tableExtent(flows: readonly FlowBlock[], start: number, end: number): B
 }
 
 /**
- * Move the table holding `rowIndex` below every float on the page it cannot
- * sit beside. Word wraps a table as one unit and never narrows it, so its rows
- * on this page move together; rows on other pages stay.
+ * Place the table holding `rowIndex` below every float on the page it cannot
+ * sit beside, measured from where the table would sit on its own. Word wraps
+ * a table as one unit and never narrows it, so its rows on this page move
+ * together; rows on other pages stay. The floats are taken where they sit
+ * with the flows as they are now, never from rects a restamp left behind.
  */
-function moveTableClearOfExclusions(
+function moveTableClearOfFloats(
   flows: FlowBlock[],
   rowIndex: number,
-  exclusions: ExclusionManager,
   zone: { pageNumber: number; contentX: number; contentWidth: number },
-  floats: readonly PlacedFloat[],
+  floats: FloatSet,
   pageConfig: PageConfig,
   geometry: PageGeometry,
-): { flows: FlowBlock[]; lastRowIndex: number } {
+): { moved: { from: number; to: number }; lastRowIndex: number } {
+  const page = zone.pageNumber;
   const onPage = (flow: FlowBlock | undefined): boolean =>
-    flow !== undefined && geometry.pageAt(flow.globalY ?? 0) === zone.pageNumber;
+    flow !== undefined && geometry.pageAt(flow.globalY ?? 0) === page;
 
   let start = rowIndex;
   while (continuesTable(flows[start - 1]) && onPage(flows[start - 1])) start--;
   let end = rowIndex;
   while (continuesTable(flows[end]) && onPage(flows[end + 1])) end++;
-
-  const table = tableExtent(flows, start, end);
-  const clearY = exclusions.getNextFreeY(
-    zone.pageNumber, table.top, table.bottom - table.top, zone.contentX, zone.contentWidth,
-  );
   const first = flows[start];
-  if (clearY === table.top || !first) return { flows, lastRowIndex: end };
+  const none = { moved: { from: start, to: start }, lastRowIndex: end };
+  if (!first) return none;
 
-  const { startGlobalY } = advanceFlowGlobalY(first, clearY, pageConfig, geometry);
-  const pushed = [...flows];
-  pushed[start] = { ...first, globalY: startGlobalY, solverPushedThisFlow: true };
-  const moved = restampGlobalYFrom(pushed, start + 1, pageConfig, geometry);
+  const natural = naturalStartOf(flows, start, pageConfig, geometry);
+  const tableHeight = tableExtent(flows, start, end).bottom - (first.globalY ?? 0);
+  // Floats anchored before the table stay put while it moves; one anchored
+  // after it moves with it, so it constrains the table only where it reaches
+  // back over the table's own band.
+  const naturalBand = { top: natural, bottom: natural + tableHeight };
+  const forward = new ExclusionManager();
+  const all = new ExclusionManager();
+  for (const float of floats.placed) {
+    if (!float.wraps || Math.abs(float.placement.page - page) > 1) continue;
+    const placement = floats.currentPlacement(float, flows);
+    if (placement.page !== page) continue;
+    const rect = float.exclusionOf(placement);
+    if (float.anchorFlowIndex <= end) forward.addRect(rect);
+    if (float.anchorFlowIndex <= end || bandsOverlap(float.zoneOf(placement), naturalBand)) all.addRect(rect);
+  }
+  const clearOf = (exclusions: ExclusionManager): number => {
+    const clearY = exclusions.getNextFreeY(page, natural, tableHeight, zone.contentX, zone.contentWidth);
+    return clearY === natural ? natural : advanceFlowGlobalY(first, clearY, pageConfig, geometry).startGlobalY;
+  };
+  const startingAt = (target: number): { flows: FlowBlock[]; to: number } => {
+    const tentative = [...flows];
+    tentative[start] = { ...first, globalY: target, solverPushedThisFlow: target !== natural };
+    const restamped = restampGlobalYFrom(tentative, start + 1, pageConfig, geometry, floats.startOf);
+    return { flows: tentative, to: Math.max(restamped.to, start + 1) };
+  };
 
-  const keep = draggedFloatsStayClear(
-    floats, end, table, tableExtent(moved, start, end), flows, moved, geometry,
-  );
-  return { flows: keep ? moved : flows, lastRowIndex: end };
+  // Clear every float if the floats the move drags let it; otherwise clear
+  // only the floats that stay put and let the dragged ones overlap
+  // (Decision 3); otherwise stay.
+  const candidates = [
+    { target: clearOf(all), reachBackMustClear: true },
+    { target: clearOf(forward), reachBackMustClear: false },
+  ];
+  let target = natural;
+  let result = startingAt(natural);
+  for (const candidate of candidates) {
+    if (candidate.target === natural) continue;
+    const tried = startingAt(candidate.target);
+    if (!draggedFloatsHold(floats, flows, tried.flows, start, end, candidate.reachBackMustClear)) continue;
+    target = candidate.target;
+    result = tried;
+    break;
+  }
+  if (target === first.globalY) return none;
+
+  for (let i = start; i < result.to; i++) {
+    const flow = result.flows[i];
+    if (flow) flows[i] = flow;
+  }
+  return { moved: { from: start, to: result.to }, lastRowIndex: end };
 }
 
 /**
- * Moving a table above a float's anchor drags a free float along with it, so
- * the two never separate. For every float that reaches back over the table,
- * keep the move only if its anchor stays on its page and the re-placed float
- * clears the table.
+ * Moving a table drags every float anchored after it. The move holds only if
+ * each one that reaches back over the table keeps its anchor on its page and,
+ * when `reachBackMustClear`, clears the moved table; and each one that does
+ * not reach back still clears it once carried. A float that does not reach
+ * back may be carried onto the next page.
  */
-function draggedFloatsStayClear(
-  floats: readonly PlacedFloat[],
-  tableEnd: number,
-  tableBefore: Band,
-  tableAfter: Band,
+function draggedFloatsHold(
+  floats: FloatSet,
   before: readonly FlowBlock[],
   after: readonly FlowBlock[],
-  geometry: PageGeometry,
+  start: number,
+  end: number,
+  reachBackMustClear: boolean,
 ): boolean {
-  const overlaps = (a: Band, b: Band): boolean => a.top < b.bottom && a.bottom > b.top;
-  return floats.every((float) => {
-    if (!float.wraps || float.anchorFlowIndex <= tableEnd) return true;
-    if (!overlaps(float.zoneOf(float.placement), tableBefore)) return true;
-    const anchorBefore = before[float.anchorFlowIndex]?.globalY ?? 0;
-    const anchorAfter = after[float.anchorFlowIndex]?.globalY ?? 0;
-    if (geometry.pageAt(anchorAfter) !== geometry.pageAt(anchorBefore)) return false;
-    return !overlaps(float.zoneOf(float.place(anchorAfter)), tableAfter);
+  const tableBefore = tableExtent(before, start, end);
+  const tableAfter = tableExtent(after, start, end);
+  return floats.placed.every((float) => {
+    if (!float.wraps || float.anchorFlowIndex <= end) return true;
+    const now = floats.currentPlacement(float, before);
+    const moved = floats.currentPlacement(float, after);
+    const clears = !bandsOverlap(float.zoneOf(moved), tableAfter);
+    if (!bandsOverlap(float.zoneOf(now), tableBefore)) return clears;
+    return moved.page === now.page && (clears || !reachBackMustClear);
   });
 }
 
