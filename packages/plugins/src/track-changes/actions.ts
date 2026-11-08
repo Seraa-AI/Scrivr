@@ -1,6 +1,7 @@
+import type { ReviewDecisions, ReviewOutcome } from "./reviewPlan";
 import { Transaction } from "@scrivr/core/pm";
 
-import { CHANGE_STATUS, StructureAttrs, TrackChangesStatus } from "./types";
+import { StructureAttrs, TrackChangesStatus, TrackingResult } from "./types";
 
 export enum TrackChangesAction {
   suggest = "track-changes-suggest",
@@ -8,6 +9,8 @@ export enum TrackChangesAction {
   setUserID = "track-changes-set-user-id",
   setPluginStatus = "track-changes-set-track-status",
   setChangeStatuses = "track-changes-set-change-statuses",
+  reviewResult = "track-changes-review-result",
+  trackingResult = "track-changes-tracking-result",
   refreshChanges = "track-changes-refresh-changes",
   updateMetaNode = "track-changes-update-meta-node",
   structuralChangeAction = "track-changes-structural-change-action",
@@ -19,10 +22,9 @@ export type TrackChangesActionParams = {
   [TrackChangesAction.skipTrack]: boolean;
   [TrackChangesAction.setUserID]: string;
   [TrackChangesAction.setPluginStatus]: TrackChangesStatus;
-  [TrackChangesAction.setChangeStatuses]: {
-    status: CHANGE_STATUS;
-    ids: string[];
-  };
+  [TrackChangesAction.setChangeStatuses]: ReviewDecisions;
+  [TrackChangesAction.reviewResult]: ReviewOutcome;
+  [TrackChangesAction.trackingResult]: TrackingResult;
   [TrackChangesAction.refreshChanges]: boolean;
   [TrackChangesAction.updateMetaNode]: boolean;
   [TrackChangesAction.structuralChangeAction]: StructureAttrs["action"];
@@ -40,8 +42,8 @@ export function hasAction(tr: Transaction) {
 export function getAction<K extends keyof TrackChangesActionParams>(
   tr: Transaction,
   action: K,
-) {
-  return tr.getMeta(action) as TrackChangesActionParams[K] | undefined;
+): TrackChangesActionParams[K] | undefined {
+  return tr.getMeta(action);
 }
 
 /** Sets a track-changes action meta on a transaction. */
@@ -67,6 +69,6 @@ export function trackAsSuggestion(tr: Transaction, authorID: string): Transactio
 
 /** Appended normalization steps belong to the same proposal as their root transaction. */
 export function suggestionIntent(tr: Transaction): { authorID: string } | undefined {
-  const root = tr.getMeta("appendedTransaction") as Transaction | undefined;
+  const root: Transaction | undefined = tr.getMeta("appendedTransaction");
   return getAction(tr, TrackChangesAction.suggest) ?? (root && getAction(root, TrackChangesAction.suggest));
 }

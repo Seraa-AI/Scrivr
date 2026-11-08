@@ -91,8 +91,8 @@ export function buildAcceptedTextMap(
         m.type === insertMarkType ||
         m.type === deleteMarkType
       ) {
-        authorID = (m.attrs.dataTracked as { authorID?: string } | null)
-          ?.authorID;
+        const dataTracked: { authorID?: string } | null = m.attrs.dataTracked;
+        authorID = dataTracked?.authorID;
         break;
       }
     }

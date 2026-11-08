@@ -121,7 +121,8 @@ describe("ChangeSet.changeTree", () => {
 
     // Only the node-change appears at the root; the text-change is a child.
     expect(tree).toHaveLength(1);
-    const root = tree[0] as NodeChange;
+    const root = tree[0]!;
+    if (!ChangeSet.isNodeChange(root)) throw new Error(`expected a node-change root, got ${root.type}`);
     expect(root.id).toBe("alice-node");
     expect(root.children.map(c => c.id)).toEqual(["alice-text"]);
   });

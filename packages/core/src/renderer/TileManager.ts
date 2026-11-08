@@ -69,6 +69,12 @@ export interface TileEntry {
    * with the cursor during mousemove without waiting for mouseup.
    */
   lastPendingAnchoredDragKey: string;
+  /**
+   * The content paint the overlay was last drawn over. Repainting content
+   * resizes the overlay canvas, which clears it, so a newer content paint means
+   * the overlay has to be drawn again even when nothing it shows has changed.
+   */
+  lastOverlayContentKey: string;
 }
 
 /** Helpers */
@@ -422,6 +428,7 @@ export class TileManager {
         tile.lastPmState = null;
         tile.lastPendingResizeKey = "";
         tile.lastPendingAnchoredDragKey = "";
+        tile.lastOverlayContentKey = "";
         tile.wrapper.style.top = `${idx * sh}px`;
         tile.wrapper.style.height = `${this.tileHeight}px`;
         tile.wrapper.style.display = "block";
@@ -724,7 +731,10 @@ export class TileManager {
     // blinks correctly and selection updates are visible. The header cursor
     // is drawn by an overlay handler that needs blink-tick repaints.
     const surfaceStateDirty = surfaceActive;
+    const contentKey = `${tile.lastPaintedVersion}:${tile.lastRenderGeneration}`;
+    const contentDirty = tile.lastOverlayContentKey !== contentKey;
     if (
+      !contentDirty &&
       !blinkDirty &&
       !moveDirty &&
       !pluginStateDirty &&
@@ -740,6 +750,7 @@ export class TileManager {
     tile.lastPmState = pmState;
     tile.lastPendingResizeKey = pendingKey;
     tile.lastPendingAnchoredDragKey = pendingAnchoredKey;
+    tile.lastOverlayContentKey = contentKey;
 
     const dpr = tile.dpr || (window.devicePixelRatio ?? 1);
     const w = pageConfig.pageWidth;
@@ -919,6 +930,7 @@ export class TileManager {
       lastPmState: null,
       lastPendingResizeKey: "",
       lastPendingAnchoredDragKey: "",
+      lastOverlayContentKey: "",
     };
   }
 

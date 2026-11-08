@@ -1,5 +1,3 @@
-import { Mapping } from "@scrivr/core/pm";
-
 import { ChangeStep } from "../types";
 
 /**
@@ -10,18 +8,19 @@ import { ChangeStep } from "../types";
  *
  *   extract → [original coords] → mapChangeSteps → [newTr coords] → apply
  *
- * The cross-step mapping (deletedNodeMapping) is resolved here.
+ * The cross-step mapping (replayBridge) is resolved here.
  * Intra-batch position shifts produced by applying each step are handled
  * separately by the local accumulator inside processChangeSteps.
  */
-export function mapChangeSteps(steps: ChangeStep[], mapping: Mapping): ChangeStep[] {
+export function mapChangeSteps(steps: ChangeStep[], mapping: { map(pos: number): number }): ChangeStep[] {
   return steps.map(step => {
-    const remapped: Partial<Record<string, number>> = {};
-    if ("from"     in step) remapped.from     = mapping.map(step.from);
-    if ("to"       in step) remapped.to       = mapping.map(step.to);
-    if ("pos"      in step) remapped.pos      = mapping.map(step.pos);
-    if ("nodeEnd"  in step) remapped.nodeEnd  = mapping.map(step.nodeEnd);
-    if ("mergePos" in step) remapped.mergePos = mapping.map(step.mergePos);
-    return { ...step, ...remapped } as ChangeStep;
+    const remapped = { ...step };
+    if ("from"     in remapped) remapped.from     = mapping.map(remapped.from);
+    if ("to"       in remapped) remapped.to       = mapping.map(remapped.to);
+    if ("pos"      in remapped) remapped.pos      = mapping.map(remapped.pos);
+    if ("nodeEnd"  in remapped) remapped.nodeEnd  = mapping.map(remapped.nodeEnd);
+    if ("mergePos" in remapped) remapped.mergePos = mapping.map(remapped.mergePos);
+    if ("caretAt"  in remapped && remapped.caretAt !== undefined) remapped.caretAt = mapping.map(remapped.caretAt);
+    return remapped;
   });
 }

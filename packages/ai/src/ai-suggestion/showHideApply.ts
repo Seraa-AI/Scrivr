@@ -454,7 +454,7 @@ function _applyTracked(
  *
  * Discards pending ops without changing document content or review marks.
  * Applied changes are no longer proposal ops; rejecting them belongs to the
- * track-changes API (`setChangeStatuses`), which addresses change IDs.
+ * track-changes API (`reviewChanges`), which addresses change IDs.
  *
  * If `blockId` is provided, only that block's pending ops are discarded.
  * If `groupId` is provided, only that group within the scope is discarded.

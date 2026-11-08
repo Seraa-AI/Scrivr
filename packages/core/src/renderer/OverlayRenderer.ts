@@ -235,6 +235,48 @@ export function renderTrackedAttrChange(
 }
 
 /**
+ * Washes text whose formatting a tracked change altered. No underline: the text
+ * is neither added nor removed, and an underline would read as underlining.
+ */
+export function renderTrackedFormatting(
+  ctx: CanvasRenderingContext2D,
+  glyphs: GlyphEntry[],
+  color: string,
+): void {
+  ctx.save();
+  ctx.fillStyle = color.startsWith("#") ? hexToRgba(color, 0.18) : color;
+  for (const g of glyphs) snappedFillRect(ctx, g.x, g.y, g.width, g.height);
+  ctx.restore();
+}
+
+/**
+ * Frames an object with a tracked change — an image, a rule, a page break —
+ * which has no text to underline or strike through. Added content gets a
+ * coloured frame and wash; removed content is also struck through, corner to
+ * corner, as Word marks a deleted object.
+ */
+export function renderTrackedObject(
+  ctx: CanvasRenderingContext2D,
+  rect: { x: number; y: number; width: number; height: number },
+  color: string,
+  removed: boolean,
+): void {
+  ctx.save();
+  ctx.fillStyle = color.startsWith("#") ? hexToRgba(color, 0.12) : color;
+  snappedFillRect(ctx, rect.x, rect.y, rect.width, rect.height);
+  ctx.strokeStyle = color.startsWith("#") ? hexToRgba(color, 0.9) : color;
+  ctx.lineWidth = 2;
+  ctx.strokeRect(rect.x + 1, rect.y + 1, rect.width - 2, rect.height - 2);
+  if (removed) {
+    ctx.beginPath();
+    ctx.moveTo(rect.x, rect.y + rect.height);
+    ctx.lineTo(rect.x + rect.width, rect.y);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/**
  * Draws an amber conflict indicator over glyphs where two authors' marks
  * overlap on the same segment. Rendered on top of the normal insert/delete
  * colour — the underlying green/red is still visible through the amber wash.

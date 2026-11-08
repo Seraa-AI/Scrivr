@@ -10,7 +10,7 @@ describe("TrackChanges document clone", () => {
         type: "paragraph",
         attrs: {
           nodeId: "p1",
-          dataTracked: [{ id: "change-a", operation: "node_split", referenceId: "change-b", moveNodeId: "move-a" }],
+          dataTracked: [{ id: "change-a", operation: "node_split", referenceId: "change-b", moveNodeId: "move-a", creationId: "change-b", dependsOn: ["change-b"], placementDependsOn: ["change-b"], foldingClosed: true }],
         },
         content: [
           { type: "text", text: "one", marks: [{ type: "trackedInsert", attrs: { dataTracked: { id: "change-b", groupId: "group-a" } } }] },
@@ -25,12 +25,16 @@ describe("TrackChanges document clone", () => {
       clone: { generate: ({ kind, typeName, oldId }) => `${kind}:${typeName}:${oldId}:clone` },
     });
     const paragraph = editor.getState().doc.firstChild!;
-    const nodeChange = paragraph.attrs["dataTracked"][0] as Record<string, string>;
-    const firstMark = paragraph.child(0).marks[0]!.attrs["dataTracked"] as Record<string, string>;
-    const secondMark = paragraph.child(1).marks[0]!.attrs["dataTracked"] as Record<string, string>;
+    const nodeChange: Record<string, unknown> = paragraph.attrs["dataTracked"][0];
+    const firstMark: Record<string, unknown> = paragraph.child(0).marks[0]!.attrs["dataTracked"];
+    const secondMark: Record<string, unknown> = paragraph.child(1).marks[0]!.attrs["dataTracked"];
 
     expect(nodeChange.id).not.toBe("change-a");
     expect(nodeChange.referenceId).toBe(firstMark.id);
+    expect(nodeChange.creationId).toBe(firstMark.id);
+    expect(nodeChange.dependsOn).toEqual([firstMark.id]);
+    expect(nodeChange.placementDependsOn).toEqual([firstMark.id]);
+    expect(nodeChange.foldingClosed).toBe(true);
     expect(firstMark.id).toBe(secondMark.id);
     expect(firstMark.groupId).toBe(secondMark.groupId);
     expect(nodeChange.moveNodeId).toBe(secondMark.moveNodeId);

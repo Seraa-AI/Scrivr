@@ -92,8 +92,8 @@ export interface RichDiffResult {
   rejected: string[];
 }
 
-/** Block styling the agent may set in v1. Structural/type edits are v2. */
-const ALLOWED_ATTRS = ["align", "indent", "textIndent"] as const;
+/** Block styling the agent may set. */
+const ALLOWED_ATTRS: ReadonlyArray<string> = ["align", "indent", "textIndent"];
 const VALID_ALIGN = new Set(["left", "center", "right", "justify"]);
 
 /**

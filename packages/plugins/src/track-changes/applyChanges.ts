@@ -2,13 +2,15 @@ import { Node as PMNode, Schema } from "@scrivr/core/pm";
 import { Transaction } from "@scrivr/core/pm";
 import { Mapping } from "@scrivr/core/pm";
 
-import { revertSplitNodeChange, revertWrapNodeChange } from "./lib/revertChanges";
+import { revertWrapNodeChange } from "./lib/revertChanges";
 import { restoreNode, updateChangeChildrenAttributes } from "./engine/updateAttributes";
 import { ChangeSet } from "./ChangeSet";
 import { excludeFromTracked } from "./helpers";
-import { deleteNode, keepPairedChanges } from "./lib/deleteNode";
+import { deleteNode } from "./lib/deleteNode";
+import { clearTextChange } from "./lib/clearTextChange";
+import { rejectMove } from "./engine/moveIdentity";
 import { mergeNode } from "./lib/mergeNode";
-import { CHANGE_OPERATION, CHANGE_STATUS, TrackedAttrs, TrackedChange, UpdateAttrs } from "./types";
+import { CHANGE_OPERATION, CHANGE_STATUS, TrackedAttrs, TrackedChange } from "./types";
 
 function collectMoveNodeIds(containerNode: PMNode, primaryMoveNodeId: string): Set<string> {
   const moveNodeIds = new Set<string>();
@@ -22,6 +24,17 @@ function collectMoveNodeIds(containerNode: PMNode, primaryMoveNodeId: string): S
     }
   });
   return moveNodeIds;
+}
+
+/**
+ * Whether anything of a change is left after the steps in `deleteMap`. A text
+ * record can outlive its first characters: rejecting an insertion takes away
+ * whatever part of a deletion was stacked on it, not the rest.
+ */
+function isEntirelyGone(change: TrackedChange, deleteMap: Mapping) {
+  const { pos, deleted } = deleteMap.mapResult(change.from);
+  const spansText = ChangeSet.isTextChange(change) || ChangeSet.isInlineMarkChange(change);
+  return deleted && !(spansText && deleteMap.map(change.to, -1) > pos);
 }
 
 /**
@@ -57,37 +70,39 @@ export function applyChanges(
       change.dataTracked.moveNodeId
     ) return;
 
-    const { pos: from, deleted } = deleteMap.mapResult(change.from);
+    // Joining reshapes the blocks around it, so it settles after everything else.
+    if (
+      change.dataTracked.operation === CHANGE_OPERATION.node_join &&
+      change.dataTracked.status === CHANGE_STATUS.accepted
+    ) return;
+
+    const from = deleteMap.map(change.from);
     const node = tr.doc.nodeAt(from);
     const noChangeNeeded = !ChangeSet.shouldDeleteChange(change);
 
-    if (deleted) return;
+    if (isEntirelyGone(change, deleteMap)) return;
     if (!node) {
-      !deleted && console.warn("No node found to update for change", change);
+      console.warn("No node found to update for change", change);
       return;
     }
 
-    if (change.dataTracked.status === CHANGE_STATUS.rejected) {
-      if (change.dataTracked.operation === CHANGE_OPERATION.node_split) {
-        return revertSplitNodeChange(tr, change, changeSet);
-      }
-      if (change.dataTracked.operation === CHANGE_OPERATION.wrap_with_node) {
-        return revertWrapNodeChange(tr, change, deleteMap);
-      }
+    if (
+      change.dataTracked.status === CHANGE_STATUS.rejected &&
+      change.dataTracked.operation === CHANGE_OPERATION.wrap_with_node
+    ) {
+      return revertWrapNodeChange(tr, change, deleteMap);
     }
 
     if (ChangeSet.isTextChange(change) && noChangeNeeded) {
-      tr.removeMark(from, deleteMap.map(change.to), schema.marks.trackedInsert);
-      tr.removeMark(from, deleteMap.map(change.to), schema.marks.trackedDelete);
+      clearTextChange(tr, from, deleteMap.map(change.to), change.id);
     } else if (ChangeSet.isTextChange(change)) {
       tr.delete(from, deleteMap.map(change.to));
       deleteMap.appendMap(tr.steps[tr.steps.length - 1]!.getMap());
     } else if (ChangeSet.isNodeChange(change) && noChangeNeeded) {
-      const attrs = { ...node.attrs, dataTracked: keepPairedChanges(node) };
+      const attrs = { ...node.attrs, dataTracked: excludeFromTracked(node.attrs.dataTracked, change.id) };
       tr.setNodeMarkup(from, undefined, attrs, node.marks);
       if (node.isAtom) {
-        tr.removeMark(from, deleteMap.map(change.to), schema.marks.trackedInsert);
-        tr.removeMark(from, deleteMap.map(change.to), schema.marks.trackedDelete);
+        clearTextChange(tr, from, deleteMap.map(change.to), change.id);
       }
       updateChangeChildrenAttributes(change.children, tr, deleteMap);
     } else if (ChangeSet.isNodeChange(change)) {
@@ -101,7 +116,7 @@ export function applyChanges(
         node.marks,
       );
     } else if (ChangeSet.isNodeAttrChange(change) && change.dataTracked.status === CHANGE_STATUS.rejected) {
-      const oldTypeName = (change.dataTracked as UpdateAttrs).oldNodeTypeName;
+      const oldTypeName = "oldNodeTypeName" in change.dataTracked ? change.dataTracked.oldNodeTypeName : undefined;
       const oldType = oldTypeName ? node.type.schema.nodes[oldTypeName] : undefined;
       tr.setNodeMarkup(
         from, oldType,
@@ -115,7 +130,9 @@ export function applyChanges(
         node.marks,
       );
     } else if (ChangeSet.isMarkChange(change)) {
+      // The mark keeps what it says — a colour, a size, a link — and loses only this record.
       const newMark = change.mark.type.create({
+        ...change.mark.attrs,
         dataTracked: excludeFromTracked(change.mark.attrs.dataTracked, change.id),
       });
       const isInsert = change.dataTracked.operation === CHANGE_OPERATION.insert;
@@ -125,11 +142,12 @@ export function applyChanges(
         (change.dataTracked.status === CHANGE_STATUS.rejected && isDelete);
 
       if (ChangeSet.isInlineMarkChange(change)) {
-        tr.removeMark(change.from, change.to, change.mark);
-        if (toBeRestored) tr.addMark(change.from, change.to, newMark);
+        const to = deleteMap.map(change.to);
+        tr.removeMark(from, to, change.mark);
+        if (toBeRestored) tr.addMark(from, to, newMark);
       } else {
-        tr.removeNodeMark(change.from, change.mark);
-        if (toBeRestored) tr.addNodeMark(change.from, newMark);
+        tr.removeNodeMark(from, change.mark);
+        if (toBeRestored) tr.addNodeMark(from, newMark);
       }
     }
   });
@@ -140,6 +158,12 @@ export function applyChanges(
       change.dataTracked.operation !== CHANGE_OPERATION.move &&
       change.dataTracked.operation !== CHANGE_OPERATION.structure
     ) return;
+
+    if (change.type === "node-change" && change.dataTracked.operation === CHANGE_OPERATION.move &&
+        change.dataTracked.status === CHANGE_STATUS.rejected) {
+      rejectMove(tr, change, deleteMap);
+      return;
+    }
 
     const { pos: from, deleted } = deleteMap.mapResult(change.from);
     const node = tr.doc.nodeAt(from);
@@ -167,11 +191,15 @@ export function applyChanges(
       }
 
       originalChanges.forEach(originalChange => {
-        const { pos: originalFrom, deleted } = deleteMap.mapResult(originalChange.from);
-        if (deleted) return;
+        if (isEntirelyGone(originalChange, deleteMap)) return;
+        const originalFrom = deleteMap.map(originalChange.from);
         const originalNode = tr.doc.nodeAt(originalFrom);
         if (originalNode) {
-          tr.delete(originalFrom, originalFrom + originalNode.nodeSize);
+          // A text record can span several text nodes; a node's record is the node.
+          const originalTo = ChangeSet.isTextChange(originalChange)
+            ? deleteMap.map(originalChange.to, -1)
+            : originalFrom + originalNode.nodeSize;
+          tr.delete(originalFrom, originalTo);
           deleteMap.appendMap(tr.steps[tr.steps.length - 1]!.getMap());
         }
       });
@@ -206,7 +234,7 @@ export function applyChanges(
             return;
           }
 
-          restoreNode(tr, node, pos, schema);
+          restoreNode(tr, node, pos, orig.id);
         });
     }
   });
