@@ -137,6 +137,48 @@ const BULLET_PAINTERS: Record<BulletShape, (at: BulletAt) => void> = {
   },
 };
 
+/**
+ * Draws a block's list marker on its first line: a bullet as core's shape for
+ * it, a number as text in the face and size core chose when layout measured
+ * it. Called once per block from the block dispatch, whichever handler paints
+ * the block — the PDF's counterpart of the canvas's `paintBlock`.
+ */
+export function drawListMarker(
+  page: PDFPage,
+  block: LayoutBlock,
+  pageHeightPt: number,
+  fontRegistry: PdfFontRegistry,
+  theme: ResolvedTheme,
+): void {
+  const firstLine = block.lines[0];
+  if (!block.listMarker || block.listMarkerX === undefined || !firstLine) return;
+  const marker = listMarkerFont(firstLine);
+  const baselinePx = block.y + firstLine.ascent;
+  const color = parseCssColor(theme.listMarker);
+  // A bullet takes only its line's size: it is drawn as the canvas's shape, so
+  // it never depends on whether the face can encode the glyph.
+  const shape = bulletShape(block.listMarker);
+  if (shape) {
+    const box = bulletBox(marker.size);
+    BULLET_PAINTERS[shape]({
+      page,
+      left: block.listMarkerX * PT_PER_PX,
+      centerY: flipY(baselinePx - box.centerAboveBaseline, pageHeightPt),
+      box,
+      color,
+    });
+    return;
+  }
+  const markerFont = fontRegistry.resolve(marker.font, marker.resolution);
+  page.drawText(fontRegistry.isUnicode(markerFont) ? stripInvisible(block.listMarker) : sanitizeForWinAnsi(block.listMarker), {
+    x: block.listMarkerX * PT_PER_PX,
+    y: flipY(baselinePx, pageHeightPt),
+    size: marker.size * PT_PER_PX,
+    font: markerFont,
+    color,
+  });
+}
+
 // ── Draw helpers implementation ──────────────────────────────────────────────
 
 export function createDrawHelpers(
@@ -383,41 +425,6 @@ export function createDrawHelpers(
     const page = getPage();
     const themeListMarker = parseCssColor(theme.listMarker);
     const themeDefaultText = parseCssColor(theme.defaultText);
-
-    // Draw list marker if present.
-    const firstLine = block.lines[0];
-    if (block.listMarker && block.listMarkerX !== undefined && firstLine) {
-      // Core chose the marker's face and size when layout measured it; the PDF
-      // draws in the same, so a number pushed past its hanging lands as measured.
-      const marker = listMarkerFont(firstLine);
-      const fontSize = marker.size;
-      const baselinePx = block.y + firstLine.ascent;
-      // A bullet takes only its line's size: it is drawn as the canvas's
-      // shape, so it never depends on whether the face can encode the glyph.
-      const shape = bulletShape(block.listMarker);
-      if (shape) {
-        const box = bulletBox(fontSize);
-        BULLET_PAINTERS[shape]({
-          page,
-          left: block.listMarkerX * PT_PER_PX,
-          centerY: flipY(baselinePx - box.centerAboveBaseline, pageHeightPt),
-          box,
-          color: themeListMarker,
-        });
-      } else {
-        const markerFont = fontRegistry.resolve(marker.font, marker.resolution);
-        const markerText = fontRegistry.isUnicode(markerFont)
-          ? stripInvisible(block.listMarker)
-          : sanitizeForWinAnsi(block.listMarker);
-        page.drawText(markerText, {
-          x: block.listMarkerX * PT_PER_PX,
-          y: flipY(baselinePx, pageHeightPt),
-          size: fontSize * PT_PER_PX,
-          font: markerFont,
-          color: themeListMarker,
-        });
-      }
-    }
 
     let lineY = block.y;
     for (let li = 0; li < block.lines.length; li++) {

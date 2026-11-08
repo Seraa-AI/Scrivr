@@ -7,7 +7,7 @@
 import { describe, expect, it } from "vitest";
 import { buildPdf as buildPdfWithEditor } from "../index";
 import { PT_PER_PX } from "../context";
-import { listMarkerFont, type LayoutLine } from "@scrivr/core";
+import { Extension, ServerEditor, StarterKit, listMarkerFont, type LayoutLine } from "@scrivr/core";
 import { exportEditor, textLine, block, onePage, schema } from "./fixtures";
 import { recordDrawOps, type DrawOp } from "./opLog";
 
@@ -78,6 +78,28 @@ describe("the marker's size", () => {
     ));
     const marker = ops.find((op) => op.op === "text" && op["value"] === "1.");
     expect(marker?.["size"]).toBeCloseTo(listMarkerFont(line).size * PT_PER_PX, 3);
+  });
+});
+
+describe("whoever draws the block", () => {
+  it("draws the number once, even for a paragraph painter that never calls draw.lines", async () => {
+    const SilentParagraph = Extension.create({
+      name: "silentParagraph",
+      addExports() {
+        return { pdf: { nodes: { paragraph: () => {} } } };
+      },
+    });
+    const editor = new ServerEditor({ extensions: [StarterKit, SilentParagraph] });
+    const ops = await recordDrawOps(() => buildPdfWithEditor(
+      onePage([block("paragraph", [textLine("item", { font: "16px Helvetica" })], { y: 100, listMarker: "1.", listMarkerX: MARKER_X })]),
+      editor,
+    ));
+    expect(ops.filter((op) => op.op === "text" && op["value"] === "1.")).toHaveLength(1);
+  });
+
+  it("draws the number once when the painter draws its lines", async () => {
+    const ops = await markerOps("1.");
+    expect(texts(ops)).toHaveLength(1);
   });
 });
 

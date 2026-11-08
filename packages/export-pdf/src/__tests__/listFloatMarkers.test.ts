@@ -63,3 +63,27 @@ describe("an item that opens with a floating image, in the PDF", () => {
     expect(await markersDrawn(layout)).toEqual(expected);
   });
 });
+
+describe("a list inside a table cell, in the PDF", () => {
+  const inCell = (list: Json): Json[] => [{
+    type: "table",
+    attrs: { grid: [300, 300] },
+    content: [{ type: "tableRow", content: [
+      { type: "tableCell", content: [list] },
+      { type: "tableCell", content: [p("other")] },
+    ] }],
+  }];
+
+  it("draws each item's number and text", async () => {
+    const numbered = ordered(item(p("first")), item(p("second")));
+    const ops = await recordDrawOps(() => buildPdf(layoutOf(inCell(numbered)), exportEditor));
+    const texts = ops.flatMap((op) => (op.op === "text" && typeof op["value"] === "string" ? [op["value"]] : []));
+    expect(texts).toEqual(expect.arrayContaining(["1.", "first", "2.", "second"]));
+  });
+
+  it("draws a bullet as its shape", async () => {
+    const bullets: Json = { type: "bulletList", content: [item(p("point"))] };
+    const ops = await recordDrawOps(() => buildPdf(layoutOf(inCell(bullets)), exportEditor));
+    expect(ops.filter((op) => op.op === "ellipse")).toHaveLength(1);
+  });
+});
