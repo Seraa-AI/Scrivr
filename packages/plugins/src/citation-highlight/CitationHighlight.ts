@@ -1,6 +1,6 @@
 import { Plugin, PluginKey } from "@scrivr/core/pm";
 import type { EditorState, Transaction } from "@scrivr/core/pm";
-import { Extension, renderSelection } from "@scrivr/core";
+import { Extension, findNodeById, renderSelection } from "@scrivr/core";
 import type { IEditor, OverlayRenderHandler } from "@scrivr/core";
 import type { Node as PmNode } from "@scrivr/core/pm";
 import { findLiveNodeById } from "../track-changes/liveNode";
@@ -71,7 +71,9 @@ function sanitize(citations: CitationRange[], state: EditorState): CitationRange
 }
 
 function nodeCitation(doc: PmNode, nodeId: string): CitationRange | null {
-  const found = findLiveNodeById(doc, nodeId);
+  // The live copy when a move left a shadow; otherwise a block proposed for
+  // deletion, which is still on screen until someone decides it.
+  const found = findLiveNodeById(doc, nodeId) ?? findNodeById(doc, nodeId);
   if (!found) return null;
   const from = found.pos + 1;
   const to = found.pos + found.node.nodeSize - 1;

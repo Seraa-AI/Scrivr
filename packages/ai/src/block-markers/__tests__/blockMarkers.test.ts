@@ -9,6 +9,7 @@
 import { describe, it, expect } from "vitest";
 import { ServerEditor, StarterKit } from "@scrivr/core";
 import { TextSelection } from "@scrivr/core/pm";
+import { TrackChanges, TrackChangesStatus } from "@scrivr/plugins";
 // Through the package barrel: a host reaches these by name, so one dropped
 // from `index.ts` fails here rather than there.
 import {
@@ -273,5 +274,28 @@ describe("clearing a source that never wrote", () => {
     clearBlockMarkers(editor, "never-wrote");
 
     expect(blockMarkersPluginKey.getState(editor.getState())).toBe(before);
+  });
+});
+
+describe("a marker on a block with a pending move", () => {
+  it("hangs on the live copy, not the shadow the move left behind", () => {
+    const editor = new ServerEditor({
+      extensions: [StarterKit, BlockMarkers, TrackChanges.configure({ userID: "agent", initialStatus: TrackChangesStatus.enabled })],
+      content: {
+        type: "doc",
+        content: ["moved", "stays"].map((text, i) => ({
+          type: "paragraph", attrs: { nodeId: `b${i + 1}` }, content: [{ type: "text", text }],
+        })),
+      },
+    });
+    const moved = editor.getState().doc.child(0);
+    const tr = editor.getState().tr.delete(0, moved.nodeSize);
+    editor.applyTransaction(tr.insert(tr.doc.content.size, moved));
+    setBlockMarkers(editor, "review", [marker("b1")]);
+
+    const end = editor.getState().doc.content.size - 2;
+    editor.applyTransaction(editor.getState().tr.setSelection(TextSelection.create(editor.getState().doc, end)));
+
+    expect(activeBlockMarkers(editor).map((m) => m.nodeId)).toEqual(["b1"]);
   });
 });

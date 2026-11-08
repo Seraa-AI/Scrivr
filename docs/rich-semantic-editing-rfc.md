@@ -351,14 +351,13 @@ The schemas are part of the public API.
   `insert_node` / `delete_node` pair is genuinely absent, and Phase 2's ops do
   not need it.
 
-## Phase 3 — resolution and tracking boundaries (implemented 2026-10-07)
+## Phase 3 — resolution and tracking boundaries (shipped in #229)
 
 A pending move retains a deleted shadow and a live copy with the same `nodeId`.
 Core's `findNodeById` now returns the first match accepted by an optional
 predicate, and stops searching once it finds it. Core knows nothing about
-tracking. Structural AI edits build their predicate from
-`findChanges(EditorState.create({ doc }))`: a pending deletion covering the
-node's entire range excludes it. This includes empty nodes and descendants of
+tracking. `findLiveNodeById` in `@scrivr/plugins` owns the predicate for every
+consumer: a pending deletion covering the node's entire range excludes it. This includes empty nodes and descendants of
 deleted containers; testing text marks alone misses both.
 
 The ChangeSet is scanned once at structural-batch entry. Its shadow ranges are
@@ -372,18 +371,21 @@ leaf inside it, but source and destination must resolve to the same list.
 Cross-list moves are rejected before writing steps. Self moves and moves to an
 already occupied boundary are no-ops. Moves preserve the node and its identity.
 
-Integration testing also exposed a tracking replay boundary: reverse replay
-must map from each step's document into the current tracked document, including
-retained insertions. The replay now composes that bridge and mirrors the source
-step with its inverse. The inverse's end boundary excludes later insertions so
-moving a block and then inserting beside it does not swallow the second edit.
+Integration testing also exposed tracking replay boundaries — the reverse
+replay bridge, a collapsed inverse range, and tracking marks inside mark-less
+parents. Those fixes shipped with the track-changes boundaries work (#228),
+which this phase was reconciled onto; the step budget that bounded a batch went
+with it, since tracking now records a gesture of any length in full.
 
-**Auto-pairing is retained.** Content-matched deletion and insertion in one
-transaction can become a move even when emitted as separate semantic ops.
-Accepting or rejecting the move uses the existing `moveNodeId` relationship to
-resolve its shadow atomically. Identical-content independent intents may thus
-become inseparable review decisions. This is an accepted limitation; explicit
-move intent is not required by the tracking engine.
+A batch moves content once: a move or delete overlapping content the batch
+already moved is refused. Agents read one unit per id, the live copy.
+
+**Auto-pairing is retained, bounded by identity.** A deletion and an insertion
+in one transaction become a move when their content matches and, where both
+carry a `nodeId`, the ids match too — so two blocks that only read the same are
+not paired. Accepting or rejecting the move uses the existing `moveNodeId`
+relationship to resolve its shadow atomically. Explicit move intent is not
+required by the tracking engine.
 
 Verification covers both directions, either transaction-step order, atomic
 accept/reject, empty moved nodes, subsequent structural batches and same-batch
@@ -488,7 +490,7 @@ section is what is true.
 |---|---|---|
 | **1** | #133, #134, #136 | `@scrivr/ai` extracted from `@scrivr/plugins` as a hard move (D2); leaf-based `RichSemanticEdit` with `getRichBlocks` / `applyRichEdit`; zod edit protocol with `parseSemanticEdits`. #133 first grouped adjacent formatting-mark tracked changes into one, which the leaf merge depends on |
 | **2** | #209, #210, #218 | Six structural ops — `insertBlock`, `deleteBlock`, `insertListItem`, `deleteListItem`, `insertTableRow`, `deleteTableRow` — in `StructuralSemanticEditSchema`, applied by `applyStructuralEdits`; `applySemanticEdits` routes rich vs structural; formatting proposals became visible, addressable and acceptable; a finding may propose no edit at all (block markers) |
-| **3** | this PR | `moveBlock` and `moveListItem`. No new tracked representation — the engine's existing content-pairing yields one `CHANGE_OPERATION.move`. Core's `findNodeById` gained an `accept` predicate so a pending move's shadow is skipped in either direction, and three tracking replay defects the moves exposed are fixed |
+| **3** | #229 | `moveBlock` and `moveListItem`. No new tracked representation — the engine's content-and-identity pairing yields one `CHANGE_OPERATION.move`. Core's `findNodeById` gained an `accept` predicate and `findLiveNodeById` skips a pending move's shadow in either direction, for every consumer. The replay fixes the moves exposed shipped in #228 |
 | **4-5** | — | Not built. Table columns, and `CHANGE_OPERATION.insert_node` / `delete_node` |
 
 ### Where the code differs from the design above

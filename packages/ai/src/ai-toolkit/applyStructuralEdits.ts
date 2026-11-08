@@ -12,6 +12,7 @@
  */
 import { findNodeById, spansToFragment, tableColumnCount } from "@scrivr/core";
 import { findLiveNodeById, pickAgentAttrs, shadowRanges } from "@scrivr/plugins";
+import type { ShadowRange } from "@scrivr/plugins";
 import type { Node as PmNode, Schema, Transaction } from "@scrivr/core/pm";
 
 import type { SemanticBlockInput, SemanticCellInput, StructuralSemanticEdit } from "../schema/edit";
@@ -41,7 +42,7 @@ function createLiveResolver(tr: Transaction): ResolveNode {
   return (nodeId) => {
     const mapping = tr.mapping.slice(start);
     const mapped = entryShadows.map(
-      ([from, to]) => [mapping.map(from, 1), mapping.map(to, -1)] as const,
+      ([from, to]): ShadowRange => [mapping.map(from, 1), mapping.map(to, -1)],
     );
     return findLiveNodeById(tr.doc, nodeId, mapped);
   };
@@ -57,6 +58,8 @@ function resolveAncestor(
   const found = resolve(nodeId);
   if (!found) return null;
   if (found.node.type.name === typeName) return found;
+  // Only the leaf the agent sees names its container; a nested list is neither.
+  if (!found.node.isTextblock) return null;
   const $pos = doc.resolve(found.pos);
   for (let depth = $pos.depth; depth > 0; depth--) {
     if ($pos.node(depth).type.name === typeName) {
@@ -119,7 +122,7 @@ function applyOne(
   edit: StructuralSemanticEdit,
   result: StructuralEditResult,
   resolve: ResolveNode,
-  moved: Set<string>,
+  moved: Set<PmNode>,
 ): void {
   const schema = tr.doc.type.schema;
 
@@ -136,6 +139,8 @@ function applyOne(
     case "deleteBlock": {
       const target = resolveTopLevel(tr.doc, edit.nodeId, resolve);
       if (!target) return void rejectOrMiss(tr.doc, edit.nodeId, result);
+      // Deleting what this batch moved would take the move's copy and leave its shadow.
+      if (overlapsMoved(tr.doc, target, moved)) return void result.rejected.push(edit.nodeId);
       tr.delete(target.pos, target.pos + target.node.nodeSize);
       result.changed.push(edit.nodeId);
       return;
@@ -149,14 +154,14 @@ function applyOne(
       if (!target) return void rejectOrMiss(tr.doc, edit.nodeId, result);
       const anchor = resolveTarget(edit.anchorNodeId);
       if (!anchor) return void rejectOrMiss(tr.doc, edit.anchorNodeId, result);
-      // A second move of the same node in one transaction emits a second
+      // A second move of the same content in one transaction emits a second
       // overlapping delete/insert pair, which tracking pairs wrongly and
       // replays into a duplicated block. One move per node per batch.
-      if (moved.has(edit.nodeId)) return void result.rejected.push(edit.nodeId);
+      if (overlapsMoved(tr.doc, target, moved)) return void result.rejected.push(edit.nodeId);
       if (edit.op === "moveListItem") {
         const source = tr.doc.resolve(target.pos);
         const destination = tr.doc.resolve(anchor.pos);
-        if (source.depth !== destination.depth || source.start() !== destination.start()) {
+        if (!source.sameParent(destination)) {
           result.rejected.push(edit.nodeId);
           return;
         }
@@ -166,7 +171,7 @@ function applyOne(
       if (target.pos === anchor.pos || at === target.pos || at === target.pos + target.node.nodeSize) return;
       tr.delete(target.pos, target.pos + target.node.nodeSize);
       tr.insert(at > target.pos ? at - target.node.nodeSize : at, target.node);
-      moved.add(edit.nodeId);
+      moved.add(target.node);
       result.changed.push(edit.nodeId);
       return;
     }
@@ -189,6 +194,7 @@ function applyOne(
     case "deleteListItem": {
       const item = resolveAncestor(tr.doc, edit.nodeId, "listItem", resolve);
       if (!item) return void rejectOrMiss(tr.doc, edit.nodeId, result);
+      if (overlapsMoved(tr.doc, item, moved)) return void result.rejected.push(edit.nodeId);
       deleteContainerChild(tr, item);
       result.changed.push(edit.nodeId);
       return;
@@ -218,6 +224,7 @@ function applyOne(
     case "deleteTableRow": {
       const row = resolveAncestor(tr.doc, edit.nodeId, "tableRow", resolve);
       if (!row) return void rejectOrMiss(tr.doc, edit.nodeId, result);
+      if (overlapsMoved(tr.doc, row, moved)) return void result.rejected.push(edit.nodeId);
       deleteContainerChild(tr, row);
       result.changed.push(edit.nodeId);
       return;
@@ -225,7 +232,23 @@ function applyOne(
   }
 }
 
-/** An id the document holds but in the wrong shape is rejected, not "not found". */
+/**
+ * Whether the node at `target` is, holds, or sits inside one this batch already
+ * moved. Ids cannot answer it: a list item is named by its own id or by a
+ * paragraph inside it.
+ */
+function overlapsMoved(doc: PmNode, target: { node: PmNode; pos: number }, moved: Set<PmNode>): boolean {
+  const $pos = doc.resolve(target.pos);
+  for (let depth = 0; depth <= $pos.depth; depth++) if (moved.has($pos.node(depth))) return true;
+  let overlaps = moved.has(target.node);
+  target.node.descendants(node => {
+    overlaps ||= moved.has(node);
+    return !overlaps;
+  });
+  return overlaps;
+}
+
+/** An id the document still holds, in the wrong shape or only as a deleted shadow, is rejected, not "not found". */
 function rejectOrMiss(doc: PmNode, nodeId: string, result: StructuralEditResult): void {
   if (findNodeById(doc, nodeId)) result.rejected.push(nodeId);
   else result.notFound.push(nodeId);
@@ -243,7 +266,7 @@ export function applyStructuralEdits(
 ): StructuralEditResult {
   const result: StructuralEditResult = { changed: [], notFound: [], rejected: [] };
   const resolve = createLiveResolver(tr);
-  const moved = new Set<string>();
+  const moved = new Set<PmNode>();
   for (const edit of edits) applyOne(tr, edit, result, resolve, moved);
   return result;
 }

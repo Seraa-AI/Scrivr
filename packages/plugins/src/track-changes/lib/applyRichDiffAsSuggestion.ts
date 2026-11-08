@@ -46,6 +46,7 @@ import {
   type NewEmptyAttrs,
 } from "../helpers";
 import { CHANGE_STATUS } from "../types";
+import { findNodeById } from "@scrivr/core";
 import { findLiveNodeById } from "../liveNode";
 import { acceptedRangeToDocRange, type PosMapEntry } from "./acceptedTextMap";
 import { clearAuthorPendingMarks } from "./applyDiffAsSuggestion";
@@ -127,7 +128,8 @@ export function applyRichDiffAsSuggestion(
   const resolved = edits.flatMap((edit) => {
     const found = findLiveNodeById(state.doc, edit.nodeId);
     if (!found) {
-      notFound.push(edit.nodeId);
+      // Held only by content proposed for deletion: there, but not editable.
+      (findNodeById(state.doc, edit.nodeId) ? rejected : notFound).push(edit.nodeId);
       return [];
     }
     // Leaf-only: rich inline edits target a single textblock. A container

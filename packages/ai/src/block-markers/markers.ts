@@ -1,6 +1,7 @@
 /** Reading and writing the block-marker layer. */
 import type { IBaseEditor } from "@scrivr/core";
 import type { Node as PmNode } from "@scrivr/core/pm";
+import { isShadowNode, shadowRanges } from "@scrivr/plugins";
 import { blockMarkersPluginKey, BLOCK_MARKERS_SET } from "./BlockMarkersPlugin";
 import type { BlockMarker, PlacedBlockMarker } from "./types";
 
@@ -99,9 +100,11 @@ function resolveMarkers(
   for (const markers of bySource.values()) {
     for (const marker of markers) wanted.set(marker.nodeId, { node: state.doc, pos: -1 });
   }
+  // A pending move leaves a shadow carrying the same id; the marker belongs on the live copy.
+  const shadows = shadowRanges(state.doc);
   state.doc.descendants((node, pos) => {
     const id = node.attrs["nodeId"];
-    if (typeof id === "string" && wanted.get(id)?.pos === -1) wanted.set(id, { node, pos });
+    if (typeof id === "string" && wanted.get(id)?.pos === -1 && !isShadowNode(node, pos, shadows)) wanted.set(id, { node, pos });
     return true;
   });
 

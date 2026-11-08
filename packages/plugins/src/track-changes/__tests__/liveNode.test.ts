@@ -10,7 +10,10 @@ import { describe, expect, it } from "vitest";
 import { ServerEditor, StarterKit, findNodeById } from "@scrivr/core";
 import { TrackChanges } from "../TrackChanges";
 import { TrackChangesStatus } from "../types";
-import { findLiveNodeById, shadowRanges } from "../liveNode";
+// Through the package barrel, as a host imports them.
+import { findLiveNodeById, isShadowNode, shadowRanges } from "../index";
+import type { ShadowRange } from "../index";
+import { findChanges } from "../findChanges";
 
 const content = (...texts: string[]) => ({
   type: "doc",
@@ -43,8 +46,8 @@ function move(editor: ServerEditor, index: number, toEnd: boolean) {
 
 const liveOp = (editor: ServerEditor, id: string) => {
   const found = findLiveNodeById(editor.getState().doc, id);
-  const tracked = found?.node.attrs["dataTracked"] as Array<{ operation?: string }> | null;
-  return { pos: found?.pos, operation: tracked?.[0]?.operation };
+  const record = findChanges(editor.getState()).changes.find(change => change.type !== "text-change" && change.from === found?.pos);
+  return { pos: found?.pos, operation: record?.dataTracked.operation };
 };
 
 describe("findLiveNodeById", () => {
@@ -68,7 +71,7 @@ describe("findLiveNodeById", () => {
     move(editor, 0, true);
     const found = findLiveNodeById(editor.getState().doc, "");
     expect(found).not.toBeNull();
-    expect(found!.pos).toBeGreaterThan(0);
+    expect(found?.pos).toBeGreaterThan(0);
   });
 
   it("treats a block whose text is all struck through as live", () => {
@@ -79,7 +82,16 @@ describe("findLiveNodeById", () => {
     expect(findLiveNodeById(editor.getState().doc, "alpha")?.pos).toBe(0);
   });
 
-  it("costs no document walk when TrackChanges is not installed", () => {
+  it("counts a node as a shadow only when a deletion covers it whole", () => {
+    const { schema } = build(true, "x");
+    const node = schema.node("paragraph", null, schema.text("abc"));
+    const covering: ShadowRange[] = [[0, node.nodeSize]];
+    const partial: ShadowRange[] = [[1, 3]];
+    expect(isShadowNode(node, 0, covering)).toBe(true);
+    expect(isShadowNode(node, 0, partial)).toBe(false);
+  });
+
+  it("finds no shadows when TrackChanges is not installed", () => {
     const editor = build(false, "alpha", "beta");
     expect(shadowRanges(editor.getState().doc)).toEqual([]);
     expect(findLiveNodeById(editor.getState().doc, "beta")?.pos).toBe(7);

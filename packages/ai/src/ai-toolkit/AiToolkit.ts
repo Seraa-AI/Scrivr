@@ -7,12 +7,12 @@ import { toCoreSpans } from "./spans";
 import { UniqueId } from "./UniqueId";
 import { GhostText, ghostTextPluginKey } from "./GhostText";
 import { AiCaret, aiCaretPluginKey } from "./AiCaret";
-import { findLiveNodeById } from "@scrivr/plugins";
+import { findLiveNodeById, isShadowNode, shadowRanges } from "@scrivr/plugins";
 import { aiToolkitRegistry } from "./aiToolkitRegistry";
 import { applyRichDiffAsSuggestion, buildAcceptedTextMap, type RichBlockEdit } from "@scrivr/plugins";
 
 export { unitRichHash };
-import type { Schema } from "@scrivr/core/pm";
+import type { Node as PmNode, Schema } from "@scrivr/core/pm";
 import type { Command } from "@scrivr/core/pm";
 import { AiSuggestion as AiSuggestionExtension } from "../ai-suggestion/AiSuggestion";
 import { computeAiSuggestion } from "../ai-suggestion/computeAiSuggestion";
@@ -102,6 +102,33 @@ export class AiSuggestionsAPI {
  * Never instantiate directly — created by AiToolkit.onEditorReady().
  */
 /** Distinguish a whole `SemanticUnit` (has `nodeIds[]`) from a `RichBlockEdit` (has `nodeId`). */
+/**
+ * The units of the live document. A pending move leaves a shadow carrying the
+ * same ids, which the export walks like any block; an agent reads and edits the
+ * live copy, so the shadow's unit and parts are left out. Units come in
+ * document order, so the nth unit for an id is the nth copy of it.
+ */
+function liveUnits(units: SemanticUnit[], doc: PmNode): SemanticUnit[] {
+  const shadows = shadowRanges(doc);
+  if (shadows.length === 0) return units;
+  const live = new Map<string, boolean[]>();
+  doc.descendants((node, pos) => {
+    const id = node.attrs["nodeId"];
+    if (typeof id === "string") live.set(id, [...(live.get(id) ?? []), !isShadowNode(node, pos, shadows)]);
+    return true;
+  });
+  const seen = new Map<string, number>();
+  const isLive = (id: string) => {
+    const nth = seen.get(id) ?? 0;
+    seen.set(id, nth + 1);
+    return live.get(id)?.[nth] ?? true;
+  };
+  return units.flatMap((unit) => {
+    if (!isLive(unit.id)) return [];
+    return unit.parts ? [{ ...unit, parts: unit.parts.filter((part) => isLive(part.nodeId)) }] : [unit];
+  });
+}
+
 function isSemanticUnit(item: RichBlockEdit | SemanticUnit): item is SemanticUnit {
   return "nodeIds" in item && Array.isArray(item.nodeIds);
 }
@@ -319,7 +346,7 @@ export class AiToolkitAPI {
    * ai.applyRichEdit(edited);
    */
   getRichBlocks(from?: number, to?: number): SemanticUnit[] {
-    const units = toSemanticUnits(this.editor, { groupBlocks: false });
+    const units = liveUnits(toSemanticUnits(this.editor, { groupBlocks: false }), this.editor.getState().doc);
     if (from === undefined || to === undefined) return units;
     const allowed = new Set(this.getBlocks(from, to).map((b) => b.nodeId));
     return units.filter((u) => allowed.has(u.id));
@@ -351,7 +378,7 @@ export class AiToolkitAPI {
     // (which units changed) and the stale guard (did the doc move under us).
     const currentUnits = new Map<string, SemanticUnit>();
     const currentHashByNodeId = new Map<string, string>();
-    for (const u of toSemanticUnits(this.editor, { groupBlocks: false })) {
+    for (const u of liveUnits(toSemanticUnits(this.editor, { groupBlocks: false }), this.editor.getState().doc)) {
       currentUnits.set(u.id, u);
       currentHashByNodeId.set(u.id, unitRichHash(u));
       for (const part of u.parts ?? []) {
@@ -425,9 +452,10 @@ export class AiToolkitAPI {
       (tr) => this.editor.applyTransaction(tr),
       { edits: resolved, authorID },
     );
+    const unapplied = new Set([...result.notFound, ...result.rejected]);
     return {
       applied: result.applied,
-      changed,
+      changed: changed.filter((nodeId) => !unapplied.has(nodeId)),
       stale,
       notFound: [...notFound, ...result.notFound],
       rejected: result.rejected,
@@ -470,8 +498,7 @@ export class AiToolkitAPI {
       : { applied: false, changed: [], stale: [], notFound: [], rejected: [] };
     if (structural.length === 0) return richResult;
 
-    // One undo step for the structural batch. Tracking pairs moves within it;
-    // unrelated changes retain their own review decisions.
+    // One transaction: the structural batch is one undo step.
     const tr = this.editor.getState().tr;
     const structuralResult = applyStructuralEdits(tr, structural);
     const touched = tr.docChanged;
@@ -582,7 +609,7 @@ export class AiToolkitAPI {
    *   1. Cosmetic streaming → ghost text grows, AI caret pulses
    *   2. Stream ends → ghost text cleared, AI caret cleared
    *   3. Content inserted after anchor block as a real document transaction
-   *      tagged with `track-author` so TrackChanges (Phase 4) wraps it
+   *      tagged with `track-author` so TrackChanges wraps it
    *
    * @param nodeId   Anchor block to insert content after
    * @param stream   AsyncIterable of text chunks
@@ -604,7 +631,7 @@ export class AiToolkitAPI {
 
     if (!generated) return;
 
-    // Phase 3: atomic insert tagged for TrackChanges (Phase 4)
+    // Phase 3: one atomic insert, which TrackChanges records as a single change.
     const state = this.editor.getState();
     const found = findLiveNodeById(state.doc, nodeId);
     if (!found) return;
@@ -623,7 +650,7 @@ export class AiToolkitAPI {
 
     const tr = state.tr
       .insert(insertPos, newNode)
-      .setMeta("track-author", authorId)  // TrackChanges (Phase 4) reads this
+      .setMeta("track-author", authorId)  // TrackChanges reads this
       .scrollIntoView();
 
     this.editor.applyTransaction(tr);

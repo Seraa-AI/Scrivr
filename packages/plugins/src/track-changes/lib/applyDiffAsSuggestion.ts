@@ -164,6 +164,7 @@ export interface ApplyDiffResult {
 function applyBlockToTr(
   state: EditorState,
   tr: Transaction,
+  nodeId: string,
   found: ReturnType<typeof findLiveNodeById> & {},
   proposedText: string,
   authorID: string,
@@ -179,7 +180,7 @@ function applyBlockToTr(
   clearAuthorPendingMarks(tr, nodeFrom, nodeTo, authorID, schema);
 
   // Re-resolve the node after mutations (positions may have shifted).
-  const updatedFound = findLiveNodeById(tr.doc, found.node.attrs["nodeId"]);
+  const updatedFound = findLiveNodeById(tr.doc, nodeId);
   if (!updatedFound) return { applied: false, editDensity: 0, sourceChars: 0 };
 
   const { acceptedText, map } = buildAcceptedTextMap(updatedFound.node, updatedFound.pos, schema);
@@ -257,7 +258,7 @@ export function applyDiffAsSuggestion(
   if (!found) return { applied: false, editDensity: 0 };
 
   const tr = state.tr;
-  const { applied, editDensity } = applyBlockToTr(state, tr, found, proposedText, authorID);
+  const { applied, editDensity } = applyBlockToTr(state, tr, nodeId, found, proposedText, authorID);
 
   if (!applied) return { applied: false, editDensity };
 
@@ -291,7 +292,7 @@ export function applyMultiBlockDiff(
   // Resolve nodeIds → drop any blocks whose node is no longer in the doc.
   const resolved = blocks.flatMap(b => {
     const found = findLiveNodeById(state.doc, b.nodeId);
-    return found ? [{ found, proposedText: b.proposedText }] : [];
+    return found ? [{ nodeId: b.nodeId, found, proposedText: b.proposedText }] : [];
   });
 
   if (resolved.length === 0) return { applied: false, editDensity: 0 };
@@ -303,8 +304,8 @@ export function applyMultiBlockDiff(
   const density = { weighted: 0, sourceChars: 0 };
   let anyApplied = false;
 
-  for (const { found, proposedText } of resolved) {
-    const result = applyBlockToTr(state, tr, found, proposedText, authorID);
+  for (const { nodeId, found, proposedText } of resolved) {
+    const result = applyBlockToTr(state, tr, nodeId, found, proposedText, authorID);
     if (result.applied) anyApplied = true;
     density.weighted    += result.editDensity * result.sourceChars;
     density.sourceChars += result.sourceChars;

@@ -20,12 +20,11 @@ import { findChanges } from "./findChanges";
 import { CHANGE_OPERATION, CHANGE_STATUS } from "./types";
 
 /** Document ranges holding content a pending deletion covers. */
-type ShadowRange = readonly [from: number, to: number];
+export type ShadowRange = readonly [from: number, to: number];
 
 /**
  * Keyed on the document node: a ProseMirror node is immutable, so an edit
- * produces a different object and the cache misses on its own. The same
- * reasoning `LayoutCoordinator` uses for its measure cache.
+ * produces a different object and the cache misses on its own.
  */
 const shadowCache = new WeakMap<PMNode, readonly ShadowRange[]>();
 
@@ -51,7 +50,7 @@ export function shadowRanges(doc: PMNode): readonly ShadowRange[] {
             change.dataTracked.operation === CHANGE_OPERATION.delete &&
             change.dataTracked.status === CHANGE_STATUS.pending,
         )
-        .map((change) => [change.from, change.to] as const)
+        .map((change): ShadowRange => [change.from, change.to])
     : [];
 
   shadowCache.set(doc, ranges);
@@ -59,21 +58,16 @@ export function shadowRanges(doc: PMNode): readonly ShadowRange[] {
 }
 
 /** Whether a pending deletion covers this node whole. */
-export function isShadowNode(
-  doc: PMNode,
-  node: PMNode,
-  pos: number,
-  ranges: readonly ShadowRange[] = shadowRanges(doc),
-): boolean {
+export function isShadowNode(node: PMNode, pos: number, ranges: readonly ShadowRange[]): boolean {
   return ranges.some(([from, to]) => from <= pos && pos + node.nodeSize <= to);
 }
 
 /**
  * The live node this id names, skipping a pending deletion's shadow.
  *
- * `ranges` is for a caller resolving several ids against a document it is
- * editing: pass ranges mapped through its own steps, because the cache is
- * keyed on the document those ranges were read from.
+ * Pass `ranges`, mapped through your own steps, when resolving many ids against
+ * a document you are still editing: each intermediate document misses the
+ * cache and would cost a full walk.
  */
 export function findLiveNodeById(
   doc: PMNode,
@@ -81,5 +75,5 @@ export function findLiveNodeById(
   ranges?: readonly ShadowRange[],
 ): { node: PMNode; pos: number } | null {
   const shadows = ranges ?? shadowRanges(doc);
-  return findNodeById(doc, nodeId, (node, pos) => !isShadowNode(doc, node, pos, shadows));
+  return findNodeById(doc, nodeId, (node, pos) => !isShadowNode(node, pos, shadows));
 }

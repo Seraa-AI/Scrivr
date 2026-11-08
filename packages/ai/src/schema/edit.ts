@@ -70,7 +70,7 @@ export type SemanticCellInput = z.infer<typeof SemanticCellInputSchema>;
 const structuralOp = <Op extends string, Shape extends z.ZodRawShape>(op: Op, shape: Shape) =>
   z.strictObject({ kind: z.literal("structural"), op: z.literal(op), ...shape });
 
-/** Insert relative to a named neighbour — `strictObject` refuses `index`. */
+/** Placement relative to a named neighbour — `strictObject` refuses `index`. */
 const anchored = { position: EditPositionSchema, anchorNodeId: z.string().min(1) };
 
 /**
@@ -84,6 +84,7 @@ const anchored = { position: EditPositionSchema, anchorNodeId: z.string().min(1)
 export const StructuralSemanticEditSchema = z.discriminatedUnion("op", [
   structuralOp("insertBlock", { ...anchored, block: SemanticBlockInputSchema }),
   structuralOp("deleteBlock", { nodeId: z.string().min(1) }),
+  // A block of the document itself, moved once per batch.
   structuralOp("moveBlock", { ...anchored, nodeId: z.string().min(1) }),
   structuralOp("insertListItem", {
     ...anchored,
@@ -93,6 +94,7 @@ export const StructuralSemanticEditSchema = z.discriminatedUnion("op", [
     }),
   }),
   structuralOp("deleteListItem", { nodeId: z.string().min(1) }),
+  // Named by the item or its text; stays in its own list, moved once per batch.
   structuralOp("moveListItem", { ...anchored, nodeId: z.string().min(1) }),
   structuralOp("insertTableRow", { ...anchored, cells: z.array(SemanticCellInputSchema).optional() }),
   structuralOp("deleteTableRow", { nodeId: z.string().min(1) }),

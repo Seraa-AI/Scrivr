@@ -54,12 +54,16 @@ function nodeContentEquals(a: Node, b: Node): boolean {
 /** Content taken or written whole; a slice cut open is part of something else. */
 const whole = (slice: Slice) => slice.openStart === 0 && slice.openEnd === 0;
 
+/** A moved node keeps its id, so two blocks that only read the same are not one moved block. */
+const sameIdentity = (a: Node, b: Node) =>
+  !a.attrs["nodeId"] || !b.attrs["nodeId"] || a.attrs["nodeId"] === b.attrs["nodeId"];
+
 /**
  * Is `inserted` what `deleted` took away? A floating object alone in its
  * paragraph leaves with the paragraph, which holds nothing else to move.
  */
 function movedContent(inserted: Node, deleted: Node): boolean {
-  return nodeContentEquals(inserted, deleted) ||
+  return (sameIdentity(inserted, deleted) && nodeContentEquals(inserted, deleted)) ||
     (deleted.isTextblock && deleted.childCount === 1 && nodeContentEquals(inserted, deleted.firstChild!));
 }
 
@@ -281,8 +285,8 @@ export const groupMoveSteps = (
           )
         ) {
           pair(peerStep, step, insertedContent.content.firstChild);
+          matched.push(i, g);
         }
-        matched.push(i, g);
       }
     }
   }

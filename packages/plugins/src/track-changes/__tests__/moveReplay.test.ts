@@ -12,7 +12,7 @@ function build() {
     })) },
   });
 }
-const changes = (editor: ServerEditor) => trackChangesPluginKey.getState(editor.getState())!.changeSet.changes;
+const changes = (editor: ServerEditor) => trackChangesPluginKey.getState(editor.getState())?.changeSet.changes ?? [];
 
 describe("move replay coordinates", () => {
   for (const backward of [false, true]) {
@@ -20,7 +20,7 @@ describe("move replay coordinates", () => {
       it(`reviews ${backward ? "backward" : "forward"} moves with ${insertFirst ? "insert" : "delete"} first`, () => {
         const editor = build();
         const original = editor.getState().doc;
-        const node = backward ? original.lastChild! : original.firstChild!;
+        const node = backward ? original.child(original.childCount - 1) : original.child(0);
         const from = backward ? original.content.size - node.nodeSize : 0;
         const at = backward ? 0 : original.content.size;
         const tr = editor.getState().tr;
@@ -36,7 +36,7 @@ describe("move replay coordinates", () => {
         expect(() => editor.getState().doc.check()).not.toThrow();
         const moves = changes(editor).filter(c => c.dataTracked.operation === "move");
         expect(moves).toHaveLength(1);
-        editor.commands.setChangeStatuses("rejected", [moves[0]!.id]);
+        editor.commands.setChangeStatuses("rejected", moves.map(move => move.id));
         const restored = editor.getState().doc;
         expect(restored.childCount).toBe(original.childCount);
         restored.forEach((node, _pos, index) => {

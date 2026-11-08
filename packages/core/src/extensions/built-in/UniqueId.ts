@@ -19,9 +19,9 @@ export const COLLAB_SYNC_META = "scrivr:collabSync";
 export const NORMALIZATION_META = "scrivr:normalization";
 
 /**
- * Find the first node with this nodeId that satisfies the optional predicate.
- * Stops at the first accepted match; the caller defines eligibility.
- * Returns the node and its absolute ProseMirror position, or null if not found.
+ * The first node, in document order (ancestors before descendants), carrying
+ * this nodeId and passing `accept`. `accept` lets a caller skip copies it does
+ * not treat as live, such as a tracked deletion's shadow, without core knowing why.
  */
 export function findNodeById(
   doc: Node,

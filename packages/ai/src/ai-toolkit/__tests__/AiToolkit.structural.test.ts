@@ -8,7 +8,8 @@
  */
 import { describe, expect, it } from "vitest";
 import { ServerEditor, StarterKit, Table } from "@scrivr/core";
-import { TrackChanges, TrackChangesStatus, trackChangesPluginKey } from "@scrivr/plugins";
+import { reviewChanges, TrackChanges, TrackChangesStatus, trackChangesPluginKey } from "@scrivr/plugins";
+import { unitRichHash } from "@scrivr/export-semantic";
 import { AiToolkit } from "../AiToolkit";
 import { getAiToolkit } from "../aiToolkitRegistry";
 import type { SemanticEdit } from "../../schema/edit";
@@ -40,11 +41,19 @@ const changesOf = (editor: ServerEditor) =>
   trackChangesPluginKey.getState(editor.getState())?.changeSet.changes ?? [];
 const nodeOps = (editor: ServerEditor) =>
   changesOf(editor).filter((c) => c.type === "node-change").map((c) => c.dataTracked.operation);
+const ids = (editor: ServerEditor) => {
+  const out: string[] = [];
+  editor.getState().doc.forEach((node) => out.push(String(node.attrs["nodeId"])));
+  return out;
+};
 const textOf = (editor: ServerEditor) => editor.getState().doc.textBetween(0, editor.getState().doc.content.size, "\n");
 
+const directions: Array<"forward" | "backward"> = ["forward", "backward"];
+const statuses: Array<"accepted" | "rejected"> = ["accepted", "rejected"];
+
 describe("tracked moves", () => {
-  for (const direction of ["forward", "backward"] as const) {
-    for (const status of ["accepted", "rejected"] as const) {
+  for (const direction of directions) {
+    for (const status of statuses) {
       it(`${direction} block move is reviewed atomically as ${status}`, () => {
         const { editor, ai } = build([para("a", "alpha"), para("b", "beta"), para("c", "gamma")]);
         const result = ai.applySemanticEdits([{
@@ -54,7 +63,7 @@ describe("tracked moves", () => {
         expect(result.changed).toEqual([direction === "forward" ? "a" : "c"]);
         const moves = changesOf(editor).filter(c => c.dataTracked.operation === "move");
         expect(moves).toHaveLength(1);
-        editor.commands.setChangeStatuses(status, [moves[0]!.id]);
+        editor.commands.setChangeStatuses(status, moves.map(move => move.id));
         expect(textOf(editor)).toBe(status === "rejected" ? "alpha\nbeta\ngamma" : direction === "forward" ? "beta\ngamma\nalpha" : "gamma\nalpha\nbeta");
         expect(changesOf(editor)).toHaveLength(0);
         expect(() => editor.getState().doc.check()).not.toThrow();
@@ -79,9 +88,9 @@ describe("tracked moves", () => {
       expect(result.applied).toBe(true);
       const moves = changesOf(editor).filter(c => c.dataTracked.operation === "move");
       expect(moves).toHaveLength(1);
-      editor.commands.setChangeStatuses("rejected", [moves[0]!.id]);
-      expect(editor.getState().doc.firstChild!.textContent).toBe("onetwothree");
-      expect(editor.getState().doc.firstChild!.childCount).toBe(3);
+      editor.commands.setChangeStatuses("rejected", moves.map(move => move.id));
+      expect(editor.getState().doc.child(0).textContent).toBe("onetwothree");
+      expect(editor.getState().doc.child(0).childCount).toBe(3);
       expect(changesOf(editor)).toHaveLength(0);
     });
   }
@@ -151,7 +160,7 @@ describe("tracked moves", () => {
     ]);
     const moves = changesOf(editor).filter(c => c.dataTracked.operation === "move");
     expect(moves).toHaveLength(1);
-    editor.commands.setChangeStatuses("rejected", [moves[0]!.id]);
+    editor.commands.setChangeStatuses("rejected", moves.map(move => move.id));
     expect(textOf(editor)).toBe("foo\nkeep");
     expect(changesOf(editor)).toHaveLength(0);
   });
@@ -397,7 +406,7 @@ describe("structural destination contracts", () => {
       { spans: [{ text: "A", marks: [] }] }, { spans: [{ text: "B", marks: [] }] },
     ] }]);
     expect(result.rejected).toEqual([]);
-    const row = editor.getState().doc.firstChild!.child(1);
+    const row = editor.getState().doc.child(0).child(1);
     expect(row.childCount).toBe(2);
     expect(row.textContent).toBe("AB");
     expect(() => editor.getState().doc.check()).not.toThrow();
@@ -411,25 +420,25 @@ describe("structural destination contracts", () => {
     ]);
     expect(result.rejected).toEqual(["cp"]);
     expect(result.changed).toEqual(["tail"]);
-    expect(editor.getState().doc.firstChild!.childCount).toBe(1);
+    expect(editor.getState().doc.child(0).childCount).toBe(1);
     expect(textOf(editor)).toContain("valid");
   });
 
-  it.each(["accepted", "rejected"] as const)("can resolve deletion of the final list item as %s", (status) => {
+  it.each(statuses)("can resolve deletion of the final list item as %s", (status) => {
     const { editor, ai } = build([{ type: "bulletList", attrs: { nodeId: "list" }, content: [listItem("li", "p", "only")] }, para("tail", "tail")]);
     ai.applySemanticEdits([{ kind: "structural", op: "deleteListItem", nodeId: "p" }]);
     expect(changesOf(editor).some(c => c.type === "node-change" && c.node.type.name === "bulletList")).toBe(true);
     editor.commands.setChangeStatuses(status, changesOf(editor).map(c => c.id));
-    expect(editor.getState().doc.firstChild!.type.name).toBe(status === "accepted" ? "paragraph" : "bulletList");
+    expect(editor.getState().doc.child(0).type.name).toBe(status === "accepted" ? "paragraph" : "bulletList");
     expect(editor.getState().doc.textContent).toBe(status === "accepted" ? "tail" : "onlytail");
     expect(() => editor.getState().doc.check()).not.toThrow();
   });
 
-  it.each(["accepted", "rejected"] as const)("can resolve deletion of the final table row as %s", (status) => {
+  it.each(statuses)("can resolve deletion of the final table row as %s", (status) => {
     const { editor, ai } = build([{ type: "table", attrs: { nodeId: "t", grid: [100] }, content: [{ type: "tableRow", attrs: { nodeId: "r" }, content: [cell("c", "cp", "one")] }] }, para("tail", "tail")]);
     ai.applySemanticEdits([{ kind: "structural", op: "deleteTableRow", nodeId: "cp" }]);
     editor.commands.setChangeStatuses(status, changesOf(editor).map(c => c.id));
-    expect(editor.getState().doc.firstChild!.type.name).toBe(status === "accepted" ? "paragraph" : "table");
+    expect(editor.getState().doc.child(0).type.name).toBe(status === "accepted" ? "paragraph" : "table");
     expect(editor.getState().doc.textContent).toBe(status === "accepted" ? "tail" : "onetail");
   });
 });
@@ -441,7 +450,7 @@ describe("resolving an id while a move is pending", () => {
    * first match writes into the shadow for a move in one direction — the edit
    * reports success and then evaporates when the move is accepted.
    */
-  for (const direction of ["forward", "backward"] as const) {
+  for (const direction of directions) {
     it(`a rich edit after a ${direction} move lands on the live copy`, () => {
       const { editor, ai } = build([para("a", "alpha"), para("b", "beta"), para("c", "gamma")]);
       const nodeId = direction === "forward" ? "a" : "c";
@@ -462,6 +471,125 @@ describe("resolving an id while a move is pending", () => {
 });
 
 describe("what one batch can ask of tracking", () => {
+  it("refuses a second move of one list item named by another of its ids", () => {
+    // The item, or a paragraph inside it, names the same item.
+    const { editor, ai } = build([{ type: "bulletList", content: [
+      listItem("i1", "p1", "one"), listItem("i2", "p2", "two"), listItem("i3", "p3", "three"),
+    ] }]);
+    const result = ai.applySemanticEdits([
+      { kind: "structural", op: "moveListItem", nodeId: "p1", anchorNodeId: "p3", position: "after" },
+      { kind: "structural", op: "moveListItem", nodeId: "i1", anchorNodeId: "p2", position: "before" },
+    ]);
+
+    expect(result.changed).toEqual(["p1"]);
+    expect(result.rejected).toEqual(["i1"]);
+    editor.commands.setChangeStatuses("accepted", changesOf(editor).map((c) => c.id));
+    expect(textOf(editor).trimEnd()).toBe("two\nthree\none");
+  });
+
+  it("refuses a move inside a block this batch already moved", () => {
+    const { editor, ai } = build([
+      { type: "bulletList", attrs: { nodeId: "list" }, content: [listItem("i1", "p1", "one"), listItem("i2", "p2", "two")] },
+      para("after", "after"),
+    ]);
+    const result = ai.applySemanticEdits([
+      { kind: "structural", op: "moveBlock", nodeId: "list", anchorNodeId: "after", position: "after" },
+      { kind: "structural", op: "moveListItem", nodeId: "p1", anchorNodeId: "p2", position: "after" },
+    ]);
+
+    expect(result.changed).toEqual(["list"]);
+    expect(result.rejected).toEqual(["p1"]);
+    editor.commands.setChangeStatuses("accepted", changesOf(editor).map((c) => c.id));
+    expect(textOf(editor).trimEnd()).toBe("after\none\ntwo");
+  });
+
+  it("keeps a move whole when an insertion comes before it in the batch", () => {
+    const { editor, ai } = build([para("a", "alpha"), para("b", "beta"), para("c", "gamma")]);
+    ai.applySemanticEdits([
+      { kind: "structural", op: "insertBlock", anchorNodeId: "b", position: "after", block: { type: "paragraph", spans: [{ text: "new", marks: [] }] } },
+      { kind: "structural", op: "moveBlock", nodeId: "a", anchorNodeId: "c", position: "after" },
+    ]);
+
+    expect(changesOf(editor).filter(c => c.dataTracked.operation === "move")).toHaveLength(1);
+    editor.commands.setChangeStatuses("rejected", changesOf(editor).map((c) => c.id));
+    expect(textOf(editor)).toBe("alpha\nbeta\ngamma");
+  });
+
+  it("pairs each move with its own block when two blocks read the same", () => {
+    const { editor, ai } = build([para("a", "same"), para("b", "same"), para("c", "end")]);
+    ai.applySemanticEdits([
+      { kind: "structural", op: "moveBlock", nodeId: "a", anchorNodeId: "c", position: "after" },
+      { kind: "structural", op: "moveBlock", nodeId: "b", anchorNodeId: "c", position: "after" },
+    ]);
+    const moves = changesOf(editor).filter(c => c.dataTracked.operation === "move");
+    expect(moves).toHaveLength(2);
+
+    for (const move of moves) {
+      const outcome = reviewChanges(editor, { accepted: [], rejected: [move.id] });
+      expect(outcome.status).toBe("applied");
+    }
+    expect(ids(editor)).toEqual(["a", "b", "c"]);
+  });
+
+  it("keeps a deleted empty block apart from a moved empty block", () => {
+    const empty = (nodeId: string) => ({ type: "paragraph", attrs: { nodeId } });
+    const { editor, ai } = build([empty("x"), para("a", "alpha"), empty("e"), para("c", "gamma")]);
+    ai.applySemanticEdits([
+      { kind: "structural", op: "deleteBlock", nodeId: "x" },
+      { kind: "structural", op: "moveBlock", nodeId: "e", anchorNodeId: "c", position: "after" },
+    ]);
+
+    editor.commands.setChangeStatuses("rejected", changesOf(editor).map((c) => c.id));
+    expect(ids(editor)).toEqual(["x", "a", "e", "c"]);
+  });
+
+  it("refuses to delete a block this batch already moved", () => {
+    const { editor, ai } = build([para("a", "alpha"), para("b", "beta")]);
+    const result = ai.applySemanticEdits([
+      { kind: "structural", op: "moveBlock", nodeId: "a", anchorNodeId: "b", position: "after" },
+      { kind: "structural", op: "deleteBlock", nodeId: "a" },
+    ]);
+
+    expect(result.changed).toEqual(["a"]);
+    expect(result.rejected).toEqual(["a"]);
+  });
+
+  for (const direction of directions) {
+    it(`shows an agent one block after a ${direction} move, and takes a guarded edit to it`, () => {
+      const { editor, ai } = build([para("a", "alpha"), para("b", "beta"), para("c", "gamma")]);
+      const moved = direction === "forward" ? "a" : "c";
+      ai.applySemanticEdits([direction === "forward"
+        ? { kind: "structural", op: "moveBlock", nodeId: "a", anchorNodeId: "c", position: "after" }
+        : { kind: "structural", op: "moveBlock", nodeId: "c", anchorNodeId: "a", position: "before" }]);
+
+      const units = ai.getRichBlocks().filter((unit) => unit.id === moved);
+      expect(units.map((unit) => unit.text)).toEqual([direction === "forward" ? "alpha" : "gamma"]);
+      const [unit] = units;
+      if (!unit) throw new Error("no unit for the moved block");
+      const result = ai.applySemanticEdits([{ kind: "richText", nodeId: moved, expectedContentHash: unitRichHash(unit), spans: [{ text: "NEW", marks: [] }] }]);
+      expect(result.stale).toEqual([]);
+      expect(result.applied).toBe(true);
+    });
+  }
+
+  it("rejects a rich edit to a block proposed for deletion, rather than calling it both changed and missing", () => {
+    const { ai } = build([para("a", "alpha"), para("b", "beta")]);
+    ai.applySemanticEdits([{ kind: "structural", op: "deleteBlock", nodeId: "b" }]);
+    const result = ai.applySemanticEdits([{ kind: "richText", nodeId: "b", spans: [{ text: "NEW", marks: [] }] }]);
+
+    expect(result).toMatchObject({ applied: false, changed: [], notFound: [], rejected: ["b"] });
+  });
+
+  it("refuses a list item op named by a nested list, which is neither the item nor its text", () => {
+    const { ai } = build([{ type: "bulletList", content: [
+      { type: "listItem", attrs: { nodeId: "i1" }, content: [para("p1", "one"), { type: "bulletList", attrs: { nodeId: "N" }, content: [listItem("n1", "q1", "n-one")] }] },
+      listItem("i2", "p2", "two"),
+    ] }]);
+    const result = ai.applySemanticEdits([{ kind: "structural", op: "moveListItem", nodeId: "N", anchorNodeId: "p2", position: "after" }]);
+
+    expect(result).toMatchObject({ changed: [], rejected: ["N"] });
+  });
+
   it("refuses a second move of the same node in one batch", () => {
     // Two overlapping delete/insert pairs for one node are paired wrongly by
     // tracking and replay into a duplicate carrying a duplicate nodeId.
@@ -481,7 +609,7 @@ describe("what one batch can ask of tracking", () => {
     expect(ids).toHaveLength(1);
   });
 
-  it("applies a long reorder in full, however many steps it takes", () => {
+  it("a twelve-move reorder accepts and rejects in full", () => {
     const blocks = Array.from({ length: 14 }, (_, i) => para(`p${i}`, `t${i}`));
     const { editor, ai } = build(blocks);
     const original = textOf(editor);
