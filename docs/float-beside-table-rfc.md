@@ -15,11 +15,20 @@ Approved by the user on 2026-11-08.
    table's run of rows on the float's page. It is never narrowed.
 2. **Rows never wrap separately.** Word's per-row mode exists only behind the
    `layoutTableRowsApart` compatibility flag, which we do not model.
-3. **Backward anchors.** A table *above* the float's anchor moves like any other
-   table. If moving it would carry the anchor paragraph onto the next page, the
-   table stays put and the float overlaps it. The rule is deterministic,
-   converges within the existing settle cap, and the float never leaves its
-   anchor's page. See [Backward anchors](#backward-anchors).
+3. **Backward anchors.** A table *above* a float's anchor moves only if the
+   move holds: the anchor stays on its page **and** the float, re-placed at the
+   anchor's new position, clears the table. Otherwise the table stays put and
+   the float overlaps it. Every float a move drags is re-placed from its new
+   anchor; no float is left off its anchor or its anchor's page. The rule is
+   deterministic and converges within the existing settle cap. See
+   [Backward anchors](#backward-anchors).
+
+   *Approved by the user on 2026-11-08 over the earlier wording* ("a table
+   above the anchor moves like any other table; it stays only if moving it
+   would carry the anchor onto the next page"). The earlier wording lets a
+   free float chase the table down the page until the settle cap, leaving a
+   placement off its anchor; the stricter rule decides the chase's end state
+   in one step.
 4. **Re-anchoring on drop is out of scope.** Dragging a float keeps its anchor
    and changes `yOffset`, which matches Word with a locked anchor.
 
@@ -187,11 +196,15 @@ the skip at `PageLayout.ts:931` becomes a branch:
    (`PageLayout.ts:1537`) and early termination never treats it as a stable
    trigger (`PageLayout.ts:1790`). Then `restampGlobalYFrom(flows, start + 1,
    …)` (`PageLayout.ts:502`) carries every following row and block down.
-5. **Continue the scan from the fragment start.** The loop at
-   `PageLayout.ts:924` visits flows in order and re-reads `globalY` on each
-   visit, so the moved rows are re-tested at their new y. The existing
-   `if (flowY >= zoneBottom) break;` (`PageLayout.ts:927`) ends the scan once
-   the table has cleared the zone.
+5. **Continue the scan after the table, to the page bottom.** The moved rows
+   cleared every rect on the page as one band, so they need no re-test; the
+   scan resumes after the table's last row on this page. It no longer stops at
+   the current zone's bottom: growing a block or moving a table restamps every
+   flow after it, so the scan runs to the page bottom and re-lays (or moves)
+   any flow that touches *any* exclusion on the page, or was wrapped on this
+   page before. A text flow restamps what follows only when its own end moved,
+   because a restamp re-derives later flows from their predecessors and drops
+   any push they carry.
 
 The row does **not** get `overlapsWrapZone`. That flag tells
 `normalizeWrappedBlockForPage` (`PageLayout.ts:2101`) to re-break the block's
@@ -213,29 +226,29 @@ follows the anchor. Taken step by step that is a chase:
   it and the next settle pass finds nothing to do.
 
 Running the chase inside the settle loop would not converge within
-`MAX_ANCHOR_SETTLE_PASSES` (`PageLayout.ts:627`) and would leave a placement
-that disagrees with its anchor. So the reflow evaluates the rule's end state in
-one step instead. For a table fragment that precedes the anchor flow, it
-tentatively moves the table, restamps, and accepts the move only if:
+`MAX_ANCHOR_SETTLE_PASSES` and would leave a placement that disagrees with its
+anchor. So the reflow evaluates the rule's end state in one step instead. It
+tentatively moves the table, restamps, and keeps the move only if, for every
+float already placed whose anchor follows the table and whose zone reaches
+back over it:
 
-1. the anchor flow is still on the float's page, and
+1. the anchor stays on its page, and
 2. the float, re-placed at the anchor's new y, no longer intersects the moved
    table.
 
-Otherwise the tentative flows are discarded: the table stays at its natural
-y and the float overlaps it. A table after the anchor cannot move the anchor,
-so the check never applies to it.
+Otherwise the tentative flows are discarded: the table stays and the floats
+overlap it. A float whose zone does not reach the table is simply dragged.
 
-This is deterministic, needs no extra settle pass in the "stays" case, and
-one in the "moves" case (the anchor moved, so the float is re-placed once and
-then finds the table clear). The float never leaves its anchor's page because
-the move that would take the anchor elsewhere is refused.
+A kept move shifts the anchors of every float after the table, not only the
+one being resolved. The settle loop therefore re-places **every** placed float
+whose anchor moved, carves its zone again, and reflows the union of the band
+it left and the new one, until no anchor moves or the cap is reached.
 
-The reflow needs two inputs for this: the anchor flow's index, and a way to
-ask where the float's band would be for a given anchor y.
-`resolveAnchoredObjects` already has both (`i`, and the `placeAt` closure plus
-the zone band computation), and passes them in. These are new parameters on a
-private function, not a new concept.
+The reflow gets the list of placed floats (`PlacedFloat`: anchor flow index,
+whether it wraps, its placement, and how to place it again and compute its
+zone). That record is new; it is the per-float state the settle loop already
+held in local variables, lifted so that a move can ask any float where it
+would land.
 
 ### The one extension: `ExclusionManager.getNextFreeY` (changed in place)
 
@@ -384,6 +397,14 @@ contentWidth`.
 | 17 | Pagination feedback: add content above the anchor paragraph until it crosses onto the next page | The float is on the anchor's page; the table is below the float on that page; a second layout of the same document gives identical blocks and placements |
 | 18 | Page-break guard: table row taller than a page under a float | Layout terminates; the row is placed once |
 | 19 | Tail cache: edit that moves the float off the table, laid out with the previous layout | The table returns to its no-float y, equal to a fresh layout of the edited document |
+| 20 | A later float grows the text above a table that an earlier float moved | No row overlaps either float |
+| 21 | A later float's push restamps a second table into an earlier float's band | No row of either table overlaps either float |
+| 22 | Same, with a paragraph instead of the second table | Every line beside the earlier float ends left of it |
+| 23 | A float between the table and a pinned float's anchor | It stays on its paragraph after the table moves |
+| 24 | A pinned float after a free float that reaches back over the table | Both floats stay on their anchors; the table stays at its no-float y |
+| 25 | A move would carry a pinned float's anchor onto the next page | The table stays; anchor and float stay on page 1 |
+| 26 | A table split across pages under a float | Only its rows on the float's page move; page 2 starts at the content top |
+| 27 | A later float re-wraps text without changing its height | A stacked float keeps its push and its anchor |
 
 ## Slices
 
@@ -447,10 +468,9 @@ its natural y. Add that as a second half of scenario 1.
 `restampGlobalYFrom` recomputes `globalY` from each predecessor and does not
 know a flow was pushed. If a later float on the same page reflows text above
 the table so that it *shrinks*, the restamp can pull the table back up into the
-earlier float's band. The table is re-tested against the page's whole manager
-only if it lies inside the later float's zone. Scenario 10 covers the stacked
-case; if it fails, the fix is to re-test table fragments against the page's
-manager after each restamp, still inside this function.
+earlier float's band. This happened (review, 2026-11-08): scenario 10 did not
+build the case. The fix is step 5 as now written — the scan runs to the page
+bottom against the page's whole manager — and scenarios 20–22 and 27 cover it.
 
 ## Known gaps
 
@@ -474,9 +494,11 @@ manager after each restamp, still inside this function.
   today. When narrower tables land, step 1's test becomes "the table's own x
   range intersects a rect" instead of "any content width is taken", which is
   the same seam.
-- **Pageless.** Floats carve no wrap zone in pageless mode (non-positive
-  content height clamps the band), so neither text nor tables wrap there.
-  Pinned by scenario 16.
+- **Pageless.** Floats carve no wrap zone in pageless mode. The cause predates
+  this work: a pageless page's `contentBottom` is `pageHeight` (0), so its
+  content height is negative (`layout/PageMetrics.ts:255-260`) and every zone
+  band clamps to nothing. Text does not wrap around floats there either. A
+  separate todo; pinned by scenario 16.
 - **`layoutTableRowsApart`** (§14.8.3.24). Per-row wrapping is not modelled;
   the compat flag is ignored on import (Decision 2).
 - **`allowOverlap`** (§20.4.2.3). Object-to-object overlap is not modelled;
@@ -496,29 +518,46 @@ section is what is true.
 
 | Slice | Landed | What it changed |
 |---|---|---|
-| A | `feat/float-beside-table` (`8912e48`, `b5ee210`) | `getNextFreeY(page, y, height, contentX, contentWidth)` changed in place; the `tableRow` skip in `reflowFlowsAgainstExclusions` became `moveTableClearOfExclusions`. Scenarios 1, 2, 3b, 7, 8, 10, 11 and 19 (add) flipped red → green. |
-| B | `feat/float-beside-table` (`6ea4cbd`) | `anchorKeepsFloatClear` decides the backward-anchor rule in one step; the zone band became `zoneOf(placement)` so the reflow can ask where a re-placed float would sit. Scenarios 9, 12b, 13, 14 and 17 flipped red → green against `main`; 12 is green on `main` (no table ever moved), went red with Slice A alone, and is green with B. |
+| A | `feat/float-beside-table` (`8912e48`, `b5ee210`) | `getNextFreeY(page, y, height, contentX, contentWidth)` changed in place; the `tableRow` skip in `reflowFlowsAgainstExclusions` became `moveTableClearOfExclusions`. Scenarios 1, 2, 3b, 7, 8, 9, 10, 11, 12b, 13, 14, 17 and 19 (float added on incremental layout) flipped red → green against `main`. Scenario 12 went from green (on `main` no table ever moved) to red. |
+| B | `feat/float-beside-table` (`6ea4cbd`) | The backward-anchor check decides the chase's end state in one step; the zone band became `zoneOf(placement)` so the reflow can ask where a re-placed float would sit. Turned scenario 12 back to green. |
+| Review | `feat/float-beside-table` (`b0d1a21`) | The reflow scans to the page bottom against the whole page's manager and restamps only when a block's end moved; the settle loop re-places every float whose anchor moved; the backward check covers every placed float that reaches back over the table; the table's run stops at the page in both directions. Scenarios 20, 21, 22, 23, 24 and 27 flipped red → green against the Slice B code. |
 
 Where this differs from the design above:
 
-- **Pageless is a known gap, not a scenario that passes.** A pageless page
-  reports a non-positive content height, so `zoneOf` clamps every float's band
-  to nothing and floats wrap neither text nor tables there. That is older than
-  this work. Scenario 16 pins today's behaviour (the table stays put) so that
-  fixing pageless wrap flips it.
+- **Step 1 uses `getNextFreeY`, not `getAvailableSegments`.** One call both
+  answers "is the table blocked" (the result differs from its top) and gives
+  the clear y, against every rect on the page.
+- **Step 5 was rewritten after review.** As first shipped, the scan resumed
+  after the table without re-testing what the move restamped, and stopped at
+  the current float's zone; a restamped table, paragraph or stacked float could
+  land under an earlier float (scenarios 20–22, 27). Step 5 above is what ships.
+- **Decision 3 was tightened and approved** (see Decisions): the rule checks
+  every dragged float that reaches back over the table, not only the float
+  being resolved. In scenario 24 a pinned float would have moved the table and
+  dragged a free float off its anchor; the move is refused instead and both
+  floats overlap the table.
+- **Pageless is a known gap, not a scenario that passes.** See Known gaps.
+  Scenario 16 pins today's behaviour (the table stays put) so that fixing
+  pageless wrap flips it.
 - **Scenario 3 was already green.** A top-bottom float anchored in the
   paragraph above a table pushes that paragraph's own line below the float, so
   the table followed. Scenario 3b, a top-bottom float pulled down over the
   table's rows, is the one that was red.
-- **Scenarios 4, 5, 6, 15, 16 and 18 are regression guards.** They were green
-  before and stay green: `behind`/`front` and floats in the margin or above the
-  table never move it, a float in a cell is still not placed, and a row taller
-  than a page under a float is placed once.
+- **Guards that were never red on `main`:** scenarios 4, 5, 6, 15, 16 and 18;
+  scenario 19 "moved off" and "same document"; scenario 26 (a split table moves
+  only its rows on the float's page — the band past the page bottom meets no
+  rect, so stopping the walk at the page changes no output); scenario 25 (the
+  page-crossing clause — red only with that clause deleted, which is how it was
+  checked); and the `ExclusionManager` test "ignores a rect outside the content
+  width and on other pages".
+- **Scenario 27 was red before this work too.** Re-laying a paragraph always
+  restamped what followed, which dropped a stacked float's push; restamping
+  only when the block's end moves fixes it.
 - **Hit-testing is asserted through `cellAtCoords`.** The CharacterMap path
   for cell glyphs (via `posAtCoords`) reads the same `block.y` but is not driven
   end to end by these scenarios.
 - **The scenarios live in `layout/FloatBesideTable.test.ts`**, not
   `PageLayout.test.ts`, so this change does not collide with the list work in
   the same area.
-- **Restamp from a later float** (Risks) did not appear: scenario 10, with two
-  floats on one page, passes without re-testing tables after each restamp.
+- **`ExclusionManager.getNextFreeY` is public.** Its signature and behaviour
+  change is named in the changeset.
