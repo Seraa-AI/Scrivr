@@ -208,6 +208,11 @@ export interface DocxContext {
   readonly editor: IBaseEditor;
   /** Resolved export options — never undefined inside a handler. */
   readonly options: DocxResolvedOptions;
+  /**
+   * Width of the exported section's text column, in twips. A handler that
+   * indents a table sizes it to fit what is left of the column.
+   */
+  readonly textWidthTwips: number;
 
   styles: {
     paragraph: { getOrCreate(name: string, spec: DocxStyleSpec): string };

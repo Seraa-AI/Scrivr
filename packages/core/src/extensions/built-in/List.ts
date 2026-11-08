@@ -93,23 +93,49 @@ function numbered(p: XmlNode, numId: number, ilvl: number): XmlNode {
   return p.name === "w:p" ? withProperty(p, "w:pPr", numPrOf(numId, ilvl), PPR_ORDER) : p;
 }
 
+/** A table's preferred width as a fraction of the text column, scaled to fit beside `indent`. */
+function narrowedTableWidth(tblPr: XmlNode, indent: number, textWidth: number): XmlNode {
+  const children = (tblPr.children ?? []).map((child) => {
+    if (typeof child === "string" || child.name !== "w:tblW" || child.attributes?.["w:type"] !== "pct") return child;
+    const pct = Number(child.attributes["w:w"]);
+    if (!Number.isFinite(pct)) return child;
+    const fitted = Math.max(0, Math.round((pct * (textWidth - indent)) / textWidth));
+    return xml("w:tblW", { ...child.attributes, "w:w": String(fitted) });
+  });
+  return xml(tblPr.name, tblPr.attributes, children);
+}
+
 /**
  * An item's blocks after its first sit at the level's text indent: a
  * paragraph as Word's unnumbered continuation paragraph, a table indented by
- * `w:tblInd`. One that already has a number or an indent belongs to a deeper
- * item, whose handler placed it.
+ * `w:tblInd` and narrowed to fit beside it — Word measures a percentage
+ * `w:tblW` against the whole text column, so an indented table at 100% would
+ * run into the right margin — and a content control's blocks the same way.
+ * One that already has a number or an indent belongs to a deeper item, whose
+ * handler placed it.
  */
-function indentToItemText(block: XmlNode, ilvl: number): XmlNode {
-  const left = String(pxToTwips(listLevel(ilvl).textIndent));
+function indentToItemText(block: XmlNode, ilvl: number, textWidth: number): XmlNode {
+  const indent = pxToTwips(listLevel(ilvl).textIndent);
   if (block.name === "w:p") {
     const pPr = childNamed(block, "w:pPr");
     if (pPr && (childNamed(pPr, "w:numPr") || childNamed(pPr, "w:ind"))) return block;
-    return withProperty(block, "w:pPr", xml("w:ind", { "w:left": left }), PPR_ORDER);
+    return withProperty(block, "w:pPr", xml("w:ind", { "w:left": String(indent) }), PPR_ORDER);
   }
   if (block.name === "w:tbl") {
     const tblPr = childNamed(block, "w:tblPr");
     if (tblPr && childNamed(tblPr, "w:tblInd")) return block;
-    return withProperty(block, "w:tblPr", xml("w:tblInd", { "w:w": left, "w:type": "dxa" }), TBLPR_ORDER);
+    const indented = withProperty(block, "w:tblPr", xml("w:tblInd", { "w:w": String(indent), "w:type": "dxa" }), TBLPR_ORDER);
+    return xml(indented.name, indented.attributes, (indented.children ?? []).map((child) =>
+      typeof child !== "string" && child.name === "w:tblPr" ? narrowedTableWidth(child, indent, textWidth) : child,
+    ));
+  }
+  if (block.name === "w:sdt") {
+    return xml(block.name, block.attributes, (block.children ?? []).map((child) =>
+      typeof child !== "string" && child.name === "w:sdtContent"
+        ? xml(child.name, child.attributes, (child.children ?? []).map((inner) =>
+            typeof inner === "string" ? inner : indentToItemText(inner, ilvl, textWidth)))
+        : child,
+    ));
   }
   return block;
 }
@@ -395,7 +421,7 @@ export const List = Extension.create({
       const info = ctx.shared.get<Map<PmNode, ListItemDocxInfo>>(LIST_ITEMS_KEY)?.get(node);
       if (!info || children.length === 0) return children;
       return children.map((child, i) =>
-        i === 0 ? numbered(child, info.numId, info.ilvl) : indentToItemText(child, info.ilvl),
+        i === 0 ? numbered(child, info.numId, info.ilvl) : indentToItemText(child, info.ilvl, ctx.textWidthTwips),
       );
     };
 
@@ -443,7 +469,8 @@ export const List = Extension.create({
           /^(\d+)\.\s$/,
           orderedList,
           (match) => ({ order: +match[1]! }),
-          (match, node) => node.childCount + (node.attrs["order"] as number) === +match[1]!,
+          // Joins the list before it when the typed number is the one it would show next.
+          (match, node) => listStart(node) + node.childCount === Number(match[1]),
         ),
       );
     }

@@ -658,6 +658,41 @@ describe("list levels match what the editor draws", () => {
     expect(order).toEqual(schemaOrder.filter((name) => order.includes(name)));
   });
 
+  it("fits a table in an item inside the margins: its width and indent add up to the text column", async () => {
+    const editor = new ServerEditor({ extensions: [StarterKit.configure({ table: true })] });
+    const cell = (text: string): Json => ({ type: "tableCell", content: [p(text)] });
+    const table: Json = { type: "table", attrs: { grid: [120, 120] }, content: [{ type: "tableRow", content: [cell("a"), cell("b")] }] };
+    editor.setContent({ type: "doc", content: [list("bulletList", item("one", list("bulletList", { type: "listItem", content: [p("two"), table] })))] });
+    const document = readZip(await exportDocxBytes(editor))["word/document.xml"] ?? "";
+    editor.destroy();
+
+    const attr = (element: string, name: string) => Number(element.match(new RegExp(`${name}="(-?\\d+)"`))?.[1]);
+    const pgSz = document.match(/<w:pgSz [^>]*\/>/)?.[0] ?? "";
+    const pgMar = document.match(/<w:pgMar [^>]*\/>/)?.[0] ?? "";
+    const textWidth = attr(pgSz, "w:w") - attr(pgMar, "w:left") - attr(pgMar, "w:right");
+    const tblW = document.match(/<w:tblW [^>]*\/>/)?.[0] ?? "";
+    const tblInd = document.match(/<w:tblInd [^>]*\/>/)?.[0] ?? "";
+    expect(tblW).toContain('w:type="pct"');
+    const tableWidth = (attr(tblW, "w:w") / 5000) * textWidth;
+    expect(attr(tblInd, "w:w")).toBe(1440);
+    expect(tableWidth + attr(tblInd, "w:w")).toBeLessThanOrEqual(textWidth + 2);
+    expect(tableWidth + attr(tblInd, "w:w")).toBeGreaterThan(textWidth - 10);
+  });
+
+  it("indents a sourced block inside an item to the item's text", async () => {
+    const editor = new ServerEditor({
+      extensions: [StarterKit, SourcedBlockExtension],
+      content: { type: "doc", content: [list("orderedList", { type: "listItem", content: [p("first"), {
+        type: "sourcedBlock",
+        attrs: { instanceId: "src_1", kind: "clause", resourceId: "r1", versionId: "v1", baseHash: "abc123", baseNormalizer: 1 },
+        content: [p("quoted")],
+      }] })] },
+    });
+    const document = readZip(await exportDocxBytes(editor))["word/document.xml"] ?? "";
+    editor.destroy();
+    expect(paragraphWith(document, "quoted")).toContain('<w:ind w:left="720"/>');
+  });
+
   it.each([
     ["holds nothing else", []],
     ["is followed by a table", [{ type: "table", attrs: { grid: [120] }, content: [{ type: "tableRow", content: [{ type: "tableCell", content: [p("cell")] }] }] }]],

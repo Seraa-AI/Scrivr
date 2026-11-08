@@ -16,6 +16,7 @@
 
 import { xml, serializeXml } from "./xml";
 import type { DocxPackage, XmlNode } from "./context";
+import { PAGE_HEIGHT_TWIPS, PAGE_MARGIN_TWIPS, PAGE_WIDTH_TWIPS } from "./section";
 import type {
   DocxBuildState,
   NumberingEntry,
@@ -155,14 +156,14 @@ export function buildDocumentRoot(body: XmlNode[]): XmlNode {
 }
 
 function defaultSectionProperties(): XmlNode {
-  // US Letter at 1in margins. 1 inch = 1440 twentieths of a point.
+  const margin = String(PAGE_MARGIN_TWIPS);
   return xml("w:sectPr", undefined, [
-    xml("w:pgSz", { "w:w": "12240", "w:h": "15840" }),
+    xml("w:pgSz", { "w:w": String(PAGE_WIDTH_TWIPS), "w:h": String(PAGE_HEIGHT_TWIPS) }),
     xml("w:pgMar", {
-      "w:top": "1440",
-      "w:right": "1440",
-      "w:bottom": "1440",
-      "w:left": "1440",
+      "w:top": margin,
+      "w:right": margin,
+      "w:bottom": margin,
+      "w:left": margin,
       "w:header": "720",
       "w:footer": "720",
       "w:gutter": "0",

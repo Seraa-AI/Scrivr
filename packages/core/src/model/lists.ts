@@ -1,4 +1,4 @@
-import type { Node, NodeType } from "prosemirror-model";
+import type { ContentMatch, Node, NodeType } from "prosemirror-model";
 
 export type ListKind = "bullet" | "ordered";
 export type BulletShape = "disc" | "circle" | "square";
@@ -58,10 +58,28 @@ export function listLevel(depth: number): ListLevelStyle {
   };
 }
 
-/** A list container: a node whose items are list items. */
+/**
+ * A list container: a node whose content allows list items and nothing else.
+ * Every child its content expression can take, at any point, is a `listItem`.
+ */
 export function isListType(type: NodeType): boolean {
   const listItem = type.schema.nodes["listItem"];
-  return listItem !== undefined && type.contentMatch.defaultType === listItem;
+  if (!listItem) return false;
+  const seen = new Set<ContentMatch>([type.contentMatch]);
+  const pending = [type.contentMatch];
+  let allowsItem = false;
+  for (let match = pending.pop(); match; match = pending.pop()) {
+    for (let i = 0; i < match.edgeCount; i++) {
+      const { type: child, next } = match.edge(i);
+      if (child !== listItem) return false;
+      allowsItem = true;
+      if (!seen.has(next)) {
+        seen.add(next);
+        pending.push(next);
+      }
+    }
+  }
+  return allowsItem;
 }
 
 /**

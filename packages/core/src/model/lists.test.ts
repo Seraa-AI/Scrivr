@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { buildStarterKitContext } from "../test-utils";
+import { Extension } from "../extensions/Extension";
+import { ExtensionManager } from "../extensions/ExtensionManager";
+import { StarterKit } from "../extensions/StarterKit";
 import * as lists from "./lists";
 import * as core from "../index";
 import type { BulletBox, BulletShape, ListMarkerFont } from "../index";
@@ -16,6 +19,24 @@ describe("what is a list", () => {
     };
     expect(["bulletList", "orderedList"].map(isList)).toEqual([true, true]);
     expect(["listItem", "paragraph", "doc"].map(isList)).toEqual([false, false, false]);
+  });
+
+  it("holds only list items: a node that mixes them with paragraphs is not a list", () => {
+    const Mixed = Extension.create({
+      name: "mixedList",
+      addNodes() {
+        return {
+          mixedList: { group: "block", content: "(listItem | paragraph)+", toDOM: () => ["ul", 0] },
+          itemList: { group: "block", content: "listItem+", toDOM: () => ["ul", 0] },
+        };
+      },
+    });
+    const custom = new ExtensionManager([StarterKit, Mixed]).schema;
+    const isList = (name: string) => {
+      const type = custom.nodes[name];
+      return type !== undefined && lists.isListType(type);
+    };
+    expect([isList("mixedList"), isList("itemList")]).toEqual([false, true]);
   });
 
   it("names its kind", () => {
