@@ -423,7 +423,6 @@ export function createDrawHelpers(
 
   function drawLines(block: LayoutBlock, ctx: PdfNodeContext): void {
     const page = getPage();
-    const themeListMarker = parseCssColor(theme.listMarker);
     const themeDefaultText = parseCssColor(theme.defaultText);
 
     let lineY = block.y;
