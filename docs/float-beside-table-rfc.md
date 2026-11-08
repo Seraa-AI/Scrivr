@@ -689,9 +689,8 @@ Where this differs from the design above:
   another page than its anchor 0 / 2 / 4 / 0 / 0. Square floats overlapping
   41 / 40 / 36 / 28 / 28. Stacked below another (by design, Decision 5) 3 / 1 /
   0 / 60 / 59. Scaling unchanged: N=160 `yOffset -40` 17 ms, N=1000 108 ms.
-- **Residual after locking.** 8 documents still have text under a float.
-  At least one (seed 103) is a float whose anchor crossed onto the next page,
-  where its new page's text was not re-laid around it; a locked float can also
-  sit well above its anchor when its own wrap pushed a long paragraph (seed
-  103, about 200 px). Both are left open for review.
-
+- **Residual after locking.** 8 documents still have text under a float
+  (seeds 50, 103, 130, 153, 161, 190, 274, 379), not yet diagnosed. In seed
+  103 the text is on page 2 under a float clamped to that page's top, and a
+  locked float sits about 200 px above its anchor because its own wrap pushed
+  a long paragraph. Left open for review.
