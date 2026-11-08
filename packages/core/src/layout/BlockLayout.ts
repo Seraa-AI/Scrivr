@@ -63,7 +63,7 @@ export function resolveLeafBlockDimensions(
  * Discriminator for the variety of block this LayoutBlock represents.
  *
  *   - `"text"`     — block contributes textual lines that drive rendering and
- *                    cursor placement (paragraph, heading, list_item, codeBlock).
+ *                    cursor placement (paragraph, heading, codeBlock).
  *                    `lines` is non-empty (anchor-only paragraphs hold a single
  *                    hidden line — still "text").
  *   - `"leaf"`     — block has no inline content and contributes no lines
@@ -715,7 +715,7 @@ export function layoutBlock(
     blockType: node.type.name,
     align: resolvedAlign,
     availableWidth,
-    // listMarker and listMarkerX are set by layoutDocument for list items
+    // listMarker and listMarkerX are set by pagination for a list item's first block
   };
 }
 
