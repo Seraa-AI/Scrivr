@@ -3,8 +3,7 @@ import type { EditorState } from "prosemirror-state";
 import type { DocumentLayout, LayoutFragment } from "../layout/PageLayout";
 import { setupCanvas, clearCanvas, watchDpr } from "./canvas";
 import { renderPage } from "./PageRenderer";
-import { drawBlock } from "./PageRenderer";
-import { drawListMarker } from "../layout/listMarkers";
+import { paintBlock } from "./paintBlock";
 import {
   clearOverlay,
   paintSelectionPrimitives,
@@ -181,7 +180,7 @@ export function routePageClick(
  *
  * The two modes differ in exactly two places:
  *   - `visualYToDocY` / `docYToVisualY` — coordinate mapping
- *   - `paintContent` — paged calls renderPage(); pageless calls drawBlock() with translate
+ *   - `paintContent` — paged calls renderPage(); pageless calls paintBlock() with translate
  */
 export class TileManager {
   private readonly tilesContainer: HTMLDivElement;
@@ -617,46 +616,28 @@ export class TileManager {
 
     let lineIndexOffset = 0;
     for (const frag of fragments) {
-      // A list marker is drawn the same whatever painter draws the block.
-      drawListMarker(ctx, frag.block, theme);
-      const strategy = this.editor.blockRegistry?.get(frag.block.blockType);
-      if (strategy) {
-        lineIndexOffset = strategy.render(
-          frag.block,
-          {
-            ctx,
-            pageNumber: 1,
-            lineIndexOffset,
-            dpr,
-            measurer: this.editor.measurer,
-            theme,
-            ...(this.editor.blockRegistry
-              ? { blockRegistry: this.editor.blockRegistry }
-              : {}),
-            ...(this.editor.markDecorators
-              ? { markDecorators: this.editor.markDecorators }
-              : {}),
-            ...(this.editor.inlineRegistry
-              ? { inlineRegistry: this.editor.inlineRegistry }
-              : {}),
-            ...(layout.fontResolutions ? { fontResolutions: layout.fontResolutions } : {}),
-          },
-          this.editor.charMap,
-        );
-      } else {
-        lineIndexOffset = drawBlock(
+      lineIndexOffset = paintBlock(
+        frag.block,
+        {
           ctx,
-          frag.block,
-          this.editor.measurer,
-          this.editor.charMap,
-          1,
+          pageNumber: 1,
           lineIndexOffset,
+          dpr,
+          measurer: this.editor.measurer,
           theme,
-          this.editor.markDecorators,
-          this.editor.inlineRegistry,
-          layout.fontResolutions,
-        );
-      }
+          ...(this.editor.blockRegistry
+            ? { blockRegistry: this.editor.blockRegistry }
+            : {}),
+          ...(this.editor.markDecorators
+            ? { markDecorators: this.editor.markDecorators }
+            : {}),
+          ...(this.editor.inlineRegistry
+            ? { inlineRegistry: this.editor.inlineRegistry }
+            : {}),
+          ...(layout.fontResolutions ? { fontResolutions: layout.fontResolutions } : {}),
+        },
+        this.editor.charMap,
+      );
     }
 
     ctx.restore();

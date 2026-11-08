@@ -1,7 +1,7 @@
 import type { BlockStrategy, BlockRenderContext } from "../layout/BlockRegistry";
 import type { LayoutBlock, CellSubBlock } from "../layout/BlockLayout";
 import type { CharacterMap } from "../layout/CharacterMap";
-import { drawBlock } from "./PageRenderer";
+import { paintBlock } from "./paintBlock";
 
 /**
  * Renders a `kind: "tableRow"` block: paints each cell's border (and optional
@@ -68,8 +68,7 @@ function paintRowGrid(
 
 export const TableRowStrategy: BlockStrategy = {
   render(block: LayoutBlock, renderCtx: BlockRenderContext, map: CharacterMap): number {
-    const { ctx, pageNumber, measurer, theme, markDecorators, blockRegistry, inlineRegistry, fontResolutions } =
-      renderCtx;
+    const { ctx } = renderCtx;
     let lineIndexOffset = renderCtx.lineIndexOffset;
     const cells = block.cells ?? [];
 
@@ -79,27 +78,7 @@ export const TableRowStrategy: BlockStrategy = {
       // Paint each child block at its absolute y (block.y + relative offsets).
       for (const child of cell.blocks) {
         const absoluteChild: LayoutBlock = { ...child, y: block.y + child.y };
-        const strategy = blockRegistry?.get(absoluteChild.blockType);
-        if (strategy) {
-          lineIndexOffset = strategy.render(
-            absoluteChild,
-            { ...renderCtx, lineIndexOffset },
-            map,
-          );
-        } else {
-          lineIndexOffset = drawBlock(
-            ctx,
-            absoluteChild,
-            measurer,
-            map,
-            pageNumber,
-            lineIndexOffset,
-            theme,
-            markDecorators,
-            inlineRegistry,
-            fontResolutions,
-          );
-        }
+        lineIndexOffset = paintBlock(absoluteChild, { ...renderCtx, lineIndexOffset }, map);
       }
     }
 

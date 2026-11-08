@@ -4,11 +4,11 @@
  * Each band runs its own mini-layout with margins.top set to the band's
  * actual Y position on the page. This produces blocks at the correct
  * page-space coordinates — same coordinate system as the body, so
- * drawBlock, charMap, coordsAtPos, and posAtCoords all work identically.
+ * paintBlock, charMap, coordsAtPos, and posAtCoords all work identically.
  */
 
 import {
-  drawBlock,
+  paintBlock,
   runMiniPipeline,
   CharacterMap,
   type EditorSurface,
@@ -136,30 +136,22 @@ function drawBlocksWithOffset(
 
   let lineIndexOffset = 0;
   for (const block of blocks) {
-    const strategy = blockRegistry?.get(block.blockType);
-    if (strategy) {
-      lineIndexOffset = strategy.render(
-        block,
-        {
-          ctx,
-          pageNumber,
-          lineIndexOffset,
-          dpr: 1,
-          measurer,
-          theme,
-          ...(markDecorators ? { markDecorators } : {}),
-          ...(inlineRegistry ? { inlineRegistry } : {}),
-          ...(fontResolutions ? { fontResolutions } : {}),
-        },
-        THROWAWAY_CHARMAP,
-      );
-    } else {
-      lineIndexOffset = drawBlock(
-        ctx, block, measurer, THROWAWAY_CHARMAP,
-        pageNumber, lineIndexOffset, theme, markDecorators,
-        inlineRegistry, fontResolutions,
-      );
-    }
+    lineIndexOffset = paintBlock(
+      block,
+      {
+        ctx,
+        pageNumber,
+        lineIndexOffset,
+        dpr: 1,
+        measurer,
+        theme,
+        ...(blockRegistry ? { blockRegistry } : {}),
+        ...(markDecorators ? { markDecorators } : {}),
+        ...(inlineRegistry ? { inlineRegistry } : {}),
+        ...(fontResolutions ? { fontResolutions } : {}),
+      },
+      THROWAWAY_CHARMAP,
+    );
   }
 
   ctx.restore();
@@ -171,36 +163,26 @@ function drawBlocks(
   layout: DocumentLayout,
   charMap: CharacterMap,
 ): void {
-  const { ctx, measurer, markDecorators, blockRegistry, inlineRegistry, pageNumber, theme, fontResolutions } =
-    paintCtx;
+  const { ctx, measurer, markDecorators, blockRegistry, inlineRegistry, pageNumber, theme } = paintCtx;
   const page = layout.pages[0];
   if (!page) return;
 
   let lineIndexOffset = 0;
   for (const block of page.blocks) {
-    // Use block strategy when available — handles inline images, custom nodes.
-    // Falls back to raw drawBlock for basic text rendering.
-    const strategy = blockRegistry?.get(block.blockType);
-    if (strategy) {
-      lineIndexOffset = strategy.render(
-        block,
-        {
-          ctx,
-          pageNumber,
-          lineIndexOffset,
-          dpr: 1,
-          measurer,
-          theme,
-          ...(markDecorators ? { markDecorators } : {}),
-          ...(inlineRegistry ? { inlineRegistry } : {}),
-        },
-        charMap,
-      );
-    } else {
-      lineIndexOffset = drawBlock(
-        ctx, block, measurer, charMap,
-        pageNumber, lineIndexOffset, theme, markDecorators,
-      );
-    }
+    lineIndexOffset = paintBlock(
+      block,
+      {
+        ctx,
+        pageNumber,
+        lineIndexOffset,
+        dpr: 1,
+        measurer,
+        theme,
+        ...(blockRegistry ? { blockRegistry } : {}),
+        ...(markDecorators ? { markDecorators } : {}),
+        ...(inlineRegistry ? { inlineRegistry } : {}),
+      },
+      charMap,
+    );
   }
 }
