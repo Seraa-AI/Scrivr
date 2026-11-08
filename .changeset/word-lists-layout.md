@@ -27,9 +27,12 @@ Lists lay out, print and export like Word's.
 - **Lists inside table cells are drawn.** A list in a cell (pasting one
   there makes one) used to lay out as one empty line, its text never painted
   on canvas or in PDF. A cell now lays out its blocks as the page body does:
-  numbered, nested and indented, and a table nested in a cell shows its rows.
+  numbered, nested, indented and spaced, the number kept inside even a narrow
+  cell, and a table nested in a cell shows its rows and its bottom border.
   A block that holds other blocks but is not a list or a table — a custom
-  container, say — lays out the blocks it holds instead of one empty line.
+  container, say — lays out the blocks it holds instead of one empty line,
+  unless its node spec declares `layout: { kind: "block" }`, which keeps its
+  own box and the painter it registered.
 - **No block is indented past an inch from the right margin.** Any block's
   indent — a deeply nested list, or a paragraph's own `indent` — leaves at
   least an inch of the line for its text.

@@ -490,7 +490,7 @@ section is what is true.
 |---|---|---|
 | **L1** | `feat/word-lists` (not yet merged) | `model/lists.ts` owns what a list is (`isListType`, `listKind`, `listStart`), the nine levels (`listLevel`) and markers (`listMarker`, `bulletShape`, `bulletBox`); `layout/listMarkers.ts` owns the marker's face (`listMarkerFont`) and its painting (`drawListMarker`); `renderer/paintBlock.ts` paints every block with its marker. The six call sites ask them. `collectLayoutItems` lays out every block of an item at its level's indent, with the number on the item's first block. D5 geometry, with Word's tab rule for a number that reaches its text. Bullets drawn as shapes on canvas and in PDF, in the face of the item's first text. DOCX export brought forward from L3: nine levels with the drawn formats, glyphs and indents, continuation paragraphs, tables and sourced blocks indented to the item's text, and properties in schema order. Scenarios 1, 2 (drawn), 4, 6 and 7 (screen), 8, 9 green; scenario 5's continuation block is drawn |
 | **L2** | — | Not built |
-| **L3** | — | Not built. Its export half is a `numId` per list and `start` (`w:startOverride`): until then every ordered list shares one `numId`, so separate lists continue each other's numbering in Word, and `order` is not exported |
+| **L3** | — | Not built. Its export half is a `numId` per list and `start` (`w:startOverride`): until then every ordered list shares one `numId`, so separate lists — including short lists in separate table cells, where independent lists are most common — continue each other's numbering in Word, and `order` is not exported |
 
 ### Decisions taken while building L1
 
@@ -598,17 +598,32 @@ section is what is true.
   child out with `layoutBlock` directly: the list became one empty line and its
   text was never painted, on canvas or in PDF (already so on `main`). The body
   and every cell now collect their blocks through one walk
-  (`layout/layoutItems.ts`: `collectChildItems`) and measure them through
-  `layoutBlockWithMarker`, so a list in a cell is numbered, nested and indented
-  as in the body, and a table nested in a cell lays out its rows. DOCX already
-  numbered lists in cells.
+  (`layout/layoutItems.ts`: `collectChildItems`) and take the same fully
+  resolved item (`resolveItem`: fitted indent, marker placement, the item's
+  own style), so a list in a cell is numbered, nested, indented and spaced as
+  in the body, and a table nested in a cell lays out its rows and closes with
+  its last row's border. DOCX already numbered lists in cells.
+- **In a narrow cell the number stays inside the cell.** A cell an inch or
+  so wide leaves no room for a list's indent, so the indent shrinks to fit;
+  the marker's hanging shrinks with it, so the number never sits over the
+  previous column's grid line, and a number that then reaches the text pushes
+  it to the next stop as anywhere else. Our DOCX keeps the number inside the
+  cell too. How Word places a number whose hanging indent does not fit a
+  cell is not documented and could not be checked here; this keeps it inside
+  the box Word draws for the cell.
+- **Known gaps in cells, not lists' own:** a cell adds its blocks' margins
+  together where the body collapses them (already so on `main`), and a cell
+  of a table nested in a cell cannot be selected, because cell hit-testing
+  (`cellAtCoords`) looks only at top-level rows.
 - **A block that holds blocks is laid out through its blocks.** A container
   that is neither a list nor a table — such as a custom `(listItem |
   paragraph)+` node, no longer a list since `isListType` tightened — has no
   lines of its own, so its blocks are laid out in its place, as a transparent
-  node's are; before, it painted as one empty line. A transparent or
-  container first block of an item passes the item's number to its own first
-  block only.
+  node's are; before, it painted as one empty line. A node that declares
+  `layout: { kind: "block" }` explicitly keeps its own box and the painter it
+  registered, as the `NodeLayout` contract promises; only an undeclared
+  container is laid out in place. A transparent or container first block of
+  an item passes the item's number to its own first block only.
 - **DOCX paragraph and table properties are written in schema order.** One
   ordered insert per properties element (`CT_PPrBase` / `CT_PPr`,
   `CT_TblPrBase` / `CT_TblPr`) places `w:numPr`, `w:ind` and `w:tblInd`.
@@ -631,7 +646,11 @@ section is what is true.
   for its number", and the PDF position test in `listFloatMarkers.test.ts`).
   `rebreakWrappedLinesWithoutExclusions` drops the same settings when a wrapped
   block moves page; probing could not reach it with a list item, because the
-  float travels with its anchor onto the item's page. The fix gives these
+  float travels with its anchor onto the item's page. The fix is a single
+  `layoutBlockWithMarker` call in place of `layoutBlock` in
+  `reflowFlowsAgainstExclusions` (which keeps it through W1's rewrite), and
+  the same settings forwarded in `rebreakWrappedLinesWithoutExclusions`; it
+  gives these
   settings one owner on the measured entry and forwards them on every
   re-break path. It waits for W1, which rewrites
   `reflowFlowsAgainstExclusions`, to land on `main`. **L1 does not merge until
