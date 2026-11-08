@@ -419,35 +419,33 @@ listed here; L1 indents it — see What shipped.)
 
 | PR | Contents | Scenarios | Gate |
 |---|---|---|---|
-| **L1** | `model/lists.ts` (`isListType`, `listKind`, level table, `listMarker`); the six call sites switch; `collectLayoutItems` recursion; left-aligned markers with overflow; PDF marker shapes | 1, 2 (drawn), 4, 6, 7, 8, 9 | Core and plugins suites green; PDF op-log baseline diff reviewed (lists move, nothing else) |
+| **L1** | `model/lists.ts` (`isListType`, `listKind`, levels, `listMarker`); the six call sites switch; `collectLayoutItems` recursion; left-aligned markers and Word's tab rule for wide numbers; marker shapes on canvas and in PDF; DOCX levels, continuation indents and schema order (brought forward from L3) | 1, 2 (drawn), 4, 6, 7, 8, 9, and 10's levels and continuation indents | Core, plugins, PDF and DOCX suites green; incremental and streamed layout agree with a fresh layout |
 | **L2** | `deleteAndMergeSplitNodes` gap classification; Tab refusal at level 8 and first-item consumption | 2 (keys), 3, 5, 13, 14, 15 | `trackedGestures` contract holds for the new rows |
-| **L3** | `numbering.getOrCreate` `instance` / `start`, abstract/num split, 9 levels, continuation indent; import per-level kind, start, resumed `order`, continuation, `numId` 0; paste `aria-level` and markdown | 6, 7, 10, 11, 12 | Fidelity report: list counts change only where intended; round trip of the 13 list fixtures |
+| **L3** | `numbering.getOrCreate` `instance` / `start` and the abstract/num split, so separate lists restart in Word; import per-level kind, start, resumed `order`, continuation, `numId` 0; paste `aria-level` and markdown | 6 and 7 (DOCX), 10 (round trip), 11, 12 | Fidelity report: list counts change only where intended; round trip of the 13 list fixtures |
 
 L1 first: everything else is invisible until it lands. L2 next, because its
-scenarios need nested items drawn. L3 last; it is the largest and touches
-`packages/docx` and `List.ts`, which W3's block revisions also touch, so W3's
-PR B follows it or merges it in.
+scenarios need nested items drawn. L3 last; it touches `packages/docx` and
+`List.ts`, which W3's block revisions also touch, so W3's PR B follows it or
+merges it in.
 
-W1 also edits `PageLayout.ts` (`reflowFlowsAgainstExclusions`, a different
-function). L1 starts after W1 merges, by merging `main`.
+W1 also edits `PageLayout.ts` (`reflowFlowsAgainstExclusions`). L1 carries one
+fix in that function, the wide number's first-line push on the float re-break
+paths; it waits for W1 to land on `main` and is made in the merged code.
 
 ## Risks
 
-- **Every existing list moves.** D5 shifts level-0 text from 24px to 48px. PDF
-  op-log baselines change for every fixture with a list; the diff is reviewed,
-  not regenerated blind.
-- **Incremental layout.** The resumable-layout snapshot caches `LayoutItem`s
-  (`PageLayout.ts:1205`).
-  More items per list, and blocks that were never items, must invalidate and
-  resume correctly; covered by running the existing resumable-layout tests
-  with nested fixtures.
+- **Every existing list moves.** D5 shifts level-0 text from 24px to 48px.
+  The PDF op-log baselines are built from hand-written layouts and do not
+  move; the change shows on screen, in PDF and in DOCX.
+- **Incremental and streamed layout.** A list marker is part of what a cached
+  measurement describes, and streamed chunks replay a waiting marker. Both are
+  covered by tests that compare against a fresh layout in one pass, including
+  edits made through the editor's own keys.
 - **Content that was invisible becomes visible.** Documents edited since nested
   lists stopped drawing may hold nested items or continuation blocks the author
   never saw. That is correct, and it may surprise.
-- **Overflowing markers.** The first-line push for wide markers uses the
-  `textIndent` path, which offsets the first segment's `x`
-  (`BlockLayout.ts:532`). Beside a float the first segment may not be where the
-  marker is, which may need care.
+- **Wide numbers beside a float.** The first-line push is lost on the paths
+  that re-break lines against a float; see "Not shipped yet" below.
 - **Google Docs clipboard shape** is undocumented and changes. The captured
   fixture pins one version.
 - **Word's paragraph-mark rule.** In Word, the paragraph that survives a join
@@ -459,13 +457,17 @@ function). L1 starts after W1 merges, by merging `main`.
 ## Release
 
 - **This RFC:** no changeset. Docs only.
-- **L1:** `patch` for `@scrivr/core` (new exports `isListType`, `listKind`,
-  `LIST_LEVELS`, `listMarker`; list geometry changes), `@scrivr/plugins` and
-  `@scrivr/export-semantic` (import the predicate from core), `@scrivr/export-pdf`
-  (marker shapes).
+- **L1:** `patch` for `@scrivr/core`, `@scrivr/plugins` and
+  `@scrivr/export-semantic` (the list predicate moves to core),
+  `@scrivr/export-pdf` (marker shapes and face) and `@scrivr/docx` (numbering
+  levels). Public changes: `isListType`, `bulletShape`, `bulletBox`,
+  `listMarkerFont` and their types are new; `ListItemStrategy` is removed;
+  `LayoutBlock.listMarkerX` is now the marker's left edge;
+  `BlockLayoutOptions.firstLineOffset` and the two `DocxNumberingLevel`
+  formats and indents are new.
 - **L2:** `patch` for `@scrivr/plugins` and `@scrivr/core`.
 - **L3:** `patch` for `@scrivr/core` (`getOrCreate` options, import model
-  `start`, numbering level formats) and `@scrivr/docx`.
+  `start`) and `@scrivr/docx`.
 
 ## What shipped
 
@@ -474,9 +476,9 @@ section is what is true.
 
 | PR | Landed | What it changed |
 |---|---|---|
-| **L1** | `feat/word-lists` (not yet merged) | `model/lists.ts` owns what a list is (`isListType`, `listKind`, `listStart`), the nine levels (`listLevel`) and markers (`listMarker`, `bulletShape`, `bulletBox`, `listMarkerFont`); the six call sites ask it. `collectLayoutItems` lays out every block of an item at its level's indent; the marker goes on the item's first visible line. D5 geometry, with Word's push of a wide number's first line to the next tab stop. Bullets drawn as shapes on canvas and in PDF. DOCX export brought forward from L3: nine levels with the drawn formats, glyphs and indents, and continuation paragraphs. Scenarios 1, 2 (drawn), 4, 6 and 7 (screen), 8, 9 green; scenario 5's continuation block is drawn |
+| **L1** | `feat/word-lists` (not yet merged) | `model/lists.ts` owns what a list is (`isListType`, `listKind`, `listStart`), the nine levels (`listLevel`) and markers (`listMarker`, `bulletShape`, `bulletBox`); `layout/listMarkers.ts` owns the marker's face (`listMarkerFont`) and its painting (`drawListMarker`). The six call sites ask them. `collectLayoutItems` lays out every block of an item at its level's indent; the marker goes on the item's first visible line. D5 geometry, with Word's tab rule for a number that reaches its text. Bullets drawn as shapes on canvas and in PDF, in the face layout measured. DOCX export brought forward from L3: nine levels with the drawn formats, glyphs and indents, continuation paragraphs and tables indented to the item's text, and properties in schema order. Scenarios 1, 2 (drawn), 4, 6 and 7 (screen), 8, 9 green; scenario 5's continuation block is drawn |
 | **L2** | — | Not built |
-| **L3** | — | Not built. Its export half is now only a `numId` per list and `start` (`w:startOverride`); the per-level formats, nine levels and continuation `w:ind` shipped in L1 |
+| **L3** | — | Not built. Its export half is a `numId` per list and `start` (`w:startOverride`): until then every ordered list shares one `numId`, so separate lists continue each other's numbering in Word, and `order` is not exported |
 
 ### Where the code differs from the design above
 
@@ -485,48 +487,78 @@ section is what is true.
   `ListLevel`. Its `ordered.text` is gone (the marker text is
   `listMarker`'s, and DOCX writes `%n.`), and so is `hanging`: every level
   hangs by the one constant `LIST_MARKER_HANGING`. `listLevel(depth)` builds a
-  level from the depth instead of indexing a table, so nothing outside can
-  change it. `@scrivr/core` exports only `isListType`, `bulletShape`,
-  `bulletBox` (with its `BulletBox` type) and `listMarkerFont`, the pieces
+  level from the depth instead of indexing a table, and its parts are frozen,
+  so nothing outside can change it. `@scrivr/core` exports only `isListType`,
+  `bulletShape`, `bulletBox`, `listMarkerFont` and their types, the pieces
   another package reads.
+- **A wide number follows Word's tab rule, not "overflow less a gap".** §3
+  pushed the text when the number came within 4px of it. Word follows the
+  number with a tab: `w:suff` (ECMA-376 Part 1 §17.9, `ST_LevelSuffix`
+  `tab | space | nothing`) is "assumed to be tab" when omitted, and "this tab
+  will follow normal tab stop rules". So the text moves only when the number
+  reaches it, and then to the next default half-inch stop past the number; a
+  paragraph's own first-line indent counts once. With no stop left on the
+  line, the text follows the number and keeps a quarter inch of the line.
 - **No new `LayoutBlock` field for the bullet shape.** §4 proposed carrying the
   shape beside `listMarker`. The shape is a function of the glyph, which comes
   only from the level table, so canvas and PDF both read it with
   `bulletShape(listMarker)`. A marker that is not one of the table's glyphs is
   drawn as text, as before.
-- **The canvas draws bullets as shapes too**, not glyphs. Both surfaces draw
-  from `bulletBox` at the size `listMarkerFont` gives, so screen and PDF match
-  whatever font the line uses.
+- **Markers are painted whatever painter draws the block.** The canvas draws
+  a block's marker before its strategy runs (page and pageless renderers), as
+  the PDF draws it in `drawLines`; a block that carries a marker keeps its own
+  `blockType`. `ListItemStrategy`, which existed only to draw markers on
+  blocks relabelled `list_item`, is removed. Bullets are shapes on both
+  surfaces, drawn from `bulletBox` at the size `listMarkerFont` gives; numbers
+  are drawn in the face and resolution `listMarkerFont` returns, so the PDF
+  draws them in the face layout measured.
 - **NEW: `LayoutItem.listItemPos`.** Whether a block shows a line is known
-  only after it is measured, so the flow stage needs to know which blocks share
-  an item to hand a marker from a float-only first block to the item's next
-  block. A streamed chunk that starts part-way through an item replays the
-  hand-off over the item's earlier blocks.
+  only after it is measured, so the flow stage needs to know which blocks (and
+  page breaks) share an item to hand a marker from a float-only first block to
+  the item's next block. A streamed chunk that starts part-way through an item
+  replays the hand-off over the item's earlier blocks, across page breaks.
 - **NEW: `MeasureCacheEntry.listMarker` and `BlockLayoutOptions.firstLineOffset`.**
-  A marker draws on its block and can move its first line, so it is part of
-  what a cached measurement describes: a renumbered item is a cache miss.
-  Without it, incremental layout reused blocks from the previous layout with
-  their old numbers (Tab, Shift-Tab and joins showed stale or duplicate
-  numbers while the PDF, laid out fresh, did not). `firstLineOffset` adds to a
-  node's own `textIndent` for a wide number.
-- **A list's start is kept within 0–32767.** The schema's `ST_DecimalNumber`
+  A marker draws on its block and can move its first line, so the marker and
+  its indent are part of what a cached measurement describes: a renumbered
+  item, or one whose indent a page-size change moved, is a cache miss. Without
+  it, incremental layout reused blocks from the previous layout with their old
+  numbers (Tab, Shift-Tab and joins showed stale or duplicate numbers while the
+  PDF, laid out fresh, did not). The editor shows this from its second edit
+  on: the first edit stamps every block with its id, which replaces every node
+  once and so hides the stale tail. The tests type a word first, then press the
+  keys. `firstLineOffset` adds to a node's own `textIndent` for a wide number.
+- **A list's start is kept within 0–32767**, in layout, copied HTML and
+  markdown alike (all read `listStart`). The schema's `ST_DecimalNumber`
   allows any integer, and no published Word limit for `w:start` was found.
   32767 is Word's documented cap for the nearest equivalent, the line-numbering
   start (MS-OI29500, Part 1 §17.6.8). Without a cap, a pasted or synced
   `start=2147483647` built a marker 82 million characters long.
-- **An indent never leaves less than an inch of text.** At depth 8 the text
-  indent is 4.5in, more than an A5 page's text width. Word's behaviour when an
-  indent exceeds the text width is not documented, and Word cannot be run here
-  to see it. Layout bounds every block's indent at the content width less one
-  inch, list or not; deeper levels on a narrow page share that edge.
-- **A table in a list item is indented with the item.** Its columns keep
-  their grid widths, so a table as wide as the page runs past the right margin
-  by the indent, as it does in Word.
-- **PDF op-log baselines did not move.** The baselines are built from
-  hand-written layouts, not from the layout pipeline, so the geometry change
-  does not reach them. `listMarkers.test.ts` covers the PDF markers, and the op
-  recorder now records `drawEllipse`.
+- **Any block's indent leaves at least an inch of text.** At depth 8 a list's
+  text indent is 4.5in, more than an A5 page's text width, and a paragraph's
+  own `indent` can exceed the page too. Word's behaviour when an indent exceeds
+  the text width is not documented, and Word cannot be run here to see it.
+  Layout bounds every block's indent at the content width less one inch, list
+  or not; deeper levels on a narrow page share that edge.
+- **A table in a list item is indented with the item**, on screen and in DOCX
+  (`w:tblInd`). Its columns keep their grid widths, so a table as wide as the
+  page runs past the right margin by the indent, as it does in Word.
+- **DOCX paragraph and table properties are written in schema order.** One
+  ordered insert per properties element (`CT_PPrBase` / `CT_PPr`,
+  `CT_TblPrBase` / `CT_TblPr`) places `w:numPr`, `w:ind` and `w:tblInd`.
 - **The nested-list streaming check lives with the list tests.**
   `listLayout.test.ts` lays nested lists out in chunks of 1, 2, 3 and 5 blocks
   and requires the same result as one pass, rather than adding fixtures to the
   general streaming tests in `PageLayout.test.ts`.
+
+### Not shipped yet
+
+- **Wide numbers beside a float.** `reflowFlowsAgainstExclusions` and
+  `rebreakWrappedLinesWithoutExclusions` re-break lines without the first-line
+  push, so beside a float, or after a wrapped block moves page, a pushed number
+  is drawn over its first word. The fix gives the push one owner on the
+  measured entry and forwards it on every re-break path; it waits for W1, which
+  rewrites `reflowFlowsAgainstExclusions`, to land on `main`.
+- **A float-only first block.** Word draws the number on the anchor
+  paragraph's line, and our DOCX puts `numPr` there; layout hands the marker to
+  the item's next block, and drops it when that block is a table row or a
+  nested list. The intended behaviour is with the user.
