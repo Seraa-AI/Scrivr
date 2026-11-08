@@ -609,7 +609,7 @@ Where this differs from the design above:
   under a float anchored after it (Decision 3 overlap) 129 / 82 / 73 / 74;
   float off anchor 92 / 115 / 43 / 1; float on another page than its anchor
   0 / 2 / 4 / 0; square floats overlapping 41 / 40 / 36 / 28; text under a
-  float 63 / 83 / 14 / 44. 41 of the 44 text-under documents hit the settle
+  float 63 / 83 / 14 / 44. In an instrumented run, 41 of 43 text-under documents hit the settle
   cap (no fixed point): the cap now ends with placements on their anchors,
   where round 2 ended with text consistent but floats off their anchors.
 - **Review 2 scaling:** every paragraph with a `yOffset -40` float, N=160:
