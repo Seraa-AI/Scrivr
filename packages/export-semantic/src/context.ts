@@ -1,15 +1,14 @@
-import { describeInlineMark } from "@scrivr/core";
+import { describeInlineMark, stableStringify } from "@scrivr/core";
 import type {
   IBaseEditor,
   InlineMark,
   InlineSpan,
   SemanticChange,
-  SemanticMarkHandler,
   SemanticRun,
   UnitCtx,
 } from "@scrivr/core";
 import type { Mark as PmMark, Node as PmNode } from "@scrivr/core/pm";
-import type { NodeChanges } from "./collectHandlers";
+import type { ResolvedHandlers } from "./collectHandlers";
 
 /**
  * Attrs excluded from `attrsOf` — not user styling. Identity/level bookkeeping
@@ -48,18 +47,6 @@ function physicalColumns(table: PmNode): number {
   return max;
 }
 
-/**
- * Formatting marks on a run — every mark EXCEPT those the semantic seam handles
- * (i.e. tracked changes, surfaced separately in `changes`). Order is the node's
- * mark order, so spans are deterministic.
- */
-function formattingMarks(
-  marks: readonly PmMark[],
-  markHandlers: Record<string, SemanticMarkHandler>,
-): InlineMark[] {
-  return marks.filter((m) => !(m.type.name in markHandlers)).map(describeInlineMark);
-}
-
 /** A block's non-default styling attrs, or undefined when it carries none. */
 function describeAttrs(node: PmNode): Record<string, unknown> | undefined {
   const spec = node.type.spec.attrs;
@@ -71,6 +58,20 @@ function describeAttrs(node: PmNode): Record<string, unknown> | undefined {
     out[key] = value;
   }
   return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/** What reads a node's text and its review changes. */
+type Readers = Pick<ResolvedHandlers, "marks" | "removers" | "nodeChangers" | "markRemovers">;
+
+/**
+ * Formatting marks on a run — every mark EXCEPT those the semantic seam handles
+ * (tracked changes, surfaced separately in `changes`) and those the proposed
+ * view takes off. Order is the node's mark order, so spans are deterministic.
+ */
+function formattingMarks(marks: readonly PmMark[], readers: Readers): InlineMark[] {
+  return marks
+    .filter((m) => !(m.type.name in readers.marks) && !readers.markRemovers.some((removed) => removed(m)))
+    .map(describeInlineMark);
 }
 
 const NEWLINE_SPAN: InlineSpan = { text: "\n", marks: [] };
@@ -88,26 +89,47 @@ const isLineBreak = (node: PmNode) => node.type.name === "hardBreak";
 const endOf = (change: SemanticChange) => (change.at ?? 0) + (change.length ?? 0);
 
 /**
- * One act reads as one change. Its pieces join wherever they fall — split
- * across formatting runs, around another author's work, a block and its text —
- * spanning from the first to the last, with the text of each in order. An
- * insertion with no text of its own (a moved block, a line break) reads the
+ * Which change a piece joins: its act and type. A formatting change also keys
+ * on the marks its text had, since each change states those.
+ */
+const actKey = (change: SemanticChange) => {
+  if (change.id === undefined) return undefined;
+  const key = `${change.type}:${change.id}`;
+  return change.type === "suggestedAttrs" ? `${key}:${stableStringify(change.oldAttrs ?? null)}` : key;
+};
+
+/** Two pieces of one change, read in document order. */
+function joinPieces(prev: SemanticChange, next: SemanticChange, separator: string): SemanticChange {
+  const text = prev.text && next.text ? prev.text + separator + next.text : prev.text + next.text;
+  const image = prev.image ?? next.image;
+  // A deletion is not in the proposed text: it stays where its first piece stood.
+  if (prev.type === "suggestedDelete") return { ...prev, text, length: 0, ...(image ? { image } : {}) };
+  const at = Math.min(prev.at ?? 0, next.at ?? 0);
+  return { ...prev, text, at, length: Math.max(endOf(prev), endOf(next)) - at, ...(image ? { image } : {}) };
+}
+
+/**
+ * One change per act and type: an act's pieces join wherever they fall — split
+ * across formatting runs, around another author's change, a block and its
+ * text — and pieces from different blocks keep `separator`, the break between
+ * them. A formatting change joins only touching runs that had the same marks.
+ * An insertion with no text of its own (a moved block, a line break) reads the
  * text it spans.
  */
-function mergeActs(changes: readonly SemanticChange[], text: string): SemanticChange[] {
+function mergeActs(changes: readonly SemanticChange[], text: string, separator: string): SemanticChange[] {
   const out: SemanticChange[] = [];
-  const slot = new Map<string, number>();
+  const indexOfAct = new Map<string, number>();
   for (const change of changes) {
-    const key = change.id === undefined ? undefined : `${change.type}:${change.id}`;
-    const index = key === undefined ? undefined : slot.get(key);
+    const key = actKey(change);
+    const index = key === undefined ? undefined : indexOfAct.get(key);
     const prev = index === undefined ? undefined : out[index];
-    if (index === undefined || prev === undefined) {
-      if (key !== undefined) slot.set(key, out.length);
-      out.push(change);
+    const touches = prev !== undefined && (change.type !== "suggestedAttrs" || change.at === endOf(prev));
+    if (prev && index !== undefined && touches) {
+      out[index] = joinPieces(prev, change, separator);
       continue;
     }
-    const at = Math.min(prev.at ?? 0, change.at ?? 0);
-    out[index] = { ...prev, text: prev.text + change.text, at, length: Math.max(endOf(prev), endOf(change)) - at };
+    if (key !== undefined) indexOfAct.set(key, out.length);
+    out.push(change);
   }
   return out.map((change) =>
     change.type === "suggestedInsert" && change.text === "" && (change.length ?? 0) > 0
@@ -133,7 +155,7 @@ function joinExtracted(parts: readonly Extracted[], separator: InlineSpan | null
     spans.push(...part.spans);
     offset += textOf(part.spans).length;
   }
-  return { spans, changes: mergeActs(changes, textOf(spans)) };
+  return { spans, changes: mergeActs(changes, textOf(spans), separator?.text ?? "") };
 }
 
 /**
@@ -143,14 +165,9 @@ function joinExtracted(parts: readonly Extracted[], separator: InlineSpan | null
  * the plain text exactly, so `toText` derives from them, and every change is
  * placed by offset into that text.
  */
-function extractSemantic(
-  node: PmNode,
-  markHandlers: Record<string, SemanticMarkHandler>,
-  nodeChangers: readonly NodeChanges[],
-  ctx: UnitCtx,
-): Extracted {
-  const content = extractContent(node, markHandlers, nodeChangers, ctx);
-  const own = nodeChangers.flatMap((changesOf) => changesOf(node, ctx));
+function extractSemantic(node: PmNode, readers: Readers, ctx: UnitCtx): Extracted {
+  const content = extractContent(node, readers, ctx);
+  const own = readers.nodeChangers.flatMap((changesOf) => changesOf(node, ctx));
   if (own.length === 0) return content;
   const text = textOf(content.spans);
   const covers: SemanticChange[] = [];
@@ -162,26 +179,21 @@ function extractSemantic(
       covers.push({ ...change, text: change.text || (isLineBreak(node) ? "\n" : ""), at: 0, length: 0 });
     } else covers.push({ ...change, at: 0, length: text.length });
   }
-  return { spans: content.spans, changes: mergeActs([...covers, ...content.changes, ...after], text) };
+  return { spans: content.spans, changes: mergeActs([...covers, ...content.changes, ...after], text, "") };
 }
 
-function extractContent(
-  node: PmNode,
-  markHandlers: Record<string, SemanticMarkHandler>,
-  nodeChangers: readonly NodeChanges[],
-  ctx: UnitCtx,
-): Extracted {
+function extractContent(node: PmNode, readers: Readers, ctx: UnitCtx): Extracted {
   if (node.isText) {
     let run: SemanticRun | null = { text: node.text ?? "" };
     for (const mark of node.marks) {
-      const handler = markHandlers[mark.type.name];
+      const handler = readers.marks[mark.type.name];
       if (!handler) continue;
       run = handler(run, mark, ctx);
       if (run === null) return { spans: [], changes: [] };
     }
     const length = run.text.length;
     const changes = (run.changes ?? []).map((c) => ({ ...c, at: 0, length }));
-    const spans = length > 0 ? [{ text: run.text, marks: formattingMarks(node.marks, markHandlers) }] : [];
+    const spans = length > 0 ? [{ text: run.text, marks: formattingMarks(node.marks, readers) }] : [];
     return { spans, changes };
   }
 
@@ -192,7 +204,7 @@ function extractContent(
 
   const parts: Extracted[] = [];
   node.forEach((child) => {
-    parts.push(extractSemantic(child, markHandlers, nodeChangers, ctx));
+    parts.push(extractSemantic(child, readers, ctx));
   });
 
   // A textblock (paragraph, heading) concatenates its inline runs; a block
@@ -200,28 +212,29 @@ function extractContent(
   return joinExtracted(parts, node.isTextblock ? null : NEWLINE_SPAN);
 }
 
-
 /**
  * Build the producer context: the bridge to the editor's markdown serializer
  * (reuse, don't reinvent) plus the mark-aware inline extractor.
  */
-export function createUnitCtx(
-  editor: IBaseEditor,
-  markHandlers: Record<string, SemanticMarkHandler>,
-  removers: ReadonlyArray<(node: PmNode) => boolean> = [],
-  nodeChangers: readonly NodeChanges[] = [],
-): UnitCtx {
-  const schema = editor.getState().doc.type.schema;
+export function createUnitCtx(editor: IBaseEditor, handlers: Partial<Readers> = {}): UnitCtx {
+  const doc = editor.getState().doc;
+  const schema = doc.type.schema;
   const serializer = editor.getMarkdownSerializer();
+  const readers: Readers = {
+    marks: handlers.marks ?? {},
+    removers: handlers.removers ?? [],
+    nodeChangers: handlers.nodeChangers ?? [],
+    markRemovers: handlers.markRemovers ?? [],
+  };
 
   const extractAll = (nodes: PmNode | readonly PmNode[]): Extracted => {
     const list = Array.isArray(nodes) ? nodes : [nodes];
-    return joinExtracted(list.map((n) => extractSemantic(n, markHandlers, nodeChangers, ctx)), NEWLINE_SPAN);
+    return joinExtracted(list.map((n) => extractSemantic(n, readers, ctx)), NEWLINE_SPAN);
   };
 
   const ctx: UnitCtx = {
     schema,
-    doc: editor.getState().doc,
+    doc,
     toMarkdown(nodes) {
       const list = Array.isArray(nodes) ? nodes : [nodes];
       // Wrap the block(s) in a fresh doc so the serializer renders them as
@@ -250,7 +263,7 @@ export function createUnitCtx(
       return describeAttrs(node);
     },
     isRemoved(node) {
-      return removers.some((removed) => removed(node));
+      return readers.removers.some((removed) => removed(node));
     },
     physicalColumns,
   };

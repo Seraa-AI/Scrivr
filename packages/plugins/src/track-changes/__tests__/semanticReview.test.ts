@@ -157,7 +157,7 @@ describe("structural changes", () => {
     const firstRow = editor.getState().doc.child(0).child(0);
     editor.applyTransaction(editor.getState().tr.delete(1, 1 + firstRow.nodeSize));
     const deleted = unitOf(editor, "t").changes?.filter((c) => c.type === "suggestedDelete") ?? [];
-    expect(deleted.map((c) => c.text)).toEqual(["a1b1"]);
+    expect(deleted.map((c) => c.text)).toEqual(["a1\nb1"]);
 
     const table = editor.getState().doc.child(0);
     const row = table.child(1).type.create({ nodeId: "r3" }, table.child(1).content);
@@ -267,20 +267,121 @@ describe("one act reads under one id", () => {
     expect(table.changes).toHaveLength(1);
   });
 
-  it("for a deletion nested several levels deep", () => {
-    const item = (id: string, text: string): DocNode => ({ type: "listItem", content: [para(id, text)] });
+  it("when a piece is read before its container: a deleted table's cells name the table", () => {
+    // The table handler reads each cell before the walker reaches the table's
+    // and rows' own records, so a name resolved by read order would differ.
     const editor = editorWith([para("p0", "before"), {
-      type: "bulletList", attrs: { nodeId: "l" },
-      content: [item("i1", "one"), item("i2", "two")],
+      type: "table", attrs: { nodeId: "t" },
+      content: [
+        { type: "tableRow", attrs: { nodeId: "r1" }, content: [cell("a", "a1")] },
+        { type: "tableRow", attrs: { nodeId: "r2" }, content: [cell("b", "b1")] },
+      ],
     }]);
     const { doc } = editor.getState();
     const start = doc.child(0).nodeSize;
     editor.applyTransaction(editor.getState().tr.delete(start, start + doc.child(1).nodeSize));
+    const table = unitOf(editor, "t");
+    const cellIds = (table.cells?.rows ?? []).flatMap((r) => r.cells).flatMap((c) => c.changes ?? []).map((c) => c.id);
+    expect(cellIds).toEqual([table.changes?.[0]?.id, table.changes?.[0]?.id]);
+  });
+});
+
+describe("an act's text keeps the breaks between its blocks", () => {
+  const item = (id: string, text: string): DocNode => ({ type: "listItem", content: [para(id, text)] });
+
+  it("for a deleted list", () => {
+    const editor = editorWith([para("p0", "before"), { type: "bulletList", attrs: { nodeId: "l" }, content: [item("i1", "one"), item("i2", "two")] }]);
+    const { doc } = editor.getState();
+    const start = doc.child(0).nodeSize;
+    editor.applyTransaction(editor.getState().tr.delete(start, start + doc.child(1).nodeSize));
     const list = units(editor).find((u) => u.type === "list");
-    const deletions = list?.changes?.filter((c) => c.type === "suggestedDelete") ?? [];
-    expect(deletions.map((c) => c.text)).toEqual(["onetwo"]);
-    const partIds = (list?.parts ?? []).flatMap((p) => p.changes ?? []).map((c) => c.id);
-    expect(new Set([...partIds, deletions[0]?.id])).toEqual(new Set([deletions[0]?.id]));
+    expect(list?.changes?.map(shape)).toEqual([{ type: "suggestedDelete", text: "one\ntwo", at: 0, length: 0 }]);
+  });
+
+  it("for an inserted list, which reads exactly the text it spans", () => {
+    const editor = editorWith([para("a", "Alpha")]);
+    const { schema } = editor.getState();
+    const [list, listItem, paragraph] = [schema.nodes["bulletList"], schema.nodes["listItem"], schema.nodes["paragraph"]];
+    if (!list || !listItem || !paragraph) throw new Error("no list");
+    const entry = (id: string, text: string) => listItem.create(null, paragraph.create({ nodeId: id }, schema.text(text)));
+    editor.applyTransaction(editor.getState().tr.insert(7, list.create({ nodeId: "l" }, [entry("i1", "hello"), entry("i2", "world")])));
+    const unit = units(editor).find((u) => u.type === "list");
+    const [change] = unit?.changes ?? [];
+    expect(change && shape(change)).toEqual({ type: "suggestedInsert", text: "hello\nworld", at: 0, length: 11 });
+    expect(unit?.text.slice(change?.at, (change?.at ?? 0) + (change?.length ?? 0))).toBe(change?.text);
+  });
+});
+
+describe("pieces of one act carry what each says", () => {
+  it("a deletion keeps no length when another author's text sits inside it", () => {
+    const editor = editorWith([para("a", "Alpha one two")]);
+    editor.applyTransaction(editor.getState().tr.delete(3, 10));
+    editor.commands.setTrackChangesUserID("bob");
+    editor.applyTransaction(editor.getState().tr.insertText("X", 6));
+    const alice = (unitOf(editor, "a").changes ?? []).filter((c) => c.authorId === "alice");
+    expect(alice.map(shape)).toEqual([{ type: "suggestedDelete", text: "pha one", at: 2, length: 0 }]);
+  });
+
+  it("a deleted paragraph with an image says which image goes with it", () => {
+    const editor = editorWith([para("a", "Alpha"), {
+      type: "paragraph", attrs: { nodeId: "fig" },
+      content: [{ type: "text", text: "cap " }, { type: "image", attrs: { src: "https://example.com/a.png", alt: "A" } }],
+    }]);
+    const { doc } = editor.getState();
+    editor.applyTransaction(editor.getState().tr.delete(doc.child(0).nodeSize, doc.content.size));
+    const [change] = unitOf(editor, "fig").changes ?? [];
+    expect(change && shape(change)).toEqual({ type: "suggestedDelete", text: "cap ", at: 0, length: 0 });
+    expect(change?.image).toMatchObject({ src: "https://example.com/a.png" });
+  });
+
+  it("a formatting act over runs with different marks states each run's marks", () => {
+    const editor = editorWith([{
+      type: "paragraph", attrs: { nodeId: "a" },
+      content: [{ type: "text", text: "ab" }, { type: "text", text: "cd", marks: [{ type: "italic" }] }],
+    }]);
+    const bold = editor.getState().schema.marks["bold"];
+    if (!bold) throw new Error("no bold");
+    editor.applyTransaction(editor.getState().tr.addMark(1, 5, bold.create()));
+    const changes = unitOf(editor, "a").changes ?? [];
+    expect(changes.map((c) => [c.at, c.length, c.oldAttrs])).toEqual([
+      [0, 2, { marks: [] }],
+      [2, 2, { marks: [{ type: "italic" }] }],
+    ]);
+    expect(new Set(changes.map((c) => c.id)).size).toBe(1);
+  });
+
+  it("a removed mark is gone from the proposed spans", () => {
+    const editor = editorWith([para("a", "Alpha", [{ type: "bold" }])]);
+    const bold = editor.getState().schema.marks["bold"];
+    if (!bold) throw new Error("no bold");
+    editor.applyTransaction(editor.getState().tr.removeMark(1, 6, bold));
+    const unit = unitOf(editor, "a");
+    expect(unit.spans).toBeUndefined();
+    expect(unit.changes?.[0]?.oldAttrs).toEqual({ marks: [{ type: "bold" }] });
+  });
+});
+
+describe("records that are not pending, or not well formed", () => {
+  it("a decided record is not reported", () => {
+    const editor = editorWith([para("a", "Alpha", [{ type: "trackedInsert", attrs: tracked("insert", "alice", { status: "accepted" }) }])]);
+    expect(unitOf(editor, "a").changes).toBeUndefined();
+  });
+
+  it("a malformed record reports only what it says correctly, and does not throw", () => {
+    const editor = editorWith([{
+      type: "paragraph",
+      attrs: {
+        nodeId: "a",
+        dataTracked: [
+          { id: 5, authorID: {}, createdAt: "soon", groupId: 7, operation: "list_change", status: "pending", oldList: [null, { type: 3 }, { type: "bulletList" }] },
+          { id: "s", operation: "set_attrs", status: "pending", oldAttrs: "bad", oldNodeTypeName: 7 },
+        ],
+      },
+      content: [{ type: "text", text: "Alpha" }],
+    }]);
+    const changes = unitOf(editor, "a").changes ?? [];
+    expect(changes[0]).toEqual({ type: "suggestedAttrs", text: "", at: 0, length: 5, status: "pending", oldAttrs: { list: ["bulletList"] } });
+    expect(changes[1]).toMatchObject({ type: "suggestedAttrs", id: "s", oldAttrs: {} });
   });
 });
 

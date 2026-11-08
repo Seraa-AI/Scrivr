@@ -163,7 +163,11 @@ export const IMAGE_NODE_ATTRS: Record<keyof SemanticImage, string> = {
   align: "xAlign",
 };
 
-/** The image a node is, as an agent reads it, or null when it is not an image. */
+/**
+ * The image a node is, as an agent reads it, or null when it is not an image.
+ * Use it wherever an image is reported — a unit's `image`, or the image a
+ * change inserts or deletes — so both read the same.
+ */
 export function semanticImage(node: PmNode): SemanticImage | null {
   if (node.type.name !== "image") return null;
   const placed = normalizeImageAttrs(node);
@@ -220,15 +224,20 @@ export interface SemanticChange {
   type: "suggestedDelete" | "suggestedInsert" | "suggestedAttrs";
   /**
    * What it removes or adds: "\n" for a paragraph or line break, "" for an
-   * attribute change or an object. Another author's work inside it is not part
-   * of it, though its extent spans it.
+   * attribute change or an object. Text it spans across blocks keeps the break
+   * between them. Another author's change inside it is a change of its own and
+   * not in this text, though an insertion's `length` spans it.
    */
   text: string;
-  /** Offset into the owning text. Absent when a node handler overrides the unit's text. */
+  /**
+   * Offset into the owning text: where an insertion or attribute change
+   * starts, or where a deletion's first piece stood. Absent when a node
+   * handler overrides the unit's text.
+   */
   at?: number;
   /**
-   * How much of the owning text it spans. Always 0 for a deletion, which is
-   * not in the proposed text.
+   * How much of the owning text it spans. 0 for a deletion, which is not in
+   * the proposed text.
    */
   length?: number;
   /**
@@ -255,9 +264,10 @@ export interface SemanticChange {
 }
 
 /**
- * A review record written on a node rather than on its text. `covers` spans
- * the node's text; `after` sits where it ends, as a paragraph break does. A
- * covering insertion with no text of its own reads the text it covers.
+ * A review record a contributor reads off a node — a block's own attrs, or a
+ * text node's formatting marks. `covers` spans the node's text; `after` sits
+ * where it ends, as a paragraph break does. A covering insertion with no text
+ * of its own reads the text it covers.
  */
 export interface SemanticNodeChange {
   change: SemanticChange;
@@ -334,8 +344,16 @@ export interface SemanticHandlers {
    * beside one.
    */
   isRemoved?: (node: PmNode) => boolean;
-  /** Review records on a node's own attrs, which no mark handler sees. */
+  /**
+   * Review records on any node, text included: a block's own attrs, or a
+   * formatting mark's records, which no mark handler sees.
+   */
   nodeChanges?: (node: PmNode, ctx: UnitCtx) => SemanticNodeChange[];
+  /**
+   * Whether the proposed view leaves a formatting mark off its text: one
+   * proposed for removal. Spans then read the text as it would be.
+   */
+  isMarkRemoved?: (mark: PmMark) => boolean;
 }
 
 // ── Producer context ─────────────────────────────────────────────────────────

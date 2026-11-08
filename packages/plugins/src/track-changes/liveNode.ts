@@ -57,6 +57,25 @@ export function shadowRanges(doc: PMNode): readonly ShadowRange[] {
   return ranges;
 }
 
+const moveShadowCache = new WeakMap<PMNode, readonly ShadowRange[]>();
+
+/**
+ * The ranges a pending move left behind: where a moved block was, a copy of
+ * the one now live at its new place. Unlike any other deletion, such a copy is
+ * not content of its own.
+ */
+export function moveShadowRanges(doc: PMNode): readonly ShadowRange[] {
+  const cached = moveShadowCache.get(doc);
+  if (cached) return cached;
+  const ranges: ShadowRange[] = doc.type.schema.marks["trackedDelete"]
+    ? findChanges(EditorState.create({ doc }))
+        .pending.filter((change) => change.dataTracked.operation === CHANGE_OPERATION.delete && !!change.dataTracked.moveNodeId)
+        .map((change): ShadowRange => [change.from, change.to])
+    : [];
+  moveShadowCache.set(doc, ranges);
+  return ranges;
+}
+
 /** Whether a pending deletion covers this node whole. */
 export function isShadowNode(node: PMNode, pos: number, ranges: readonly ShadowRange[]): boolean {
   return ranges.some(([from, to]) => from <= pos && pos + node.nodeSize <= to);

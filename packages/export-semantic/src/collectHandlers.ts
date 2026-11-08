@@ -1,4 +1,4 @@
-import type { Node as PmNode } from "@scrivr/core/pm";
+import type { Mark as PmMark, Node as PmNode } from "@scrivr/core/pm";
 import type {
   ExportContributionMap,
   IBaseEditor,
@@ -7,8 +7,7 @@ import type {
   SemanticMarkHandler,
 } from "@scrivr/core";
 
-/** One contributed `nodeChanges`. */
-export type NodeChanges = NonNullable<SemanticHandlers["nodeChanges"]>;
+type NodeChanges = NonNullable<SemanticHandlers["nodeChanges"]>;
 
 export interface ResolvedHandlers {
   nodes: Record<string, SemanticNodeHandler>;
@@ -17,6 +16,8 @@ export interface ResolvedHandlers {
   removers: Array<(node: PmNode) => boolean>;
   /** Every contributed `nodeChanges`, read in contribution order. */
   nodeChangers: NodeChanges[];
+  /** Every contributed `isMarkRemoved`; a mark any of them claims is left off the spans. */
+  markRemovers: Array<(mark: PmMark) => boolean>;
 }
 
 /**
@@ -34,7 +35,8 @@ function semanticOf(contrib: ExportContributionMap): SemanticHandlers | undefine
   const value = record["semantic"];
   if (value && typeof value === "object" &&
     ("nodes" in value || "marks" in value || ("isRemoved" in value && typeof value.isRemoved === "function") ||
-      ("nodeChanges" in value && typeof value.nodeChanges === "function"))) {
+      ("nodeChanges" in value && typeof value.nodeChanges === "function") ||
+      ("isMarkRemoved" in value && typeof value.isMarkRemoved === "function"))) {
     return value as SemanticHandlers; // single guarded cast after typeof/in checks
   }
   return undefined;
@@ -53,6 +55,7 @@ export function collectHandlers(
   const marks: Record<string, SemanticMarkHandler> = {};
   const removers: Array<(node: PmNode) => boolean> = [];
   const nodeChangers: NodeChanges[] = [];
+  const markRemovers: Array<(mark: PmMark) => boolean> = [];
 
   for (const contrib of editor.getExportContributions()) {
     const semantic = semanticOf(contrib);
@@ -61,6 +64,7 @@ export function collectHandlers(
     if (semantic.marks) Object.assign(marks, semantic.marks);
     if (semantic.isRemoved) removers.push(semantic.isRemoved);
     if (semantic.nodeChanges) nodeChangers.push(semantic.nodeChanges);
+    if (semantic.isMarkRemoved) markRemovers.push(semantic.isMarkRemoved);
   }
 
   if (overrides) {
@@ -68,7 +72,8 @@ export function collectHandlers(
     if (overrides.marks) Object.assign(marks, overrides.marks);
     if (overrides.isRemoved) removers.push(overrides.isRemoved);
     if (overrides.nodeChanges) nodeChangers.push(overrides.nodeChanges);
+    if (overrides.isMarkRemoved) markRemovers.push(overrides.isMarkRemoved);
   }
 
-  return { nodes, marks, removers, nodeChangers };
+  return { nodes, marks, removers, nodeChangers, markRemovers };
 }

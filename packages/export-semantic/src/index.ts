@@ -27,6 +27,7 @@ export type {
   SemanticRole,
   SemanticTextView,
   SemanticChange,
+  SemanticNodeChange,
   InlineSpan,
   InlineMark,
   TableCells,

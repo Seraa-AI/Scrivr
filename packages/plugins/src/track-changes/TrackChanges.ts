@@ -27,7 +27,7 @@ import { planReviewIn } from "./reviewChanges";
 import { changeActs } from "./reviewPlan";
 import type { ChangeSet } from "./ChangeSet";
 import { cloneTrackedChanges } from "./cloneTrackedChanges";
-import { dropDeleted, keepInserted, nodeChanges } from "./semanticChanges";
+import { dropDeleted, isMarkRemoved, keepInserted, nodeChanges } from "./semanticChanges";
 
 declare module "@scrivr/core" {
   interface Commands<ReturnType> {
@@ -244,6 +244,7 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
         marks: { trackedDelete: dropDeleted, trackedInsert: keepInserted },
         isRemoved: proposedForDeletion,
         nodeChanges,
+        isMarkRemoved,
       },
     };
   },

@@ -28,7 +28,7 @@ export type { ChangePopoverInfo, ChangePopoverCallbacks } from "./createChangePo
 export { isTrackedMark } from "./helpers";
 export { trackChangesPluginKey } from "./engine/trackChangesPlugin";
 export { findChanges } from "./findChanges";
-export { findLiveNodeById, isShadowNode, shadowRanges } from "./liveNode";
+export { findLiveNodeById, isShadowNode, moveShadowRanges, shadowRanges } from "./liveNode";
 export type { ShadowRange } from "./liveNode";
 export { applyChanges } from "./applyChanges";
 export { ChangeSet } from "./ChangeSet";

@@ -1,6 +1,9 @@
 /**
  * What each tracked record means to an agent reading the semantic lane. The
  * walker places what these return; this decides what they say.
+ *
+ * Records come from saved and synced documents, so every field is read through
+ * a check of its type rather than trusted.
  */
 import { describeInlineMark, isTrackedMark, semanticImage } from "@scrivr/core";
 import type { SemanticChange, SemanticMarkHandler, SemanticNodeChange, UnitCtx } from "@scrivr/core";
@@ -14,14 +17,27 @@ import { CHANGE_OPERATION, CHANGE_STATUS, type TrackedAttrs } from "./types";
 
 type TrackedRecord = Partial<TrackedAttrs>;
 
+const textOf = (value: unknown) => (typeof value === "string" ? value : undefined);
+const numberOf = (value: unknown) => (typeof value === "number" ? value : undefined);
+const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const isPending = (record: TrackedRecord) => record.status === CHANGE_STATUS.pending;
+
+const OPERATIONS: ReadonlySet<string> = new Set(Object.values(CHANGE_OPERATION));
+
 const actIdsByDoc = new WeakMap<PMNode, ReadonlyMap<string, string>>();
 
-/** Each record's act, named by its primary record: the id `reviewChanges` decides the act by. */
+/**
+ * Each pending record's act, named by its primary record: the id
+ * `reviewChanges` decides the act by. Grouped over the pending changes, as the
+ * review plan groups them, so the reader and the decider agree.
+ */
 function actIds(doc: PMNode): ReadonlyMap<string, string> {
   const cached = actIdsByDoc.get(doc);
   if (cached) return cached;
   const ids = new Map<string, string>();
-  for (const { primary, records } of changeActs(findChanges(EditorState.create({ doc })).changes)) {
+  for (const { primary, records } of changeActs(findChanges(EditorState.create({ doc })).pending)) {
     for (const record of records) ids.set(record.id, primary.id);
   }
   actIdsByDoc.set(doc, ids);
@@ -29,24 +45,32 @@ function actIds(doc: PMNode): ReadonlyMap<string, string> {
 }
 
 function describe(type: SemanticChange["type"], text: string, record: TrackedRecord, ctx: UnitCtx): SemanticChange {
-  const id = record.id === undefined ? undefined : actIds(ctx.doc).get(record.id) ?? record.id;
-  const moveId = record.moveId ?? record.moveNodeId;
+  const recordId = textOf(record.id);
+  const id = recordId === undefined ? undefined : actIds(ctx.doc).get(recordId) ?? recordId;
+  const authorId = textOf(record.authorID);
+  const status = textOf(record.status);
+  const createdAt = numberOf(record.createdAt);
+  const groupId = textOf(record.groupId);
+  const moveId = textOf(record.moveId) ?? textOf(record.moveNodeId);
   return {
     type,
     text,
     ...(id !== undefined ? { id } : {}),
-    ...(record.authorID !== undefined ? { authorId: record.authorID } : {}),
-    ...(record.status !== undefined ? { status: record.status } : {}),
-    ...(record.createdAt !== undefined ? { createdAt: record.createdAt } : {}),
-    ...(record.groupId !== undefined ? { groupId: record.groupId } : {}),
+    ...(authorId !== undefined ? { authorId } : {}),
+    ...(status !== undefined ? { status } : {}),
+    ...(createdAt !== undefined ? { createdAt } : {}),
+    ...(groupId !== undefined ? { groupId } : {}),
     ...(moveId !== undefined ? { moveId } : {}),
   };
 }
 
-/** A review mark's records; one with none still stands for one change. */
+/**
+ * A review mark's pending records. A mark with no records at all still stands
+ * for one change, as documents written before records existed carry them.
+ */
 const reviewRecords = (mark: Mark): TrackedRecord[] => {
   const records = markRecords(mark);
-  return records.length > 0 ? records : [{}];
+  return records.length > 0 ? records.filter(isPending) : [{}];
 };
 
 /** Inserted text stays in the proposed text, and is reported as proposed. */
@@ -61,11 +85,17 @@ export const dropDeleted: SemanticMarkHandler = (run, mark, ctx) => ({
   changes: [...(run.changes ?? []), ...reviewRecords(mark).map((r) => describe("suggestedDelete", run.text, r, ctx))],
 });
 
+/** A formatting mark proposed for removal is left off the proposed text. */
+export const isMarkRemoved = (mark: Mark): boolean =>
+  isValidTrackableMark(mark) &&
+  markRecords(mark).some((record) => record.operation === CHANGE_OPERATION.delete && isPending(record));
+
 /** The block as it was before an attribute change, in the vocabulary of `attrsOf`. */
 function formerAttrs(node: PMNode, record: TrackedRecord, ctx: UnitCtx): Record<string, unknown> {
-  const oldTypeName = "oldNodeTypeName" in record ? record.oldNodeTypeName : undefined;
+  const oldTypeName = "oldNodeTypeName" in record ? textOf(record.oldNodeTypeName) : undefined;
   const oldType = (oldTypeName !== undefined ? ctx.schema.nodes[oldTypeName] : undefined) ?? node.type;
-  const former = oldType.create("oldAttrs" in record ? record.oldAttrs : null);
+  const oldAttrs = "oldAttrs" in record && isPlainRecord(record.oldAttrs) ? record.oldAttrs : null;
+  const former = oldType.create(oldAttrs);
   const level = former.attrs["level"];
   return {
     ...(ctx.attrsOf(former) ?? {}),
@@ -75,8 +105,13 @@ function formerAttrs(node: PMNode, record: TrackedRecord, ctx: UnitCtx): Record<
   };
 }
 
-const listTypes = (record: TrackedRecord): string[] =>
-  "oldList" in record && Array.isArray(record.oldList) ? record.oldList.map((level) => level.type) : [];
+/** The list types a block sat in before a list change, outermost first; malformed entries are skipped. */
+const listTypes = (record: TrackedRecord): string[] => {
+  const oldList: unknown = "oldList" in record ? record.oldList : undefined;
+  return Array.isArray(oldList)
+    ? oldList.flatMap((level: unknown) => (isPlainRecord(level) ? textOf(level["type"]) ?? [] : []))
+    : [];
+};
 
 /** What an inserted or deleted node adds or removes, beyond its text. */
 const objectOf = (node: PMNode) => {
@@ -109,8 +144,6 @@ const NODE_CHANGES: Partial<Record<CHANGE_OPERATION, (node: PMNode, record: Trac
   }),
 };
 
-const isPending = (record: TrackedRecord) => record.status === CHANGE_STATUS.pending;
-
 /** A formatting change on text: the marks the text had before it. */
 function formattingChanges(node: PMNode, ctx: UnitCtx): SemanticNodeChange[] {
   const formatting = node.marks.filter((mark) => !isTrackedMark(mark.type.name));
@@ -127,9 +160,12 @@ function formattingChanges(node: PMNode, ctx: UnitCtx): SemanticNodeChange[] {
 
 /** The pending records written on a node itself, or on the formatting of its text. */
 export function nodeChanges(node: PMNode, ctx: UnitCtx): SemanticNodeChange[] {
+  // Text carries its own records on marks; the review marks are read by the
+  // mark handlers, so only its formatting is read here.
   if (node.isText) return formattingChanges(node, ctx);
   return (getBlockInlineTrackedData(node) ?? []).filter(isTrackedRecord).filter(isPending).flatMap((record) => {
-    const toChange = record.operation === undefined ? undefined : NODE_CHANGES[record.operation];
+    const operation = record.operation;
+    const toChange = operation !== undefined && OPERATIONS.has(operation) ? NODE_CHANGES[operation] : undefined;
     return toChange ? [toChange(node, record, ctx)] : [];
   });
 }
