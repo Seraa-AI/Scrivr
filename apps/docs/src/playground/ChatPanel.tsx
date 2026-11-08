@@ -3,7 +3,7 @@ import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import type { UIMessage, DataUIPart } from "ai";
 import type { Editor } from "@scrivr/core";
-import { getAiToolkit, parseSemanticEdits } from "@scrivr/ai";
+import { findLiveNodeById, getAiToolkit, parseSemanticEdits } from "@scrivr/ai";
 import type { DocUnit, ToolOutputData } from "../routes/api/ai";
 import { clearAgentDebug, downloadAgentDebug, recordEdit, recordThread } from "./agentDebug";
 
@@ -14,6 +14,9 @@ interface ChatPanelProps {
   editor: Editor | null;
   hideBorder?: boolean;
 }
+
+const stringList = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 
 function getDocContext(editor: Editor | null): {
   units?: DocUnit[];
@@ -40,8 +43,17 @@ function getDocContext(editor: Editor | null): {
     ...(unit.headingLevel ? { headingLevel: unit.headingLevel } : {}),
     ...(unit.parts ? { parts: unit.parts.map((part) => ({ nodeId: part.nodeId, text: part.text })) } : {}),
     ...(unit.image ? { image: unit.image } : {}),
+    ...(findLiveNodeById(state.doc, unit.id) ? {} : { proposedForDeletion: true }),
     ...(unit.changes ? {
-      changes: unit.changes.map(({ type, text, authorId }) => ({ type, text, ...(authorId ? { authorId } : {}) })),
+      changes: unit.changes.map(({ type, text, id, at, authorId, oldAttrs, image }) => ({
+        type,
+        text,
+        ...(id ? { id } : {}),
+        ...(at !== undefined ? { at } : {}),
+        ...(authorId ? { authorId } : {}),
+        ...(oldAttrs ? { oldAttrs } : {}),
+        ...(image ? { image: image.src } : {}),
+      })),
     } : {}),
   }));
   return units.length > 0 ? { units } : {};
@@ -141,6 +153,18 @@ export function ChatPanel({ editor, hideBorder }: ChatPanelProps) {
         invalid: parsed.rejected,
         result: { applied: result.applied, changed: result.changed, rejected: result.rejected, notFound: result.notFound, stale: result.stale },
       });
+      return;
+    }
+
+    if (toolType === "review_changes") {
+      // A host decides whether an agent may review (`canAcceptReject`); the
+      // outcome says what happened, or why not.
+      const ai = getAiToolkit(ed);
+      if (!ai) return;
+      const outcome = ai.reviewChanges({ accepted: stringList(output["accepted"]), rejected: stringList(output["rejected"]) });
+      setLastEdit(outcome.status === "applied"
+        ? `accepted ${outcome.accepted.join(", ") || "nothing"} · rejected ${outcome.rejected.join(", ") || "nothing"}`
+        : `review ${outcome.status}: ${outcome.reason}`);
       return;
     }
 
