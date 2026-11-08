@@ -1,6 +1,6 @@
 # Float Beside Table RFC
 
-> Status: **approved 2026-11-08**, implementation in progress. A floating image
+> Status: **approved 2026-11-08**, both slices implemented, in review. A floating image
 > with square or top-and-bottom wrap must not cover a table. The table moves
 > below the float as one unit; it is never narrowed. Written 2026-11-08 against
 > `main` @ `288119e`. See [What shipped](#what-shipped). Where the code and this
@@ -474,6 +474,9 @@ manager after each restamp, still inside this function.
   today. When narrower tables land, step 1's test becomes "the table's own x
   range intersects a rect" instead of "any content width is taken", which is
   the same seam.
+- **Pageless.** Floats carve no wrap zone in pageless mode (non-positive
+  content height clamps the band), so neither text nor tables wrap there.
+  Pinned by scenario 16.
 - **`layoutTableRowsApart`** (§14.8.3.24). Per-row wrapping is not modelled;
   the compat flag is ignored on import (Decision 2).
 - **`allowOverlap`** (§20.4.2.3). Object-to-object overlap is not modelled;
@@ -493,3 +496,29 @@ section is what is true.
 
 | Slice | Landed | What it changed |
 |---|---|---|
+| A | `feat/float-beside-table` (`8912e48`, `b5ee210`) | `getNextFreeY(page, y, height, contentX, contentWidth)` changed in place; the `tableRow` skip in `reflowFlowsAgainstExclusions` became `moveTableClearOfExclusions`. Scenarios 1, 2, 3b, 7, 8, 10, 11 and 19 (add) flipped red → green. |
+| B | `feat/float-beside-table` (`6ea4cbd`) | `anchorKeepsFloatClear` decides the backward-anchor rule in one step; the zone band became `zoneOf(placement)` so the reflow can ask where a re-placed float would sit. Scenarios 9, 12b, 13, 14 and 17 flipped red → green against `main`; 12 is green on `main` (no table ever moved), went red with Slice A alone, and is green with B. |
+
+Where this differs from the design above:
+
+- **Pageless is a known gap, not a scenario that passes.** A pageless page
+  reports a non-positive content height, so `zoneOf` clamps every float's band
+  to nothing and floats wrap neither text nor tables there. That is older than
+  this work. Scenario 16 pins today's behaviour (the table stays put) so that
+  fixing pageless wrap flips it.
+- **Scenario 3 was already green.** A top-bottom float anchored in the
+  paragraph above a table pushes that paragraph's own line below the float, so
+  the table followed. Scenario 3b, a top-bottom float pulled down over the
+  table's rows, is the one that was red.
+- **Scenarios 4, 5, 6, 15, 16 and 18 are regression guards.** They were green
+  before and stay green: `behind`/`front` and floats in the margin or above the
+  table never move it, a float in a cell is still not placed, and a row taller
+  than a page under a float is placed once.
+- **Hit-testing is asserted through `cellAtCoords`.** The CharacterMap path
+  for cell glyphs (via `posAtCoords`) reads the same `block.y` but is not driven
+  end to end by these scenarios.
+- **The scenarios live in `layout/FloatBesideTable.test.ts`**, not
+  `PageLayout.test.ts`, so this change does not collide with the list work in
+  the same area.
+- **Restamp from a later float** (Risks) did not appear: scenario 10, with two
+  floats on one page, passes without re-testing tables after each restamp.
