@@ -28,6 +28,8 @@ export type {
   SemanticTextView,
   SemanticChange,
   SemanticNodeChange,
+  SemanticImage,
+  SemanticPart,
   InlineSpan,
   InlineMark,
   TableCells,
