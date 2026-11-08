@@ -7,7 +7,8 @@
 import { describe, expect, it } from "vitest";
 import { buildPdf as buildPdfWithEditor } from "../index";
 import { PT_PER_PX } from "../context";
-import { exportEditor, textLine, block, onePage } from "./fixtures";
+import { listMarkerFont, type LayoutLine } from "@scrivr/core";
+import { exportEditor, textLine, block, onePage, schema } from "./fixtures";
 import { recordDrawOps, type DrawOp } from "./opLog";
 
 const MARKER_X = 60;
@@ -60,5 +61,22 @@ describe("list markers in the PDF", () => {
     const ops = await markerOps("1.");
     expect(texts(ops)).toEqual([expect.objectContaining({ value: "1.", x: MARKER_X * PT_PER_PX })]);
     expect(shapes(ops)).toEqual([]);
+  });
+});
+
+describe("the marker's size", () => {
+  it("is core's size when the line opens with an inline image, not a separate fallback", async () => {
+    const image = schema.nodes["image"]?.create({ src: "data:image/png;base64,AA==", width: 10, height: 10 });
+    if (!image) throw new Error("no image node");
+    const line: LayoutLine = {
+      spans: [{ kind: "object", node: image, x: 0, width: 10, height: 10, docPos: 1, verticalAlign: "baseline" }],
+      width: 10, ascent: 10, descent: 2, lineHeight: 14, textAscent: 10, cursorHeight: 14, xHeight: 6,
+    };
+    const ops = await recordDrawOps(() => buildPdfWithEditor(
+      onePage([block("paragraph", [line], { y: 100, listMarker: "1.", listMarkerX: MARKER_X })]),
+      exportEditor,
+    ));
+    const marker = ops.find((op) => op.op === "text" && op["value"] === "1.");
+    expect(marker?.["size"]).toBeCloseTo(listMarkerFont(line).size * PT_PER_PX, 3);
   });
 });

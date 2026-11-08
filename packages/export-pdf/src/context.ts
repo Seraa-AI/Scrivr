@@ -42,7 +42,7 @@ import {
   type LayoutLine,
   type ResolvedTheme,
 } from "@scrivr/core";
-import { SYNTHETIC_ITALIC_SHEAR, bulletBox, bulletShape, emboldenWidth, fontSizeOf, type BulletShape } from "@scrivr/core";
+import { SYNTHETIC_ITALIC_SHEAR, bulletBox, bulletShape, emboldenWidth, fontSizeOf, listMarkerFont, type BulletBox, type BulletShape } from "@scrivr/core";
 import type { PdfNodeHandler } from "./augmentation";
 import { resolvePdfSpanStyle, type ResolvedPdfSpanStyle } from "./spanStyle";
 
@@ -103,46 +103,38 @@ function flipY(yPx: number, pageHeightPt: number): number {
   return pageHeightPt - yPx * PT_PER_PX;
 }
 
-/** A bullet drawn as core's shape for it, with its left edge at `leftPx`. */
-function drawBulletShape(
-  page: PDFPage,
-  shape: BulletShape,
-  leftPx: number,
-  baselinePx: number,
-  fontSizePx: number,
-  pageHeightPt: number,
-  color: ReturnType<typeof rgb>,
-): void {
-  const { size, centerAboveBaseline, stroke } = bulletBox(fontSizePx);
-  const radius = size / 2;
-  const centerY = flipY(baselinePx - centerAboveBaseline, pageHeightPt);
-  if (shape === "square") {
-    page.drawRectangle({
-      x: leftPx * PT_PER_PX,
-      y: centerY - radius * PT_PER_PX,
-      width: size * PT_PER_PX,
-      height: size * PT_PER_PX,
-      color,
-    });
-    return;
-  }
-  const circle = {
-    x: (leftPx + radius) * PT_PER_PX,
-    y: centerY,
-  };
-  if (shape === "circle") {
-    const ringRadius = (radius - stroke / 2) * PT_PER_PX;
-    page.drawEllipse({
-      ...circle,
-      xScale: ringRadius,
-      yScale: ringRadius,
-      borderColor: color,
-      borderWidth: stroke * PT_PER_PX,
-    });
-    return;
-  }
-  page.drawEllipse({ ...circle, xScale: radius * PT_PER_PX, yScale: radius * PT_PER_PX, color });
+/** Where a bullet goes, in PDF points: its box's left edge and centre line. */
+interface BulletAt {
+  page: PDFPage;
+  left: number;
+  centerY: number;
+  box: BulletBox;
+  color: ReturnType<typeof rgb>;
 }
+
+/** Each of core's bullet shapes, drawn as the canvas draws it. */
+const BULLET_PAINTERS: Record<BulletShape, (at: BulletAt) => void> = {
+  disc: ({ page, left, centerY, box, color }) => {
+    const radius = (box.size / 2) * PT_PER_PX;
+    page.drawEllipse({ x: left + radius, y: centerY, xScale: radius, yScale: radius, color });
+  },
+  circle: ({ page, left, centerY, box, color }) => {
+    const radius = (box.size / 2) * PT_PER_PX;
+    const ring = radius - (box.stroke / 2) * PT_PER_PX;
+    page.drawEllipse({
+      x: left + radius,
+      y: centerY,
+      xScale: ring,
+      yScale: ring,
+      borderColor: color,
+      borderWidth: box.stroke * PT_PER_PX,
+    });
+  },
+  square: ({ page, left, centerY, box, color }) => {
+    const size = box.size * PT_PER_PX;
+    page.drawRectangle({ x: left, y: centerY - size / 2, width: size, height: size, color });
+  },
+};
 
 // ── Draw helpers implementation ──────────────────────────────────────────────
 
@@ -394,20 +386,25 @@ export function createDrawHelpers(
     // Draw list marker if present.
     const firstLine = block.lines[0];
     if (block.listMarker && block.listMarkerX !== undefined && firstLine) {
-      // A marker labels its line, so it takes that line's face as well as its
-      // size. Pinning it to the fallback puts the number of a numbered clause
-      // in a different typeface from the clause.
       const firstSpan = firstLine.spans[0];
-      const fontSize = extractFontSizePx(
-        (firstSpan?.kind === "text" ? firstSpan.font : undefined) ?? "12px sans-serif",
-      );
+      const fontSize = listMarkerFont(firstLine).size;
       const baselinePx = block.y + firstLine.ascent;
-      // Bullets are the shapes the canvas draws, so they never depend on
-      // whether the face can encode the glyph.
+      // A bullet takes only its line's size: it is drawn as the canvas's
+      // shape, so it never depends on whether the face can encode the glyph.
       const shape = bulletShape(block.listMarker);
       if (shape) {
-        drawBulletShape(page, shape, block.listMarkerX, baselinePx, fontSize, pageHeightPt, themeListMarker);
+        const box = bulletBox(fontSize);
+        BULLET_PAINTERS[shape]({
+          page,
+          left: block.listMarkerX * PT_PER_PX,
+          centerY: flipY(baselinePx - box.centerAboveBaseline, pageHeightPt),
+          box,
+          color: themeListMarker,
+        });
       } else {
+        // A number labels its line, so it takes that line's face as well as
+        // its size. Pinning it to the fallback puts the number of a numbered
+        // clause in a different typeface from the clause.
         const markerFont =
           firstSpan?.kind === "text"
             ? fontRegistry.resolve(firstSpan.font, firstSpan.resolution)
