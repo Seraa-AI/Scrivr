@@ -9,7 +9,7 @@ import { describe, it, expect } from "vitest";
 import type { Node as PmNode } from "@scrivr/core/pm";
 import { EditorState } from "@scrivr/core/pm";
 import { computeAiSuggestion } from "../computeAiSuggestion";
-import { AiTestEditor, doc, moveFirstBlockToEnd, p, h } from "./helpers";
+import { AiTestEditor, doc, moveFirstBlockToEnd, p, h, schema } from "./helpers";
 
 
 function makeState(d: PmNode) {
@@ -150,6 +150,15 @@ describe("computeAiSuggestion — phrases, as the tracked rewrite shows them", (
       ["-is", "+are"],
       ["-employees", "+employee's"],
     ]);
+  });
+
+  it("keeps formatted words out of a replacement, as the tracked rewrite does", () => {
+    const bold = schema.marks["bold"];
+    if (!bold) throw new Error("no bold mark");
+    const paragraph = schema.node("paragraph", { nodeId: "p1" }, [
+      schema.text("teh "), schema.text("big", [bold.create()]), schema.text(" smal"),
+    ]);
+    expect(groups(makeState(doc(paragraph)), "the big small")).toEqual([["-teh", "+the"], ["-smal", "+small"]]);
   });
 
   it("replaces a misspelt word whole, not the letters inside it", () => {

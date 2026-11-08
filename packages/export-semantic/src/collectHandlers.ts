@@ -11,7 +11,7 @@ export interface ResolvedHandlers {
   nodes: Record<string, SemanticNodeHandler>;
   marks: Record<string, SemanticMarkHandler>;
   /** Every contributed `isRemoved`; a node any of them claims is left out. */
-  isRemoved: Array<(node: PmNode) => boolean>;
+  removers: Array<(node: PmNode) => boolean>;
 }
 
 /**
@@ -45,21 +45,21 @@ export function collectHandlers(
 ): ResolvedHandlers {
   const nodes: Record<string, SemanticNodeHandler> = {};
   const marks: Record<string, SemanticMarkHandler> = {};
-  const isRemoved: Array<(node: PmNode) => boolean> = [];
+  const removers: Array<(node: PmNode) => boolean> = [];
 
   for (const contrib of editor.getExportContributions()) {
     const semantic = semanticOf(contrib);
     if (!semantic) continue;
     if (semantic.nodes) Object.assign(nodes, semantic.nodes);
     if (semantic.marks) Object.assign(marks, semantic.marks);
-    if (semantic.isRemoved) isRemoved.push(semantic.isRemoved);
+    if (semantic.isRemoved) removers.push(semantic.isRemoved);
   }
 
   if (overrides) {
     if (overrides.nodes) Object.assign(nodes, overrides.nodes);
     if (overrides.marks) Object.assign(marks, overrides.marks);
-    if (overrides.isRemoved) isRemoved.push(overrides.isRemoved);
+    if (overrides.isRemoved) removers.push(overrides.isRemoved);
   }
 
-  return { nodes, marks, isRemoved };
+  return { nodes, marks, removers };
 }

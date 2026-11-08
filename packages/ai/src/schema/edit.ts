@@ -53,8 +53,9 @@ const ImageSizeSchema = z.number().positive().max(4000);
 
 /**
  * How an image sits, as an agent sets it: on a new image, or through `richText`
- * `attrs` or an edited unit's `image` on an image unit. Keys it does not know
- * are dropped. `align` is never `custom`: that is a position only a drag sets.
+ * `attrs` or an edited unit's `image` on an image unit. An edit is checked
+ * strictly, so a key it does not know is refused. `align` is never `custom`:
+ * that is a position only a drag sets.
  */
 export const SemanticImageAttrsSchema = z.object({
   alt: z.string().optional(),

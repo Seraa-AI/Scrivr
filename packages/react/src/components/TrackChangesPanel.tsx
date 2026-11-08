@@ -9,7 +9,7 @@
  */
 
 import type { IBaseEditor } from "@scrivr/core";
-import { CHANGE_OPERATION, changePreviewText, findChanges } from "@scrivr/plugins";
+import { CHANGE_OPERATION, changePreviewText } from "@scrivr/plugins";
 import type {
   TrackedChange,
   MarkChange,
@@ -182,7 +182,7 @@ export function TrackChangesPanel({
             item.kind === "replacement" ? (
               <ReplacementRow key={item.ids.join(":")} item={item} editor={editor} />
             ) : (
-              <SingleRow key={item.change.id} change={item.change} pieces={item.pieces} editor={editor} />
+              <SingleRow key={item.change.id} change={item.change} pieces={item.pieces} pending={panel.changes} editor={editor} />
             ),
           )
         )}
@@ -227,10 +227,13 @@ function ReplacementRow({
 function SingleRow({
   change,
   pieces,
+  pending,
   editor,
 }: {
   change: TrackedChange;
   pieces: TrackedChange[];
+  /** Every pending change, which a move's preview reads its moved copy from. */
+  pending: TrackedChange[];
   editor: IBaseEditor | null;
 }) {
   const meta = getChangeMeta(change);
@@ -276,9 +279,8 @@ function SingleRow({
     );
   } else if (change.type === "node-change") {
     const verb = previewVerb(change.dataTracked.operation, !!change.dataTracked.moveNodeId);
-    const state = editor?.getState();
-    const pending = state ? findChanges(state).pending : [];
-    const text = state ? changePreviewText(state.doc, change, pending) : "";
+    const doc = editor?.getState().doc;
+    const text = doc ? changePreviewText(doc, change, pending) : "";
     preview = (
       <div style={previewLine}>
         {verb ? <span style={prefixLabel}>{decisionLabel(verb, meta)}</span> : null}

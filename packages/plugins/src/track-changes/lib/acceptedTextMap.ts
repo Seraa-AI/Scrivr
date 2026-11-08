@@ -136,9 +136,10 @@ export function buildAcceptedTextMap(
 
 /**
  * Whether the accepted text in `[from, to)` is a plain run a replacement may
- * take in: its characters, and the ones either side, sit side by side in the
- * document — no break or inline object between them — and none carries a
- * suggestion of its own.
+ * take in. Taking it in deletes and re-inserts it, so it must be what a
+ * re-insert can restore: characters side by side in the document, with no
+ * break, inline object or newline between them, and no mark — neither
+ * formatting a plain insertion would drop nor a suggestion of its own.
  */
 export function bridgeable(doc: PMNode, map: readonly PosMapEntry[], from: number, to: number): boolean {
   const lo = Math.max(0, from - 1);
@@ -148,15 +149,13 @@ export function bridgeable(doc: PMNode, map: readonly PosMapEntry[], from: numbe
     const next = map[k + 1];
     if (!here || !next || next.docPos !== here.docPos + 1) return false;
   }
-  const first = map[from];
-  const last = map[to - 1];
-  if (!first || !last) return false;
-  let tracked = false;
-  doc.nodesBetween(first.docPos, last.docPos + 1, (node) => {
-    tracked ||= node.marks.some((mark) => mark.type.name === "trackedInsert" || mark.type.name === "trackedDelete");
-    return !tracked;
-  });
-  return !tracked;
+  for (let k = from; k < to; k++) {
+    const entry = map[k];
+    const node = entry && doc.nodeAt(entry.docPos);
+    if (!entry || !node?.isText || node.marks.length > 0) return false;
+    if (doc.textBetween(entry.docPos, entry.docPos + 1) === "\n") return false;
+  }
+  return true;
 }
 
 /**

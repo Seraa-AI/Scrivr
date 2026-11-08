@@ -337,12 +337,10 @@ The schemas are part of the public API.
   the paired move change on its own. The indentation action only supplies
   `indentationType`, which an AI move does not set.
 
-  **Rejected alternative: grouping via `dataTracked.groupId`.** It exists
-  (`types.ts:73`) and the popover already collects a group's ids to accept them
-  together (`createChangePopover.ts:212-226,370`), with `setChangeStatuses`
-  taking an id array. But `groupId` only makes a set of changes *reviewable*
-  together; it does not make rejecting one restore a moved node, because the
-  delete-side shadow still has to be dropped. `moveNodeId` carries that
+  **Rejected alternative: grouping via `dataTracked.groupId`.** It exists, and
+  review decides a replacement's insertion and deletion as one by it (D8). But
+  it pairs text, not nodes: it does not make rejecting a move restore the moved
+  node, because the delete-side shadow still has to be dropped. `moveNodeId` carries that
   semantics already. Grouping is the UI affordance; the operation is the model.
 
   Consequence for Phase 5: it is narrower than written. `move` is done,
@@ -568,12 +566,9 @@ section is what is true.
 
 - **`applySemanticEdits` has no `asSuggestion` option.** The phase list specified
   `applySemanticEdits(editor, edits, { asSuggestion })`; what shipped is
-  `aiToolkit.applySemanticEdits(edits, { authorID })`. Tracked-ness is the
-  track-changes status — the user's mode — not a per-call flag, because AI is not
-  a fourth mode (see [ai-authoring.md](./ai-authoring.md)).
-- **`authorID` names every edit.** Structural changes were first attributed to
-  the track-changes author; since #229, `trackAsSuggestion` hands the engine a
-  per-transaction author, so a batch is the agent's in every half.
+  `aiToolkit.applySemanticEdits(edits, { authorID })`, and with TrackChanges
+  installed an agent's edit is always tracked as `authorID`'s, whatever mode the
+  person is in.
 - **`deleteTableRow` takes `nodeId`, not `anchorNodeId`.** It names the row it
   deletes, which is not an anchor. The design listed `anchorNodeId` for it;
   `deleteBlock` and `deleteListItem` always read `nodeId`.

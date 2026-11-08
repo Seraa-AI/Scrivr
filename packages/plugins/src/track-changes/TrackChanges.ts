@@ -110,6 +110,11 @@ function objectBox(
   return null;
 }
 
+/** A table row someone added or removed, marked as a row rather than as loose words in its cells. */
+const isRowAddedOrRemoved = (change: TrackedChange) =>
+  change.type === "node-change" && change.node.type.name === "tableRow" &&
+  (change.dataTracked.operation === CHANGE_OPERATION.insert || change.dataTracked.operation === CHANGE_OPERATION.delete);
+
 const rowRecordsCache = new WeakMap<ChangeSet, ReadonlySet<string>>();
 
 /**
@@ -117,10 +122,6 @@ const rowRecordsCache = new WeakMap<ChangeSet, ReadonlySet<string>>();
  * that are part of adding or removing it carry no marks of their own. Cached
  * per change set, which every page of a paint shares.
  */
-/** A table row someone added or removed, marked as a row rather than as loose words in its cells. */
-const isRowAddedOrRemoved = (change: TrackedChange) =>
-  change.type === "node-change" && change.node.type.name === "tableRow" &&
-  (change.dataTracked.operation === CHANGE_OPERATION.insert || change.dataTracked.operation === CHANGE_OPERATION.delete);
 
 function recordsInsideRowChanges(changeSet: ChangeSet): ReadonlySet<string> {
   const cached = rowRecordsCache.get(changeSet);

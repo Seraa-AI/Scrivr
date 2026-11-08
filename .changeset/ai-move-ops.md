@@ -29,13 +29,15 @@ tracked suggestion a reviewer decides in one click.
   (`align: "custom"`) can be handed back untouched. A new `src`, paragraph
   styling on an image unit, and invalid values are rejected. Setting `wrap` or
   `align` on an image laid out by the legacy `wrappingMode` takes effect.
-- Every edit an agent makes is its suggestion: `applySemanticEdits` tracks text,
-  image and structural edits as `authorID`'s (default "AI Assistant") whether or
-  not the person is suggesting.
+- Every edit an agent makes is its suggestion: with TrackChanges installed,
+  `applySemanticEdits` tracks text, image and structural edits as `authorID`'s
+  (default "AI Assistant") whether or not the person is suggesting.
 - The result says what happened. An edit that changes nothing — the level a
   heading already has, attrs an agent may not set, an image layout it already
   has, a move to where the block already is — is `rejected`, never `changed`
-  and never silently dropped.
+  and never silently dropped. An edit is taken whole or not at all: attrs it
+  cannot apply refuse its text too. Restating the original to withdraw the
+  agent's own earlier suggestion is a change.
 - A batch touches content once. A move or delete overlapping content the batch
   already moved or added to, or adding an item or row inside content it moved,
   is refused; so is a list or table op named by a node holding several of what
@@ -47,11 +49,12 @@ tracked suggestion a reviewer decides in one click.
 - `applyDiffAsSuggestion` and `applyRichDiffAsSuggestion`, for any caller, turn
   a rewrite into phrase replacements: each run of changes is one deletion and
   one insertion, a short unchanged gap inside a replacement is taken in, and no
-  change is made inside a word. A gap holding a line break, an inline image or
-  another author's suggestion is never taken in, and words added near each
-  other stay additions.
-- A replacement is decided as one. Its two halves share a `groupId` unique to
-  the call, and accepting or rejecting either half — through a card,
+  change is made inside a word. A gap holding a line break, a newline, an
+  inline image, formatting or another author's suggestion is never taken in,
+  and words added near each other stay additions.
+- A replacement is decided as one. Its two halves share a `groupId` nothing
+  else carries, from this diff or any other, and accepting or rejecting either
+  half — through a card,
   `setChangeStatuses`, `reviewChanges` or accept-at-caret — decides both.
 - The AI suggestion overlay groups the same way, so a proposal reads the same
   before it is applied as after. `phraseReplacements` and `bridgeable` are

@@ -105,16 +105,20 @@ export function getChangeMeta(change: TrackedChange): ChangeMeta {
   return changeName(change.type, op, !!change.dataTracked.moveId);
 }
 
+type PreviewVerb = "Adding" | "Removing" | "Moving";
+
 /** "Accept", "Adding" or, for a change decided whole, "Accept row", "Adding row". */
-export const decisionLabel = (verb: string, meta: ChangeMeta) =>
+export const decisionLabel = (verb: "Accept" | "Reject" | PreviewVerb, meta: ChangeMeta) =>
   meta.unit ? `${verb} ${meta.unit}` : verb;
 
-const PREVIEW_VERB: Partial<Record<CHANGE_OPERATION, string>> = {
+// A text move's halves are an insertion and a deletion, so `moved` names them;
+// a block move is its own operation.
+const PREVIEW_VERB: Partial<Record<CHANGE_OPERATION, PreviewVerb>> = {
   [CHANGE_OPERATION.insert]: "Adding",
   [CHANGE_OPERATION.delete]: "Removing",
   [CHANGE_OPERATION.move]: "Moving",
 };
 
 /** What a change does to the words it previews; a split, a list change and the like show them as they are. */
-export const previewVerb = (operation: CHANGE_OPERATION, moved: boolean) =>
+export const previewVerb = (operation: CHANGE_OPERATION, moved: boolean): PreviewVerb | undefined =>
   moved ? "Moving" : PREVIEW_VERB[operation];

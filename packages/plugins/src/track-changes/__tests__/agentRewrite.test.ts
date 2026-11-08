@@ -119,6 +119,13 @@ describe.each(rewrites)("$name", ({ apply, lineBreak }) => {
     expect(laidOut(editor)).toBe("the □ small");
   });
 
+  it("keeps formatted words out of a replacement, so they keep their formatting", () => {
+    const editor = editorOf([{ type: "text", text: "teh " }, { type: "text", text: "big", marks: [{ type: "bold" }] }, { type: "text", text: " smal" }]);
+    apply(editor, "the big small");
+
+    expect(proposed(editor)).toEqual(["-teh", "+the", "-smal", "+small"]);
+  });
+
   it("leaves another author's pending suggestion as theirs", () => {
     const editor = editorOf([{ type: "text", text: "teh cat smal" }], "person");
     editor.applyTransaction(editor.getState().tr.insertText("big ", 5));
@@ -127,11 +134,58 @@ describe.each(rewrites)("$name", ({ apply, lineBreak }) => {
     expect(proposed(editor)).toEqual(["-teh", "+the", "+big ", "-smal", "+small"]);
   });
 
+  it("withdraws its own earlier rewrite when it restates the original", () => {
+    const editor = editorWith("teh cat");
+    apply(editor, "the cat");
+    apply(editor, "teh cat");
+
+    expect(proposed(editor)).toEqual([]);
+    expect(editor.getState().doc.textContent).toBe("teh cat");
+  });
+
   it("adds words without striking the words between them", () => {
     const editor = editorWith("the cat sat");
     apply(editor, "the big cat sat down");
 
     expect(proposed(editor).every((change) => change.startsWith("+"))).toBe(true);
+  });
+});
+
+describe("a code block's lines", () => {
+  it("stay lines: a replacement never spans the newline between them", () => {
+    const editor = new ServerEditor({
+      extensions: [StarterKit, TrackChanges.configure({ userID: "u1", initialStatus: TrackChangesStatus.enabled, canAcceptReject: true })],
+      content: { type: "doc", content: [{ type: "codeBlock", attrs: { nodeId: "c" }, content: [{ type: "text", text: "x = 1\nbar = 2" }] }] },
+    });
+    applyDiffAsSuggestion(editor.getState(), (tr) => editor.applyTransaction(tr), {
+      nodeId: "c", proposedText: "x = 3\nbar = 4", authorID: "agent",
+    });
+    acceptAll(editor);
+
+    expect(editor.getState().doc.textContent).toBe("x = 3\nbar = 4");
+  });
+});
+
+describe("restating the original to withdraw a rewrite", () => {
+  it("is reported as a change, not a rejection", () => {
+    const editor = editorWith("teh cat");
+    const rich = (text: string) => applyRichDiffAsSuggestion(editor.getState(), (tr) => editor.applyTransaction(tr), {
+      edits: [{ nodeId: "p", spans: [{ text, marks: [] }] }],
+      authorID: "agent",
+    });
+    rich("the cat");
+
+    expect(rich("teh cat")).toEqual({ applied: true, notFound: [], rejected: [] });
+  });
+
+  it("is reported as applied through the plain path", () => {
+    const editor = editorWith("teh cat");
+    const plain = (proposedText: string) => applyDiffAsSuggestion(editor.getState(), (tr) => editor.applyTransaction(tr), {
+      nodeId: "p", proposedText, authorID: "agent",
+    });
+    plain("the cat");
+
+    expect(plain("teh cat").applied).toBe(true);
   });
 });
 

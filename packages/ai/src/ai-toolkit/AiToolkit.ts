@@ -519,8 +519,8 @@ export class AiToolkitAPI {
    * When TrackChanges is installed, every edit is a proposal by `authorID`
    * (default "AI Assistant"), tracked whether or not the person is suggesting.
    *
-   * A batch lands in up to three transactions, so up to three undo steps: text
-   * edits, image layouts, then structural ops.
+   * A batch lands in up to three transactions, so up to three undo steps: image
+   * layouts, text edits, then structural ops.
    */
   applySemanticEdits(
     edits: SemanticEdit[],

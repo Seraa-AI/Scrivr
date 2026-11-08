@@ -14,10 +14,10 @@
  * Round-trip: join(tokenise(s)) === s is always true.
  *
  * ## Replacement grouping
- * pairReplacements() uses a look-ahead buffer (default 5 tokens) to bridge
- * short keep sequences inside a phrase replacement, so that
- * "of the Party" → "the Seller" is grouped as one replacement even though
- * the LCS keeps "the" and the following space.
+ * pairReplacements() groups word swaps: a look-ahead buffer (default 5 tokens)
+ * bridges short keep sequences, so "of the Party" → "the Seller" is one group
+ * even though the LCS keeps "the". Nothing in Scrivr groups this way now; it
+ * stays public for hosts that want word-level groups.
  *
  * ## Phrase replacements
  * phraseReplacements() turns a word-level diff into the edits a person would
@@ -31,9 +31,9 @@
  * computeEditDensity() returns the fraction of original characters that were
  * deleted, giving callers a quality gate to decide whether to surface the
  * fine-grained diff or offer a simplified "replace block" view.
- *
- * No external dependencies — pure TypeScript.
  */
+
+import { genId } from "../helpers";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -295,8 +295,10 @@ export function pairReplacements(ops: DiffOp[], lookAheadTokens = 5): PairedDiff
  * selects text and types over it. An unchanged gap of up to `bridgeTokens`
  * tokens — a space, a comma, a word — inside what is being replaced is taken
  * in, when `canBridge` allows its accepted-text range; additions near each
- * other stay additions. A replacement's two halves share a groupId, unique
- * within this diff. The insertion carries where its text starts in the proposal.
+ * other stay additions. Every change carries a groupId of its own, shared by
+ * a replacement's two halves and by nothing else, in this diff or any other —
+ * review decides a shared id as one. The insertion carries where its text
+ * starts in the proposal.
  */
 export function phraseReplacements(
   ops: DiffOp[],
@@ -341,10 +343,10 @@ export function phraseReplacements(
     const region = ops.slice(i, last + 1);
     const removed = region.filter((o) => o.type !== "insert").map((o) => o.text).join("");
     const added = region.filter((o) => o.type !== "delete").map((o) => o.text).join("");
-    const pair = removed && added ? { groupId: `grp_${i}_${last}` } : {};
-    if (removed) out.push({ type: "delete", text: removed, ...pair });
+    const groupId = genId();
+    if (removed) out.push({ type: "delete", text: removed, groupId });
     const proposedOffset = region.find((o) => o.type !== "delete")?.proposedOffset;
-    if (added) out.push({ type: "insert", text: added, ...pair, ...(proposedOffset === undefined ? {} : { proposedOffset }) });
+    if (added) out.push({ type: "insert", text: added, groupId, ...(proposedOffset === undefined ? {} : { proposedOffset }) });
     i = last + 1;
   }
   return out;

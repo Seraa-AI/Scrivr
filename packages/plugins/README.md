@@ -46,7 +46,7 @@ const editor = new Editor({
 Streaming ghost-text and AI caret overlay for in-editor AI writing assistance. The document stays unchanged until `acceptSuggestion` is called — streaming is cosmetic (canvas overlay only).
 
 ```ts
-import { AiToolkit, GhostText, AiCaret, UniqueId } from '@scrivr/plugins';
+import { AiToolkit, GhostText, AiCaret, UniqueId } from '@scrivr/ai';
 
 const editor = new Editor({
   extensions: [StarterKit, UniqueId, GhostText, AiCaret, AiToolkit],
@@ -63,8 +63,8 @@ api.acceptSuggestion();
 Display AI-generated document diffs as tracked suggestions with accept/reject controls. Supports word-level phrase replacements, multi-block, and semantic diffs.
 
 ```ts
-import { AiSuggestion } from '@scrivr/plugins';
-import { computeAiSuggestion, showAiSuggestion, applyAiSuggestion, rejectAiSuggestion } from '@scrivr/plugins';
+import { AiSuggestion } from '@scrivr/ai';
+import { computeAiSuggestion, showAiSuggestion, applyAiSuggestion, rejectAiSuggestion } from '@scrivr/ai';
 
 const editor = new Editor({
   extensions: [StarterKit, AiSuggestion],

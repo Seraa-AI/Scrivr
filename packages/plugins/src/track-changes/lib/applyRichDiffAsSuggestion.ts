@@ -43,7 +43,6 @@ import {
   createNewDeleteAttrs,
   createNewInsertAttrs,
   createNewPendingAttrs,
-  genId,
   createNewUpdateAttrs,
   getBlockInlineTrackedData,
   type NewEmptyAttrs,
@@ -181,16 +180,20 @@ function applyRichBlockToTr(
   // Attribute-only edits are independent and must preserve pending text edits.
   const found = findLiveNodeById(tr.doc, edit.nodeId);
   if (!found) return false;
+  // An edit is taken whole or not at all: attrs it cannot apply refuse its text too.
+  if (edit.attrs && !attrsApplicable(tr, found.pos, found.node, edit.attrs)) return false;
+  const stepsBefore = tr.steps.length;
   if (edit.spans) {
     clearAuthorPendingMarks(tr, found.pos, found.pos + found.node.nodeSize, authorID, schema);
   }
+  // Restating the original withdraws the author's earlier suggestion: a change.
+  let applied = tr.steps.length > stepsBefore;
 
   const updated = findLiveNodeById(tr.doc, edit.nodeId);
-  if (!updated) return false;
+  if (!updated) return applied;
 
   const now = Date.now();
   const base = (): NewEmptyAttrs => createNewPendingAttrs(now, authorID);
-  let applied = false;
 
   // 1. Block attrs first — setNodeMarkup keeps the node's size, so inline
   //    positions computed below stay valid.
@@ -208,6 +211,20 @@ function applyRichBlockToTr(
 
 // ── Block attrs → tracked set_node_attributes ─────────────────────────────────
 
+/** Every key is one an agent may set, with a value the block can take. */
+function attrsApplicable(tr: Transaction, nodeFrom: number, node: PMNode, editAttrs: Record<string, unknown>): boolean {
+  const { level, ...styling } = editAttrs;
+  if (!Object.entries(styling).every(([key, value]) => ALLOWED_ATTRS.includes(key) && isValidAttr(key, value))) return false;
+  return level === undefined || typeAt(tr, nodeFrom, node, level) !== undefined;
+}
+
+/** The type `level` makes this block, where its parent allows that type. */
+function typeAt(tr: Transaction, nodeFrom: number, node: PMNode, level: unknown): NodeType | undefined {
+  const type = level === undefined ? node.type : typeForLevel(node, level);
+  const $node = tr.doc.resolve(nodeFrom);
+  return type && $node.parent.canReplaceWith($node.index(), $node.index() + 1, type) ? type : undefined;
+}
+
 function applyAttrsChange(
   tr: Transaction,
   nodeFrom: number,
@@ -216,10 +233,8 @@ function applyAttrsChange(
   base: NewEmptyAttrs,
 ): boolean {
   const { level } = editAttrs;
-  const type = level === undefined ? node.type : typeForLevel(node, level);
+  const type = typeAt(tr, nodeFrom, node, level);
   if (!type) return false;
-  const $node = tr.doc.resolve(nodeFrom);
-  if (!$node.parent.canReplaceWith($node.index(), $node.index() + 1, type)) return false;
 
   const typeAttrs = Object.keys(type.spec.attrs ?? {});
   const picked: Record<string, unknown> = { ...pickAgentAttrs(editAttrs), ...(level !== undefined && type.name === "heading" ? { level } : {}) };
@@ -273,12 +288,8 @@ function applyInlineChange(
   // change over a retained region is emitted as ONE mark-add (one tracking id)
   // spanning the whole region — correct even when the region is interleaved
   // with a pending trackedInsert that stops the text nodes from fusing.
-  // A line break reads as "\n" here, and is never taken into a replacement.
-  const ops = coalesceKeeps(phraseReplacements(rawOps, (from, to) =>
-    !acceptedText.slice(from, to).includes("\n") && bridgeable(tr.doc, map, from, to)));
-  // Group ids are unique within one diff; this block's call makes them unique everywhere.
-  const call = genId();
-  const grouped = (groupId: string | undefined) => (groupId ? { groupId: `${call}:${groupId}` } : {});
+  const ops = coalesceKeeps(phraseReplacements(rawOps, (from, to) => bridgeable(tr.doc, map, from, to)));
+  const grouped = (groupId: string | undefined) => (groupId ? { groupId } : {});
 
   const insertType = schema.marks.trackedInsert;
   let aOff = 0; // cursor into acceptedText

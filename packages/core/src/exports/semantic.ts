@@ -149,6 +149,7 @@ export interface SemanticImage {
 export type ImageWrap = WrapMode;
 /** Where an image sits across the line. */
 export type ImageAlign = Exclude<XAlign, "custom">;
+/** The wraps and alignments an agent may set; validate against these so validation follows the node. */
 export const IMAGE_WRAPS: readonly ImageWrap[] = ["inline", "square", "top-bottom", "behind", "front"];
 export const IMAGE_ALIGNS: readonly ImageAlign[] = ["left", "center", "right"];
 
@@ -268,8 +269,9 @@ export interface SemanticHandlers {
   nodes?: Record<string, SemanticNodeHandler>;
   marks?: Record<string, SemanticMarkHandler>;
   /**
-   * Whether the proposed view leaves a node out — an object proposed for
-   * deletion, which carries no text for a mark handler to drop, or text that is.
+   * Whether the proposed view leaves a node out: an object proposed for
+   * deletion, which no mark handler can drop, or text proposed for deletion
+   * beside one.
    */
   isRemoved?: (node: PmNode) => boolean;
 }

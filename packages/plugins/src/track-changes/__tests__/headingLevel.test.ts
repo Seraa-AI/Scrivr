@@ -87,3 +87,28 @@ function setLevelless(editor: ServerEditor) {
     authorID: "agent",
   });
 }
+
+describe("an edit with attrs it cannot apply", () => {
+  it("is rejected whole, its text left as it was", () => {
+    const editor = editorWith(heading(2));
+    const result = applyRichDiffAsSuggestion(editor.getState(), (tr) => editor.applyTransaction(tr), {
+      edits: [{ nodeId: "b", spans: [{ text: "New title", marks: [] }], attrs: { level: 7, align: "center" } }],
+      authorID: "agent",
+    });
+
+    expect(result).toEqual({ applied: false, notFound: [], rejected: ["b"] });
+    expect(editor.getState().doc.textContent).toBe("Purpose");
+    expect(findChanges(editor.getState()).pending).toEqual([]);
+  });
+
+  it("is rejected for a key an agent may not set", () => {
+    const editor = editorWith(paragraph);
+    const result = applyRichDiffAsSuggestion(editor.getState(), (tr) => editor.applyTransaction(tr), {
+      edits: [{ nodeId: "b", spans: [{ text: "New title", marks: [] }], attrs: { nodeId: "forged" } }],
+      authorID: "agent",
+    });
+
+    expect(result.rejected).toEqual(["b"]);
+    expect(editor.getState().doc.textContent).toBe("Purpose");
+  });
+});

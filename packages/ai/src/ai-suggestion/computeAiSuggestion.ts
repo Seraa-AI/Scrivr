@@ -110,21 +110,16 @@ function splitByMarks(op: AiOp, marksAt: InlineMark[][], offset: number): AiOp[]
 }
 
 /**
- * One diff op as a suggestion op. `proposedOffset` stays behind: it is diff
- * bookkeeping the caller needs while building, not something a suggestion
- * carries into storage.
- *
- * `nodeId` prefixes the generated ids because a group is addressed across the
- * whole suggestion, and an index into one block's ops repeats in every block.
+ * One diff op as a suggestion op, keeping the group the diff gave it.
+ * `proposedOffset` stays behind: it is diff bookkeeping the caller needs while
+ * building, not something a suggestion carries into storage.
  */
-function toDiffOp(op: PairedDiffOp, i: number, nodeId: string): AiOp {
+function toDiffOp(op: PairedDiffOp): AiOp {
   if (op.type === "keep") return { type: "keep", text: op.text };
-  // A replacement's halves share the groupId the diff gave them; a lone
-  // addition or removal is a group of its own.
-  const gid = `${nodeId}_${op.groupId ?? `solo_${i}`}`;
-  if (op.type === "delete")
-    return { type: "delete", text: op.text, groupId: gid };
-  return { type: "insert", text: op.text, groupId: gid };
+  const grouped = op.groupId ? { groupId: op.groupId } : {};
+  return op.type === "delete"
+    ? { type: "delete", text: op.text, ...grouped }
+    : { type: "insert", text: op.text, ...grouped };
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -176,16 +171,14 @@ export function computeAiSuggestion(
     let formatGroups = 0;
     let acceptedOffset = 0;
     const ops: AiOp[] = [];
-    for (const [i, raw] of paired.entries()) {
-      const op = toDiffOp(raw, i, nodeId);
+    for (const raw of paired) {
+      const op = toDiffOp(raw);
       if (op.type === "delete") {
         ops.push(op);
         acceptedOffset += op.text.length;
         continue;
       }
-      // Where this op sits in the proposal comes from the op itself. Counting
-      // as we walk would be wrong: a replacement's insertion holds the unchanged
-      // words it took in as well as the new ones, so a counted offset drifts.
+      // Where this op sits in the proposal comes from the op itself.
       const proposedOffset = raw.type === "delete" ? 0 : raw.proposedOffset ?? 0;
       for (const part of splitByMarks(op, proposal.marksAt, proposedOffset)) {
         if (part.type !== "keep" || !part.marks) {

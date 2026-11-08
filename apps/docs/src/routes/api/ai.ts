@@ -11,7 +11,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { anthropic } from "@ai-sdk/anthropic";
 import { z } from "zod";
 import { SemanticEditSchema } from "@scrivr/ai";
-import type { SemanticImage } from "@scrivr/core";
+import { IMAGE_ALIGNS, IMAGE_WRAPS } from "@scrivr/core";
 
 // ── Typed data parts emitted per tool result ────────────────────────────────
 // The client's onData callback receives these during streaming.
@@ -22,19 +22,28 @@ export type ToolOutputData = {
 };
 
 /** A unit of `getRichBlocks()`, trimmed to what the agent needs to address it. */
-export type DocUnit = {
-  id: string;
-  type: string;
-  text: string;
-  headingLevel?: number;
-  parts?: Array<{ nodeId: string; text: string }>;
-  image?: SemanticImage;
-};
+const DocUnitSchema = z.object({
+  id: z.string(),
+  type: z.string(),
+  text: z.string(),
+  headingLevel: z.number().int().optional(),
+  parts: z.array(z.object({ nodeId: z.string(), text: z.string() })).optional(),
+  image: z.object({
+    src: z.string(),
+    alt: z.string(),
+    width: z.number(),
+    height: z.number(),
+    wrap: z.enum(IMAGE_WRAPS),
+    align: z.enum([...IMAGE_ALIGNS, "custom"]),
+  }).optional(),
+});
+export type DocUnit = z.infer<typeof DocUnitSchema>;
 
 const RequestBodySchema = z.object({
+  // The AI SDK checks each message's shape when it converts them.
   messages: z.array(z.custom<UIMessage>((message) => typeof message === "object" && message !== null)),
   context: z.string().optional(),
-  units: z.array(z.custom<DocUnit>((unit) => typeof unit === "object" && unit !== null && "id" in unit)).optional(),
+  units: z.array(DocUnitSchema).optional(),
 });
 
 export const Route = createFileRoute("/api/ai")({

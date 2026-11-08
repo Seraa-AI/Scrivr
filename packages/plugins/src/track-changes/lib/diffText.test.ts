@@ -370,11 +370,20 @@ describe("phraseReplacements", () => {
     ]);
   });
 
-  it("leaves a pure insertion or deletion unpaired", () => {
+  it("gives a pure insertion or deletion a group of its own", () => {
     const inserted = phrases("a c", "a b c").filter(o => o.type !== "keep");
     const deleted = phrases("a b c", "a c").filter(o => o.type !== "keep");
-    expect(inserted.map(o => [o.type, o.text.trim(), o.groupId])).toEqual([["insert", "b", undefined]]);
-    expect(deleted.map(o => [o.type, o.text.trim(), o.groupId])).toEqual([["delete", "b", undefined]]);
+    expect(inserted.map(o => [o.type, o.text.trim()])).toEqual([["insert", "b"]]);
+    expect(deleted.map(o => [o.type, o.text.trim()])).toEqual([["delete", "b"]]);
+    expect(inserted[0]?.groupId).toBeTruthy();
+    expect(inserted[0]?.groupId).not.toBe(deleted[0]?.groupId);
+  });
+
+  it("never repeats a group across diffs, so two rewrites never pair as one", () => {
+    const groupsOf = (a: string, b: string) => phrases(a, b).flatMap(o => (o.type === "keep" ? [] : [o.groupId]));
+    const first = groupsOf("the red car", "the blue car");
+    const second = groupsOf("the red car", "the blue car");
+    expect(first.filter(id => second.includes(id))).toEqual([]);
   });
 
   it("reconstructs both texts", () => {
