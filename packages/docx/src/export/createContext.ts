@@ -270,6 +270,8 @@ function numberingKey(config: NumberingEntry["config"]): string {
       level: level.level,
       format: level.format,
       text: level.text,
+      left: level.left,
+      hanging: level.hanging,
     })),
   });
 }

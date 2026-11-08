@@ -577,3 +577,55 @@ describe("table fill export", () => {
     editor.destroy();
   });
 });
+
+describe("list levels match what the editor draws", () => {
+  type Json = { type: string; attrs?: Record<string, unknown>; content?: Json[]; text?: string };
+  const p = (text: string): Json => ({ type: "paragraph", content: [{ type: "text", text }] });
+  const item = (text: string, ...more: Json[]): Json => ({ type: "listItem", content: [p(text), ...more] });
+  const list = (type: string, ...items: Json[]): Json => ({ type, content: items });
+
+  async function exported(content: Json[]) {
+    const editor = new ServerEditor({ content: { type: "doc", content } });
+    const files = readZip(await exportDocxBytes(editor));
+    editor.destroy();
+    return { document: files["word/document.xml"] ?? "", numbering: files["word/numbering.xml"] ?? "" };
+  }
+
+  /** The `<w:p>` holding `text`. */
+  const paragraphWith = (document: string, text: string) =>
+    document.split("<w:p>").find((part) => part.includes(`<w:t>${text}</w:t>`)) ?? "";
+
+  it("numbers nested ordered levels 1. / a. / i., nine levels deep", async () => {
+    let nested = item("d4");
+    for (const text of ["d3", "d2", "d1"]) nested = item(text, list("orderedList", nested));
+    const { document, numbering } = await exported([list("orderedList", nested)]);
+
+    expect(paragraphWith(document, "d4")).toContain('<w:ilvl w:val="3"/>');
+    expect(numbering.match(/<w:lvl w:ilvl=/g)).toHaveLength(9);
+    expect(numbering).toContain('<w:numFmt w:val="lowerLetter"/>');
+    expect(numbering).toContain('<w:numFmt w:val="lowerRoman"/>');
+  });
+
+  it("keeps lists nested past the ninth level at the ninth", async () => {
+    let nested = item("deepest");
+    for (let depth = 0; depth < 10; depth++) nested = item(`d${depth}`, list("bulletList", nested));
+    const { document } = await exported([list("bulletList", nested)]);
+    expect(paragraphWith(document, "deepest")).toContain('<w:ilvl w:val="8"/>');
+  });
+
+  it("cycles bullets •, ◦, ▪ by level", async () => {
+    const { numbering } = await exported([list("bulletList", item("a"))]);
+    const glyphs = [...numbering.matchAll(/<w:lvlText w:val="([^"]*)"\/>/g)].map((match) => match[1]);
+    expect(glyphs.slice(0, 4)).toEqual(["•", "◦", "▪", "•"]);
+  });
+
+  it("indents an item's further blocks to its text, unnumbered", async () => {
+    const { document } = await exported([
+      list("bulletList", item("one", p("more"), list("bulletList", item("child", p("child more"))))),
+    ]);
+    const more = paragraphWith(document, "more");
+    expect(more).not.toContain("<w:numPr>");
+    expect(more).toContain('<w:ind w:left="720"/>');
+    expect(paragraphWith(document, "child more")).toContain('<w:ind w:left="1440"/>');
+  });
+});
