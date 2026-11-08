@@ -469,3 +469,30 @@ function). L1 starts after W1 merges, by merging `main`.
 
 ## What shipped
 
+Updated as each PR lands. Where this disagrees with the design above, this
+section is what is true.
+
+| PR | Landed | What it changed |
+|---|---|---|
+| **L1** | `feat/word-lists` (not yet merged) | `model/lists.ts` owns what a list is (`isListType`, `listKind`, `listStart`), the nine-level table (`LIST_LEVELS`, `listLevel`, `LIST_MARKER_HANGING`) and markers (`listMarker`, `bulletShape`, `bulletBox`); the six call sites ask it. `collectLayoutItems` lays out every block of an item at its level's indent, with the marker on the first block only. D5 geometry. Bullets drawn as shapes on canvas and in PDF. Scenarios 1, 2 (drawn), 4, 6 and 7 (screen), 8, 9 green; scenario 5's continuation block is drawn |
+| **L2** | — | Not built |
+| **L3** | — | Not built |
+
+### Where the code differs from the design above
+
+- **No new `LayoutBlock` field for the bullet shape.** §4 proposed carrying the
+  shape beside `listMarker`. The shape is a function of the glyph, which comes
+  only from the level table, so canvas and PDF both read it with
+  `bulletShape(listMarker)`. A marker that is not one of the table's glyphs is
+  drawn as text, as before.
+- **The canvas draws bullets as shapes too**, not glyphs. Both surfaces draw
+  from `bulletBox`, so screen and PDF match whatever font the line uses.
+- **A number too wide for the hanging moves left, not the text right.** §3
+  proposed pushing the first line through the `textIndent` path. Moving the
+  marker keeps it clear of the text without touching line breaking or the
+  measure cache. Word moves the text instead; this differs only for numbers
+  wider than about a quarter inch (`1000.`, `xviii.`).
+- **PDF op-log baselines did not move.** The baselines are built from
+  hand-written layouts, not from the layout pipeline, so the geometry change
+  does not reach them. The new `listMarkers.test.ts` covers the PDF markers,
+  and the op recorder now records `drawEllipse`.
