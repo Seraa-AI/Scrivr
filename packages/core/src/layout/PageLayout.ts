@@ -809,6 +809,29 @@ function resolveAnchoredObjects(
       // pass reflows the union of the zone it replaces and the new one, so a
       // block the zone has moved off gets its full width back.
       const margin = attrs.margin;
+      // The zone may not reach above the anchor on the strength of its
+      // margin alone. Blocks above the anchor are what fix the anchor's own
+      // position, so letting the margin band narrow them makes the anchor
+      // depend on a float that depends on the anchor: the block grows, the
+      // anchor drops, the zone follows it off the block, the block shrinks
+      // back. That configuration has no fixed point — it oscillates.
+      //
+      // The image rectangle is a hard constraint and still reflows whatever
+      // it genuinely covers, so a float pulled up by a negative yOffset wraps
+      // the paragraph above it as before. Only the courtesy gap yields.
+      const zoneOf = (at: AnchoredObjectPlacement): { top: number; bottom: number } => {
+        const pageStart = barriers.pageStartGlobal(at.page);
+        const pageEnd = pageStart + barriers.contentHeight(at.page);
+        return {
+          top: Math.max(pageStart, at.globalY - margin, Math.min(at.globalY, at.anchorGlobalY)),
+          bottom: Math.min(pageEnd, at.globalY + height + margin),
+        };
+      };
+      const floatAnchor: FloatAnchor = {
+        index: i,
+        zoneAt: (atAnchorGlobalY) =>
+          zoneOf(placeAt(atAnchorGlobalY, barriers.pageForGlobalY(atAnchorGlobalY))),
+      };
       let vacatedTop: number | undefined;
       let vacatedBottom: number | undefined;
       for (let pass = 0; ; pass++) {
@@ -818,24 +841,7 @@ function resolveAnchoredObjects(
           exclusions = new ExclusionManager();
           exclusionsByPage.set(zonePage, exclusions);
         }
-        const pageStart = barriers.pageStartGlobal(zonePage);
-        const pageEnd = pageStart + barriers.contentHeight(zonePage);
-        // The zone may not reach above the anchor on the strength of its
-        // margin alone. Blocks above the anchor are what fix the anchor's own
-        // position, so letting the margin band narrow them makes the anchor
-        // depend on a float that depends on the anchor: the block grows, the
-        // anchor drops, the zone follows it off the block, the block shrinks
-        // back. That configuration has no fixed point — it oscillates.
-        //
-        // The image rectangle is a hard constraint and still reflows whatever
-        // it genuinely covers, so a float pulled up by a negative yOffset wraps
-        // the paragraph above it as before. Only the courtesy gap yields.
-        const zoneTop = Math.max(
-          pageStart,
-          placement.globalY - margin,
-          Math.min(placement.globalY, anchorGlobalY),
-        );
-        const zoneBottom = Math.min(pageEnd, placement.globalY + height + margin);
+        const { top: zoneTop, bottom: zoneBottom } = zoneOf(placement);
 
         // Square carves a side zone at the image's painted rectangle; top-bottom
         // reserves the whole Y band. Both go through the page's shared manager
@@ -871,6 +877,7 @@ function resolveAnchoredObjects(
             contentX,
             contentWidth,
           },
+          floatAnchor,
           pageConfig,
           geometry,
           ctx,
@@ -894,6 +901,14 @@ function resolveAnchoredObjects(
   return { flows, placements };
 }
 
+/** The float being resolved, as the reflow needs to see it. */
+interface FloatAnchor {
+  /** Index of the flow holding the float's anchor. */
+  index: number;
+  /** The float's wrap band if its anchor sat at `anchorGlobalY`. */
+  zoneAt(anchorGlobalY: number): { top: number; bottom: number };
+}
+
 /**
  * Reflow every flow whose Y range intersects the latest exclusion zone.
  *
@@ -912,6 +927,7 @@ function reflowFlowsAgainstExclusions(
     contentX: number;
     contentWidth: number;
   },
+  anchor: FloatAnchor,
   pageConfig: PageConfig,
   geometry: PageGeometry,
   ctx: MeasureContext,
@@ -929,7 +945,9 @@ function reflowFlowsAgainstExclusions(
     if (flow.kind === "leaf" || flowY + flow.height <= zoneTop) continue;
     // A table cannot be re-broken either, so it moves below the float instead.
     if (flow.kind === "tableRow") {
-      const moved = moveTableClearOfExclusions(flows, idx, exclusions, zone, pageConfig, geometry);
+      const moved = moveTableClearOfExclusions(
+        flows, idx, exclusions, zone, anchor, pageConfig, geometry,
+      );
       flows = moved.flows;
       idx = moved.lastRowIndex;
       continue;
@@ -1021,6 +1039,7 @@ function moveTableClearOfExclusions(
   rowIndex: number,
   exclusions: ExclusionManager,
   zone: { pageNumber: number; contentX: number; contentWidth: number },
+  anchor: FloatAnchor,
   pageConfig: PageConfig,
   geometry: PageGeometry,
 ): { flows: FlowBlock[]; lastRowIndex: number } {
@@ -1047,12 +1066,42 @@ function moveTableClearOfExclusions(
   if (clearY === top) return { flows, lastRowIndex: end };
 
   const { startGlobalY } = advanceFlowGlobalY(first, clearY, pageConfig, geometry);
-  const moved = [...flows];
-  moved[start] = { ...first, globalY: startGlobalY, solverPushedThisFlow: true };
-  return {
-    flows: restampGlobalYFrom(moved, start + 1, pageConfig, geometry),
-    lastRowIndex: end,
-  };
+  const pushed = [...flows];
+  pushed[start] = { ...first, globalY: startGlobalY, solverPushedThisFlow: true };
+  const moved = restampGlobalYFrom(pushed, start + 1, pageConfig, geometry);
+
+  const isAboveAnchor = end < anchor.index;
+  if (isAboveAnchor && !anchorKeepsFloatClear(flows, moved, start, end, anchor, geometry)) {
+    return { flows, lastRowIndex: end };
+  }
+  return { flows: moved, lastRowIndex: end };
+}
+
+/**
+ * Moving a table above the float's own anchor moves the anchor, and the float
+ * follows it. Step by step that chase only ends when the anchor would leave
+ * its page, so decide its end state at once: the move holds only if the
+ * anchor stays on its page and the float, re-placed there, clears the table.
+ */
+function anchorKeepsFloatClear(
+  before: FlowBlock[],
+  after: FlowBlock[],
+  start: number,
+  end: number,
+  anchor: FloatAnchor,
+  geometry: PageGeometry,
+): boolean {
+  const anchorBefore = before[anchor.index]?.globalY ?? 0;
+  const anchorAfter = after[anchor.index]?.globalY ?? 0;
+  if (geometry.pageAt(anchorAfter) !== geometry.pageAt(anchorBefore)) return false;
+
+  const first = after[start];
+  const last = after[end];
+  if (!first || !last) return false;
+  const zone = anchor.zoneAt(anchorAfter);
+  const tableTop = first.globalY ?? 0;
+  const tableBottom = (last.globalY ?? 0) + last.height;
+  return zone.bottom <= tableTop || zone.top >= tableBottom;
 }
 
 /**

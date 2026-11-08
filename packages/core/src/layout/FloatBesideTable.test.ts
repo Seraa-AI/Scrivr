@@ -13,6 +13,9 @@ import type { DocumentLayout, MeasureCacheEntry, PageConfig } from "./PageLayout
 import type { AnchoredObjectPlacement } from "./AnchoredObjects";
 import { ANCHORED_OBJECT_MARGIN } from "./AnchoredObjects";
 import { computePageMetrics, EMPTY_RESOLVED_CHROME } from "./PageMetrics";
+import type { LayoutBlock } from "./BlockLayout";
+import { cellAtCoords } from "./cellHitTest";
+import { renderTableRowPdf } from "../table/pdfExport";
 
 /**
  * A floating image beside a table. Word moves the whole table below a square
@@ -258,6 +261,139 @@ describe("float beside a table — the table moves below the float", () => {
   it("18: a row taller than a page under a float is placed once and layout ends", () => {
     const l = layout(docOf(para("Anchor", image({ wrapMode: "square" })), table("T", 1, 80)));
     expect(rowsOf(l, "T")).toHaveLength(1);
+  });
+
+  describe("a float anchored after the table it reaches back over", () => {
+    /** The table's rows and the anchor's y with no float in the document. */
+    function probe(rows: number, lead: Node[] = []) {
+      const plain = layout(docOf(...lead, table("T", rows), para("Anchor")));
+      return { plain, anchor: blockWith(plain, "Anchor"), rows: rowsOf(plain, "T") };
+    }
+
+    it("12: a float free to follow its anchor leaves the table and overlaps it", () => {
+      const { anchor, rows } = probe(3, [para("Intro")]);
+      const yOffset = must(rows[1], "row 1").y - anchor.y;
+      const l = layout(docOf(
+        para("Intro"), table("T", 3),
+        para("Anchor", image({ wrapMode: "square", height: 60, yOffset })),
+      ));
+      const f = floatOf(l);
+      const anchorNow = blockWith(l, "Anchor");
+      expect(rowsOf(l, "T").map((r) => r.y)).toEqual(rows.map((r) => r.y));
+      expect(f.page).toBe(anchorNow.page);
+      expect(f.y).toBe(anchorNow.y + yOffset);
+      expect(rowsOf(l, "T").some((r) => overlaps(r, f))).toBe(true);
+    });
+
+    it("12b: a float pinned to the page top moves the table below it", () => {
+      const l = layout(docOf(
+        table("T", 3),
+        para("Anchor", image({ wrapMode: "square", height: 60, yOffset: -5000 })),
+      ));
+      const f = floatOf(l);
+      const page1 = computePageMetrics(defaultPageConfig, EMPTY_RESOLVED_CHROME, 1);
+      expect(f.clamped).toBe(true);
+      expect(f.y).toBe(page1.contentTop);
+      expect(blockWith(l, "Anchor").page).toBe(f.page);
+      expectBelowFloat(rowsOf(l, "T"), f);
+    });
+
+    it("9: a table split across pages — a float on page 2 moves only the page-2 rows", () => {
+      const long = probe(80);
+      const onPage1 = long.rows.filter((r) => r.page === 1).length;
+      const { rows } = probe(onPage1 + 3);
+      const l = layout(docOf(
+        table("T", onPage1 + 3),
+        para("Anchor", image({ wrapMode: "square", height: 60, yOffset: -5000 })),
+      ));
+      const f = floatOf(l);
+      const after = rowsOf(l, "T");
+      expect(f.page).toBe(2);
+      expect(blockWith(l, "Anchor").page).toBe(2);
+      expect(after.filter((r) => r.page === 1).map((r) => r.y))
+        .toEqual(rows.filter((r) => r.page === 1).map((r) => r.y));
+      expectBelowFloat(after.filter((r) => r.page === 2), f);
+    });
+  });
+
+  it("17: pagination feedback — the float follows its anchor across the page boundary", () => {
+    const build = (lead: number) => docOf(
+      ...Array.from({ length: lead }, () => para(LONG_TEXT)),
+      para("Anchor", image({ wrapMode: "square" })),
+      table("T", 3),
+    );
+    let crossing = 0;
+    while (blockWith(layout(build(crossing)), "Anchor").page === 1) crossing++;
+
+    for (const lead of [crossing - 2, crossing - 1, crossing, crossing + 1]) {
+      const d = build(lead);
+      const measurer = createMeasurer();
+      const measureCache = new WeakMap<object, MeasureCacheEntry>();
+      const opts = { pageConfig: defaultPageConfig, fontConfig, measurer, measureCache };
+      const first = runPipeline(d, opts);
+      const again = runPipeline(d, { ...opts, previousLayout: first });
+      const f = floatOf(first);
+      expect(f.page).toBe(blockWith(first, "Anchor").page);
+      for (const row of rowsOf(first, "T")) expect(overlaps(row, f)).toBe(false);
+      expect(blocksOf(again)).toEqual(blocksOf(first));
+      expect(again.anchoredObjects).toEqual(first.anchoredObjects);
+    }
+  });
+
+  describe("consumers read the moved rows", () => {
+    const moved = () => layout(docOf(para("Anchor", image({ wrapMode: "square" })), table("T", 3)));
+
+    function firstRowBlock(l: DocumentLayout): LayoutBlock {
+      return must(
+        l.pages.flatMap((page) => page.blocks).find((b) => b.kind === "tableRow"),
+        "first row block",
+      );
+    }
+
+    it("13: a click lands in the moved cell, not where the row used to be", () => {
+      const l = moved();
+      const row = firstRowBlock(l);
+      const cell = must(row.cells?.[0], "first cell");
+      const centreX = cell.x + cell.width / 2;
+      const centreY = row.y + cell.y + cell.height / 2;
+      expect(cellAtCoords(l.pages, centreX, centreY, 1)).toBe(cell.cellPos);
+
+      const plainRow = must(rowsOf(layout(docOf(para("Anchor"), table("T", 3))), "T")[0], "plain row");
+      expect(cellAtCoords(l.pages, centreX, plainRow.y + plainRow.height / 2, 1)).not.toBe(cell.cellPos);
+    });
+
+    it("14: PDF draws the moved row where the layout put it", () => {
+      const l = moved();
+      const f = floatOf(l);
+      const row = firstRowBlock(l);
+      const lineYs: number[] = [];
+      const childYs: number[] = [];
+      const record = { text: () => {}, rect: () => {}, image: () => {}, imagePlaceholder: () => {} };
+      renderTableRowPdf(row, {
+        draw: {
+          ...record,
+          line: (op) => { lineYs.push(op.from.y, op.to.y); },
+          lines: () => {},
+        },
+        blocks: (blocks) => { for (const b of blocks) childYs.push(b.y); },
+      });
+      expect(Math.min(...lineYs)).toBe(row.y);
+      expect(Math.min(...lineYs)).toBeGreaterThanOrEqual(f.y + f.height);
+      expect(Math.min(...childYs)).toBeGreaterThanOrEqual(row.y);
+    });
+  });
+
+  // Known gap, pinned: a float anchored inside a cell is not resolved as a
+  // float, because a row's own lines are empty and cells are not scanned.
+  it("15: a square float anchored in a cell is not placed yet", () => {
+    const inCell = schema.node("table", { grid: [100, 100] }, [
+      schema.node("tableRow", null, [
+        schema.node("tableCell", null, [para("Cell", image({ wrapMode: "square" }))]),
+        schema.node("tableCell", null, [para("Other")]),
+      ]),
+    ]);
+    const l = layout(docOf(para("Before"), inCell));
+    expect(l.anchoredObjects ?? []).toHaveLength(0);
   });
 
   describe("19: the previous-layout tail cache", () => {
