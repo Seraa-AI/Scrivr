@@ -423,6 +423,69 @@ record means:
   agent can see and review it. An edit to it is already reported as rejected,
   because `findLiveNodeById` returns null. See D9.
 
+### Block ids are unique at the source (D13)
+
+Direction from the user (2026-11-08). Three review rounds kept finding defects
+in one class: a split or an Enter in a list leaves two live blocks with the
+same `nodeId`, because `UniqueId` only fills empty ids. Every reader then has
+to guess which copy an id means — the agent's edit lands on one copy while the
+hash, the stale guard and the image routing read another. Counting copies in
+each reader patches the symptom; the fix belongs where ids are assigned.
+
+**The rule.** *A block that an authored local edit creates never carries an id
+another block in the document already carries.* After a batch of local,
+authored transactions, `UniqueId`'s `appendTransaction` finds every id carried
+by more than one block. The copies that were already there before the batch —
+the old positions of that id mapped through the batch — keep it; any copy the
+batch created gets a fresh id, in the same appended transaction that fills
+empty ids (`NORMALIZATION_META`, nobody's edit). So:
+
+- a split or a list Enter: the first half was there, the split-off half is new
+  and gets a fresh id;
+- pasting a copy of a block into the same document: the pasted copy gets a
+  fresh id;
+- a move inside one transaction (delete at the old place, insert at the new)
+  leaves one copy and changes nothing.
+
+**Pending moves keep their shared id.** Track changes records a move by
+putting the moved block back where it was as a deleted copy — the left-behind
+copy — under the same id, so the two read as one block with a pending
+decision. That copy is written by the tracking engine's own transaction, which
+is bookkeeping, not an authored edit: the engine marks it `NORMALIZATION_META`,
+and `UniqueId` only de-duplicates after authored transactions. On every later
+edit both copies were there before the batch, so neither is renamed. Accepting
+or rejecting the move removes one copy. This is the only sharing the rule
+allows, and core still knows nothing about tracking: it asks only who authored
+the transaction.
+
+**Collaboration.** Exactly as the existing fill: only the client that made the
+split assigns the new id, in its own appended transaction, which syncs to the
+others. A change that arrives through sync (`COLLAB_SYNC_META`) is never
+re-keyed on the receiving client, so every client converges on the author's
+ids. Concurrent splits on two clients each mint their own ids for their own new
+blocks.
+
+**Existing documents.** Reads never assign ids (`ServerEditor` never fabricates
+one on load), so nothing is fixed on load. A document saved with duplicates
+keeps them until an authored edit creates another copy of that id; `UniqueId`
+cannot tell an old duplicate from a pending move's pair without knowing about
+tracking, and renaming a move's copy would break the move. Readers stay correct
+on such a document: the agent's view matches a unit by its id and whether it is
+proposed for deletion (`SemanticUnit.proposedForDeletion`), and a write by id
+goes to the live copy (`findLiveNodeById`). Two *live* copies of one id in an
+old document stay ambiguous, as they were; a tracked repair is a follow-up.
+
+**What it removes.** With ids unique at the source, `findLiveNodeById` is exact
+and the copy-counting in `@scrivr/ai` goes: no nth-copy matching, no
+last-copy-wins maps. `unitsToRead` leaves out a move's left-behind copy by its
+position, and `applyRichEdit` matches a handed-back unit by id and by whether
+it is proposed for deletion.
+
+**Track-changes splits.** A tracked split already records itself by record ids
+— `node_split` on the second half, `reference` on the first, pointing at the
+split's record id — never by `nodeId`. Rejecting a split joins the halves and
+the first keeps its identity; accepting keeps both, now with distinct ids.
+
 ### PR B: DOCX revisions
 
 **Export, `@scrivr/core/exports/docx.ts` and `@scrivr/docx`.**
@@ -701,6 +764,9 @@ including the NEW pieces in D7, D8 and D12.
   `w:pPr`, and Word enforces the order (rules 1 and 2). One place knows it.
   List's `addNumPrToParagraph` (`List.ts:35-56`) moves onto it. W2's L3 rewrites
   that function, so whichever PR lands second adopts the helper.
+- **D13: Block ids are unique at the source.** Directed by the user on
+  2026-11-08; the rule, its treatment of pending moves, collaboration and
+  existing documents are under "Block ids are unique at the source" above.
 
 ## Risks
 
