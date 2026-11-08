@@ -1,5 +1,5 @@
 import { Extension, IMAGE_NODE_ATTRS, stableStringify } from "@scrivr/core";
-import type { IBaseEditor, IEditor, SemanticImage, SemanticPart, SemanticUnit } from "@scrivr/core";
+import type { IBaseEditor, IEditor, SemanticChange, SemanticImage, SemanticPart, SemanticUnit } from "@scrivr/core";
 import type { ReviewDecisions, ReviewOutcome } from "@scrivr/plugins";
 import { semanticPartRichHash, toSemanticUnits, unitRichHash } from "@scrivr/export-semantic";
 import { SemanticImageAttrsSchema, type SemanticEdit, type StructuralSemanticEdit } from "../schema/edit";
@@ -95,13 +95,15 @@ export class AiSuggestionsAPI {
 }
 
 /**
- * The units of the live document. A pending move leaves a shadow carrying the
- * same ids, which the export walks like any block; an agent reads and edits the
- * live copy, so the shadow's unit and parts are left out. Units come in
- * document order, so the nth unit or part for an id is the nth copy of it —
- * which is why a shadow's parts are counted even though they are dropped.
+ * The units an agent reads: one per id. A pending move leaves a shadow carrying
+ * the same ids as the moved copy, which the export walks like any block; the
+ * agent reads and edits the live copy, so the shadow's unit and parts are left
+ * out. A block proposed for deletion has no live copy, so it stays, for the
+ * agent to read and review. Units come in document order, so the nth unit or
+ * part for an id is the nth copy of it — which is why a shadow's parts are
+ * counted even though they are dropped.
  */
-function liveUnits(units: SemanticUnit[], doc: PmNode): SemanticUnit[] {
+function unitsToRead(units: SemanticUnit[], doc: PmNode): SemanticUnit[] {
   const shadows = shadowRanges(doc);
   if (shadows.length === 0) return units;
   const live = new Map<string, boolean[]>();
@@ -114,9 +116,8 @@ function liveUnits(units: SemanticUnit[], doc: PmNode): SemanticUnit[] {
     return true;
   });
   const seen = new Map<string, number>();
-  // Only a copy whose id is live elsewhere — a move's shadow — is left out; a
-  // block proposed for deletion stays, so an agent can read and review it.
-  const isLive = (id: string) => {
+  /** Keep the nth copy of an id unless it is a shadow of a copy live elsewhere. */
+  const isKept = (id: string) => {
     const nth = seen.get(id) ?? 0;
     seen.set(id, nth + 1);
     const copies = live.get(id) ?? [];
@@ -124,9 +125,9 @@ function liveUnits(units: SemanticUnit[], doc: PmNode): SemanticUnit[] {
     return !copies.some(Boolean);
   };
   return units.flatMap((unit) => {
-    const unitIsLive = isLive(unit.id);
-    const parts = unit.parts?.filter((part) => isLive(part.nodeId));
-    if (!unitIsLive) return [];
+    const unitIsKept = isKept(unit.id);
+    const parts = unit.parts?.filter((part) => isKept(part.nodeId));
+    if (!unitIsKept) return [];
     return parts ? [{ ...unit, parts }] : [unit];
   });
 }
@@ -147,18 +148,33 @@ function isSemanticUnit(item: RichBlockEdit | SemanticUnit): item is SemanticUni
 }
 
 /**
- * `changes` are read-only to an agent: it proposes through spans, attrs and
- * structural ops. So whatever it hands back there is replaced by what the
- * document has before deciding whether it edited anything.
+ * `item` with `current`'s review changes in place of its own — on the item and
+ * on each of its parts and cells. An agent cannot edit `changes`, so whatever
+ * it hands back there must not read as an edit.
  */
-function unitWithChanges(unit: SemanticUnit, current: SemanticUnit): SemanticUnit {
-  const { changes: _ignored, ...rest } = unit;
-  return current.changes ? { ...rest, changes: current.changes } : rest;
+function withCurrentChanges<T extends ChangeHolder>(item: T, current: ChangeHolder | undefined): T {
+  const copy = { ...item };
+  delete copy.changes;
+  if (current?.changes) copy.changes = current.changes;
+  return copy;
 }
 
-function partWithChanges(part: SemanticPart, current: SemanticPart): SemanticPart {
-  const { changes: _ignored, ...rest } = part;
-  return current.changes ? { ...rest, changes: current.changes } : rest;
+interface ChangeHolder {
+  changes?: SemanticChange[];
+}
+
+function unitWithCurrentChanges(unit: SemanticUnit, current: SemanticUnit): SemanticUnit {
+  const copy = withCurrentChanges(unit, current);
+  const currentParts = new Map((current.parts ?? []).map((part) => [part.nodeId, part]));
+  if (unit.parts) copy.parts = unit.parts.map((part) => withCurrentChanges(part, currentParts.get(part.nodeId)));
+  if (unit.cells) {
+    copy.cells = {
+      rows: unit.cells.rows.map((row, r) => ({
+        cells: row.cells.map((cell, c) => withCurrentChanges(cell, current.cells?.rows[r]?.cells[c])),
+      })),
+    };
+  }
+  return copy;
 }
 
 /** A caller-pinned source hash on a unit (optional stale-edit guard). */
@@ -383,7 +399,7 @@ export class AiToolkitAPI {
    * ai.applyRichEdit(edited);
    */
   getRichBlocks(from?: number, to?: number): SemanticUnit[] {
-    const units = liveUnits(toSemanticUnits(this.editor, { groupBlocks: false }), this.editor.getState().doc);
+    const units = unitsToRead(toSemanticUnits(this.editor, { groupBlocks: false }), this.editor.getState().doc);
     if (from === undefined || to === undefined) return units;
     const allowed = new Set<string>();
     this.editor.getState().doc.forEach((node, offset) => {
@@ -433,7 +449,7 @@ export class AiToolkitAPI {
     // (which units changed) and the stale guard (did the doc move under us).
     const currentUnits = new Map<string, SemanticUnit>();
     const currentHashByNodeId = new Map<string, string>();
-    for (const u of liveUnits(toSemanticUnits(this.editor, { groupBlocks: false }), this.editor.getState().doc)) {
+    for (const u of unitsToRead(toSemanticUnits(this.editor, { groupBlocks: false }), this.editor.getState().doc)) {
       currentUnits.set(u.id, u);
       currentHashByNodeId.set(u.id, unitRichHash(u));
       for (const part of u.parts ?? []) {
@@ -472,7 +488,7 @@ export class AiToolkitAPI {
           stale.push(nodeId);
           continue;
         }
-        if (unitRichHash(unitWithChanges(item, currentUnit)) === current) continue; // unchanged — skip
+        if (unitRichHash(unitWithCurrentChanges(item, currentUnit)) === current) continue; // unchanged — skip
         if (currentUnit.type === "image") {
           if (stableStringify(item.attrs ?? {}) === stableStringify(currentUnit.attrs ?? {})) queueImageLayout(nodeId, item.image);
           else rejected.push(nodeId);
@@ -490,7 +506,7 @@ export class AiToolkitAPI {
               notFound.push(part.nodeId);
               continue;
             }
-            if (semanticPartRichHash(partWithChanges(part, currentPart)) === semanticPartRichHash(currentPart)) continue;
+            if (semanticPartRichHash(withCurrentChanges(part, currentPart)) === semanticPartRichHash(currentPart)) continue;
             resolved.push(editForPart(part));
             changed.push(part.nodeId);
           }

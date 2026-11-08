@@ -67,6 +67,7 @@ describe("an agent sees structural changes", () => {
     expect(unit.changes?.map((c) => [c.type, c.text])).toEqual([["suggestedDelete", "Beta"]]);
     const result = ai.applyRichEdit([{ nodeId: "b", spans: [{ text: "Revived", marks: [] }] }]);
     expect(result.changed).toEqual([]);
+    expect(result.rejected).toEqual(["b"]);
   });
 
   it("reads a moved block once, where it went", () => {
@@ -83,6 +84,46 @@ describe("an agent sees structural changes", () => {
     const { ai } = replaceThirty();
     const units = ai.getRichBlocks().map(({ changes: _changes, ...unit }) => unit);
     expect(ai.applyRichEdit(units).changed).toEqual([]);
+  });
+
+  it("nor a returned list whose parts left out their changes", () => {
+    const { editor, ai } = build([{
+      type: "bulletList",
+      content: [{ type: "listItem", content: [para("i1", "one")] }, { type: "listItem", content: [para("i2", "two")] }],
+    }]);
+    editor.applyTransaction(editor.getState().tr.insertText("NEW ", 3));
+    const units = ai.getRichBlocks().map(({ changes: _changes, ...unit }) => ({
+      ...unit,
+      ...(unit.parts ? { parts: unit.parts.map(({ changes: _partChanges, ...part }) => part) } : {}),
+    }));
+    expect(units[0]?.parts?.length).toBe(2);
+    const result = ai.applyRichEdit(units);
+    expect(result).toEqual({ applied: false, changed: [], stale: [], notFound: [], rejected: [] });
+  });
+
+  it("nor a returned table whose cells left out their changes", () => {
+    // Cells without ids have no parts, so the table is compared as a whole.
+    const inserted = { type: "trackedInsert", attrs: { dataTracked: { id: "ins", operation: "insert", authorID: "jane", status: "pending", createdAt: 1 } } };
+    const cell = (text: string, marks: DocNode[] = []): DocNode =>
+      ({ type: "tableCell", content: [{ type: "paragraph", content: [{ type: "text", text, marks }] }] });
+    const editor = new ServerEditor({
+      extensions: [
+        StarterKit.configure({ table: true }),
+        TrackChanges.configure({ userID: "jane", initialStatus: TrackChangesStatus.enabled, canAcceptReject: true }),
+        AiToolkit.configure({ uniqueId: false }),
+      ],
+      content: { type: "doc", content: [{ type: "table", attrs: { nodeId: "t" }, content: [{ type: "tableRow", content: [cell("NEW a1", [inserted]), cell("b1")] }] }] },
+    });
+    const ai = getAiToolkit(editor);
+    if (!ai) throw new Error("no AiToolkit");
+    expect(ai.getRichBlocks()[0]?.parts).toBeUndefined();
+    const units = ai.getRichBlocks().map(({ changes: _changes, ...unit }) => ({
+      ...unit,
+      ...(unit.parts ? { parts: unit.parts.map(({ changes: _partChanges, ...part }) => part) } : {}),
+      ...(unit.cells ? { cells: { rows: unit.cells.rows.map((row) => ({ cells: row.cells.map(({ changes: _cellChanges, ...c }) => c) })) } } : {}),
+    }));
+    expect(units[0]?.cells?.rows[0]?.cells[0]?.text).toBe("NEW a1");
+    expect(ai.applyRichEdit(units)).toEqual({ applied: false, changed: [], stale: [], notFound: [], rejected: [] });
   });
 });
 
