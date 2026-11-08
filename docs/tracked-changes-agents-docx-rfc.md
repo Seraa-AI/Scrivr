@@ -844,7 +844,7 @@ The user also approved, on 2026-11-08, two added in the second review round:
   duplicated ids, say what is a move's left-behind copy. It shares one cached
   walk with `shadowRanges`.
 
-NEW in the third review round, awaiting the user's approval:
+Added in the third review round, approved by the user on 2026-11-08:
 
 - **`SemanticUnit.proposedForDeletion` and `SemanticPart.proposedForDeletion`**
   (`true` when present). Whether a block itself is proposed for deletion — not
@@ -895,13 +895,32 @@ NEW in the third review round, awaiting the user's approval:
 - **A formatting change's `oldAttrs.marks` is the text's marks before any
   pending formatting change on it**, so a mark both added and proposed for
   removal reads absent in both the spans and `oldAttrs`.
-- **Units handed back to `applyRichEdit` are matched by the copy of their id**
-  they were read as: a split or a list Enter leaves two blocks with one id.
-- **`findChanges` looks operations up in a map**, so a synced record naming
-  `"toString"` is an unknown operation rather than a crash on load.
+- **Block ids are unique at the source (D13, shipped).** `UniqueId` re-keys a
+  block an authored local edit creates under an id another block carries;
+  track changes marks its recording transaction `NORMALIZATION_META` and, when
+  it writes a split or an insertion back, clears ids the document already has
+  so `UniqueId` fills them. A move keeps the moved block's id (it is written
+  through the move path, which keeps it). Verified with a two-peer Yjs sync:
+  the receiving peer gets the author's ids and mints none.
+- **`applyRichEdit` matches a handed-back unit by its id and whether it was
+  read as proposed for deletion** — no copy counting. An id that names two
+  live blocks (only in a document saved before D13) is refused, not guessed.
+  `unitsToRead` leaves out a move's left-behind copy by position.
+- **`findChanges` and the paint colours look operations up in maps**, guarded
+  on a string, so a synced record naming `""`, `"toString"` or `"__proto__"`
+  neither breaks loading nor paints a bogus frame.
+- **A grouped unit is `proposedForDeletion` only when every block in it is.**
+  A former node type must be a textblock standing in for a textblock.
+- **A change's extent contract** is stated in `semantic.ts`, the README and
+  the plugins docs: `text` is the act's own content, `at`/`length` its extent
+  from first piece to last.
 
 ### Not shipped in PR A
 
+- Documents saved with duplicate ids keep them until an edit creates another
+  copy: `UniqueId` cannot tell an old duplicate from a pending move's pair
+  without knowing about tracking. Agents can still read and edit such a
+  document safely, as above.
 - Deleting text across a hard break ("b⏎c") reads as three changes, because
   the engine records three acts, and a reviewer decides three. The lane follows
   `changeActs`.

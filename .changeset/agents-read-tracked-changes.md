@@ -65,3 +65,15 @@ One-time changes to watch for:
   proposed view,** where they used to read as present.
 - **`markdown` is omitted on units with any pending change,** not only those
   with pending deletions.
+- **Block ids are now unique after a split.** `UniqueId` gives the block an
+  edit creates — a split's second half, a list Enter's new item, a pasted copy
+  — a fresh id when another block already carries its id; the original keeps
+  it. Only the author's client assigns it; a change arriving through sync is
+  never re-keyed. A pending move's two copies still share their id. Documents
+  saved with duplicates keep them until edited (reads never assign ids).
+- **An edit to a block proposed for deletion is rejected** by `applyRichEdit`,
+  and an edit by an id that names two live blocks — only possible in a
+  document saved before ids were unique — is rejected rather than written to
+  the first.
+- **Track changes marks its own recording transaction `NORMALIZATION_META`,**
+  as bookkeeping nobody authored.
