@@ -36,6 +36,8 @@ const DocUnitSchema = z.object({
     wrap: z.enum(IMAGE_WRAPS),
     align: z.enum([...IMAGE_ALIGNS, "custom"]),
   }).optional(),
+  /** The block itself is proposed for deletion, as `getRichBlocks` says. */
+  proposedForDeletion: z.literal(true).optional(),
   changes: z.array(z.object({
     type: z.enum(["suggestedInsert", "suggestedDelete", "suggestedAttrs"]),
     text: z.string(),
@@ -98,10 +100,8 @@ export const Route = createFileRoute("/api/ai")({
             "of the document, place it after the block marked `last block`.",
             "",
           );
-          // A block that reads empty because its text is all proposed for
-          // deletion is not one to place after; the last block with text is.
-          const readsDeleted = (u: DocUnit) => u.text === "" && (u.changes ?? []).some((c) => c.type === "suggestedDelete");
-          const lastLive = units.reduce((last, u, index) => (readsDeleted(u) ? last : index), -1);
+          // A block proposed for deletion cannot be placed after; the last other one can.
+          const lastLive = units.reduce((last, u, index) => (u.proposedForDeletion ? last : index), -1);
           for (const [index, u] of units.entries()) {
             const kind = u.headingLevel ? `heading ${u.headingLevel}` : u.type;
             const last = index === lastLive ? ", last block" : "";

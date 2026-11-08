@@ -44,6 +44,7 @@ function getDocContext(editor: Editor | null): {
     ...(unit.headingLevel ? { headingLevel: unit.headingLevel } : {}),
     ...(unit.parts ? { parts: unit.parts.map((part) => ({ nodeId: part.nodeId, text: part.text })) } : {}),
     ...(unit.image ? { image: unit.image } : {}),
+    ...(unit.proposedForDeletion ? { proposedForDeletion: true } : {}),
     ...(unit.changes ? {
       changes: unit.changes.map(({ type, text, id, at, authorId, oldAttrs, image }) => ({
         type,
@@ -181,16 +182,20 @@ export function ChatPanel({ editor, hideBorder }: ChatPanelProps) {
       ? `accepted ${outcome.accepted.join(", ") || "nothing"} · rejected ${outcome.rejected.join(", ") || "nothing"}`
       : `review ${outcome.status}: ${outcome.reason}`);
     recordReview({ at: new Date().toISOString(), toolCallId, decisions, outcome });
+    // A refused review goes back to the model once, with the user's next
+    // message, rather than being retried on its own without end.
+    reviewRefused.current = outcome.status !== "applied";
     void addToolOutput({ tool: "review_changes", toolCallId, output: outcome });
   }
 
+  const reviewRefused = useRef(false);
   const { messages, sendMessage, status, setMessages, addToolOutput } = useChat<AppUIMessage>({
     transport,
     onData: applyToolResult,
     onToolCall: ({ toolCall }) => {
       if (toolCall.toolName === "review_changes") reviewForAgent(toolCall.toolCallId, toolCall.input);
     },
-    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
+    sendAutomaticallyWhen: (options) => !reviewRefused.current && lastAssistantMessageIsCompleteWithToolCalls(options),
   });
   const isLoading = status === "streaming" || status === "submitted";
 
@@ -207,6 +212,7 @@ export function ChatPanel({ editor, hideBorder }: ChatPanelProps) {
       const s = editorRef.current.getState().selection;
       pendingSelection.current = { from: s.from, to: s.to };
     }
+    reviewRefused.current = false;
     sendMessage({ text });
     setInputValue("");
   }
