@@ -476,6 +476,36 @@ describe("YBinding — two-peer sync", () => {
   });
 });
 
+// ── Block ids after a split ──────────────────────────────────────────────────
+
+describe("YBinding — a split's new id is assigned once, by its author", () => {
+  const blockIds = (editor: ServerEditor) => {
+    const ids: unknown[] = [];
+    editor.getState().doc.forEach((node) => ids.push(node.attrs["nodeId"]));
+    return ids;
+  };
+
+  it("peer B receives the fresh id peer A gave the split-off half, and mints none of its own", () => {
+    const a = makePeer();
+    const b = makePeer();
+    const unpair = pairDocs(a.ydoc, b.ydoc);
+    a.binding.markSynced();
+    b.binding.markSynced();
+
+    a.editor.applyTransaction(a.editor.getState().tr.insertText("AlphaBeta", 1));
+    a.editor.applyTransaction(a.editor.getState().tr.split(6));
+
+    const ids = blockIds(a.editor);
+    expect(ids).toHaveLength(2);
+    expect(new Set(ids).size).toBe(2);
+    expect(blockIds(b.editor)).toEqual(ids);
+
+    unpair();
+    a.binding.destroy();
+    b.binding.destroy();
+  });
+});
+
 // ── Late join ────────────────────────────────────────────────────────────────
 
 describe("YBinding — late join", () => {

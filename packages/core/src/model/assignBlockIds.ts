@@ -19,6 +19,7 @@
  *   const state = EditorState.create({ schema, doc: safe });
  */
 import { Fragment, type Node, type Mark, type Attrs } from "prosemirror-model";
+import type { Mappable } from "prosemirror-transform";
 
 export interface AssignBlockIdsOptions {
   /** Override the ID source. Defaults to `crypto.randomUUID()`. */
@@ -111,6 +112,60 @@ export function planBlockIdAssignments(
     return true;
   });
   return out;
+}
+
+/**
+ * The blocks an edit created that carry an id another block already carries,
+ * each with a fresh id to take instead. `before` is the document the edit
+ * started from, `after` the one it produced, and `mapping` maps the first onto
+ * the second. A copy of an id that was already there — its old position mapped
+ * through the edit — keeps it; any other copy is new and is re-keyed. So a
+ * split's second half and a pasted copy get fresh ids, while copies that were
+ * all there before the edit (a pending move's pair) are left alone.
+ */
+export function planDuplicateIdAssignments(
+  before: Node,
+  after: Node,
+  mapping: Mappable,
+  options: AssignBlockIdsOptions = {},
+): BlockIdAssignment[] {
+  const generate = options.generate ?? defaultGenerate;
+  const copies = new Map<string, Array<{ pos: number; node: Node }>>();
+  after.descendants((node, pos) => {
+    const id = blockIdOf(node);
+    if (id !== null) copies.set(id, [...(copies.get(id) ?? []), { pos, node }]);
+    return true;
+  });
+  const shared = new Set([...copies].filter(([, at]) => at.length > 1).map(([id]) => id));
+  if (shared.size === 0) return [];
+
+  const kept = new Set<number>();
+  before.descendants((node, pos) => {
+    const id = blockIdOf(node);
+    if (id === null || !shared.has(id)) return true;
+    const mapped = mapping.mapResult(pos, 1);
+    if (!mapped.deleted) kept.add(mapped.pos);
+    return true;
+  });
+
+  const out: BlockIdAssignment[] = [];
+  for (const id of shared) {
+    const at = copies.get(id) ?? [];
+    // Copies the edit made all of keep the first, as the one written first.
+    const keeper = at.find(({ pos }) => kept.has(pos)) ?? at[0];
+    for (const copy of at) {
+      if (copy === keeper || kept.has(copy.pos)) continue;
+      out.push({ pos: copy.pos, attrs: { ...copy.node.attrs, nodeId: generate() } });
+    }
+  }
+  return out;
+}
+
+/** A block's id, or null when it has none or its schema declares none. */
+function blockIdOf(node: Node): string | null {
+  if (!node.isBlock || !("nodeId" in (node.type.spec.attrs ?? {}))) return null;
+  const id = node.attrs["nodeId"];
+  return typeof id === "string" && id.length > 0 ? id : null;
 }
 
 /** Result of `recloneDocumentIds`: the fresh-id doc plus the old→new mapping. */

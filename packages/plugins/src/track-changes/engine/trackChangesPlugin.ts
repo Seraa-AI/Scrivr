@@ -1,3 +1,4 @@
+import { NORMALIZATION_META } from "@scrivr/core";
 import { closeHistory, EditorState, Plugin, PluginKey, Transaction } from "@scrivr/core/pm";
 
 import {
@@ -176,6 +177,10 @@ export const trackChangesPlugin = (options: TrackChangesOptions) => {
         fixInconsistentChanges(current, userID, createdTr, oldState.schema);
       if (docChanged || createdTr.docChanged || changed) {
         createdTr.setMeta("origin", trackChangesPluginKey);
+        // Recording a change is bookkeeping, not authoring: the copy a pending
+        // move leaves behind shares the moved block's id by design, and must
+        // not be re-keyed as though someone had pasted it.
+        createdTr.setMeta(NORMALIZATION_META, true);
         return setAction(createdTr, TrackChangesAction.refreshChanges, true);
       }
       return null;

@@ -99,6 +99,28 @@ export function setFragmentAsNodeSplit(
   return inserted;
 }
 
+/**
+ * Written content with any block id `doc` already carries cleared. A split or
+ * a list Enter copies its source's id onto the new block; the id stays with the
+ * block that had it, and `UniqueId` gives each new one its own.
+ */
+export function withoutTakenIds(fragment: Fragment, doc: PMNode): Fragment {
+  const taken = new Set<unknown>();
+  doc.descendants((node) => {
+    if (node.isBlock && node.attrs["nodeId"]) taken.add(node.attrs["nodeId"]);
+  });
+  const clear = (node: PMNode): PMNode => {
+    if (node.isText || node.isLeaf) return node;
+    const content: PMNode[] = [];
+    node.forEach((child) => content.push(clear(child)));
+    const takenId = node.isBlock && taken.has(node.attrs["nodeId"]);
+    return node.type.create(takenId ? { ...node.attrs, nodeId: null } : node.attrs, Fragment.from(content), node.marks);
+  };
+  const out: PMNode[] = [];
+  fragment.forEach((node) => out.push(clear(node)));
+  return Fragment.from(out);
+}
+
 /** The mark standing in for this operation on text. */
 function trackedMarkType(newTrackAttrs: NewTrackedAttrs, schema: Schema) {
   return newTrackAttrs.operation === CHANGE_OPERATION.insert

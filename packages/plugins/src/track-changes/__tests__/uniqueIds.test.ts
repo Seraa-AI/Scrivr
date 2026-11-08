@@ -1,0 +1,84 @@
+/**
+ * Block ids are unique at the source: a split's halves differ, while a pending
+ * move's two copies keep the one id they share by design.
+ */
+import { describe, expect, it } from "vitest";
+import { ServerEditor, StarterKit } from "@scrivr/core";
+import { splitListItem, TextSelection } from "@scrivr/core/pm";
+import { changeActs, reviewChanges, TrackChanges, TrackChangesStatus, trackChangesPluginKey } from "@scrivr/plugins";
+
+type DocNode = Record<string, unknown>;
+const para = (nodeId: string, text: string): DocNode => ({ type: "paragraph", attrs: { nodeId }, content: [{ type: "text", text }] });
+
+function editorWith(content: DocNode[]) {
+  return new ServerEditor({
+    extensions: [StarterKit, TrackChanges.configure({ userID: "alice", initialStatus: TrackChangesStatus.enabled, canAcceptReject: true })],
+    content: { type: "doc", content },
+  });
+}
+
+const topIds = (editor: ServerEditor) => {
+  const ids: unknown[] = [];
+  editor.getState().doc.forEach((node) => ids.push(node.attrs["nodeId"]));
+  return ids;
+};
+
+const pendingActs = (editor: ServerEditor) => changeActs(trackChangesPluginKey.getState(editor.getState())?.changeSet.pending ?? []);
+
+describe("a tracked split", () => {
+  it("gives its second half a fresh id", () => {
+    const editor = editorWith([para("p", "AlphaBeta")]);
+    editor.applyTransaction(editor.getState().tr.split(6));
+    const [first, second] = topIds(editor);
+    expect(first).toBe("p");
+    expect(second).not.toBe("p");
+  });
+
+  it("is accepted with both halves kept under their own ids", () => {
+    const editor = editorWith([para("p", "AlphaBeta")]);
+    editor.applyTransaction(editor.getState().tr.split(6));
+    expect(reviewChanges(editor, { accepted: pendingActs(editor).map((a) => a.primary.id), rejected: [] }).status).toBe("applied");
+    const ids = topIds(editor);
+    expect(editor.getState().doc.textContent).toBe("AlphaBeta");
+    expect(ids[0]).toBe("p");
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("is rejected back into one block that keeps the first half's id", () => {
+    const editor = editorWith([para("p", "AlphaBeta")]);
+    editor.applyTransaction(editor.getState().tr.split(6));
+    expect(reviewChanges(editor, { accepted: [], rejected: pendingActs(editor).map((a) => a.primary.id) }).status).toBe("applied");
+    expect(editor.getState().doc.child(0).textContent).toBe("AlphaBeta");
+    expect(topIds(editor)[0]).toBe("p");
+  });
+});
+
+describe("a tracked Enter in a list", () => {
+  it("gives the new item and its paragraph ids of their own", () => {
+    const editor = editorWith([{ type: "bulletList", attrs: { nodeId: "l" }, content: [
+      { type: "listItem", attrs: { nodeId: "li" }, content: [para("p", "onetwo")] },
+    ] }]);
+    const listItem = editor.getState().schema.nodes["listItem"];
+    if (!listItem) throw new Error("no listItem");
+    editor.applyTransaction(editor.getState().tr.setSelection(TextSelection.create(editor.getState().doc, 6)));
+    splitListItem(listItem)(editor.getState(), (tr) => editor.applyTransaction(tr));
+    const ids: unknown[] = [];
+    editor.getState().doc.descendants((node) => {
+      if (node.isBlock) ids.push(node.attrs["nodeId"]);
+    });
+    expect(ids.every((id) => typeof id === "string")).toBe(true);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+});
+
+describe("a pending move", () => {
+  it("keeps one id on both copies, through later edits", () => {
+    const editor = editorWith([para("a", "Alpha"), para("b", "Beta")]);
+    const state = editor.getState();
+    const moved = state.doc.child(0);
+    editor.applyTransaction(state.tr.insert(state.doc.content.size, moved).delete(0, moved.nodeSize));
+    expect(topIds(editor).filter((id) => id === "a")).toHaveLength(2);
+    editor.applyTransaction(editor.getState().tr.insertText("!", editor.getState().doc.child(0).nodeSize + 2));
+    expect(topIds(editor).filter((id) => id === "a")).toHaveLength(2);
+  });
+});

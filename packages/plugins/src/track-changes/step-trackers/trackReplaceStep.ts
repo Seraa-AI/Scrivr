@@ -19,6 +19,7 @@ import {
   setFragmentAsInserted,
   setFragmentAsMoveChange,
   setFragmentAsNodeSplit,
+  withoutTakenIds,
 } from "../lib/fragments";
 import { mapChangeSteps } from "../engine/changeStep";
 import { advanceBridge } from "../engine/replayBridge";
@@ -127,6 +128,10 @@ export function trackReplaceStep(
             createNewMoveAttrs(attrs, indentationType),
           );
         }
+        // Only moved content keeps the id of the block it came from — its
+        // left-behind copy shares it by design. Anything else the step wrote
+        // under an id the document already has is a new block.
+        if (!moveID && !isStructuralChange(tr)) fragment = withoutTakenIds(fragment, newTr.doc);
         const openStart =
           slice.openStart !== slice.openEnd ? 0 : slice.openStart;
         const openEnd = slice.openStart !== slice.openEnd ? 0 : slice.openEnd;
