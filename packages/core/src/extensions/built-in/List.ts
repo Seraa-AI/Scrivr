@@ -12,6 +12,7 @@ import {
   LIST_MARKER_HANGING,
   listKind,
   listLevel,
+  listStart,
   type ListKind,
 } from "../../model/lists";
 import type { SlashCommandContribution, ToolbarItemSpec } from "../types";
@@ -36,40 +37,49 @@ interface ListItemDocxInfo {
 
 const LIST_ITEMS_KEY = "docx:listItems";
 
-/** `w:pPr` children that the schema orders after `w:ind`. */
-const AFTER_IND: ReadonlySet<string> = new Set([
-  "w:contextualSpacing", "w:mirrorIndents", "w:suppressOverlap", "w:jc", "w:textDirection",
-  "w:textAlignment", "w:textboxTightWrap", "w:outlineLvl", "w:divId", "w:cnfStyle",
-  "w:rPr", "w:sectPr", "w:pPrChange",
-]);
+/** The order the schema requires inside `w:pPr` (CT_PPrBase, then CT_PPr). */
+const PPR_ORDER: readonly string[] = [
+  "w:pStyle", "w:keepNext", "w:keepLines", "w:pageBreakBefore", "w:framePr", "w:widowControl",
+  "w:numPr", "w:suppressLineNumbers", "w:pBdr", "w:shd", "w:tabs", "w:suppressAutoHyphens",
+  "w:kinsoku", "w:wordWrap", "w:overflowPunct", "w:topLinePunct", "w:autoSpaceDE", "w:autoSpaceDN",
+  "w:bidi", "w:adjustRightInd", "w:snapToGrid", "w:spacing", "w:ind", "w:contextualSpacing",
+  "w:mirrorIndents", "w:suppressOverlap", "w:jc", "w:textDirection", "w:textAlignment",
+  "w:textboxTightWrap", "w:outlineLvl", "w:divId", "w:cnfStyle", "w:rPr", "w:sectPr", "w:pPrChange",
+];
+
+/** The order the schema requires inside `w:tblPr` (CT_TblPrBase, then CT_TblPr). */
+const TBLPR_ORDER: readonly string[] = [
+  "w:tblStyle", "w:tblpPr", "w:tblOverlap", "w:bidiVisual", "w:tblStyleRowBandSize",
+  "w:tblStyleColBandSize", "w:tblW", "w:jc", "w:tblCellSpacing", "w:tblInd", "w:tblBorders",
+  "w:shd", "w:tblLayout", "w:tblCellMar", "w:tblLook", "w:tblCaption", "w:tblDescription",
+  "w:tblPrChange",
+];
 
 const childNamed = (node: XmlNode, name: string) =>
   (node.children ?? []).find((c): c is XmlNode => typeof c !== "string" && c.name === name);
 
 /**
- * Adds `property` to a `<w:p>`'s pPr, before the first child named in
- * `before` (or last). Anything that is not a `<w:p>` — a table in an item —
- * passes through untouched.
+ * Adds `property` to the properties element `container` (`w:pPr`, `w:tblPr`)
+ * of `element`, where `order` puts it: before the first property the schema
+ * orders after it. The properties element is created as `element`'s first
+ * child when it has none.
  */
-function addParagraphProperty(p: XmlNode, property: XmlNode, before: ReadonlySet<string> = new Set()): XmlNode {
-  if (p.name !== "w:p") return p;
-  const existingChildren = p.children ?? [];
-  const pPrIdx = existingChildren.findIndex(
-    (c) => typeof c !== "string" && c.name === "w:pPr",
-  );
-  const pPr = pPrIdx >= 0 ? existingChildren[pPrIdx] : undefined;
-  if (pPr !== undefined && typeof pPr !== "string") {
-    const props = pPr.children ?? [];
-    const at = props.findIndex((c) => typeof c !== "string" && before.has(c.name));
-    const placed = at < 0 ? [...props, property] : [...props.slice(0, at), property, ...props.slice(at)];
-    const newChildren = [...existingChildren];
-    newChildren[pPrIdx] = xml("w:pPr", pPr.attributes, placed);
-    return xml(p.name, p.attributes, newChildren);
+function withProperty(element: XmlNode, container: string, property: XmlNode, order: readonly string[]): XmlNode {
+  const rank = (name: string) => order.indexOf(name);
+  const children = element.children ?? [];
+  const at = children.findIndex((c) => typeof c !== "string" && c.name === container);
+  const props = at >= 0 ? children[at] : undefined;
+  if (props === undefined || typeof props === "string") {
+    return xml(element.name, element.attributes, [xml(container, undefined, [property]), ...children]);
   }
-  return xml(p.name, p.attributes, [
-    xml("w:pPr", undefined, [property]),
-    ...existingChildren,
-  ]);
+  const existing = props.children ?? [];
+  const before = existing.findIndex((c) => typeof c !== "string" && rank(c.name) > rank(property.name));
+  const placed = before < 0
+    ? [...existing, property]
+    : [...existing.slice(0, before), property, ...existing.slice(before)];
+  const next = [...children];
+  next[at] = xml(container, props.attributes, placed);
+  return xml(element.name, element.attributes, next);
 }
 
 const numPrOf = (numId: number, ilvl: number) =>
@@ -78,31 +88,46 @@ const numPrOf = (numId: number, ilvl: number) =>
     xml("w:numId", { "w:val": String(numId) }),
   ]);
 
-/**
- * A block after an item's first is an unnumbered paragraph at the level's
- * text indent — Word's continuation paragraph. A paragraph that already has a
- * number or an indent belongs to a deeper item, whose handler placed it.
- */
-function indentAsContinuation(p: XmlNode, ilvl: number): XmlNode {
-  if (p.name !== "w:p") return p;
-  const pPr = childNamed(p, "w:pPr");
-  if (pPr && (childNamed(pPr, "w:numPr") || childNamed(pPr, "w:ind"))) return p;
-  const left = pxToTwips(listLevel(ilvl).textIndent);
-  return addParagraphProperty(p, xml("w:ind", { "w:left": String(left) }), AFTER_IND);
+/** Numbers an item's first paragraph. Anything else passes through. */
+function numbered(p: XmlNode, numId: number, ilvl: number): XmlNode {
+  return p.name === "w:p" ? withProperty(p, "w:pPr", numPrOf(numId, ilvl), PPR_ORDER) : p;
 }
+
+/**
+ * An item's blocks after its first sit at the level's text indent: a
+ * paragraph as Word's unnumbered continuation paragraph, a table indented by
+ * `w:tblInd`. One that already has a number or an indent belongs to a deeper
+ * item, whose handler placed it.
+ */
+function indentToItemText(block: XmlNode, ilvl: number): XmlNode {
+  const left = String(pxToTwips(listLevel(ilvl).textIndent));
+  if (block.name === "w:p") {
+    const pPr = childNamed(block, "w:pPr");
+    if (pPr && (childNamed(pPr, "w:numPr") || childNamed(pPr, "w:ind"))) return block;
+    return withProperty(block, "w:pPr", xml("w:ind", { "w:left": left }), PPR_ORDER);
+  }
+  if (block.name === "w:tbl") {
+    const tblPr = childNamed(block, "w:tblPr");
+    if (tblPr && childNamed(tblPr, "w:tblInd")) return block;
+    return withProperty(block, "w:tblPr", xml("w:tblInd", { "w:w": left, "w:type": "dxa" }), TBLPR_ORDER);
+  }
+  return block;
+}
+
+/** What a level's number looks like in Word, by list kind. */
+const LEVEL_FORMATS: Record<ListKind, (ilvl: number) => Pick<DocxNumberingLevel, "format" | "text">> = {
+  bullet: (ilvl) => ({ format: "bullet", text: listLevel(ilvl).bullet.glyph }),
+  ordered: (ilvl) => ({ format: listLevel(ilvl).ordered.format, text: `%${ilvl + 1}.` }),
+};
 
 /** Word's levels as the editor draws them: nine, each with its format and indent. */
 function docxLevels(kind: ListKind): DocxNumberingLevel[] {
-  return Array.from({ length: LIST_LEVEL_COUNT }, (_, ilvl) => {
-    const level = listLevel(ilvl);
-    return {
-      level: ilvl,
-      format: kind === "bullet" ? "bullet" : level.ordered.format,
-      text: kind === "bullet" ? level.bullet.glyph : `%${ilvl + 1}.`,
-      left: pxToTwips(level.textIndent),
-      hanging: pxToTwips(LIST_MARKER_HANGING),
-    };
-  });
+  return Array.from({ length: LIST_LEVEL_COUNT }, (_, ilvl) => ({
+    level: ilvl,
+    ...LEVEL_FORMATS[kind](ilvl),
+    left: pxToTwips(listLevel(ilvl).textIndent),
+    hanging: pxToTwips(LIST_MARKER_HANGING),
+  }));
 }
 
 /**
@@ -192,7 +217,7 @@ export const List = Extension.create({
             }),
           },
         ],
-        toDOM: (node) => ["ol", { start: node.attrs["order"] }, 0],
+        toDOM: (node) => ["ol", { start: listStart(node) }, 0],
       },
       listItem: {
         content: "paragraph block*",
@@ -332,8 +357,8 @@ export const List = Extension.create({
     // bulletList/orderedList type isn't visible when each listItem is
     // walked. Pre-compute the per-listItem (numId, ilvl) in
     // onBeforeExport by walking the doc with a list-type stack, then
-    // the listItem handler reads from that map. The levels come from the
-    // same table layout draws from, so Word shows what the editor shows.
+    // the listItem handler reads from that map. The levels come from
+    // listLevel, as layout's do, so Word shows what the editor shows.
     const onBeforeExport = (ctx: DocxContext) => {
       const itemMap = ctx.shared.getOrInit<Map<PmNode, ListItemDocxInfo>>(
         LIST_ITEMS_KEY,
@@ -370,9 +395,7 @@ export const List = Extension.create({
       const info = ctx.shared.get<Map<PmNode, ListItemDocxInfo>>(LIST_ITEMS_KEY)?.get(node);
       if (!info || children.length === 0) return children;
       return children.map((child, i) =>
-        i === 0
-          ? addParagraphProperty(child, numPrOf(info.numId, info.ilvl))
-          : indentAsContinuation(child, info.ilvl),
+        i === 0 ? numbered(child, info.numId, info.ilvl) : indentToItemText(child, info.ilvl),
       );
     };
 
@@ -445,7 +468,7 @@ export const List = Extension.create({
           state.renderList(node, "  ", () => "- ");
         },
         orderedList(state, node) {
-          const start = (node.attrs["order"] as number) || 1;
+          const start = listStart(node);
           const maxW = String(start + node.childCount - 1).length;
           const pad = " ".repeat(maxW + 2);
           state.renderList(node, pad, (i) => {

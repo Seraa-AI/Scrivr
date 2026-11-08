@@ -628,4 +628,33 @@ describe("list levels match what the editor draws", () => {
     expect(more).toContain('<w:ind w:left="720"/>');
     expect(paragraphWith(document, "child more")).toContain('<w:ind w:left="1440"/>');
   });
+
+  /** The order paragraph properties appear in, which the schema fixes (CT_PPrBase). */
+  const propertyOrder = (paragraph: string) =>
+    [...paragraph.matchAll(/<w:(pStyle|numPr|spacing|ind|jc)\b/g)].map((match) => match[1]);
+
+  it("writes the number before the alignment, in the order the schema requires", async () => {
+    const centred = (text: string): Json => ({ type: "paragraph", attrs: { align: "center" }, content: [{ type: "text", text }] });
+    const { document } = await exported([
+      list("orderedList", { type: "listItem", content: [centred("first"), centred("more")] }),
+    ]);
+    expect(propertyOrder(paragraphWith(document, "first"))).toEqual(["numPr", "jc"]);
+    expect(propertyOrder(paragraphWith(document, "more"))).toEqual(["ind", "jc"]);
+  });
+
+  it("indents a table inside an item to the item's text", async () => {
+    const editor = new ServerEditor({ extensions: [StarterKit.configure({ table: true })] });
+    const cell = (text: string): Json => ({ type: "tableCell", content: [p(text)] });
+    editor.setContent({ type: "doc", content: [list("bulletList", {
+      type: "listItem",
+      content: [p("one"), { type: "table", attrs: { grid: [120, 120] }, content: [{ type: "tableRow", content: [cell("a"), cell("b")] }] }],
+    })] });
+    const document = readZip(await exportDocxBytes(editor))["word/document.xml"] ?? "";
+    editor.destroy();
+    const tblPr = document.match(/<w:tblPr>.*?<\/w:tblPr>/)?.[0] ?? "";
+    expect(tblPr).toMatch(/<w:tblInd (?=[^>]*w:w="720")(?=[^>]*w:type="dxa")[^>]*\/>/);
+    const order = [...tblPr.matchAll(/<w:(tblStyle|tblW|jc|tblInd|tblBorders|tblLayout|tblCellMar|tblLook)\b/g)].map((m) => m[1]);
+    const schemaOrder = ["tblStyle", "tblW", "jc", "tblInd", "tblBorders", "tblLayout", "tblCellMar", "tblLook"];
+    expect(order).toEqual(schemaOrder.filter((name) => order.includes(name)));
+  });
 });
