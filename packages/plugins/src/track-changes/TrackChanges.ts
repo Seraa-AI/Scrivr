@@ -15,8 +15,6 @@ import type {
   IEditor,
   LineEntry,
   OverlayRenderHandler,
-  SemanticChange,
-  SemanticMarkHandler,
 } from "@scrivr/core";
 import type { EditorState, Node, Transaction } from "@scrivr/core/pm";
 
@@ -29,6 +27,7 @@ import { planReviewIn } from "./reviewChanges";
 import { changeActs } from "./reviewPlan";
 import type { ChangeSet } from "./ChangeSet";
 import { cloneTrackedChanges } from "./cloneTrackedChanges";
+import { dropDeleted, keepInserted, nodeChanges } from "./semanticChanges";
 
 declare module "@scrivr/core" {
   interface Commands<ReturnType> {
@@ -240,35 +239,13 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
   },
 
   addExports() {
-    // Keep suggested-deletion text out of embeddings while preserving it as
-    // structured review metadata. Inserted text is proposed content, kept in
-    // the semantic text — the identity handler exists only so the seam knows
-    // trackedInsert is a review mark (excluded from formatting spans), not a
-    // styling mark like bold/color.
-    const keepInserted: SemanticMarkHandler = (run) => run;
-    const dropDeleted: SemanticMarkHandler = (run, mark) => {
-      const raw = mark.attrs.dataTracked;
-      const entries = Array.isArray(raw) ? (raw.length > 0 ? raw : [{}]) : raw ? [raw] : [{}];
-      return {
-        text: "",
-        changes: [
-          ...(run.changes ?? []),
-          ...entries.map((entry: Record<string, unknown>): SemanticChange => ({
-            type: "suggestedDelete",
-            text: run.text,
-            ...(typeof entry.id === "string" ? { id: entry.id } : {}),
-            ...(typeof entry.authorID === "string" ? { authorId: entry.authorID } : {}),
-            ...(typeof entry.status === "string" ? { status: entry.status } : {}),
-            ...(typeof entry.createdAt === "number" ? { createdAt: entry.createdAt } : {}),
-            ...(typeof entry.groupId === "string" ? { groupId: entry.groupId } : {}),
-          })),
-        ],
-      };
-    };
+    // The proposed view: deleted text leaves the semantic text, inserted text
+    // stays, and every pending record is reported where it sits.
     return {
       semantic: {
         marks: { trackedDelete: dropDeleted, trackedInsert: keepInserted },
         isRemoved: proposedForDeletion,
+        nodeChanges,
       },
     };
   },
