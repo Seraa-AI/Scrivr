@@ -40,6 +40,9 @@ function getDocContext(editor: Editor | null): {
     ...(unit.headingLevel ? { headingLevel: unit.headingLevel } : {}),
     ...(unit.parts ? { parts: unit.parts.map((part) => ({ nodeId: part.nodeId, text: part.text })) } : {}),
     ...(unit.image ? { image: unit.image } : {}),
+    ...(unit.changes ? {
+      changes: unit.changes.map(({ type, text, authorId }) => ({ type, text, ...(authorId ? { authorId } : {}) })),
+    } : {}),
   }));
   return units.length > 0 ? { units } : {};
 }

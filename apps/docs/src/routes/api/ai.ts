@@ -36,7 +36,18 @@ const DocUnitSchema = z.object({
     wrap: z.enum(IMAGE_WRAPS),
     align: z.enum([...IMAGE_ALIGNS, "custom"]),
   }).optional(),
+  changes: z.array(z.object({
+    type: z.enum(["suggestedInsert", "suggestedDelete", "suggestedAttrs"]),
+    text: z.string(),
+    authorId: z.string().optional(),
+  })).optional(),
 });
+
+const CHANGE_WORDS: Record<NonNullable<DocUnit["changes"]>[number]["type"], string> = {
+  suggestedInsert: "insert",
+  suggestedDelete: "delete",
+  suggestedAttrs: "format",
+};
 export type DocUnit = z.infer<typeof DocUnitSchema>;
 
 const RequestBodySchema = z.object({
@@ -61,7 +72,8 @@ export const Route = createFileRoute("/api/ai")({
             "",
             "Blocks are listed in document order, first to last. Each has a stable nodeId; a list or table",
             "also lists the nodeIds of its items or cells. Address blocks by these ids in every tool. Text",
-            "reads as if every pending change were accepted; a block or image proposed for deletion is absent.",
+            "is the proposed version: pending insertions are in it, pending deletions are not. A block's",
+            "pending changes are listed under it; a block proposed for deletion reads empty.",
             "To put something at the end of the document, place it after the block marked `last block`.",
             "",
           );
@@ -76,6 +88,10 @@ export const Route = createFileRoute("/api/ai")({
               for (const part of u.parts) docContextLines.push(`  - nodeId: ${part.nodeId} — ${part.text}`);
             } else {
               docContextLines.push(`text: ${u.text}`);
+            }
+            for (const change of u.changes ?? []) {
+              const by = change.authorId ? ` by ${change.authorId}` : "";
+              docContextLines.push(`  pending ${CHANGE_WORDS[change.type]}${by}: ${JSON.stringify(change.text)}`);
             }
             docContextLines.push("");
           }

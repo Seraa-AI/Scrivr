@@ -177,10 +177,42 @@ moved block carries the same id. Two lookups answer two different questions:
 
 Without track changes the two return the same node.
 
-The AI toolkit reads with `findLiveNodeById`, so a block proposed for deletion
-is left out of `getRichBlocks` and cannot be edited (an edit to it comes back
-`rejected`). Block markers and citations still reach it, since it is on screen,
-struck through, until someone decides it.
+The AI toolkit reads with `findLiveNodeById`, so the copy a pending move leaves
+behind is left out of `getRichBlocks`: an agent reads one unit per id, the live
+one. A block proposed for deletion has no live copy, so it stays in
+`getRichBlocks`. It reads `text: ""`, with its deletion in `changes`, and it
+cannot be edited (the edit is not applied). Block markers and citations still
+reach it, since it is on screen, struck through, until someone decides it.
+
+### What an agent reads of pending changes
+
+Each unit from `getRichBlocks` lists its pending changes in `changes`. A part
+of a list or table lists the changes inside it too. `text` is the proposed
+version: pending insertions are in it, pending deletions are not. Each change
+says where it sits:
+
+| Field | Meaning |
+|-------|---------|
+| `type` | `suggestedInsert`, `suggestedDelete`, or `suggestedAttrs` (a heading or list change) |
+| `text` | What it adds or removes. `"\n"` for a paragraph break |
+| `at`, `length` | Its place in the owning `text`. A deletion has `length: 0`. A hard break counts as one character |
+| `id`, `authorId`, `createdAt` | Which record it is, and whose |
+| `groupId` / `moveId` | Shared by the two halves of a replacement or a move |
+| `oldAttrs` | For `suggestedAttrs`: what the block was, e.g. `{ nodeType: "paragraph" }` or `{ level: 1 }` |
+
+An agent decides changes by those ids. Deciding one half of a replacement or a
+move decides both:
+
+```ts
+const ai = getAiToolkit(editor);
+const change = ai?.getRichBlocks()[0]?.changes?.[0];
+if (change?.id) ai?.reviewChanges({ accepted: [change.id], rejected: [] });
+```
+
+`ai.reviewChanges` passes straight to `reviewChanges`, so it is refused with
+`not-permitted` unless the host configured `canAcceptReject: true`. A unit's
+`unitRichHash` covers its changes, so accepting or rejecting one makes an edit
+pinned to the old hash read `stale`.
 
 ```ts
 import { findLiveNodeById } from "@scrivr/plugins";
