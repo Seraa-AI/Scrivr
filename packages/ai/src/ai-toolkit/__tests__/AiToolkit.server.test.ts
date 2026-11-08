@@ -8,6 +8,8 @@
  */
 import { describe, it, expect } from "vitest";
 import { ServerEditor, StarterKit } from "@scrivr/core";
+import { TrackChanges, TrackChangesStatus } from "@scrivr/plugins";
+import { aiCaretPluginKey } from "../AiCaret";
 import { AiToolkit } from "../AiToolkit";
 import { getAiToolkit } from "../aiToolkitRegistry";
 
@@ -49,5 +51,47 @@ describe("AiToolkit on ServerEditor", () => {
     expect(getAiToolkit(editor)).not.toBeNull();
     editor.destroy();
     expect(getAiToolkit(editor)).toBeNull();
+  });
+});
+
+describe("streaming after a block with a pending move", () => {
+  /** "moved" goes to the end as a tracked move; its deleted copy stays first. */
+  const movedDown = () => {
+    const editor = new ServerEditor({
+      extensions: [StarterKit, TrackChanges.configure({ userID: "u1", initialStatus: TrackChangesStatus.enabled }), AiToolkit],
+      content: {
+        type: "doc",
+        content: [
+          { type: "paragraph", attrs: { nodeId: "b1" }, content: [{ type: "text", text: "moved" }] },
+          { type: "paragraph", attrs: { nodeId: "b2" }, content: [{ type: "text", text: "stays" }] },
+        ],
+      },
+    });
+    const first = editor.getState().doc.child(0);
+    const tr = editor.getState().tr.delete(0, first.nodeSize);
+    editor.applyTransaction(tr.insert(tr.doc.content.size, first));
+    const ai = getAiToolkit(editor);
+    if (!ai) throw new Error("no toolkit");
+    return { editor, ai };
+  };
+
+  async function* chunks(...parts: string[]) {
+    for (const part of parts) yield part;
+  }
+
+  it("puts the AI caret after the moved block, not the copy it left behind", async () => {
+    const { editor, ai } = movedDown();
+    await ai.streamGhostText("b1", chunks("more"));
+
+    expect(aiCaretPluginKey.getState(editor.getState())?.position).toBe(editor.getState().doc.content.size);
+  });
+
+  it("inserts the generated text after the moved block, not the copy it left behind", async () => {
+    const { editor, ai } = movedDown();
+    await ai.generateSuggestion("b1", chunks("generated"));
+
+    const texts: string[] = [];
+    editor.getState().doc.forEach((node) => texts.push(node.textContent));
+    expect(texts.slice(-2)).toEqual(["moved", "generated"]);
   });
 });

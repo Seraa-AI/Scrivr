@@ -10,7 +10,8 @@
 import { describe, expect, it } from "vitest";
 import { computeAiSuggestion } from "../computeAiSuggestion";
 import { subscribeToAiSuggestions } from "../subscribeToAiSuggestions";
-import { AiTestEditor, doc, markedText, p, schema } from "./helpers";
+import { AiTestEditor, doc, markedText, moveFirstBlockToEnd, p, schema } from "./helpers";
+import { rebaseAfterSettle } from "../rebase";
 import type { AiSuggestion } from "../types";
 
 const groupsOf = (suggestion: AiSuggestion, pick: "text" | "format") =>
@@ -201,5 +202,22 @@ describe("an accept that writes nothing", () => {
     const rest = live(editor);
     expect(rest?.blocks[0]?.ops.filter((op) => op.type === "keep" && op.marks) ?? []).toEqual([]);
     expect(markedText(editor, "bold")).toBe("omega");
+  });
+});
+
+describe("settling a group in a block with a pending move", () => {
+  it("rebuilds the rest against the moved block, not the copy it left behind", () => {
+    const editor = new AiTestEditor(doc(p("one two three", "p1"), p("tail", "p2")));
+    const suggestion = computeAiSuggestion(editor.getState(), {
+      blocks: [{ nodeId: "p1", proposedText: "ONE two THREE" }],
+      authorID: "AI Assistant",
+    });
+    if (!suggestion) throw new Error("no suggestion");
+    const [first] = groupsOf(suggestion, "text");
+    if (!first) throw new Error("no group");
+    moveFirstBlockToEnd(editor);
+
+    const rest = rebaseAfterSettle(editor, suggestion, "p1", new Set([first]), false);
+    expect(rest?.blocks.map((block) => block.nodeId)).toEqual(["p1"]);
   });
 });

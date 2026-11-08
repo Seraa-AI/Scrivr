@@ -20,6 +20,7 @@ import {
   getBlockMarkers,
   activeBlockMarkers,
   blockMarkersPluginKey,
+  findLiveNodeById,
   type BlockMarker,
 } from "../../index";
 
@@ -297,5 +298,7 @@ describe("a marker on a block with a pending move", () => {
     editor.applyTransaction(editor.getState().tr.setSelection(TextSelection.create(editor.getState().doc, end)));
 
     expect(activeBlockMarkers(editor).map((m) => m.nodeId)).toEqual(["b1"]);
+    const { doc } = editor.getState();
+    expect(findLiveNodeById(doc, "b1")?.pos).toBe(doc.content.size - doc.child(doc.childCount - 1).nodeSize);
   });
 });

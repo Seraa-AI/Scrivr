@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest";
 import { CharacterMap, defaultEditorTheme, defaultPageConfig } from "@scrivr/core";
 import { computeAiSuggestion } from "../computeAiSuggestion";
 import { createSuggestionOverlayHandler } from "../AiSuggestion";
-import { AiTestEditor, doc, p } from "./helpers";
+import { AiTestEditor, doc, moveFirstBlockToEnd, p } from "./helpers";
 
 /** A canvas context that records which decorations were drawn. */
 function recordingContext() {
@@ -70,5 +70,47 @@ describe("the overlay handler", () => {
     // The margin stripe alone is not the formatting decoration: the underline
     // is an extra stroke over the run whose appearance changes.
     expect(strokes.length).toBeGreaterThan(1);
+  });
+});
+
+/** The recording context, checked to have what the handler draws with. */
+function isContext(value: unknown): value is CanvasRenderingContext2D {
+  return typeof value === "object" && value !== null && "stroke" in value && "moveTo" in value;
+}
+
+describe("the overlay handler on a block with a pending move", () => {
+  it("draws on the moved block, not the copy it left behind", () => {
+    const editor = new AiTestEditor(doc(p("The quick fox", "b1"), p("tail", "b2")));
+    const suggestion = computeAiSuggestion(editor.getState(), {
+      blocks: [{ nodeId: "b1", proposedText: "The slow fox" }],
+      authorID: "AI Assistant",
+    });
+    if (!suggestion) throw new Error("no suggestion");
+    editor.showSuggestion(suggestion);
+    moveFirstBlockToEnd(editor);
+    const handler = createSuggestionOverlayHandler(editor, "all");
+
+    // Only the moved block is laid out here, so a handler reading the copy
+    // left behind finds no line to draw on.
+    const { doc: after } = editor.getState();
+    const text = "The quick fox";
+    const blockStart = after.content.size - after.child(after.childCount - 1).nodeSize + 1;
+    const charMap = new CharacterMap();
+    charMap.registerLine({
+      page: 0, lineIndex: 0, y: 0, height: 12, x: 0, contentWidth: text.length * 10,
+      startDocPos: blockStart, endDocPos: blockStart + text.length,
+    });
+    for (let i = 0; i < text.length; i++) {
+      charMap.registerGlyph({
+        docPos: blockStart + i, x: i * 10, y: 0, lineY: 0,
+        width: 10, height: 12, page: 0, lineIndex: 0,
+      });
+    }
+    const { ctx, strokes } = recordingContext();
+    if (!isContext(ctx)) throw new Error("recording context lacks drawing calls");
+
+    handler(ctx, 0, defaultPageConfig, charMap, defaultEditorTheme);
+
+    expect(strokes.length).toBeGreaterThan(0);
   });
 });

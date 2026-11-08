@@ -20,8 +20,18 @@ export const NORMALIZATION_META = "scrivr:normalization";
 
 /**
  * The first node, in document order (ancestors before descendants), carrying
- * this nodeId and passing `accept`. `accept` lets a caller skip copies it does
- * not treat as live, such as a tracked deletion's shadow, without core knowing why.
+ * this nodeId and passing `accept`.
+ *
+ * Use it where an id names one node: a document without track changes, or a
+ * question about whether the id is anywhere in the document at all. With track
+ * changes, a pending move leaves a deleted copy under the same id, and this
+ * returns whichever comes first — to read or write the block a person sees, use
+ * `findLiveNodeById` from `@scrivr/plugins`. `accept` is how that skips the copy
+ * without core knowing about tracking.
+ *
+ * @example
+ * findNodeById(doc, "intro");                            // any copy
+ * findNodeById(doc, "intro", (node) => node.isTextblock); // the first that passes
  */
 export function findNodeById(
   doc: Node,

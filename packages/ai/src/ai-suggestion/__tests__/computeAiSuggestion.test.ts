@@ -9,7 +9,7 @@ import { describe, it, expect } from "vitest";
 import type { Node as PmNode } from "@scrivr/core/pm";
 import { EditorState } from "@scrivr/core/pm";
 import { computeAiSuggestion } from "../computeAiSuggestion";
-import { doc, p, h } from "./helpers";
+import { AiTestEditor, doc, moveFirstBlockToEnd, p, h } from "./helpers";
 
 
 function makeState(d: PmNode) {
@@ -222,5 +222,18 @@ describe("computeAiSuggestion — acceptedText", () => {
 
     expect(result).not.toBeNull();
     expect(result!.blocks[0]!.acceptedText).toBe("Introduction");
+  });
+});
+
+describe("computeAiSuggestion — a block with a pending move", () => {
+  it("diffs against the moved block, not the copy it left behind", () => {
+    const editor = new AiTestEditor(doc(p("The quick fox", "b1"), p("tail", "b2")));
+    moveFirstBlockToEnd(editor);
+
+    const result = computeAiSuggestion(editor.getState(), {
+      blocks: [{ nodeId: "b1", proposedText: "The slow fox" }],
+      authorID: "AI Assistant",
+    });
+    expect(result?.blocks.map((block) => block.acceptedText)).toEqual(["The quick fox"]);
   });
 });

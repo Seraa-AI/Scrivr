@@ -27,7 +27,8 @@ to succeed, report success, and then evaporate when the deletion was accepted.
 A node is a shadow when a pending deletion covers its whole range, which is how
 an empty node and the children of a deleted container are recognised — neither
 carries a tracked mark of its own. `shadowRanges`, `isShadowNode` and the
-`ShadowRange` type are exported for a host resolving ids itself. The ranges are
+`ShadowRange` type are exported for a host resolving ids itself, and
+`@scrivr/ai` re-exports `findLiveNodeById` beside `findNodeById`. The ranges are
 memoised on the document node, so a structural batch resolving many ids walks
 it once, and a document whose schema has no `trackedDelete` mark skips the walk
 entirely. An agent reading rich blocks sees one unit per id — the live copy —

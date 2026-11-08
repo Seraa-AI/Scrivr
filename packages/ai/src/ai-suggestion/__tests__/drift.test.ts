@@ -7,7 +7,8 @@
  * why rather than offering a button that silently does nothing.
  */
 import { describe, it, expect } from "vitest";
-import { AiTestEditor, doc, p } from "./helpers";
+import { AiTestEditor, doc, moveFirstBlockToEnd, p } from "./helpers";
+import { driftedBlocks } from "../drift";
 import { subscribeToAiSuggestions } from "../subscribeToAiSuggestions";
 import type { AiSuggestionData as AiSuggestion } from "../../index";
 
@@ -142,5 +143,14 @@ describe("a card for a drifted block", () => {
 
   it("reports nothing stale when the document still matches", () => {
     expect(cardsOf(editorWith()).every((c) => !c.isStale)).toBe(true);
+  });
+});
+
+describe("a block with a pending move", () => {
+  it("is read where it now is, not from the copy it left behind", () => {
+    const editor = new AiTestEditor(doc(p(ONE, "b1"), p(TWO, "b2")));
+    moveFirstBlockToEnd(editor);
+
+    expect(driftedBlocks(editor.getState(), twoBlocks())).toEqual(new Set());
   });
 });
