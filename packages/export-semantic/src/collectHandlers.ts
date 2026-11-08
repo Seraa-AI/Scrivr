@@ -1,3 +1,4 @@
+import type { Node as PmNode } from "@scrivr/core/pm";
 import type {
   ExportContributionMap,
   IBaseEditor,
@@ -9,6 +10,8 @@ import type {
 export interface ResolvedHandlers {
   nodes: Record<string, SemanticNodeHandler>;
   marks: Record<string, SemanticMarkHandler>;
+  /** Every contributed `isRemoved`; a node any of them claims is left out. */
+  removers: Array<(node: PmNode) => boolean>;
 }
 
 /**
@@ -24,7 +27,8 @@ export interface ResolvedHandlers {
 function semanticOf(contrib: ExportContributionMap): SemanticHandlers | undefined {
   const record: Record<string, unknown> = contrib;
   const value = record["semantic"];
-  if (value && typeof value === "object" && ("nodes" in value || "marks" in value)) {
+  if (value && typeof value === "object" &&
+    ("nodes" in value || "marks" in value || ("isRemoved" in value && typeof value.isRemoved === "function"))) {
     return value as SemanticHandlers; // single guarded cast after typeof/in checks
   }
   return undefined;
@@ -41,18 +45,21 @@ export function collectHandlers(
 ): ResolvedHandlers {
   const nodes: Record<string, SemanticNodeHandler> = {};
   const marks: Record<string, SemanticMarkHandler> = {};
+  const removers: Array<(node: PmNode) => boolean> = [];
 
   for (const contrib of editor.getExportContributions()) {
     const semantic = semanticOf(contrib);
     if (!semantic) continue;
     if (semantic.nodes) Object.assign(nodes, semantic.nodes);
     if (semantic.marks) Object.assign(marks, semantic.marks);
+    if (semantic.isRemoved) removers.push(semantic.isRemoved);
   }
 
   if (overrides) {
     if (overrides.nodes) Object.assign(nodes, overrides.nodes);
     if (overrides.marks) Object.assign(marks, overrides.marks);
+    if (overrides.isRemoved) removers.push(overrides.isRemoved);
   }
 
-  return { nodes, marks };
+  return { nodes, marks, removers };
 }

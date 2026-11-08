@@ -8,22 +8,37 @@ import {
   type DocxNodeHandler,
   type DocxBlockTransform,
 } from "../../exports/docx";
-import type { SemanticNodeHandler } from "../../exports/semantic";
+import type { SemanticImage, SemanticNodeHandler } from "../../exports/semantic";
 import type { PdfNodeHandler } from "../../exports/pdf";
 import type { Node as PmNode } from "prosemirror-model";
 import { normalizeImageAttrs } from "../../layout/AnchoredObjects";
 
-/** A paragraph whose only non-whitespace content is a single image. */
-function isImageOnlyParagraph(node: PmNode): boolean {
-  let images = 0;
+/**
+ * The single image a paragraph holds with nothing else but whitespace, or null.
+ * What the view leaves out (proposed for deletion) does not count.
+ */
+function soleImage(node: PmNode, isRemoved: (node: PmNode) => boolean): PmNode | null {
+  const images: PmNode[] = [];
   let other = 0;
   node.forEach((child) => {
-    if (child.type.name === "image") images += 1;
-    else if (child.isText && (child.text ?? "").trim() === "") {
-      /* surrounding whitespace is fine */
-    } else other += 1;
+    if (isRemoved(child)) return;
+    if (child.type.name === "image") images.push(child);
+    else if (!child.isText || (child.text ?? "").trim() !== "") other += 1;
   });
-  return images === 1 && other === 0;
+  return images.length === 1 && other === 0 ? images[0] ?? null : null;
+}
+
+function semanticImage(image: PmNode): SemanticImage {
+  const placed = normalizeImageAttrs(image);
+  const { src, alt } = image.attrs;
+  return {
+    src: typeof src === "string" ? src : "",
+    alt: typeof alt === "string" ? alt : "",
+    width: placed.width,
+    height: placed.height,
+    wrap: placed.wrapMode,
+    align: placed.xAlign,
+  };
 }
 
 /**
@@ -206,8 +221,10 @@ export const Paragraph = Extension.create({
       const lead = jc ? [xml("w:pPr", undefined, [xml("w:jc", { "w:val": jc })])] : [];
       return xml("w:p", undefined, [...lead, ...children]);
     };
-    const semanticHandler: SemanticNodeHandler = (node) =>
-      isImageOnlyParagraph(node) ? { type: "image" } : { type: "paragraph" };
+    const semanticHandler: SemanticNodeHandler = (node, ctx) => {
+      const image = soleImage(node, (child) => ctx.isRemoved(child));
+      return image ? { type: "image", image: semanticImage(image) } : { type: "paragraph" };
+    };
     return {
       docx: { nodes: { paragraph: handler } },
       semantic: { nodes: { paragraph: semanticHandler } },

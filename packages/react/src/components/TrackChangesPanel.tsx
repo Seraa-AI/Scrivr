@@ -9,7 +9,7 @@
  */
 
 import type { IBaseEditor } from "@scrivr/core";
-import { CHANGE_OPERATION } from "@scrivr/plugins";
+import { CHANGE_OPERATION, changePreviewText } from "@scrivr/plugins";
 import type {
   TrackedChange,
   MarkChange,
@@ -17,7 +17,7 @@ import type {
 } from "@scrivr/plugins";
 import { cx } from "../utils/classNames";
 import { shortName } from "../utils/authorName";
-import { getChangeMeta, MARK_LABELS } from "../utils/changeMeta";
+import { decisionLabel, getChangeMeta, MARK_LABELS, previewVerb } from "../utils/changeMeta";
 import type { ChangeMeta } from "../utils/changeMeta";
 import { useTrackChangesPanel } from "../hooks/useTrackChangesPanel";
 import type { TrackChangesDisplayItem } from "../hooks/useTrackChangesPanel";
@@ -182,7 +182,7 @@ export function TrackChangesPanel({
             item.kind === "replacement" ? (
               <ReplacementRow key={item.ids.join(":")} item={item} editor={editor} />
             ) : (
-              <SingleRow key={item.change.id} change={item.change} pieces={item.pieces} editor={editor} />
+              <SingleRow key={item.change.id} change={item.change} pieces={item.pieces} pending={panel.changes} editor={editor} />
             ),
           )
         )}
@@ -227,10 +227,13 @@ function ReplacementRow({
 function SingleRow({
   change,
   pieces,
+  pending,
   editor,
 }: {
   change: TrackedChange;
   pieces: TrackedChange[];
+  /** Every pending change, which a move's preview reads its moved copy from. */
+  pending: TrackedChange[];
   editor: IBaseEditor | null;
 }) {
   const meta = getChangeMeta(change);
@@ -249,7 +252,7 @@ function SingleRow({
   if (change.type === "text-change") {
     // A move is shown once, by where it went, not as both of its halves.
     const moving = !!change.dataTracked.moveId;
-    const verb = moving ? "Moving" : change.dataTracked.operation === CHANGE_OPERATION.delete ? "Removing" : "Adding";
+    const verb = previewVerb(change.dataTracked.operation, moving);
     const shown = moving ? pieces.filter(piece => piece.dataTracked.operation === CHANGE_OPERATION.insert) : pieces;
     preview = (
       <div
@@ -275,12 +278,13 @@ function SingleRow({
       </div>
     );
   } else if (change.type === "node-change") {
-    const nc = change
+    const verb = previewVerb(change.dataTracked.operation, !!change.dataTracked.moveNodeId);
+    const doc = editor?.getState().doc;
+    const text = doc ? changePreviewText(doc, change, pending) : "";
     preview = (
-      <div
-        style={previewLine}
-      >
-        {nc.node.type.name}
+      <div style={previewLine}>
+        {verb ? <span style={prefixLabel}>{decisionLabel(verb, meta)}</span> : null}
+        {text ? <em>"{truncate(text)}"</em> : change.node.type.name}
       </div>
     );
   }
@@ -346,14 +350,14 @@ function ChangeRow({
         </span>
         <button
           onClick={onReject}
-          title="Reject"
+          title={decisionLabel("Reject", meta)}
           style={iconBtn}
         >
           ✗
         </button>
         <button
           onClick={onAccept}
-          title="Accept"
+          title={decisionLabel("Accept", meta)}
           style={iconBtn}
         >
           ✓

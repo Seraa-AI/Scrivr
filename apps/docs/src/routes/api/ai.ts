@@ -10,6 +10,8 @@ import type { UIMessage, UIMessageStreamWriter } from "ai";
 import { createFileRoute } from "@tanstack/react-router";
 import { anthropic } from "@ai-sdk/anthropic";
 import { z } from "zod";
+import { SemanticEditSchema } from "@scrivr/ai";
+import { IMAGE_ALIGNS, IMAGE_WRAPS } from "@scrivr/core";
 
 // ── Typed data parts emitted per tool result ────────────────────────────────
 // The client's onData callback receives these during streaming.
@@ -19,33 +21,62 @@ export type ToolOutputData = {
   output: Record<string, unknown>;
 };
 
-type DocBlock = { nodeId: string; text: string };
+/** A unit of `getRichBlocks()`, trimmed to what the agent needs to address it. */
+const DocUnitSchema = z.object({
+  id: z.string(),
+  type: z.string(),
+  text: z.string(),
+  headingLevel: z.number().int().optional(),
+  parts: z.array(z.object({ nodeId: z.string(), text: z.string() })).optional(),
+  image: z.object({
+    src: z.string(),
+    alt: z.string(),
+    width: z.number(),
+    height: z.number(),
+    wrap: z.enum(IMAGE_WRAPS),
+    align: z.enum([...IMAGE_ALIGNS, "custom"]),
+  }).optional(),
+});
+export type DocUnit = z.infer<typeof DocUnitSchema>;
+
+const RequestBodySchema = z.object({
+  // The AI SDK checks each message's shape when it converts them.
+  messages: z.array(z.custom<UIMessage>((message) => typeof message === "object" && message !== null)),
+  context: z.string().optional(),
+  units: z.array(DocUnitSchema).optional(),
+});
 
 export const Route = createFileRoute("/api/ai")({
   server: {
     handlers: {
       POST: async ({ request }: { request: Request }) => {
-        const { messages, context, blocks } = (await request.json()) as {
-          messages: UIMessage[];
-          context?: string;
-          blocks?: DocBlock[];
-        };
+        const body = RequestBodySchema.safeParse(await request.json());
+        if (!body.success) return new Response(body.error.message, { status: 400 });
+        const { messages, context, units } = body.data;
 
-        // Build structured document context for the system prompt.
-        // blocks come from AiToolkitAPI.getBlocks() — accepted text only, no markup.
         const docContextLines: string[] = [];
-        if (blocks && blocks.length > 0) {
+        if (units && units.length > 0) {
           docContextLines.push(
             "## Document content",
             "",
-            "Each block has a stable nodeId. Use it when calling `edit_paragraph` or `edit_section`.",
-            "The text shown is the clean accepted view (pending tracked changes already resolved).",
-            "Your proposedText replaces the entire block — plain text, no markup.",
+            "Blocks are listed in document order, first to last. Each has a stable nodeId; a list or table",
+            "also lists the nodeIds of its items or cells. Address blocks by these ids in every tool. Text",
+            "reads as if every pending change were accepted; a block or image proposed for deletion is absent.",
+            "To put something at the end of the document, place it after the block marked `last block`.",
             "",
           );
-          for (const b of blocks) {
-            docContextLines.push(`nodeId: ${b.nodeId}`);
-            docContextLines.push(`text: ${b.text}`);
+          for (const [index, u] of units.entries()) {
+            const kind = u.headingLevel ? `heading ${u.headingLevel}` : u.type;
+            const last = index === units.length - 1 ? ", last block" : "";
+            docContextLines.push(`nodeId: ${u.id} (${kind}${last})`);
+            if (u.image) {
+              const { src, alt, width, height, wrap, align } = u.image;
+              docContextLines.push(`image: ${src} "${alt}" ${width}×${height}, wrap ${wrap}, align ${align}`);
+            } else if (u.parts?.length) {
+              for (const part of u.parts) docContextLines.push(`  - nodeId: ${part.nodeId} — ${part.text}`);
+            } else {
+              docContextLines.push(`text: ${u.text}`);
+            }
             docContextLines.push("");
           }
         } else if (context) {
@@ -60,6 +91,17 @@ export const Route = createFileRoute("/api/ai")({
           "- To rewrite multiple paragraphs at once → `edit_section(edits)` — one atomic change.",
           "- To insert entirely new text at the cursor → `insert_text(text)`.",
           "- To replace the currently selected text → `replace_selection(text)`.",
+          "- To change the document's structure — move, add or delete blocks, list items or table rows — or to",
+          "  rewrite blocks keeping their formatting → `edit_document(edits)`, one batch applied as tracked changes.",
+          "  `moveBlock` takes a top-level block's nodeId; `moveListItem` takes an item's (or its paragraph's) nodeId and",
+          "  stays within its own list. A batch touches a block once: don't move or delete what an earlier edit in",
+          "  the same batch moved.",
+          "- Images: an `image` unit is a paragraph holding one image, named by its nodeId. Add one with `insertBlock`",
+          "  and `block: { type: \"image\", src, alt, width, height, wrap, align }`; change how it sits with `richText`",
+          "  and `attrs: { wrap, align, width, height, alt }` (wrap: inline|square|top-bottom|behind|front, align:",
+          "  left|center|right); remove it with `deleteBlock`. `src` must be an https image URL.",
+          "- Headings: change a block's level with `richText` and `attrs: { level }` — 1-6 sets the heading level",
+          "  (a paragraph becomes a heading), 0 makes a heading a paragraph.",
           "- You MAY include a short text message (1-2 sentences) explaining what you are doing.",
           "- NEVER write suggested content only in a text reply — always put it in a tool call.",
           "- If the user is asking a general question (not requesting new content), reply with text only.",
@@ -137,6 +179,21 @@ export const Route = createFileRoute("/api/ai")({
                     writer.write({
                       type: "data-tool_result",
                       data: { toolCallId, toolType: "edit_section", output: { edits } } satisfies ToolOutputData,
+                    });
+                    return { edits };
+                  },
+                }),
+
+                edit_document: tool({
+                  description:
+                    "Apply semantic edits to the document as one batch of tracked suggestions: move, insert or delete blocks, list items and table rows, or rewrite a block's rich text. Each edit names blocks by nodeId.",
+                  inputSchema: z.object({
+                    edits: z.array(SemanticEditSchema).describe("The edits, applied in order as one batch"),
+                  }),
+                  execute: async ({ edits }, { toolCallId }) => {
+                    writer.write({
+                      type: "data-tool_result",
+                      data: { toolCallId, toolType: "edit_document", output: { edits } } satisfies ToolOutputData,
                     });
                     return { edits };
                   },

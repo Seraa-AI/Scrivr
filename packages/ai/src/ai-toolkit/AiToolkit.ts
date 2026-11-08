@@ -1,18 +1,19 @@
-import { Extension } from "@scrivr/core";
-import type { IBaseEditor, IEditor, SemanticPart, SemanticUnit } from "@scrivr/core";
+import { Extension, IMAGE_NODE_ATTRS, stableStringify } from "@scrivr/core";
+import type { IBaseEditor, IEditor, SemanticImage, SemanticPart, SemanticUnit } from "@scrivr/core";
 import { semanticPartRichHash, toSemanticUnits, unitRichHash } from "@scrivr/export-semantic";
-import type { SemanticEdit, StructuralSemanticEdit } from "../schema/edit";
+import { SemanticImageAttrsSchema, type SemanticEdit, type StructuralSemanticEdit } from "../schema/edit";
 import { applyStructuralEdits } from "./applyStructuralEdits";
+import { applyImageLayout, type ImageLayoutEdit } from "./imageAttrs";
 import { toCoreSpans } from "./spans";
 import { UniqueId } from "./UniqueId";
 import { GhostText, ghostTextPluginKey } from "./GhostText";
 import { AiCaret, aiCaretPluginKey } from "./AiCaret";
-import { findNodeById } from "./UniqueId";
+import { findLiveNodeById, isShadowNode, shadowRanges, trackAsSuggestion } from "@scrivr/plugins";
 import { aiToolkitRegistry } from "./aiToolkitRegistry";
 import { applyRichDiffAsSuggestion, buildAcceptedTextMap, type RichBlockEdit } from "@scrivr/plugins";
 
 export { unitRichHash };
-import type { Schema } from "@scrivr/core/pm";
+import type { Node as PmNode, Schema } from "@scrivr/core/pm";
 import type { Command } from "@scrivr/core/pm";
 import { AiSuggestion as AiSuggestionExtension } from "../ai-suggestion/AiSuggestion";
 import { computeAiSuggestion } from "../ai-suggestion/computeAiSuggestion";
@@ -93,14 +94,48 @@ export class AiSuggestionsAPI {
 }
 
 /**
- * AiToolkitAPI — the single entry point for all AI interactions with an editor.
- *
- * Obtain via:
- *   import { getAiToolkit } from "@scrivr/plugins";
- *   const ai = getAiToolkit(editor);
- *
- * Never instantiate directly — created by AiToolkit.onEditorReady().
+ * The units of the live document. A pending move leaves a shadow carrying the
+ * same ids, which the export walks like any block; an agent reads and edits the
+ * live copy, so the shadow's unit and parts are left out. Units come in
+ * document order, so the nth unit or part for an id is the nth copy of it —
+ * which is why a shadow's parts are counted even though they are dropped.
  */
+function liveUnits(units: SemanticUnit[], doc: PmNode): SemanticUnit[] {
+  const shadows = shadowRanges(doc);
+  if (shadows.length === 0) return units;
+  const live = new Map<string, boolean[]>();
+  doc.descendants((node, pos) => {
+    const id = node.attrs["nodeId"];
+    if (typeof id !== "string") return true;
+    const copies = live.get(id) ?? [];
+    copies.push(!isShadowNode(node, pos, shadows));
+    live.set(id, copies);
+    return true;
+  });
+  const seen = new Map<string, number>();
+  const isLive = (id: string) => {
+    const nth = seen.get(id) ?? 0;
+    seen.set(id, nth + 1);
+    return live.get(id)?.[nth] ?? true;
+  };
+  return units.flatMap((unit) => {
+    const unitIsLive = isLive(unit.id);
+    const parts = unit.parts?.filter((part) => isLive(part.nodeId));
+    if (!unitIsLive) return [];
+    return parts ? [{ ...unit, parts }] : [unit];
+  });
+}
+
+/** The image fields `proposed` sets to something other than what `current` has. */
+function changedImageFields(current: SemanticImage | undefined, proposed: unknown): Record<string, unknown> {
+  if (typeof proposed !== "object" || proposed === null) return {};
+  const changed: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(proposed)) {
+    if (key in IMAGE_NODE_ATTRS && value !== Reflect.get(current ?? {}, key)) changed[key] = value;
+  }
+  return changed;
+}
+
 /** Distinguish a whole `SemanticUnit` (has `nodeIds[]`) from a `RichBlockEdit` (has `nodeId`). */
 function isSemanticUnit(item: RichBlockEdit | SemanticUnit): item is SemanticUnit {
   return "nodeIds" in item && Array.isArray(item.nodeIds);
@@ -125,6 +160,15 @@ function readStringField(item: unknown, key: string): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
+/**
+ * AiToolkitAPI — the single entry point for all AI interactions with an editor.
+ *
+ * Obtain via:
+ *   import { getAiToolkit } from "@scrivr/plugins";
+ *   const ai = getAiToolkit(editor);
+ *
+ * Never instantiate directly — created by AiToolkit.onEditorReady().
+ */
 export class AiToolkitAPI {
   /**
    * AI suggestion overlay API.
@@ -319,9 +363,13 @@ export class AiToolkitAPI {
    * ai.applyRichEdit(edited);
    */
   getRichBlocks(from?: number, to?: number): SemanticUnit[] {
-    const units = toSemanticUnits(this.editor, { groupBlocks: false });
+    const units = liveUnits(toSemanticUnits(this.editor, { groupBlocks: false }), this.editor.getState().doc);
     if (from === undefined || to === undefined) return units;
-    const allowed = new Set(this.getBlocks(from, to).map((b) => b.nodeId));
+    const allowed = new Set<string>();
+    this.editor.getState().doc.forEach((node, offset) => {
+      const nodeId = node.attrs["nodeId"];
+      if (typeof nodeId === "string" && offset < to && offset + node.nodeSize > from) allowed.add(nodeId);
+    });
     return units.filter((u) => allowed.has(u.id));
   }
 
@@ -337,7 +385,7 @@ export class AiToolkitAPI {
    * block's current rich hash differs, the edit is skipped as `stale` rather
    * than clobbering newer content.
    *
-   * Applies as tracked suggestions wherever TrackChanges is active — an agent's
+   * When TrackChanges is installed, applies as tracked suggestions — an agent's
    * edit is a proposal, and a reviewer accepts or rejects it. Applying agent
    * output straight into the document is `applyAiSuggestion({ mode: "direct" })`.
    */
@@ -351,7 +399,7 @@ export class AiToolkitAPI {
     // (which units changed) and the stale guard (did the doc move under us).
     const currentUnits = new Map<string, SemanticUnit>();
     const currentHashByNodeId = new Map<string, string>();
-    for (const u of toSemanticUnits(this.editor, { groupBlocks: false })) {
+    for (const u of liveUnits(toSemanticUnits(this.editor, { groupBlocks: false }), this.editor.getState().doc)) {
       currentUnits.set(u.id, u);
       currentHashByNodeId.set(u.id, unitRichHash(u));
       for (const part of u.parts ?? []) {
@@ -363,6 +411,17 @@ export class AiToolkitAPI {
     const changed: string[] = [];
     const stale: string[] = [];
     const notFound: string[] = [];
+    // An image unit has no words to diff; its layout is set as image attrs.
+    const imageLayouts: ImageLayoutEdit[] = [];
+    const rejected: string[] = [];
+    // Only the fields that change are checked: an image placed by drag reads
+    // `align: "custom"`, which an agent cannot set but may hand back untouched.
+    const queueImageLayout = (nodeId: string, proposed: unknown) => {
+      const changes = changedImageFields(currentUnits.get(nodeId)?.image, proposed);
+      const parsed = SemanticImageAttrsSchema.strict().safeParse(changes);
+      if (parsed.success && Object.keys(parsed.data).length > 0) imageLayouts.push({ nodeId, attrs: parsed.data });
+      else rejected.push(nodeId);
+    };
 
     for (const item of edits) {
       if (isSemanticUnit(item)) {
@@ -380,6 +439,11 @@ export class AiToolkitAPI {
           continue;
         }
         if (unitRichHash(item) === current) continue; // unchanged — skip
+        if (currentUnit.type === "image") {
+          if (stableStringify(item.attrs ?? {}) === stableStringify(currentUnit.attrs ?? {})) queueImageLayout(nodeId, item.image);
+          else rejected.push(nodeId);
+          continue;
+        }
 
         // Container units are context envelopes; their individually-addressable
         // parts are the edit surface. Diff those leaves and never send the
@@ -413,24 +477,34 @@ export class AiToolkitAPI {
           stale.push(item.nodeId);
           continue;
         }
+        if (currentUnits.get(item.nodeId)?.type === "image") {
+          if (item.spans) rejected.push(item.nodeId);
+          else queueImageLayout(item.nodeId, item.attrs);
+          continue;
+        }
         resolved.push(item);
         changed.push(item.nodeId);
       }
     }
 
-    if (resolved.length === 0) return { applied: false, changed, stale, notFound, rejected: [] };
+    const laidOut = imageLayouts.length > 0 ? applyImageLayout(this.editor, imageLayouts, authorID) : [];
+    rejected.push(...imageLayouts.map((edit) => edit.nodeId).filter((nodeId) => !laidOut.includes(nodeId)));
+    if (resolved.length === 0) {
+      return { applied: laidOut.length > 0, changed: [...changed, ...laidOut], stale, notFound, rejected };
+    }
 
     const result = applyRichDiffAsSuggestion(
       this.editor.getState(),
       (tr) => this.editor.applyTransaction(tr),
       { edits: resolved, authorID },
     );
+    const unapplied = new Set([...result.notFound, ...result.rejected]);
     return {
-      applied: result.applied,
-      changed,
+      applied: result.applied || laidOut.length > 0,
+      changed: [...changed.filter((nodeId) => !unapplied.has(nodeId)), ...laidOut],
       stale,
       notFound: [...notFound, ...result.notFound],
-      rejected: result.rejected,
+      rejected: [...rejected, ...result.rejected],
     };
   }
 
@@ -442,9 +516,11 @@ export class AiToolkitAPI {
    * `applyStructuralEdits`. Both report into one result; `stale` comes only from
    * the rich half, which is the only one with a hash to check against.
    *
-   * `authorID` names the author of the rich half. Structural changes are
-   * attributed by the track-changes author, because the engine assigns them as
-   * it tracks the transaction and takes no per-transaction override.
+   * When TrackChanges is installed, every edit is a proposal by `authorID`
+   * (default "AI Assistant"), tracked whether or not the person is suggesting.
+   *
+   * A batch lands in up to three transactions, so up to three undo steps: image
+   * layouts, text edits, then structural ops.
    */
   applySemanticEdits(
     edits: SemanticEdit[],
@@ -470,9 +546,8 @@ export class AiToolkitAPI {
       : { applied: false, changed: [], stale: [], notFound: [], rejected: [] };
     if (structural.length === 0) return richResult;
 
-    // One transaction for the whole structural batch: one undo step, and one
-    // review unit for the tracked changes it produces.
-    const tr = this.editor.getState().tr;
+    // One transaction: the structural batch is one undo step.
+    const tr = trackAsSuggestion(this.editor.getState().tr, options.authorID ?? "AI Assistant");
     const structuralResult = applyStructuralEdits(tr, structural);
     const touched = tr.docChanged;
     if (touched) this.editor.applyTransaction(tr);
@@ -507,7 +582,7 @@ export class AiToolkitAPI {
     let accumulated = "";
 
     // Position the AI caret at the end of the anchor block
-    const found = findNodeById(editor.getState().doc, nodeId);
+    const found = findLiveNodeById(editor.getState().doc, nodeId);
     if (found) {
       const endPos = found.pos + found.node.nodeSize;
       editor.applyTransaction(
@@ -582,7 +657,7 @@ export class AiToolkitAPI {
    *   1. Cosmetic streaming → ghost text grows, AI caret pulses
    *   2. Stream ends → ghost text cleared, AI caret cleared
    *   3. Content inserted after anchor block as a real document transaction
-   *      tagged with `track-author` so TrackChanges (Phase 4) wraps it
+   *      tagged with `track-author` so TrackChanges wraps it
    *
    * @param nodeId   Anchor block to insert content after
    * @param stream   AsyncIterable of text chunks
@@ -604,9 +679,9 @@ export class AiToolkitAPI {
 
     if (!generated) return;
 
-    // Phase 3: atomic insert tagged for TrackChanges (Phase 4)
+    // Phase 3: one atomic insert, which TrackChanges records as a single change.
     const state = this.editor.getState();
-    const found = findNodeById(state.doc, nodeId);
+    const found = findLiveNodeById(state.doc, nodeId);
     if (!found) return;
 
     const schema = state.schema as Schema;
@@ -623,7 +698,7 @@ export class AiToolkitAPI {
 
     const tr = state.tr
       .insert(insertPos, newNode)
-      .setMeta("track-author", authorId)  // TrackChanges (Phase 4) reads this
+      .setMeta("track-author", authorId)  // TrackChanges reads this
       .scrollIntoView();
 
     this.editor.applyTransaction(tr);

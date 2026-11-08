@@ -7,7 +7,7 @@ import { shortName } from "../utils/authorName";
 import { useTrackChangesPopover } from "../hooks/useTrackChangesPopover";
 import { useReviewAction } from "../hooks/useReviewAction";
 import { ReviewRefusalNotice } from "./ReviewRefusalNotice";
-import { changeName, getChangeMeta, type ChangeMeta, type NamedChangeType } from "../utils/changeMeta";
+import { changeName, decisionLabel, getChangeMeta, previewVerb, type ChangeMeta, type NamedChangeType } from "../utils/changeMeta";
 
 export interface TrackChangesPopoverProps {
   editor: Editor | null;
@@ -88,12 +88,6 @@ const KIND_TYPE: Record<ChangePopoverInfo["changeKind"], NamedChangeType> = {
   reference: "reference-change",
 };
 
-/** What text a change adds or removes; other changes show it as it is. */
-const VERB: Partial<Record<CHANGE_OPERATION, string>> = {
-  [CHANGE_OPERATION.insert]: "Adding: ",
-  [CHANGE_OPERATION.delete]: "Removing: ",
-};
-
 const REPLACEMENT: ChangeMeta = { icon: "↔", label: "Replacement" };
 
 /** Named as the panel names it, from the change itself while it is still in the document. */
@@ -122,6 +116,7 @@ function SingleChangePopover({
   descriptionClassName?: string | undefined;
 }) {
   const bm = badgeMeta(info, editor);
+  const verb = previewVerb(info.operation, !!info.moveId || !!info.moveNodeId);
   const author = shortName(info.authorID);
   const ids = info.groupIds.length > 0 ? info.groupIds : [info.id];
   const review = useReviewAction(editor);
@@ -169,7 +164,7 @@ function SingleChangePopover({
         data-part="description"
         style={textPreview}
       >
-        {info.moveId ? "Moving: " : VERB[info.operation] ?? ""}
+        {verb ? `${decisionLabel(verb, bm)}: ` : ""}
         <em>"{info.text}"</em>
       </div>
     );
@@ -192,14 +187,14 @@ function SingleChangePopover({
           onClick={() => decide("accepted", ids)}
           style={btnStyle}
         >
-          Accept
+          {decisionLabel("Accept", bm)}
         </button>
         <button
           className={cx("scrivr-menu-item", itemClassName)}
           onClick={() => decide("rejected", ids)}
           style={btnStyle}
         >
-          Reject
+          {decisionLabel("Reject", bm)}
         </button>
       </div>
       {preview}

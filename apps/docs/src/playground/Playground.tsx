@@ -25,6 +25,7 @@ import {
   type CitationRange,
 } from "@scrivr/plugins";
 import { AiToolkit } from "@scrivr/ai";
+import { installAgentDebug } from "./agentDebug";
 import { playgroundFonts } from "./fonts";
 import { Toolbar } from "./Toolbar";
 import { BubbleMenuBar } from "./BubbleMenuBar";
@@ -254,6 +255,7 @@ export function Playground() {
       console.log("[ProseMirror doc]", doc.toJSON());
       return doc.toJSON();
     };
+    installAgentDebug(editor);
 
   }
 

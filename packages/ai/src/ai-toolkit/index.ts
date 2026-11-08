@@ -1,4 +1,4 @@
-export { UniqueId, findNodeById } from "./UniqueId";
+export { UniqueId, findNodeById, findLiveNodeById } from "./UniqueId";
 export { GhostText, ghostTextPluginKey } from "./GhostText";
 export { AiCaret, aiCaretPluginKey } from "./AiCaret";
 export { AiToolkit, AiToolkitAPI, unitRichHash } from "./AiToolkit";

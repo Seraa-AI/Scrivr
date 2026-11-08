@@ -1,7 +1,7 @@
 /**
  * The tracked write path under the diff's emission order.
  *
- * `applyRichDiffAsSuggestion` walks the ops `pairReplacements` emits, counting
+ * `applyRichDiffAsSuggestion` walks the ops `phraseReplacements` emits, counting
  * proposal characters as it goes to index the agent's marks. That makes it
  * dependent on the emission order in a way its own code never states — and the
  * order changed when proposal-consuming ops began coming out in proposal order.

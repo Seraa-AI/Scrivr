@@ -158,6 +158,19 @@ export function getBlockInlineTrackedData(node: PMNode): Partial<TrackedAttrs>[]
   return dataTracked || [];
 }
 
+/**
+ * Whether the proposed view leaves this node out: an object whose own record
+ * proposes deleting it, or text carrying a pending deletion.
+ */
+export function proposedForDeletion(node: PMNode): boolean {
+  const records = [
+    ...(getBlockInlineTrackedData(node) ?? []),
+    ...node.marks.filter((mark) => mark.type.name === "trackedDelete").flatMap((mark) => [mark.attrs.dataTracked].flat()),
+  ];
+  return records.some((record) =>
+    record?.operation === CHANGE_OPERATION.delete && record.status === CHANGE_STATUS.pending);
+}
+
 export function getMarkTrackedData(node: PMNode | undefined | null) {
   const tracked = node?.marks.reduce((acc, current) => {
     if (isValidTrackableMark(current) && current.attrs.dataTracked) {

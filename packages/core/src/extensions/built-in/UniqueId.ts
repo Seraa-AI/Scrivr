@@ -19,21 +19,33 @@ export const COLLAB_SYNC_META = "scrivr:collabSync";
 export const NORMALIZATION_META = "scrivr:normalization";
 
 /**
- * Find a block node in the document by its stable nodeId attribute.
- * Returns the node and its absolute ProseMirror position, or null if not found.
+ * The first node, in document order (ancestors before descendants), carrying
+ * this nodeId and passing `accept`.
+ *
+ * Use it where an id names one node: a document without track changes, or a
+ * question about whether the id is anywhere in the document at all. With track
+ * changes, a pending move leaves a deleted copy under the same id, and this
+ * returns whichever comes first — to read or write the block a person sees, use
+ * `findLiveNodeById` from `@scrivr/plugins`. `accept` is how that skips the copy
+ * without core knowing about tracking.
  */
 export function findNodeById(
   doc: Node,
   nodeId: string,
+  accept?: (node: Node, pos: number) => boolean,
 ): { node: Node; pos: number } | null {
-  let result: { node: Node; pos: number } | null = null;
-  doc.descendants((node, pos) => {
-    if (node.attrs["nodeId"] === nodeId) {
-      result = { node, pos };
-      return false; // stop traversal
+  const visit = (parent: Node, start: number): { node: Node; pos: number } | null => {
+    let pos = start;
+    for (let i = 0; i < parent.childCount; i++) {
+      const node = parent.child(i);
+      if (node.attrs["nodeId"] === nodeId && (!accept || accept(node, pos))) return { node, pos };
+      const nested = visit(node, pos + 1);
+      if (nested) return nested;
+      pos += node.nodeSize;
     }
-  });
-  return result;
+    return null;
+  };
+  return visit(doc, 0);
 }
 
 /**

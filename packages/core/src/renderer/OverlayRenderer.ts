@@ -235,6 +235,72 @@ export function renderTrackedAttrChange(
 }
 
 /**
+ * Marks a whole table row a change added or removed: a wash across the row and
+ * a frame around it, dashed when the row is removed.
+ */
+export function renderTrackedRow(
+  ctx: CanvasRenderingContext2D,
+  rect: { x: number; y: number; width: number; height: number },
+  color: string,
+  removed: boolean,
+): void {
+  ctx.save();
+  ctx.fillStyle = color.startsWith("#") ? hexToRgba(color, 0.1) : color;
+  snappedFillRect(ctx, rect.x, rect.y, rect.width, rect.height);
+  ctx.strokeStyle = color.startsWith("#") ? hexToRgba(color, 0.9) : color;
+  ctx.lineWidth = 2;
+  ctx.setLineDash(removed ? [6, 4] : []);
+  ctx.strokeRect(rect.x + 1, rect.y + 1, rect.width - 2, rect.height - 2);
+  ctx.restore();
+}
+
+/**
+ * Marks moved content as Word does: double-underlined where it moved to,
+ * double-struck where it moved from, over a light wash. Edits made inside a
+ * moved block are painted over it with their own marks.
+ */
+export function renderTrackedMove(
+  ctx: CanvasRenderingContext2D,
+  glyphs: GlyphEntry[],
+  lines: LineEntry[],
+  color: string,
+  removed: boolean,
+): void {
+  if (glyphs.length === 0 && lines.length === 0) return;
+  ctx.save();
+  ctx.fillStyle = color.startsWith("#") ? hexToRgba(color, 0.08) : color;
+  for (const g of glyphs) snappedFillRect(ctx, g.x, g.y, g.width, g.height);
+  const lineIndexesWithGlyphs = new Set(glyphs.map((g) => g.lineIndex));
+  for (const line of lines) {
+    if (!lineIndexesWithGlyphs.has(line.lineIndex)) snappedFillRect(ctx, line.x, line.y, line.height, line.height);
+  }
+  ctx.strokeStyle = color.startsWith("#") ? hexToRgba(color, 0.9) : color;
+  ctx.lineWidth = 1;
+  // One pair of lines per run of glyphs on a line, not per glyph.
+  const runs = new Map<string, { x: number; end: number; y: number; height: number }>();
+  for (const g of glyphs) {
+    const key = `${g.page}:${g.lineIndex}`;
+    const run = runs.get(key);
+    if (run) {
+      run.x = Math.min(run.x, g.x);
+      run.end = Math.max(run.end, g.x + g.width);
+    } else {
+      runs.set(key, { x: g.x, end: g.x + g.width, y: g.y, height: g.height });
+    }
+  }
+  for (const { x, end, y, height } of runs.values()) {
+    const first = removed ? y + height * 0.45 : y + height - 3;
+    for (const lineY of [first, first + 2.5]) {
+      ctx.beginPath();
+      ctx.moveTo(x, lineY);
+      ctx.lineTo(end, lineY);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+/**
  * Washes text whose formatting a tracked change altered. No underline: the text
  * is neither added nor removed, and an underline would read as underlining.
  */

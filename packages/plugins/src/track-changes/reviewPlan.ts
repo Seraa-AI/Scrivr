@@ -130,6 +130,13 @@ const sameFormattingRun = (a: TrackedChange, b: TrackedChange) =>
   markValue(a.mark) === markValue(b.mark) &&
   (a.to === b.from || b.to === a.from);
 
+/** The two halves of one replacement: the words taken out and the words put in. */
+const sameReplacement = (a: TrackedChange, b: TrackedChange) =>
+  !!a.dataTracked.groupId && a.dataTracked.groupId === b.dataTracked.groupId &&
+  a.dataTracked.authorID === b.dataTracked.authorID &&
+  new Set([a.dataTracked.operation, b.dataTracked.operation]).size === 2 &&
+  [a, b].every((c) => c.dataTracked.operation === "insert" || c.dataTracked.operation === "delete");
+
 /** The record pointing back at what a split was split from. */
 const splitReference = (reference: TrackedChange, split: TrackedChange) =>
   reference.dataTracked.operation === "reference" &&
@@ -146,6 +153,7 @@ const sameAct = (a: TrackedChange, b: TrackedChange) =>
   pairedMove(a, b) ||
   sameMove(a, b) ||
   sameFormattingRun(a, b) ||
+  sameReplacement(a, b) ||
   splitReference(a, b) || splitReference(b, a);
 
 /** A record that is secondary within its act: others name the act, this one follows it. */

@@ -6,7 +6,8 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { AiTestEditor, doc, p } from "./helpers";
+import { TextSelection } from "@scrivr/core/pm";
+import { AiTestEditor, doc, moveFirstBlockToEnd, p } from "./helpers";
 import { subscribeToAiSuggestions } from "../subscribeToAiSuggestions";
 import { AI_SUGGESTION_SET_ACTIVE } from "../AiSuggestionPlugin";
 import type { AiSuggestion } from "../types";
@@ -376,5 +377,29 @@ describe("subscribeToAiSuggestions — actions", () => {
 
     expect(editor.suggestionState!.suggestion).toBeNull();
     unsub();
+  });
+});
+
+describe("subscribeToAiSuggestions — activating a card whose block has a pending move", () => {
+  /** A headless editor with the one view-side call `activate` makes: move the caret. */
+  class EditorWithCaret extends AiTestEditor {
+    readonly selection = {
+      moveCursorTo: (pos: number) => {
+        const state = this.getState();
+        this.applyTransaction(state.tr.setSelection(TextSelection.create(state.doc, pos)));
+      },
+    };
+  }
+
+  it("puts the caret in the moved block, not the copy it left behind", () => {
+    const editor = new EditorWithCaret(doc(p("Hello world", "b1"), p("tail", "b2")));
+    editor.showSuggestion(rewriteSuggestion("b1"));
+    moveFirstBlockToEnd(editor);
+    let activate: ((blockId: string) => void) | undefined;
+    subscribeToAiSuggestions(editor, (_cards, actions) => { activate = actions.activate; });
+
+    activate?.("b1");
+    const { doc: after, selection } = editor.getState();
+    expect(selection.head).toBe(after.content.size - after.child(after.childCount - 1).nodeSize + 1);
   });
 });

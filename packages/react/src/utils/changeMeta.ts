@@ -5,6 +5,8 @@ import type { NodeAttrChange, TrackedChange } from "@scrivr/plugins";
 export interface ChangeMeta {
   icon: string;
   label: string;
+  /** What one decision on this change takes or keeps whole, such as a "row". */
+  unit?: string;
 }
 
 const MARK_ICONS: Record<string, string> = {
@@ -60,6 +62,14 @@ const NAMES: Record<NamedChangeType, NamesByOperation> = {
 };
 
 
+/** Blocks named by what they are when added or removed, rather than as "a block". */
+const NODE_NAMES: Partial<Record<string, Partial<Record<CHANGE_OPERATION, ChangeMeta>>>> = {
+  tableRow: {
+    [CHANGE_OPERATION.insert]: { icon: "▤+", label: "Row added", unit: "row" },
+    [CHANGE_OPERATION.delete]: { icon: "▤−", label: "Row removed", unit: "row" },
+  },
+};
+
 /** Only where the node sits changed, not what it is. */
 const onlyPlaced = ({ oldAttrs, newAttrs }: NodeAttrChange) => {
   const changed = Object.keys({ ...oldAttrs, ...newAttrs }).filter(key =>
@@ -84,9 +94,31 @@ export function getChangeMeta(change: TrackedChange): ChangeMeta {
       label: `${MARK_LABELS[name] ?? name} ${op === CHANGE_OPERATION.delete ? "removed" : "added"}`,
     };
   }
+  const named = change.type === "node-change" && !change.dataTracked.moveNodeId
+    ? NODE_NAMES[change.node.type.name]?.[op]
+    : undefined;
+  if (named) return named;
   if (change.type === "node-attr-change" && onlyPlaced(change)) {
     const name = change.node.type.name;
     return { icon: "⇄", label: `${name.charAt(0).toUpperCase()}${name.slice(1)} moved` };
   }
   return changeName(change.type, op, !!change.dataTracked.moveId);
 }
+
+type PreviewVerb = "Adding" | "Removing" | "Moving";
+
+/** "Accept", "Adding" or, for a change decided whole, "Accept row", "Adding row". */
+export const decisionLabel = (verb: "Accept" | "Reject" | PreviewVerb, meta: ChangeMeta) =>
+  meta.unit ? `${verb} ${meta.unit}` : verb;
+
+// A text move's halves are an insertion and a deletion, so `moved` names them;
+// a block move is its own operation.
+const PREVIEW_VERB: Partial<Record<CHANGE_OPERATION, PreviewVerb>> = {
+  [CHANGE_OPERATION.insert]: "Adding",
+  [CHANGE_OPERATION.delete]: "Removing",
+  [CHANGE_OPERATION.move]: "Moving",
+};
+
+/** What a change does to the words it previews; a split, a list change and the like show them as they are. */
+export const previewVerb = (operation: CHANGE_OPERATION, moved: boolean): PreviewVerb | undefined =>
+  moved ? "Moving" : PREVIEW_VERB[operation];

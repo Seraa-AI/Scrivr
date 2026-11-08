@@ -10,12 +10,13 @@
  * container (a `listItem`) or the leaf inside it (the item's paragraph) — the
  * agent sees leaves, so ops that act on a container climb to it.
  */
-import { findNodeById, spansToFragment, tableColumnCount } from "@scrivr/core";
-import { pickAgentAttrs } from "@scrivr/plugins";
-import type { Fragment, Node as PmNode, NodeType, Schema, Transaction } from "@scrivr/core/pm";
-import type { InlineSpan } from "@scrivr/core";
+import { findNodeById, safeImageUrl, spansToFragment, tableColumnCount } from "@scrivr/core";
+import { imageNodeAttrs } from "./imageAttrs";
+import { findLiveNodeById, pickAgentAttrs, shadowRanges } from "@scrivr/plugins";
+import type { ShadowRange } from "@scrivr/plugins";
+import type { Node as PmNode, Schema, Transaction } from "@scrivr/core/pm";
 
-import type { SemanticBlockInput, SemanticCellInput, StructuralSemanticEdit } from "../schema/edit";
+import { SemanticImageAttrsSchema, type SemanticBlockInput, type SemanticCellInput, type StructuralSemanticEdit } from "../schema/edit";
 import { toCoreSpans } from "./spans";
 
 export interface StructuralEditResult {
@@ -23,19 +24,49 @@ export interface StructuralEditResult {
   changed: string[];
   /** nodeIds naming a node the document does not hold. */
   notFound: string[];
-  /** nodeIds that resolved, but to a node the op cannot act on. */
+  /** nodeIds that resolved, but only to deleted content or a shape the op cannot act on. */
   rejected: string[];
 }
 
-/** The node an id names, plus the ancestor of `type` that encloses it. */
+type ResolveNode = (nodeId: string) => { node: PmNode; pos: number } | null;
+
+/**
+ * Shadow ranges are read once, from the document the batch starts on, and
+ * mapped through the batch's own steps before each lookup — re-sliced per
+ * lookup because later ops keep appending steps. The tracking engine runs
+ * after dispatch, so a node this batch moved still has only one copy; the
+ * entry shadows are the ones resolution has to exclude.
+ */
+function createLiveResolver(tr: Transaction): ResolveNode {
+  const start = tr.mapping.maps.length;
+  const entryShadows = shadowRanges(tr.doc);
+  return (nodeId) => {
+    const mapping = tr.mapping.slice(start);
+    const mapped = entryShadows.map(
+      ([from, to]): ShadowRange => [mapping.map(from, 1), mapping.map(to, -1)],
+    );
+    return findLiveNodeById(tr.doc, nodeId, mapped);
+  };
+}
+
+/** The `type` node an id names: the node itself, or the one enclosing it. */
 function resolveAncestor(
   doc: PmNode,
   nodeId: string,
   typeName: string,
+  resolve: ResolveNode,
 ): { node: PmNode; pos: number } | null {
-  const found = findNodeById(doc, nodeId);
+  const found = resolve(nodeId);
   if (!found) return null;
   if (found.node.type.name === typeName) return found;
+  // A node holding nodes of this type — a nested list inside an item — could
+  // mean any of them, so it names none.
+  let holdsType = false;
+  found.node.descendants((node) => {
+    holdsType ||= node.type.name === typeName;
+    return !holdsType;
+  });
+  if (holdsType) return null;
   const $pos = doc.resolve(found.pos);
   for (let depth = $pos.depth; depth > 0; depth--) {
     if ($pos.node(depth).type.name === typeName) {
@@ -53,17 +84,28 @@ function resolveAncestor(
  * would turn "delete this clause" into deleting the whole table — so a nested id
  * is refused, and `deleteListItem` / `deleteTableRow` are how those are reached.
  */
-function resolveTopLevel(doc: PmNode, nodeId: string): { node: PmNode; pos: number } | null {
-  const found = findNodeById(doc, nodeId);
+function resolveTopLevel(doc: PmNode, nodeId: string, resolve: ResolveNode): { node: PmNode; pos: number } | null {
+  const found = resolve(nodeId);
   if (!found) return null;
   return doc.resolve(found.pos).depth === 0 ? found : null;
 }
 
 function buildBlock(schema: Schema, block: SemanticBlockInput): PmNode | null {
+  if (block.type === "image") return buildImageParagraph(schema, block);
   const type = schema.nodes[block.type];
   if (!type) return null;
   const attrs = { ...pickAgentAttrs(block.attrs ?? {}), ...(block.level !== undefined ? { level: block.level } : {}) };
   return type.createAndFill(attrs, spansToFragment(toCoreSpans(block.spans ?? []), schema, { parentType: type }));
+}
+
+/** A paragraph holding the image, or null when its source is not a safe image. */
+function buildImageParagraph(schema: Schema, block: Extract<SemanticBlockInput, { type: "image" }>): PmNode | null {
+  const src = safeImageUrl(block.src);
+  const image = schema.nodes["image"];
+  const paragraph = schema.nodes["paragraph"];
+  const attrs = SemanticImageAttrsSchema.safeParse(block);
+  if (!src || !image || !paragraph || !attrs.success) return null;
+  return paragraph.create({}, image.create({ ...imageNodeAttrs(attrs.data), src }));
 }
 
 function buildCell(schema: Schema, cell: SemanticCellInput | undefined): PmNode | null {
@@ -93,12 +135,18 @@ function deleteContainerChild(tr: Transaction, target: { node: PmNode; pos: numb
  * it could not — a missing anchor and a wrong-shaped anchor are different
  * answers, and a caller routing agent output needs to tell them apart.
  */
-function applyOne(tr: Transaction, edit: StructuralSemanticEdit, result: StructuralEditResult): void {
+function applyOne(
+  tr: Transaction,
+  edit: StructuralSemanticEdit,
+  result: StructuralEditResult,
+  resolve: ResolveNode,
+  batch: BatchRanges,
+): void {
   const schema = tr.doc.type.schema;
 
   switch (edit.op) {
     case "insertBlock": {
-      const anchor = resolveTopLevel(tr.doc, edit.anchorNodeId);
+      const anchor = resolveTopLevel(tr.doc, edit.anchorNodeId, resolve);
       if (!anchor) return void rejectOrMiss(tr.doc, edit.anchorNodeId, result);
       const node = buildBlock(schema, edit.block);
       if (!node) return void result.rejected.push(edit.anchorNodeId);
@@ -107,14 +155,50 @@ function applyOne(tr: Transaction, edit: StructuralSemanticEdit, result: Structu
       return;
     }
     case "deleteBlock": {
-      const target = resolveTopLevel(tr.doc, edit.nodeId);
+      const target = resolveTopLevel(tr.doc, edit.nodeId, resolve);
       if (!target) return void rejectOrMiss(tr.doc, edit.nodeId, result);
+      // Deleting what this batch moved would take the move's copy and leave its shadow.
+      if (overlapsBatch(tr, target, batch)) return void result.rejected.push(edit.nodeId);
       tr.delete(target.pos, target.pos + target.node.nodeSize);
       result.changed.push(edit.nodeId);
       return;
     }
+    case "moveBlock":
+    case "moveListItem": {
+      const resolveTarget = (id: string) => edit.op === "moveBlock"
+        ? resolveTopLevel(tr.doc, id, resolve)
+        : resolveAncestor(tr.doc, id, "listItem", resolve);
+      const target = resolveTarget(edit.nodeId);
+      if (!target) return void rejectOrMiss(tr.doc, edit.nodeId, result);
+      const anchor = resolveTarget(edit.anchorNodeId);
+      if (!anchor) return void rejectOrMiss(tr.doc, edit.anchorNodeId, result);
+      // A second move of the same content in one transaction emits a second
+      // overlapping delete/insert pair, which tracking pairs wrongly and
+      // replays into a duplicated block. Content moves at most once per batch.
+      if (overlapsBatch(tr, target, batch)) return void result.rejected.push(edit.nodeId);
+      if (edit.op === "moveListItem") {
+        const source = tr.doc.resolve(target.pos);
+        const destination = tr.doc.resolve(anchor.pos);
+        if (!source.sameParent(destination)) {
+          result.rejected.push(edit.nodeId);
+          return;
+        }
+      }
+      const at = edit.position === "before" ? anchor.pos : anchor.pos + anchor.node.nodeSize;
+      // Already there: nothing moves, and the caller hears so rather than
+      // reporting a move that never happened.
+      if (target.pos === anchor.pos || at === target.pos || at === target.pos + target.node.nodeSize) {
+        return void result.rejected.push(edit.nodeId);
+      }
+      tr.delete(target.pos, target.pos + target.node.nodeSize);
+      const placed = at > target.pos ? at - target.node.nodeSize : at;
+      tr.insert(placed, target.node);
+      batch.moved.push({ from: placed, to: placed + target.node.nodeSize, maps: tr.mapping.maps.length });
+      result.changed.push(edit.nodeId);
+      return;
+    }
     case "insertListItem": {
-      const item = resolveAncestor(tr.doc, edit.anchorNodeId, "listItem");
+      const item = resolveAncestor(tr.doc, edit.anchorNodeId, "listItem", resolve);
       if (!item) return void rejectOrMiss(tr.doc, edit.anchorNodeId, result);
       const itemType = schema.nodes["listItem"];
       const paragraph = schema.nodes["paragraph"];
@@ -125,19 +209,23 @@ function applyOne(tr: Transaction, edit: StructuralSemanticEdit, result: Structu
       );
       const node = body && itemType.createAndFill({}, body);
       if (!node) return void result.rejected.push(edit.anchorNodeId);
-      tr.insert(edit.position === "before" ? item.pos : item.pos + item.node.nodeSize, node);
+      const at = edit.position === "before" ? item.pos : item.pos + item.node.nodeSize;
+      if (insideMoved(tr, at, batch)) return void result.rejected.push(edit.anchorNodeId);
+      tr.insert(at, node);
+      batch.added.push({ from: at, to: at + node.nodeSize, maps: tr.mapping.maps.length });
       result.changed.push(edit.anchorNodeId);
       return;
     }
     case "deleteListItem": {
-      const item = resolveAncestor(tr.doc, edit.nodeId, "listItem");
+      const item = resolveAncestor(tr.doc, edit.nodeId, "listItem", resolve);
       if (!item) return void rejectOrMiss(tr.doc, edit.nodeId, result);
+      if (overlapsBatch(tr, item, batch)) return void result.rejected.push(edit.nodeId);
       deleteContainerChild(tr, item);
       result.changed.push(edit.nodeId);
       return;
     }
     case "insertTableRow": {
-      const row = resolveAncestor(tr.doc, edit.anchorNodeId, "tableRow");
+      const row = resolveAncestor(tr.doc, edit.anchorNodeId, "tableRow", resolve);
       if (!row) return void rejectOrMiss(tr.doc, edit.anchorNodeId, result);
       const rowType = schema.nodes["tableRow"];
       if (!rowType) return void result.rejected.push(edit.anchorNodeId);
@@ -154,13 +242,17 @@ function applyOne(tr: Transaction, edit: StructuralSemanticEdit, result: Structu
       }
       const node = rowType.createAndFill({}, cells);
       if (!node) return void result.rejected.push(edit.anchorNodeId);
-      tr.insert(edit.position === "before" ? row.pos : row.pos + row.node.nodeSize, node);
+      const at = edit.position === "before" ? row.pos : row.pos + row.node.nodeSize;
+      if (insideMoved(tr, at, batch)) return void result.rejected.push(edit.anchorNodeId);
+      tr.insert(at, node);
+      batch.added.push({ from: at, to: at + node.nodeSize, maps: tr.mapping.maps.length });
       result.changed.push(edit.anchorNodeId);
       return;
     }
     case "deleteTableRow": {
-      const row = resolveAncestor(tr.doc, edit.nodeId, "tableRow");
+      const row = resolveAncestor(tr.doc, edit.nodeId, "tableRow", resolve);
       if (!row) return void rejectOrMiss(tr.doc, edit.nodeId, result);
+      if (overlapsBatch(tr, row, batch)) return void result.rejected.push(edit.nodeId);
       deleteContainerChild(tr, row);
       result.changed.push(edit.nodeId);
       return;
@@ -168,15 +260,61 @@ function applyOne(tr: Transaction, edit: StructuralSemanticEdit, result: Structu
   }
 }
 
-/** An id the document holds but in the wrong shape is rejected, not "not found". */
+/** A range of the batch's own work, and how much of its mapping that predates. */
+interface BatchRange {
+  from: number;
+  to: number;
+  maps: number;
+}
+
+/**
+ * What this batch moved, and what it added inside a list or table. Tracking
+ * replays a batch as one gesture, so a later op that overlaps earlier work
+ * would be recorded wrongly — a second move duplicates a block, and a move of
+ * a list the batch added to cancels both. Content is touched once per batch.
+ */
+interface BatchRanges {
+  moved: BatchRange[];
+  added: BatchRange[];
+}
+
+/** A range mapped through the steps since it was recorded; it grows with content added inside it. */
+function mapped(tr: Transaction, { from, to, maps }: BatchRange) {
+  const since = tr.mapping.slice(maps);
+  return { from: since.map(from, 1), to: since.map(to, -1) };
+}
+
+/**
+ * Whether `target` overlaps work this batch already did — the node itself,
+ * something inside it, or something holding it. Ids cannot answer it: a list
+ * item is named by its own id or by a paragraph inside it.
+ */
+function overlapsBatch(tr: Transaction, target: { node: PmNode; pos: number }, batch: BatchRanges): boolean {
+  const end = target.pos + target.node.nodeSize;
+  return [...batch.moved, ...batch.added].some((range) => {
+    const { from, to } = mapped(tr, range);
+    return target.pos < to && from < end;
+  });
+}
+
+/** Whether `pos` lies inside content this batch moved; beside it is fine. */
+function insideMoved(tr: Transaction, pos: number, batch: BatchRanges): boolean {
+  return batch.moved.some((range) => {
+    const { from, to } = mapped(tr, range);
+    return from < pos && pos < to;
+  });
+}
+
+/** An id the document still holds, in the wrong shape or only as a deleted shadow, is rejected, not "not found". */
 function rejectOrMiss(doc: PmNode, nodeId: string, result: StructuralEditResult): void {
   if (findNodeById(doc, nodeId)) result.rejected.push(nodeId);
   else result.notFound.push(nodeId);
 }
 
 /**
- * Apply structural edits in one transaction, so a batch is one undo step and one
- * review unit. Later edits resolve against the document the earlier ones left,
+ * Apply structural edits in one transaction, so a batch is one undo step.
+ * Tracking pairs matching move steps; unrelated edits remain separate review
+ * decisions. Later edits resolve against the document the earlier ones left,
  * which is why each op re-reads `tr.doc` rather than a position captured up front.
  */
 export function applyStructuralEdits(
@@ -184,6 +322,8 @@ export function applyStructuralEdits(
   edits: StructuralSemanticEdit[],
 ): StructuralEditResult {
   const result: StructuralEditResult = { changed: [], notFound: [], rejected: [] };
-  for (const edit of edits) applyOne(tr, edit, result);
+  const resolve = createLiveResolver(tr);
+  const batch: BatchRanges = { moved: [], added: [] };
+  for (const edit of edits) applyOne(tr, edit, result, resolve, batch);
   return result;
 }

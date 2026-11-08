@@ -1,5 +1,5 @@
 /**
- * diffText — legal-aware LCS diff with replacement grouping and char-level refinement.
+ * diffText — legal-aware LCS diff with replacement grouping and phrase replacements.
  *
  * ## Tokeniser
  * The tokeniser is "greedy" for legal markers so that clause references and
@@ -14,23 +14,26 @@
  * Round-trip: join(tokenise(s)) === s is always true.
  *
  * ## Replacement grouping
- * pairReplacements() uses a look-ahead buffer (default 5 tokens) to bridge
- * short keep sequences inside a phrase replacement, so that
- * "of the Party" → "the Seller" is grouped as one replacement even though
- * the LCS keeps "the" and the following space.
+ * pairReplacements() groups word swaps: a look-ahead buffer (default 5 tokens)
+ * bridges short keep sequences, so "of the Party" → "the Seller" is one group
+ * even though the LCS keeps "the". Nothing in Scrivr groups this way now; it
+ * stays public for hosts that want word-level groups.
  *
- * ## Char-level refinement
- * diffChars() re-runs the LCS at character granularity so word-level
- * replacements like "indemnification" → "indemnity" produce surgical marks
- * on only the changed suffix rather than striking the whole word.
+ * ## Phrase replacements
+ * phraseReplacements() turns a word-level diff into the edits a person would
+ * make: each run of changes, bridging short unchanged gaps, is one deletion of
+ * the old words and one insertion of the new — never a change inside a word.
+ * The tracked paths (applyDiffAsSuggestion, applyRichDiffAsSuggestion) and the
+ * AI suggestion overlay use it, so a proposal reads the same before and after
+ * it becomes tracked changes.
  *
  * ## Noise filter
  * computeEditDensity() returns the fraction of original characters that were
  * deleted, giving callers a quality gate to decide whether to surface the
  * fine-grained diff or offer a simplified "replace block" view.
- *
- * No external dependencies — pure TypeScript.
  */
+
+import { genId } from "../helpers";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -87,7 +90,6 @@ const LCS_MAX_CELLS = 20_000;
 
 /**
  * Run the classic LCS diff on two strings using the provided tokeniser.
- * Pass `s => s.split("")` for character-level granularity (see diffChars).
  *
  * Falls back to a single block delete+insert when the token matrix would
  * exceed LCS_MAX_CELLS cells to keep runtime bounded on long paragraphs.
@@ -159,15 +161,6 @@ export function diffText(
     proposedOffset += op.text.length;
   }
   return ops;
-}
-
-/**
- * Character-level diff — every character is its own token.
- * Use this for surgical intra-word edits (see expandCharLevel in
- * applyDiffAsSuggestion for how it integrates into the suggestion pipeline).
- */
-export function diffChars(a: string, b: string): DiffOp[] {
-  return diffText(a, b, s => s.split(""));
 }
 
 // ── Replacement grouping ──────────────────────────────────────────────────────
@@ -294,82 +287,69 @@ export function pairReplacements(ops: DiffOp[], lookAheadTokens = 5): PairedDiff
   return output;
 }
 
-// ── Char-level expansion ──────────────────────────────────────────────────────
+// ── Phrase replacements ───────────────────────────────────────────────────────
 
 /**
- * Minimum character similarity (shared chars / longer token length) required
- * to trigger char-level expansion.
- *
- * 0.4 → at least 40% of the longer token's characters must be shared.
- * Below this the tokens are too dissimilar and char-level adds noise.
- *
- * Examples that PASS (similarity ≥ 0.4):
- *   indemnification → indemnity      (7/15 ≈ 0.47)
- *   liability       → liabilities    (9/11 ≈ 0.82)
- *   "Termination for Material Breach" → "Termination for Cause" — long but similar
- *
- * Examples that FAIL (similarity < 0.4):
- *   party  → seller   (0/6  = 0)
- *   quick  → slow     (0/5  = 0)
- *
- * No hard length limit: long tokens with genuine similarity still get surgical
- * marks, which is exactly what lawyers want for long legal terms.
+ * A diff as a person would make the edit: each run of changes becomes one
+ * deletion of the old words and one insertion of the new, as when someone
+ * selects text and types over it. An unchanged gap of up to `bridgeTokens`
+ * tokens — a space, a comma, a word — inside what is being replaced is taken
+ * in, when `canBridge` allows its accepted-text range; additions near each
+ * other stay additions. Every change carries a groupId of its own, shared by
+ * a replacement's two halves and by nothing else, in this diff or any other —
+ * review decides a shared id as one. The insertion carries where its text
+ * starts in the proposal.
  */
-const CHAR_DIFF_SIMILARITY_THRESHOLD = 0.4;
-
-/**
- * Expand strictly-adjacent single delete+insert pairs into char-level ops
- * when the two tokens are similar enough (similarity ≥ CHAR_DIFF_SIMILARITY_THRESHOLD).
- *
- * Only strictly adjacent pairs (no keep tokens between them) are considered —
- * bridged-gap groups involve multiple tokens and phrase-level semantics that
- * char-level expansion would fragment incorrectly.
- *
- * The `groupId` from the original word-level pair is preserved on every
- * char-level op so they still form one logical replacement. `proposedOffset`
- * is not: the re-diff measures from the token, not the proposal.
- */
-export function expandCharLevel(ops: PairedDiffOp[]): PairedDiffOp[] {
-  const result: PairedDiffOp[] = [];
-  let i = 0;
-
-  while (i < ops.length) {
-    const op   = ops[i]!;
-    const next = ops[i + 1];
-
-    if (
-      op.type === "delete" &&
-      next?.type === "insert" &&
-      op.groupId &&
-      op.groupId === next.groupId
-    ) {
-      const charOps = diffChars(op.text, next.text);
-      const keptChars = charOps
-        .filter(o => o.type === "keep")
-        .reduce((s, o) => s + o.text.length, 0);
-      const similarity = keptChars / Math.max(op.text.length, next.text.length, 1);
-
-      if (similarity >= CHAR_DIFF_SIMILARITY_THRESHOLD) {
-        const gid = op.groupId;
-        // `diffChars` measures from the start of this token pair, so its
-        // offsets are in a different frame from the proposal's. Dropping them
-        // keeps "absent" meaning unknown rather than wrong — a consumer reading
-        // one would land inside a different word.
-        result.push(...charOps.map((co): PairedDiffOp => {
-          const plain: PairedDiffOp =
-            co.type === "delete" ? { type: "delete", text: co.text } : { type: co.type, text: co.text };
-          return gid ? { ...plain, groupId: gid } : plain;
-        }));
-        i += 2; // consumed both delete and insert
-        continue;
-      }
-    }
-
-    result.push(op);
-    i++;
+export function phraseReplacements(
+  ops: DiffOp[],
+  canBridge: (acceptedFrom: number, acceptedTo: number) => boolean = () => true,
+  bridgeTokens = 5,
+): PairedDiffOp[] {
+  // Where each op starts in the accepted text, which keeps and deletes advance.
+  const starts: number[] = [];
+  let offset = 0;
+  for (const op of ops) {
+    starts.push(offset);
+    if (op.type !== "insert") offset += op.text.length;
   }
 
-  return result;
+  const out: PairedDiffOp[] = [];
+  let i = 0;
+  while (i < ops.length) {
+    const op = ops[i];
+    if (!op) break;
+    if (op.type === "keep") {
+      out.push(op);
+      i++;
+      continue;
+    }
+    let last = i;
+    let deletes = op.type === "delete";
+    let j = i + 1;
+    while (j < ops.length) {
+      const next = ops[j];
+      if (next && next.type !== "keep") {
+        deletes ||= next.type === "delete";
+        last = j++;
+        continue;
+      }
+      let gapEnd = j;
+      while (gapEnd < ops.length && ops[gapEnd]?.type === "keep") gapEnd++;
+      const gapFrom = starts[j] ?? 0;
+      const gapTo = starts[gapEnd] ?? offset;
+      if (!deletes || gapEnd === ops.length || gapEnd - j > bridgeTokens || !canBridge(gapFrom, gapTo)) break;
+      j = gapEnd;
+    }
+    const region = ops.slice(i, last + 1);
+    const removed = region.filter((o) => o.type !== "insert").map((o) => o.text).join("");
+    const added = region.filter((o) => o.type !== "delete").map((o) => o.text).join("");
+    const groupId = genId();
+    if (removed) out.push({ type: "delete", text: removed, groupId });
+    const proposedOffset = region.find((o) => o.type !== "delete")?.proposedOffset;
+    if (added) out.push({ type: "insert", text: added, groupId, ...(proposedOffset === undefined ? {} : { proposedOffset }) });
+    i = last + 1;
+  }
+  return out;
 }
 
 // ── Noise filter ──────────────────────────────────────────────────────────────

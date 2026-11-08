@@ -1,10 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
   computeEditDensity,
-  diffChars,
   diffText,
-  expandCharLevel,
   pairReplacements,
+  phraseReplacements,
   tokenise,
   type DiffOp,
   type PairedDiffOp,
@@ -191,38 +190,6 @@ describe("diffText", () => {
   });
 });
 
-// ── diffChars ─────────────────────────────────────────────────────────────────
-
-describe("diffChars", () => {
-  it("identical strings → all keeps", () => {
-    expect(diffChars("abc", "abc").every(o => o.type === "keep")).toBe(true);
-  });
-
-  it("suffix change: liability → liabilities", () => {
-    const ops = diffChars("liability", "liabilities");
-    // Common prefix "liabilit" kept, "y" deleted, "ies" inserted
-    const keeps  = ops.filter(o => o.type === "keep")  .map(o => o.text).join("");
-    const deletes = ops.filter(o => o.type === "delete").map(o => o.text).join("");
-    const inserts = ops.filter(o => o.type === "insert").map(o => o.text).join("");
-    expect(keeps).toContain("liabilit");
-    expect(deletes).toBe("y");
-    expect(inserts).toBe("ies");
-  });
-
-  it("keeps+inserts reconstruct target", () => {
-    const pairs: [string, string][] = [
-      ["indemnification", "indemnity"],
-      ["liability", "liabilities"],
-      ["agreement", "agreements"],
-      ["party", "parties"],
-    ];
-    for (const [a, b] of pairs) {
-      const ops = diffChars(a, b);
-      expect(ops.filter(o => o.type !== "delete").map(o => o.text).join("")).toBe(b);
-    }
-  });
-});
-
 // ── pairReplacements ──────────────────────────────────────────────────────────
 
 describe("pairReplacements — strict adjacency", () => {
@@ -373,86 +340,63 @@ describe("pairReplacements — look-ahead buffer", () => {
   });
 });
 
-// ── expandCharLevel ───────────────────────────────────────────────────────────
+// ── phraseReplacements ────────────────────────────────────────────────────────
 
-describe("expandCharLevel", () => {
-  function makePair(del: string, ins: string, groupId = "g1"): PairedDiffOp[] {
-    return [
-      { type: "delete", text: del, groupId },
-      { type: "insert", text: ins, groupId },
+describe("phraseReplacements", () => {
+  const phrases = (a: string, b: string) => phraseReplacements(diffText(a, b));
+
+  it("replaces a changed word whole", () => {
+    expect(phrases("liability", "liabilities")).toEqual([
+      { type: "delete", text: "liability", groupId: expect.any(String) },
+      { type: "insert", text: "liabilities", groupId: expect.any(String), proposedOffset: 0 },
+    ]);
+  });
+
+  it("starts each insertion where its text starts in the proposal", () => {
+    const proposed = "All staff; contractors are covered.";
+    const inserts = phrases("All staff, contractors is covered.", proposed).filter(o => o.type === "insert");
+    expect(inserts.map(o => o.type === "insert" && proposed.startsWith(o.text, o.proposedOffset))).toEqual([true]);
+  });
+
+  it("takes a short unchanged gap into one replacement", () => {
+    const ops = phrases("of the Party here", "the Seller here");
+    expect(ops.filter(o => o.type !== "keep").map(o => o.text)).toEqual(["of the Party", "the Seller"]);
+  });
+
+  it("keeps a long unchanged run between two replacements", () => {
+    const ops = phrases("a b c d e f g h", "x b c d e f g y");
+    expect(ops.filter(o => o.type !== "keep").map(o => `${o.type}:${o.text}`)).toEqual([
+      "delete:a", "insert:x", "delete:h", "insert:y",
+    ]);
+  });
+
+  it("gives a pure insertion or deletion a group of its own", () => {
+    const inserted = phrases("a c", "a b c").filter(o => o.type !== "keep");
+    const deleted = phrases("a b c", "a c").filter(o => o.type !== "keep");
+    expect(inserted.map(o => [o.type, o.text.trim()])).toEqual([["insert", "b"]]);
+    expect(deleted.map(o => [o.type, o.text.trim()])).toEqual([["delete", "b"]]);
+    expect(inserted[0]?.groupId).toBeTruthy();
+    expect(inserted[0]?.groupId).not.toBe(deleted[0]?.groupId);
+  });
+
+  it("never repeats a group across diffs, so two rewrites never pair as one", () => {
+    const groupsOf = (a: string, b: string) => phrases(a, b).flatMap(o => (o.type === "keep" ? [] : [o.groupId]));
+    const first = groupsOf("the red car", "the blue car");
+    const second = groupsOf("the red car", "the blue car");
+    expect(first.filter(id => second.includes(id))).toEqual([]);
+  });
+
+  it("reconstructs both texts", () => {
+    const pairs: [string, string][] = [
+      ["The policy applys to all staff.", "The policy applies to all staff."],
+      ["All staff, contractors is covered.", "All staff; contractors are covered."],
+      ["indemnification of the Party", "indemnity for the Seller"],
     ];
-  }
-
-  it("expands similar word pair to char-level ops", () => {
-    const expanded = expandCharLevel(makePair("liability", "liabilities"));
-    // Should contain keep, delete, insert ops at char granularity
-    const types = expanded.map(o => o.type);
-    expect(types).toContain("keep");
-    expect(types).toContain("delete");
-    expect(types).toContain("insert");
-    // All ops inherit the groupId
-    expect(expanded.every(o => o.groupId === "g1")).toBe(true);
-    // Reconstruction: keeps+inserts = target
-    expect(expanded.filter(o => o.type !== "delete").map(o => o.text).join("")).toBe("liabilities");
-  });
-
-  it("preserves word-level for dissimilar words (below threshold)", () => {
-    // "party" vs "seller" share 0 chars → no char expansion
-    const ops = makePair("party", "seller");
-    const expanded = expandCharLevel(ops);
-    expect(expanded.length).toBe(2);
-    expect(expanded[0]!.type).toBe("delete");
-    expect(expanded[1]!.type).toBe("insert");
-  });
-
-  it("expands long similar tokens (no hard length cap)", () => {
-    // "Indemnification Obligation" → "Indemnification Duty" — long but similar prefix
-    const expanded = expandCharLevel(makePair("IndemnificationObligation", "IndemnificationDuty"));
-    // Should be expanded: common prefix "Indemnification" (15 chars), long suffix differs
-    expect(expanded.some(o => o.type === "keep")).toBe(true);
-    expect(expanded.filter(o => o.type !== "delete").map(o => o.text).join(""))
-      .toBe("IndemnificationDuty");
-  });
-
-  it("does not expand totally dissimilar tokens", () => {
-    // "party" vs "seller": only 'r' in common → similarity 1/6 ≈ 0.17 < 0.4
-    expect(expandCharLevel(makePair("party", "seller"))).toHaveLength(2);
-    // Longer strings with disjoint char sets
-    const longA = "aaabbbcccdddeee";  // chars: a,b,c,d,e
-    const longB = "fffggghhhjjjkkk";  // chars: f,g,h,j,k — zero overlap
-    expect(expandCharLevel(makePair(longA, longB))).toHaveLength(2);
-  });
-
-  it("does not expand unmatched pairs (different groupIds)", () => {
-    const ops: PairedDiffOp[] = [
-      { type: "delete", text: "liability", groupId: "g1" },
-      { type: "insert", text: "liabilities", groupId: "g2" }, // different group
-    ];
-    const expanded = expandCharLevel(ops);
-    expect(expanded.length).toBe(2); // unchanged
-  });
-
-  it("does not expand unpaired ops (no groupId)", () => {
-    const ops: PairedDiffOp[] = [
-      { type: "delete", text: "liability" },
-      { type: "insert", text: "liabilities" },
-    ];
-    const expanded = expandCharLevel(ops);
-    expect(expanded.length).toBe(2);
-  });
-
-  it("leaves keep ops and non-adjacent pairs untouched", () => {
-    const ops: PairedDiffOp[] = [
-      { type: "keep",   text: "unchanged " },
-      { type: "delete", text: "liability", groupId: "g1" },
-      { type: "keep",   text: " between " }, // not adjacent delete+insert
-      { type: "insert", text: "liabilities", groupId: "g1" },
-    ];
-    const expanded = expandCharLevel(ops);
-    // The delete and insert are not adjacent (keep in between) → no expansion
-    expect(expanded.length).toBe(4);
-    expect(expanded[1]!.type).toBe("delete");
-    expect(expanded[3]!.type).toBe("insert");
+    for (const [a, b] of pairs) {
+      const ops = phrases(a, b);
+      expect(ops.filter(o => o.type !== "insert").map(o => o.text).join("")).toBe(a);
+      expect(ops.filter(o => o.type !== "delete").map(o => o.text).join("")).toBe(b);
+    }
   });
 });
 

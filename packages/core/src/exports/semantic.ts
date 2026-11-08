@@ -12,6 +12,7 @@
  */
 
 import type { Node as PmNode, Mark as PmMark, Schema } from "prosemirror-model";
+import type { WrapMode, XAlign } from "../layout/AnchoredObjects";
 
 // ── The unit ──────────────────────────────────────────────────────────────
 
@@ -125,7 +126,42 @@ export interface SemanticUnit {
   cells?: TableCells;
   /** Review changes excluded from `text` but preserved for audit/UI use. */
   changes?: SemanticChange[];
+  /** The image an `image` unit is — a paragraph holding one image and nothing else. */
+  image?: SemanticImage;
 }
+
+/**
+ * An image as an agent reads it; it sets one through `SemanticImageAttrs`. An
+ * image has no id of its own; the unit that carries it is addressed by its
+ * paragraph's id.
+ */
+export interface SemanticImage {
+  src: string;
+  alt: string;
+  width: number;
+  height: number;
+  wrap: ImageWrap;
+  /** `custom` when it was dragged to a position of its own; an agent sets only an `ImageAlign`. */
+  align: ImageAlign | "custom";
+}
+
+/** How text flows around an image. */
+export type ImageWrap = WrapMode;
+/** Where an image sits across the line. */
+export type ImageAlign = Exclude<XAlign, "custom">;
+/** The wraps and alignments an agent may set; validate against these so validation follows the node. */
+export const IMAGE_WRAPS: readonly ImageWrap[] = ["inline", "square", "top-bottom", "behind", "front"];
+export const IMAGE_ALIGNS: readonly ImageAlign[] = ["left", "center", "right"];
+
+/** The image node attr each `SemanticImage` field reads from and writes to. */
+export const IMAGE_NODE_ATTRS: Record<keyof SemanticImage, string> = {
+  src: "src",
+  alt: "alt",
+  width: "width",
+  height: "height",
+  wrap: "wrapMode",
+  align: "xAlign",
+};
 
 /** One inline run of a unit's text and the formatting marks around it. */
 export interface InlineSpan {
@@ -201,6 +237,7 @@ export interface TableCell {
 export interface SemanticNodeResult {
   type: SemanticUnitType;
   cells?: TableCells;
+  image?: SemanticImage;
   text?: string;
   markdown?: string;
 }
@@ -231,6 +268,12 @@ export type SemanticMarkHandler = (
 export interface SemanticHandlers {
   nodes?: Record<string, SemanticNodeHandler>;
   marks?: Record<string, SemanticMarkHandler>;
+  /**
+   * Whether the proposed view leaves a node out: an object proposed for
+   * deletion, which no mark handler can drop, or text proposed for deletion
+   * beside one.
+   */
+  isRemoved?: (node: PmNode) => boolean;
 }
 
 // ── Producer context ─────────────────────────────────────────────────────────
@@ -252,6 +295,8 @@ export interface UnitCtx {
   toChanges(nodes: PmNode | readonly PmNode[]): SemanticChange[];
   /** A block's non-default styling attrs (align/indent/font/…), or undefined. */
   attrsOf(node: PmNode): Record<string, unknown> | undefined;
+  /** Whether the proposed view leaves this node out (see `SemanticHandlers.isRemoved`). */
+  isRemoved(node: PmNode): boolean;
   /** Physical column count = max over rows of Σ gridSpan (never TableMap.width). */
   physicalColumns(table: PmNode): number;
 }

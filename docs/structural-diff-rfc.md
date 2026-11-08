@@ -183,7 +183,7 @@ the LCS we already ship.
 
 ### Stage 4 — intra-leaf diff (existing)
 For every **modified** matched pair, run today's path unchanged:
-`diffText(base.text, target.text)` → `pairReplacements` → `expandCharLevel` →
+`diffText(base.text, target.text)` → `phraseReplacements` →
 `applyRichDiffAsSuggestion` span/mark diff. Zero new code; block matching just
 tells it *which* leaves to compare.
 

@@ -113,6 +113,7 @@ export function walkSemantic(
     const markdown = result.markdown ?? ctx.toMarkdown(nodes);
     if (changes.length === 0 && markdown.length > 0) unit.markdown = markdown;
     if (result.cells !== undefined) unit.cells = result.cells;
+    if (result.image !== undefined) unit.image = result.image;
     // Container units (list, table, …) expose their inner leaf textblocks as
     // individually addressable `parts` — the edit surface. A leaf unit has none.
     const parts = extractParts(nodes, ctx, breadcrumb);

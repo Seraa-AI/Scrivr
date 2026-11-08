@@ -55,12 +55,20 @@ function nodeContentEquals(a: Node, b: Node): boolean {
 const whole = (slice: Slice) => slice.openStart === 0 && slice.openEnd === 0;
 
 /**
+ * A moved node keeps its id, so a deleted block with one is only moved by a copy
+ * carrying the same id — not by a new block, or another, that only reads the same.
+ */
+const sameIdentity = (inserted: Node, deleted: Node) =>
+  !deleted.attrs["nodeId"] || inserted.attrs["nodeId"] === deleted.attrs["nodeId"];
+
+/**
  * Is `inserted` what `deleted` took away? A floating object alone in its
  * paragraph leaves with the paragraph, which holds nothing else to move.
  */
 function movedContent(inserted: Node, deleted: Node): boolean {
-  return nodeContentEquals(inserted, deleted) ||
-    (deleted.isTextblock && deleted.childCount === 1 && nodeContentEquals(inserted, deleted.firstChild!));
+  return (sameIdentity(inserted, deleted) && nodeContentEquals(inserted, deleted)) ||
+    (deleted.isTextblock && deleted.childCount === 1 && !!deleted.firstChild && !deleted.firstChild.isText &&
+      sameIdentity(inserted, deleted.firstChild) && nodeContentEquals(inserted, deleted.firstChild));
 }
 
 export function passThroughMeta(oldTr: Transaction, newTr: Transaction) {
@@ -260,6 +268,7 @@ export const groupMoveSteps = (
         ) {
           pair(peerStep, step, deletedContent.content.firstChild);
           matched.push(i, g);
+          break;
         }
         continue;
       }
@@ -281,8 +290,9 @@ export const groupMoveSteps = (
           )
         ) {
           pair(peerStep, step, insertedContent.content.firstChild);
+          matched.push(i, g);
+          break;
         }
-        matched.push(i, g);
       }
     }
   }

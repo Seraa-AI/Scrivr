@@ -11,17 +11,17 @@ when you need one of the advanced features it provides.
 <Tabs items={["pnpm", "npm", "yarn"]}>
   <Tab value="pnpm">
     ```bash
-    pnpm add @scrivr/plugins
+    pnpm add @scrivr/plugins @scrivr/ai
     ```
   </Tab>
   <Tab value="npm">
     ```bash
-    npm install @scrivr/plugins
+    npm install @scrivr/plugins @scrivr/ai
     ```
   </Tab>
   <Tab value="yarn">
     ```bash
-    yarn add @scrivr/plugins
+    yarn add @scrivr/plugins @scrivr/ai
     ```
   </Tab>
 </Tabs>
@@ -103,7 +103,7 @@ See the [Collaboration example](/examples/collaboration) for a full backend + fr
 
 ## AI Toolkit
 
-`AiToolkit` is an aggregator extension that enables ghost-text AI suggestions directly on the
+`AiToolkit`, from `@scrivr/ai`, is an aggregator extension that enables ghost-text AI suggestions directly on the
 canvas overlay. Suggestions are rendered as a canvas overlay — the document is never mutated until
 the user explicitly accepts.
 
@@ -114,7 +114,7 @@ renderer), and `AiCaret` (cursor overlay during streaming).
 
 ```tsx title="AiEditor.tsx"
 import { useScrivrEditor, Scrivr, StarterKit } from '@scrivr/react';
-import { AiToolkit, getAiToolkit } from '@scrivr/plugins';
+import { AiToolkit, getAiToolkit } from '@scrivr/ai';
 
 export function AiEditor() {
   const editor = useScrivrEditor({
@@ -137,7 +137,7 @@ export function AiEditor() {
 After the editor is created, call `getAiToolkit(editor)` to get the toolkit handle:
 
 ```ts
-import { getAiToolkit } from '@scrivr/plugins';
+import { getAiToolkit } from '@scrivr/ai';
 
 const ai = getAiToolkit(editor);
 ```
@@ -163,6 +163,35 @@ const ai = getAiToolkit(editor);
 | `clearAiCaret()` | `void` | Clears the AI caret overlay immediately. |
 
 See the [AI Assistant example](/examples/ai-assistant) for the full streaming integration pattern.
+
+### Finding a block by its `nodeId`
+
+With track changes on, a `nodeId` can name two nodes at once. A pending move
+leaves the original in place, struck through, until someone decides it, and the
+moved block carries the same id. Two lookups answer two different questions:
+
+| Lookup | From | Returns | Use it to |
+|--------|------|---------|-----------|
+| `findLiveNodeById(doc, nodeId)` | `@scrivr/plugins` (also `@scrivr/ai`) | The block a person sees, skipping a copy left by a pending deletion. `null` if only such a copy has the id. | Read or write the block an agent's edit or a suggestion means. |
+| `findNodeById(doc, nodeId, accept?)` | `@scrivr/core` (also `@scrivr/ai`) | The first node with the id, in document order, copy or not. `accept` skips nodes it refuses. | Ask whether an id is in the document at all, or look up a block in a document without track changes. |
+
+Without track changes the two return the same node.
+
+The AI toolkit reads with `findLiveNodeById`, so a block proposed for deletion
+is left out of `getRichBlocks` and cannot be edited (an edit to it comes back
+`rejected`). Block markers and citations still reach it, since it is on screen,
+struck through, until someone decides it.
+
+```ts
+import { findLiveNodeById } from "@scrivr/plugins";
+import { findNodeById } from "@scrivr/core";
+
+const { doc } = editor.getState();
+const live = findLiveNodeById(doc, "intro"); // edit this
+if (!live && findNodeById(doc, "intro")) {
+  // only a copy proposed for deletion holds "intro"
+}
+```
 
 ---
 

@@ -5,20 +5,20 @@
  * of regressions that occur in Word, Google Docs, and Notion on complex legal
  * text. Each test targets a specific failure mode in the pipeline:
  *
- *   tokenise → diffText → pairReplacements → expandCharLevel
+ *   tokenise → diffText → pairReplacements / phraseReplacements
  *
  * Convention:
- *   wdiff(a, b)    — word-level only (diffText + pairReplacements, NO char expansion)
+ *   wdiff(a, b)    — word pairs (diffText + pairReplacements), as the AI overlay groups them.
  *                    Use when asserting specific word tokens in deletes/inserts.
- *   fullDiff(a, b) — full pipeline including char-level expansion.
- *                    Use for round-trip accuracy and char-level behavior tests.
+ *   fullDiff(a, b) — the pipeline that writes tracked changes: phrase replacements.
+ *                    Use for round-trip accuracy.
  */
 
 import { describe, it, expect } from "vitest";
 import {
   diffText,
   pairReplacements,
-  expandCharLevel,
+  phraseReplacements,
   computeEditDensity,
   tokenise,
   type DiffOp,
@@ -27,14 +27,14 @@ import {
 
 // ── Pipeline helpers ──────────────────────────────────────────────────────────
 
-/** Word-level only: no char expansion. Use for checking which WORDS changed. */
+/** Word pairs, as the AI overlay groups them. Use for checking which words changed. */
 function wdiff(a: string, b: string): PairedDiffOp[] {
   return pairReplacements(diffText(a, b));
 }
 
-/** Full pipeline: word → grouping → char-level refinement. Use for round-trips. */
+/** The pipeline that writes tracked changes: word diff → phrase replacements. */
 function fullDiff(a: string, b: string): PairedDiffOp[] {
-  return expandCharLevel(pairReplacements(diffText(a, b)));
+  return phraseReplacements(diffText(a, b));
 }
 
 function target(ops: DiffOp[]) {
@@ -127,7 +127,7 @@ describe("stress #2 — section number + clause ref changed together", () => {
   });
 });
 
-// ── Case 3: Long legal word → shorter word (char-level) ──────────────────────
+// ── Case 3: Long legal word → shorter word ──────────────────────────────────
 
 describe("stress #3 — long legal word rewritten into shorter word", () => {
   const a = "indemnification obligation";
@@ -135,9 +135,10 @@ describe("stress #3 — long legal word rewritten into shorter word", () => {
 
   it("round-trips correctly", () => assertRoundTrip(a, b));
 
-  it("char-level expansion preserves common prefix 'indemni'", () => {
+  it("replaces the word whole, as a person would", () => {
     const ops = fullDiff(a, b);
-    expect(keeps(ops).join("")).toContain("indemni");
+    expect(deletes(ops)).toEqual(["indemnification"]);
+    expect(inserts(ops)).toEqual(["indemnity"]);
   });
 
   it("only the differing suffix is marked (word-level shows the pair)", () => {
@@ -150,7 +151,7 @@ describe("stress #3 — long legal word rewritten into shorter word", () => {
     expect(keeps(fullDiff(a, b)).join("")).toContain("obligation");
   });
 
-  it("all char-level ops share one groupId", () => {
+  it("the replacement's halves share one groupId", () => {
     const ops = fullDiff(a, b);
     const grouped = ops.filter(o => o.groupId);
     expect(new Set(grouped.map(o => o.groupId)).size).toBe(1);
@@ -375,7 +376,7 @@ describe("stress #12 — 'shall' → 'must' surgical swap in long sentence", () 
   });
 });
 
-// ── Case 13: Legal pluralisation (char-level) ─────────────────────────────────
+// ── Case 13: Legal pluralisation ─────────────────────────────────────────────
 
 describe("stress #13 — legal pluralisation: 'third party' → 'third parties'", () => {
   const a = "third party";
@@ -383,20 +384,20 @@ describe("stress #13 — legal pluralisation: 'third party' → 'third parties'"
 
   it("round-trips correctly", () => assertRoundTrip(a, b));
 
-  it("char-level: 'third part' kept, only suffix changes", () => {
+  it("replaces the word whole, keeping 'third'", () => {
     const ops = fullDiff(a, b);
-    expect(keeps(ops).join("")).toContain("third part");
-    expect(deletes(ops).join("")).toBe("y");
-    expect(inserts(ops).join("")).toBe("ies");
+    expect(keeps(ops).join("")).toContain("third ");
+    expect(deletes(ops)).toEqual(["party"]);
+    expect(inserts(ops)).toEqual(["parties"]);
   });
 
-  it("word-level shows 'party' → 'parties' as paired token", () => {
+  it("word pairs show 'party' → 'parties' as one paired token", () => {
     const ops = wdiff(a, b);
     expect(deletes(ops)).toContain("party");
     expect(inserts(ops)).toContain("parties");
   });
 
-  it("all char-level ops share one groupId", () => {
+  it("the replacement's halves share one groupId", () => {
     const ops = fullDiff(a, b);
     const grouped = ops.filter(o => o.groupId);
     expect(new Set(grouped.map(o => o.groupId)).size).toBe(1);
