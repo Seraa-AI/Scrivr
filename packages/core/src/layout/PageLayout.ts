@@ -36,6 +36,9 @@ import {
   type PageChromeMeasureInput,
 } from "./PageMetrics";
 import { coerceSectionSettings, isSectionBreak } from "../model/sections";
+import { bulletBox, bulletShape, LIST_MARKER_HANGING, listKind, listLevel, listMarker, listStart } from "../model/lists";
+import { markerFont } from "./ListItemStrategy";
+import { parseFontSizePx } from "../fonts/activeFontSize";
 import type { SectionBreakType } from "../model/sections";
 import { fitLinesInCapacity } from "./splitLines";
 import { runChromeLoop } from "./aggregateChrome";
@@ -1964,7 +1967,7 @@ export function buildBlockFlow(
       align: entry.align,
       ...(listMarker !== undefined ? {
         listMarker,
-        listMarkerX: blockX - MARKER_RIGHT_GAP,
+        listMarkerX: listMarkerXFor(listMarker, blockX, entry.lines[0], measurer),
       } : {}),
       indentLeft,
       hasAnchoredObject: blockHasAnchoredObject(entry.lines),
@@ -2120,7 +2123,7 @@ export interface LayoutItem {
   pageBreakType?: Exclude<SectionBreakType, "continuous">;
   node: Node;
   nodePos: number;
-  /** Extra left indent in px (0 for regular blocks, LIST_INDENT for list items). */
+  /** Extra left indent in px: a list level's text indent, plus the block's own `indent`. */
   indentLeft: number;
   /** Bullet character or ordered number, e.g. "•" or "1.". Undefined for non-list blocks. */
   listMarker?: string;
@@ -2136,8 +2139,39 @@ export interface LayoutItem {
   isLastRow?: boolean;
 }
 
-const LIST_INDENT = 24; // px — text starts this far right of the margin
-const MARKER_RIGHT_GAP = 6; // px — gap between the marker's right edge and the text
+/** Width of one step of a block's own `indent` attr. */
+const BLOCK_INDENT_STEP = 24;
+/** Least space between a marker's right edge and the item's text. */
+const MARKER_MIN_GAP = 4;
+
+const blockIndentOf = (node: Node): number => {
+  const indent = node.attrs["indent"];
+  return typeof indent === "number" ? indent * BLOCK_INDENT_STEP : 0;
+};
+
+/**
+ * The marker's left edge: hanging before the text, as Word aligns it. A number
+ * too wide to fit there is drawn further left, so it never runs into the text.
+ */
+function listMarkerXFor(
+  marker: string,
+  textX: number,
+  firstLine: LayoutLine | undefined,
+  measurer: TextMeasurerLike,
+): number {
+  const hung = textX - LIST_MARKER_HANGING;
+  const font = markerFont(firstLine);
+  const width = bulletShape(marker)
+    ? bulletBox(parseFontSizePx(font) ?? 0).size
+    : measurer.measureWidth(marker, font);
+  return Math.min(hung, textX - MARKER_MIN_GAP - width);
+}
+
+/** Where a block sits in a list: its nesting depth, and the marker it draws if it opens an item. */
+interface ListPlace {
+  depth: number;
+  marker?: string;
+}
 
 /**
  * Walks the doc's block children and returns a flat array of layout items.
@@ -2147,105 +2181,104 @@ const MARKER_RIGHT_GAP = 6; // px — gap between the marker's right edge and th
  * `transparent` node contributes none of its own and its children are
  * collected into the enclosing flow instead.
  *
- * Lists and tables are expanded by name ahead of that, because their
- * expansion is not merely transparent — they carry markers and column widths
- * down to the items they produce.
+ * Lists and tables are expanded ahead of that, because their expansion is not
+ * merely transparent — they carry markers, indents and column widths down to
+ * the items they produce. Every block of a list item is laid out at its
+ * level's indent, and only the item's first block carries the marker.
  */
 export function collectLayoutItems(doc: Node, _fontConfig: FontConfig): LayoutItem[] {
   const items: LayoutItem[] = [];
 
   // `base` is the document position of `parent`'s first child, so a child at
   // relative `offset` sits at `base + offset`.
-  const walk = (parent: Node, base: number): void => {
-    parent.forEach((node, relOffset) => {
-      const offset = base + relOffset;
-
-      if (node.type.name === "pageBreak") {
-        items.push({ isPageBreak: true, node, nodePos: offset, indentLeft: 0 });
-        return;
-      }
-
-      // A section boundary affects the flow only when the next section must
-      // start on a fresh page. A continuous break is a pure model marker, and
-      // column geometry is read from the derived sections, not from here.
-      if (isSectionBreak(node)) {
-        const breakType = coerceSectionSettings(node.attrs["settings"]).breakType;
-        if (breakType !== "continuous") {
-          items.push({
-            isPageBreak: true,
-            pageBreakType: breakType,
-            node,
-            nodePos: offset,
-            indentLeft: 0,
-          });
-        }
-        return;
-      }
-
-      if (node.type.name === "bulletList" || node.type.name === "orderedList") {
-        const isBullet = node.type.name === "bulletList";
-        let itemIndex = (node.attrs["order"] as number) ?? 1;
-
-        node.forEach((listItem, liOffset) => {
-          // nodePos of the paragraph inside this listItem:
-          // offset (before bulletList) + 1 (into bulletList) + liOffset (before listItem) + 1 (into listItem)
-          const paraNodePos = offset + 1 + liOffset + 1;
-          const para = listItem.firstChild;
-          if (!para) return;
-
-          const marker = isBullet ? "•" : `${itemIndex}.`;
-
-          items.push({
-            node: para,
-            nodePos: paraNodePos,
-            indentLeft: LIST_INDENT,
-            listMarker: marker,
-            styleKey: "list_item",
-          });
-
-          itemIndex++;
-        });
-        return;
-      }
-
-      if (node.type.name === "table") {
-        // Tables expand into one item per row. Each row lays out as an atomic
-        // (leaf-like) block in v1 — whole row moves to the next page on
-        // overflow, no line-splitting across cells. Phase 4 replaces the
-        // stub row layout with sandboxed per-cell layout.
-        const gridAttr = node.attrs["grid"];
-        const tableColumns = Array.isArray(gridAttr)
-          ? gridAttr.filter((w): w is number => typeof w === "number" && Number.isFinite(w))
-          : [];
-        const lastRowIndex = node.childCount - 1;
-        node.forEach((rowNode, rowOffset, rowIndex) => {
-          const rowNodePos = offset + 1 + rowOffset;
-          items.push({
-            node: rowNode,
-            nodePos: rowNodePos,
-            indentLeft: 0,
-            tableColumns,
-            isLastRow: rowIndex === lastRowIndex,
-          });
-        });
-        return;
-      }
-
-      switch (nodeLayout(node.type).kind) {
-        case "transparent":
-          walk(node, offset + 1);
-          return;
-
-        case "block": {
-          const blockIndent = (node.attrs["indent"] as number) ?? 0;
-          items.push({ node, nodePos: offset, indentLeft: blockIndent * LIST_INDENT });
-          return;
-        }
-      }
-    });
+  const walk = (parent: Node, base: number, list: ListPlace | null): void => {
+    parent.forEach((node, relOffset) => walkOne(node, base + relOffset, list));
   };
 
-  walk(doc, 0);
+  const walkOne = (node: Node, offset: number, list: ListPlace | null): void => {
+    if (node.type.name === "pageBreak") {
+      items.push({ isPageBreak: true, node, nodePos: offset, indentLeft: 0 });
+      return;
+    }
+
+    // A section boundary affects the flow only when the next section must
+    // start on a fresh page. A continuous break is a pure model marker, and
+    // column geometry is read from the derived sections, not from here.
+    if (isSectionBreak(node)) {
+      const breakType = coerceSectionSettings(node.attrs["settings"]).breakType;
+      if (breakType !== "continuous") {
+        items.push({
+          isPageBreak: true,
+          pageBreakType: breakType,
+          node,
+          nodePos: offset,
+          indentLeft: 0,
+        });
+      }
+      return;
+    }
+
+    const kind = listKind(node);
+    if (kind) {
+      const depth = list ? list.depth + 1 : 0;
+      let n = kind === "ordered" ? listStart(node) : 1;
+      node.forEach((listItem, itemOffset) => {
+        const marker = listMarker(kind, depth, n++);
+        // Into the list, past the items before this one, into this item.
+        const itemBase = offset + 1 + itemOffset + 1;
+        listItem.forEach((child, childOffset, index) => {
+          walkOne(child, itemBase + childOffset, index === 0 ? { depth, marker } : { depth });
+        });
+      });
+      return;
+    }
+
+    if (node.type.name === "table") {
+      // Tables expand into one item per row. Each row lays out as an atomic
+      // (leaf-like) block in v1 — whole row moves to the next page on
+      // overflow, no line-splitting across cells. Phase 4 replaces the
+      // stub row layout with sandboxed per-cell layout.
+      const gridAttr = node.attrs["grid"];
+      const tableColumns = Array.isArray(gridAttr)
+        ? gridAttr.filter((w): w is number => typeof w === "number" && Number.isFinite(w))
+        : [];
+      const lastRowIndex = node.childCount - 1;
+      node.forEach((rowNode, rowOffset, rowIndex) => {
+        const rowNodePos = offset + 1 + rowOffset;
+        items.push({
+          node: rowNode,
+          nodePos: rowNodePos,
+          indentLeft: 0,
+          tableColumns,
+          isLastRow: rowIndex === lastRowIndex,
+        });
+      });
+      return;
+    }
+
+    switch (nodeLayout(node.type).kind) {
+      case "transparent":
+        walk(node, offset + 1, list);
+        return;
+
+      case "block": {
+        if (!list) {
+          items.push({ node, nodePos: offset, indentLeft: blockIndentOf(node) });
+          return;
+        }
+        items.push({
+          node,
+          nodePos: offset,
+          indentLeft: listLevel(list.depth).textIndent + blockIndentOf(node),
+          ...(list.marker !== undefined ? { listMarker: list.marker } : {}),
+          styleKey: "list_item",
+        });
+        return;
+      }
+    }
+  };
+
+  walk(doc, 0, null);
 
   return items;
 }

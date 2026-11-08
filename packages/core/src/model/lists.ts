@@ -15,7 +15,9 @@ export interface ListLevelStyle {
 }
 
 const HALF_INCH = 48;
-const QUARTER_INCH = 24;
+
+/** How far every level's marker hangs before its text: a quarter inch. */
+export const LIST_MARKER_HANGING = 24;
 
 const BULLETS: ReadonlyArray<ListLevelStyle["bullet"]> = [
   { glyph: "•", shape: "disc" },
@@ -31,14 +33,14 @@ const ORDERED_FORMATS: readonly OrderedFormat[] = ["decimal", "lowerLetter", "lo
  */
 export const LIST_LEVELS: readonly ListLevelStyle[] = Array.from({ length: 9 }, (_, depth) => ({
   textIndent: HALF_INCH * (depth + 1),
-  hanging: QUARTER_INCH,
+  hanging: LIST_MARKER_HANGING,
   bullet: BULLETS[depth % BULLETS.length] ?? { glyph: "•", shape: "disc" },
   ordered: { format: ORDERED_FORMATS[depth % ORDERED_FORMATS.length] ?? "decimal" },
 }));
 
 const DEEPEST_LEVEL: ListLevelStyle = {
   textIndent: HALF_INCH * LIST_LEVELS.length,
-  hanging: QUARTER_INCH,
+  hanging: LIST_MARKER_HANGING,
   bullet: { glyph: "▪", shape: "square" },
   ordered: { format: "lowerRoman" },
 };

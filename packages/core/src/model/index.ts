@@ -55,6 +55,7 @@ export {
 } from "./sections";
 export {
   LIST_LEVELS,
+  LIST_MARKER_HANGING,
   bulletBox,
   bulletShape,
   isListType,
