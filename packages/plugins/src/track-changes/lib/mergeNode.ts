@@ -15,11 +15,9 @@ export function mergeNode(node: PMNode, pos: number, tr: Transaction) {
   const canMergeToNodeAbove =
     (resPos.parent !== tr.doc || resPos.nodeBefore) && node.firstChild?.isText;
   if (canMergeToNodeAbove) {
-    return tr.replaceWith(
-      tr.mapping.map(pos),
-      tr.mapping.map(pos + node.nodeSize),
-      Fragment.empty,
-    );
+    // `pos` is already in the current document; mapping it again would shift it
+    // by steps applied before it was resolved.
+    return tr.replaceWith(pos, pos + node.nodeSize, Fragment.empty);
   }
   return undefined;
 }

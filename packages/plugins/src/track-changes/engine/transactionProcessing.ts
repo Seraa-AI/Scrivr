@@ -67,7 +67,8 @@ const sameIdentity = (inserted: Node, deleted: Node) =>
  */
 function movedContent(inserted: Node, deleted: Node): boolean {
   return (sameIdentity(inserted, deleted) && nodeContentEquals(inserted, deleted)) ||
-    (deleted.isTextblock && deleted.childCount === 1 && nodeContentEquals(inserted, deleted.firstChild!));
+    (deleted.isTextblock && deleted.childCount === 1 && !!deleted.firstChild && !deleted.firstChild.isText &&
+      sameIdentity(inserted, deleted.firstChild) && nodeContentEquals(inserted, deleted.firstChild));
 }
 
 export function passThroughMeta(oldTr: Transaction, newTr: Transaction) {

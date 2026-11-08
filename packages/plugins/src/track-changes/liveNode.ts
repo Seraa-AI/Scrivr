@@ -66,7 +66,7 @@ export function isShadowNode(node: PMNode, pos: number, ranges: readonly ShadowR
  * The live node this id names, skipping a pending deletion's shadow.
  *
  * Use it to read or write the block a person sees in a tracked document: an
- * agent's edit, a suggestion, a marker. It returns null for an id held
+ * agent's edit, a suggestion. It returns null for an id held
  * only by content proposed for deletion — to ask whether the id is there at all,
  * or to reach a block that is struck through but not yet decided, use core's
  * `findNodeById`. Without track changes the two agree.

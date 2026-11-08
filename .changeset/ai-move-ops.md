@@ -57,3 +57,9 @@ or another, that only reads the same as a deleted one — two empty paragraphs, 
 `deleteBlock` beside an `insertBlock` of the same text — is a deletion and an
 insertion, not a move. Block markers stay on a block proposed for deletion,
 which is on screen until decided.
+
+Two review defects the move work surfaced in the tracking engine: rejecting a
+block added right after a list or table, together with a move made since, no
+longer deletes the list's text and fails; and deleting a paragraph while typing
+its words elsewhere in one transaction is a deletion and an insertion rather
+than an error.

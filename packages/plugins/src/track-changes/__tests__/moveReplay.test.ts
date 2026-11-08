@@ -129,6 +129,19 @@ describe("which deletion and insertion are one move", () => {
     expect(ids(editor)).toEqual(["x", "a", "e", "c"]);
   });
 
+  it("a paragraph deleted while its words are typed elsewhere is a deletion and an insertion", () => {
+    const editor = build();
+    const tr = editor.getState().tr;
+    const alpha = tr.doc.child(0).nodeSize;
+    tr.delete(alpha, alpha + tr.doc.child(1).nodeSize);
+    tr.insertText("beta", 1);
+    expect(() => editor.applyTransaction(tr)).not.toThrow();
+
+    expect(moves(editor)).toHaveLength(0);
+    editor.commands.setChangeStatuses("rejected", changes(editor).map(c => c.id));
+    expect(editor.getState().doc.textContent).toBe("alphabetagamma");
+  });
+
   it("two blocks that read the same are each their own move", () => {
     const editor = new ServerEditor({
       extensions: [StarterKit, TrackChanges.configure({ initialStatus: TrackChangesStatus.enabled, canAcceptReject: true })],
@@ -147,6 +160,33 @@ describe("which deletion and insertion are one move", () => {
 
     for (const move of moves(editor)) editor.commands.setChangeStatuses("rejected", [move.id]);
     expect(ids(editor)).toEqual(["twin", "other", "end"]);
+    expect(changes(editor)).toHaveLength(0);
+  });
+
+  it("rejects a block added after a list together with a move made since", () => {
+    const editor = new ServerEditor({
+      extensions: [StarterKit, TrackChanges.configure({ initialStatus: TrackChangesStatus.enabled, canAcceptReject: true })],
+      content: { type: "doc", content: [
+        { type: "paragraph", attrs: { nodeId: "a" }, content: [{ type: "text", text: "alpha" }] },
+        { type: "bulletList", attrs: { nodeId: "list" }, content: [
+          { type: "listItem", attrs: { nodeId: "i1" }, content: [{ type: "paragraph", attrs: { nodeId: "p1" }, content: [{ type: "text", text: "one" }] }] },
+        ] },
+        { type: "paragraph", attrs: { nodeId: "z" }, content: [{ type: "text", text: "zeta" }] },
+      ] },
+    });
+    const original = editor.getState().doc.textBetween(0, editor.getState().doc.content.size, "|");
+    const added = editor.getState().tr;
+    const last = added.doc.child(added.doc.childCount - 1);
+    added.insert(added.doc.content.size - last.nodeSize, paragraph(editor, null, "NB"));
+    editor.applyTransaction(added);
+    const move = editor.getState().tr;
+    const zeta = move.doc.child(move.doc.childCount - 1);
+    move.delete(move.doc.content.size - zeta.nodeSize, move.doc.content.size);
+    move.insert(0, zeta);
+    editor.applyTransaction(move);
+
+    editor.commands.setChangeStatuses("rejected", changes(editor).map(c => c.id));
+    expect(editor.getState().doc.textBetween(0, editor.getState().doc.content.size, "|")).toBe(original);
     expect(changes(editor)).toHaveLength(0);
   });
 });

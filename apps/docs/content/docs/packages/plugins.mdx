@@ -172,7 +172,7 @@ moved block carries the same id. Two lookups answer two different questions:
 
 | Lookup | From | Returns | Use it to |
 |--------|------|---------|-----------|
-| `findLiveNodeById(doc, nodeId)` | `@scrivr/plugins` (also `@scrivr/ai`) | The block a person sees, skipping a copy left by a pending deletion. `null` if only such a copy has the id. | Read or write the block an agent, suggestion or marker means. |
+| `findLiveNodeById(doc, nodeId)` | `@scrivr/plugins` (also `@scrivr/ai`) | The block a person sees, skipping a copy left by a pending deletion. `null` if only such a copy has the id. | Read or write the block an agent's edit or a suggestion means. |
 | `findNodeById(doc, nodeId, accept?)` | `@scrivr/core` (also `@scrivr/ai`) | The first node with the id, in document order, copy or not. `accept` skips nodes it refuses. | Ask whether an id is in the document at all, or look up a block in a document without track changes. |
 
 Without track changes the two return the same node.
