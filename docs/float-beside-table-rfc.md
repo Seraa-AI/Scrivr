@@ -404,7 +404,18 @@ contentWidth`.
 | 24 | A pinned float after a free float that reaches back over the table | Both floats stay on their anchors; the table stays at its no-float y |
 | 25 | A move would carry a pinned float's anchor onto the next page | The table stays; anchor and float stay on page 1 |
 | 26 | A table split across pages under a float | Only its rows on the float's page move; page 2 starts at the content top |
-| 27 | A later float re-wraps text without changing its height | A stacked float keeps its push and its anchor |
+| 27 | A later float re-wraps text without changing its height | A stacked float stays below the float it stacked on; its paragraph keeps its natural y |
+| 28 | Two square floats in one paragraph | They do not overlap; the first stays on its anchor |
+| 29 | A block above a stacked float really grows | The stacked float stays clear of the one it stacked on |
+| 30 | Six paragraphs, each with a float that has no fixed point (`yOffset -40`) | Every placement agrees with its anchor |
+| 31 | Scaling: 60 vs 240 such paragraphs | Time grows less than 10x (linear is 4x, quadratic 16x) |
+| 32 | A restamp inside one reflow leaves another float's rect stale | The table stays at its natural y; no hole |
+| 33 | A float re-placed onto another page (seed 154) | No wrap left behind; every float on its anchor's page |
+| 34 | An anchor whose first line lands on the next page (seed 390) | Every float on its anchor's page |
+| 35 | Pageless with a page height | The table is not moved; nothing after it is laid out as if it had |
+| 36 | Streaming: float and table in different chunks | Pinned gap: the table stays at its natural y |
+| 37 | A float that does not reach back is carried onto the next page | Guard: the table still clears the reaching-back float |
+| 38 | A move would carry the table under a float that does not follow it | Guard: no row overlaps that float |
 
 ## Slices
 
@@ -504,6 +515,18 @@ bottom against the page's whole manager — and scenarios 20–22 and 27 cover i
 - **`allowOverlap`** (§20.4.2.3). Object-to-object overlap is not modelled;
   square floats stack as they do today. It never affected wrap, so it does not
   change this design.
+- **Streaming.** Each streamed chunk starts with no floats and no
+  exclusions, so a float in one chunk does not move a table (or wrap text) in
+  the next. Text has the same gap on `main`; the editor's synchronous first
+  100 blocks make it reachable. Carrying floats across chunks means carrying
+  the solver's state in `LayoutResumption`, which is not a small change at
+  this seam. Pinned by scenario 36.
+- **Floats with no fixed point.** A float whose zone reflows the text its own
+  anchor sits under (a reach-back `yOffset` over the paragraph above) has no
+  layout where text, float and anchor all agree. The settle loop caps it and
+  ends with every placement on its anchor; text above that anchor can then sit
+  under the image. This is most of the remaining "text under float" in the
+  fuzz below.
 - **Re-anchor on drop.** Dragging a float keeps its anchor and changes
   `yOffset` (Decision 4). Moving the anchor to the paragraph under the drop
   point is an existing todo.
@@ -521,6 +544,7 @@ section is what is true.
 | A | `feat/float-beside-table` (`8912e48`, `b5ee210`) | `getNextFreeY(page, y, height, contentX, contentWidth)` changed in place; the `tableRow` skip in `reflowFlowsAgainstExclusions` became `moveTableClearOfExclusions`. Scenarios 1, 2, 3b, 7, 8, 9, 10, 11, 12b, 13, 14, 17 and 19 (float added on incremental layout) flipped red → green against `main`. Scenario 12 went from green (on `main` no table ever moved) to red. |
 | B | `feat/float-beside-table` (`6ea4cbd`) | The backward-anchor check decides the chase's end state in one step; the zone band became `zoneOf(placement)` so the reflow can ask where a re-placed float would sit. Turned scenario 12 back to green. |
 | Review | `feat/float-beside-table` (`b0d1a21`) | The reflow scans to the page bottom against the whole page's manager and restamps only when a block's end moved; the settle loop re-places every float whose anchor moved; the backward check covers every placed float that reaches back over the table; the table's run stops at the page in both directions. Scenarios 20, 21, 22, 23, 24 and 27 flipped red → green against the Slice B code. |
+| Review 2 | `feat/float-beside-table` (`545c1654`) | Each float owns its placement: one `place()` derives landing, anchor push, stacking and clamp from its anchor flow's natural start, and the stacking offset is the float's, not the flow's. Every restamp re-applies anchor pushes through the floats and stops at the first unmoved flow. The settle loop reflows only the pages a pass changed (old and new band, on either page) and re-places only floats whose anchor moved or that stack on a moved float; its last pass ends by placing. Tables are placed from their natural start against current float placements. Pageless never moves a table. Scenarios 28–35 flipped red → green against the Review code; 36–38 are pins and guards. |
 
 Where this differs from the design above:
 
@@ -561,3 +585,34 @@ Where this differs from the design above:
   the same area.
 - **`ExclusionManager.getNextFreeY` is public.** Its signature and behaviour
   change is named in the changeset.
+- **Review 2: stacking no longer moves the paragraph.** On `main` a stacked
+  square float pushed its anchor paragraph down by the stacking offset. Now
+  the float moves and the text stays (Word moves the object, not the
+  paragraph). A stacked float's `y` is therefore below `anchor.y + yOffset`
+  by design.
+- **Review 2: a refused move still clears the floats that stay put.** When
+  the floats a move drags would not hold, the table no longer falls back to
+  its natural y under a float anchored *before* it; it clears the floats
+  anchored before it and lets the dragged ones overlap. This applies Decision 1
+  and Decision 3 together; the user may want to confirm it.
+- **Review 2: a fully blocked text line skips to `getNextFreeY` across every
+  rect on the page**, not to the current float's zone bottom, so it can no
+  longer land inside another float's rect or above its own line.
+- **Review 2: one new field, `FlowBlock.wrapLaidAtY`** (the y a flow's lines
+  were last laid out at against its page's exclusions). It is what makes
+  re-lays proportional: a wrapped flow is re-laid only when it moved or a
+  band changed around it.
+- **Review 2 fuzz** (400 generated documents, the reviewers' generator;
+  stacked-float offsets counted separately as by design). Documents with an
+  error: `main` 333, round 1 221, round 2 HEAD 145, now 130. By category
+  (documents): row under a float anchored before it 208 / 49 / 1 / 1; row
+  under a float anchored after it (Decision 3 overlap) 129 / 82 / 73 / 74;
+  float off anchor 92 / 115 / 43 / 1; float on another page than its anchor
+  0 / 2 / 4 / 0; square floats overlapping 41 / 40 / 36 / 28; text under a
+  float 63 / 83 / 14 / 44. 41 of the 44 text-under documents hit the settle
+  cap (no fixed point): the cap now ends with placements on their anchors,
+  where round 2 ended with text consistent but floats off their anchors.
+- **Review 2 scaling:** every paragraph with a `yOffset -40` float, N=160:
+  `main` 20 ms, round 2 HEAD 7.7 s, now 18 ms; N=1000: `main` 293 ms, now
+  111 ms.
+
