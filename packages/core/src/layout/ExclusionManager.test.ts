@@ -89,7 +89,7 @@ describe("ExclusionManager — available segments", () => {
   });
 });
 
-describe("ExclusionManager — addFullWidthRect (Phase 5)", () => {
+describe("ExclusionManager — addFullWidthRect", () => {
   it("adds a side:'full' rect that spans the queried content width", () => {
     const mgr = new ExclusionManager();
     mgr.addFullWidthRect({
