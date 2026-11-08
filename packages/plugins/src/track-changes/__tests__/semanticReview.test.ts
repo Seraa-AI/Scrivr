@@ -536,10 +536,11 @@ describe("records built straight into a synced document", () => {
     expect(unit.changes).toBeUndefined();
   });
 
-  it("ignore an operation they do not know, on a node or on a mark", () => {
+  // Loading such a node record is covered in findChanges.test.ts.
+  it("ignore an operation they do not know on a formatting mark", () => {
     const editor = editorWith([{
       type: "paragraph",
-      attrs: { nodeId: "a", dataTracked: [{ id: "x", operation: "toString", status: "pending" }] },
+      attrs: { nodeId: "a" },
       content: [{ type: "text", text: "Alpha", marks: [{ type: "bold", attrs: { dataTracked: [{ id: "y", operation: "bogus", status: "pending" }] } }] }],
     }]);
     expect(unitOf(editor, "a").changes).toBeUndefined();

@@ -187,7 +187,7 @@ export function findChanges(state: EditorState): ChangeSet {
       }
 
       const op = dataTracked.operation;
-      const build = node.isText ? textChange : (op && BUILD.get(op)) ?? nodeChange;
+      const build = node.isText ? textChange : (typeof op === "string" ? BUILD.get(op) : undefined) ?? nodeChange;
       const change = build(node, pos, id, dataTracked, state.doc);
 
       currentMap.set(id, { change, node });

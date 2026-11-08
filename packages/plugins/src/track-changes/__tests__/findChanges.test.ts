@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { doc, p, h, TestEditor, schema } from "./helpers";
-import { CHANGE_OPERATION } from "../types";
+import { ServerEditor, StarterKit } from "@scrivr/core";
+import { TrackChanges } from "../TrackChanges";
+import { CHANGE_OPERATION, TrackChangesStatus } from "../types";
 import type { NodeAttrChange, TextChange, TrackedChange } from "../types";
 
 function nodeAttrChange(change: TrackedChange | undefined): NodeAttrChange {
@@ -287,5 +289,21 @@ describe("findChanges — mark changes are grouped by ID", () => {
     const authors = editor.pendingChanges.map(c => c.dataTracked.authorID);
     expect(authors).toContain("author1");
     expect(authors).toContain("author2");
+  });
+});
+
+describe("findChanges — records a synced document may hold", () => {
+  it("TrackChanges loads a document whose record names an unknown or empty operation", () => {
+    for (const operation of ["", "toString", "__proto__", "bogus"]) {
+      const load = () => new ServerEditor({
+        extensions: [StarterKit, TrackChanges.configure({ userID: "u", initialStatus: TrackChangesStatus.enabled })],
+        content: { type: "doc", content: [{
+          type: "paragraph",
+          attrs: { nodeId: "a", dataTracked: [{ id: "x", operation, authorID: "u", status: "pending", createdAt: 1, updatedAt: 1 }] },
+          content: [{ type: "text", text: "Alpha" }],
+        }] },
+      });
+      expect(load).not.toThrow();
+    }
   });
 });

@@ -83,8 +83,9 @@ export const keepInserted: SemanticMarkHandler = (run, mark, ctx) => ({
 
 /**
  * Deleted text leaves the proposed text, and is kept as the change that removes
- * it. A deletion already decided proposes nothing — `proposedForDeletion` reads
- * the same records the same way — so its text stays and nothing is reported.
+ * it. A deletion whose records are all decided proposes nothing, so its text
+ * stays and nothing is reported. A mark with no records at all, as documents
+ * written before records existed carry, still reads as one deletion.
  */
 export const dropDeleted: SemanticMarkHandler = (run, mark, ctx) => {
   const records = reviewRecords(mark);

@@ -134,13 +134,20 @@ function recordsInsideRowChanges(changeSet: ChangeSet): ReadonlySet<string> {
   return ids;
 }
 
-/** How a change to an object is coloured, by what it did. */
-const OBJECT_COLOR: Partial<Record<CHANGE_OPERATION, (author: string) => string>> = {
-  [CHANGE_OPERATION.insert]: author => insertColor(author),
-  [CHANGE_OPERATION.move]: author => insertColor(author),
-  [CHANGE_OPERATION.delete]: author => deleteColor(author),
-  [CHANGE_OPERATION.set_node_attributes]: () => ATTR_CHANGE_COLOR,
-};
+/**
+ * How a change to an object is coloured, by what it did. A map, as every
+ * operation table here is: a synced record may name `__proto__` or `toString`.
+ */
+const OBJECT_COLOR = new Map<string, (author: string) => string>([
+  [CHANGE_OPERATION.insert, author => insertColor(author)],
+  [CHANGE_OPERATION.move, author => insertColor(author)],
+  [CHANGE_OPERATION.delete, author => deleteColor(author)],
+  [CHANGE_OPERATION.set_node_attributes, () => ATTR_CHANGE_COLOR],
+]);
+
+/** The colour an object's change is framed in, or none when the operation frames nothing. */
+export const objectColor = (operation: string, author: string): string | undefined =>
+  OBJECT_COLOR.get(operation)?.(author);
 
 /**
  * Changes to a block rather than its text — its attributes, the break that ends
@@ -434,11 +441,11 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
 
         // An object has no text to underline or strike, so it is framed where it
         // is drawn: added or moved in, removed or moved out, or only changed.
-        const objectColor = OBJECT_COLOR[operation]?.(author);
+        const framed = objectColor(operation, author);
         const node = change.type === "node-change" || change.type === "node-attr-change" ? change.node : null;
-        const box = objectColor && node?.isLeaf ? objectBox(change.from, node, placements, charMap, pageNumber, lines) : null;
-        if (objectColor && box) {
-          objects.push({ box, color: objectColor, removed: operation === CHANGE_OPERATION.delete });
+        const box = framed && node?.isLeaf ? objectBox(change.from, node, placements, charMap, pageNumber, lines) : null;
+        if (framed && box) {
+          objects.push({ box, color: framed, removed: operation === CHANGE_OPERATION.delete });
           continue;
         }
         if (change.type === "mark-change") {

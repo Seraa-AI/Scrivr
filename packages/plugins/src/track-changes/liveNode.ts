@@ -23,10 +23,7 @@ import { CHANGE_OPERATION, type TrackedChange } from "./types";
 /** Document ranges holding content a pending deletion covers. */
 export type ShadowRange = readonly [from: number, to: number];
 
-/**
- * Keyed on the document node: a ProseMirror node is immutable, so an edit
- * produces a different object and the cache misses on its own.
- */
+/** A document's pending deletions, and those that are a move's left-behind copy. */
 interface Shadows {
   all: readonly ShadowRange[];
   moves: readonly ShadowRange[];
