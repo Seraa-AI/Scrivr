@@ -33,6 +33,7 @@ const CONTENT_X = defaultPageConfig.margins.left;
 const CONTENT_WIDTH =
   defaultPageConfig.pageWidth - defaultPageConfig.margins.left - defaultPageConfig.margins.right;
 const LONG_TEXT = "word ".repeat(80).trim();
+const WORDS_40 = "word ".repeat(40).trim();
 
 function must<T>(value: T | undefined | null, what: string): T {
   if (value === undefined || value === null) throw new Error(`missing ${what}`);
@@ -120,6 +121,13 @@ function naturalY(l: DocumentLayout, block: Placed): number {
     "predecessor",
   );
   return prev.y + prev.height + collapseMargins(prev.spaceAfter, 0);
+}
+
+/** The float paints where its anchor paragraph says, or is clamped onto that page. */
+function expectOnAnchor(l: DocumentLayout, f: AnchoredObjectPlacement, needle: string, yOffset: number): void {
+  const anchor = blockWith(l, needle);
+  expect(f.page).toBe(anchor.page);
+  if (!f.clamped) expect(f.y).toBe(anchor.y + yOffset);
 }
 
 function expectBelowFloat(rows: Placed[], f: AnchoredObjectPlacement): void {
@@ -394,6 +402,120 @@ describe("float beside a table — the table moves below the float", () => {
     ]);
     const l = layout(docOf(para("Before"), inCell));
     expect(l.anchoredObjects ?? []).toHaveLength(0);
+  });
+
+  describe("every float on the page still holds after a later float moves content", () => {
+    it("20: a later float that grows the text above keeps the table below an earlier float", () => {
+      const l = layout(docOf(
+        para(WORDS_40, image({ wrapMode: "square", width: 200, height: 150 })),
+        table("T", 3),
+        para("Anchor", image({ wrapMode: "square", xAlign: "left", width: 150, height: 20, yOffset: -5000 })),
+      ));
+      for (const f of l.anchoredObjects ?? []) expectBelowFloat(rowsOf(l, "T"), f);
+    });
+
+    it("21: a table restamped by a later float's push clears an earlier float below it", () => {
+      const l = layout(docOf(
+        para("P1", image({ wrapMode: "square", height: 100, yOffset: 330 })),
+        para("P2", image({ wrapMode: "square", xAlign: "left", height: 150 })),
+        table("T", 3),
+        table("U", 3),
+      ));
+      for (const f of l.anchoredObjects ?? []) {
+        for (const row of [...rowsOf(l, "T"), ...rowsOf(l, "U")]) expect(overlaps(row, f)).toBe(false);
+      }
+    });
+
+    it("22: a paragraph restamped by a later float's push wraps around an earlier float", () => {
+      const l = layout(docOf(
+        para("P1", image({ wrapMode: "square", height: 100, yOffset: 330 })),
+        para("P2", image({ wrapMode: "square", xAlign: "left", height: 150 })),
+        table("T", 3),
+        para(`Q ${LONG_TEXT}`),
+      ));
+      const a = floatOf(l, 0);
+      const q = must(
+        l.pages.flatMap((page) => page.blocks.map((block) => ({ page: page.pageNumber, block })))
+          .find(({ block }) => block.node.textContent.startsWith("Q ")),
+        "Q",
+      );
+      let lineY = q.block.y;
+      for (const line of q.block.lines) {
+        const beside = q.page === a.page && lineY < a.y + a.height && lineY + line.lineHeight > a.y;
+        const right = Math.max(...line.spans.map((span) => q.block.x + span.x + span.width));
+        if (beside) expect(right).toBeLessThanOrEqual(a.x);
+        lineY += line.lineHeight;
+      }
+    });
+  });
+
+  it("27: re-wrapping text that did not change height keeps a stacked float's push", () => {
+    const l = layout(docOf(
+      para("Lead", image({ wrapMode: "square", height: 100 })),
+      para("Stacked", image({ wrapMode: "square", height: 100 })),
+      para("Pinned", image({ wrapMode: "square", xAlign: "left", width: 100, height: 30, yOffset: -5000 })),
+    ));
+    const a = floatOf(l, 0);
+    const b = floatOf(l, 1);
+    expect(b.y).toBeGreaterThanOrEqual(a.y + a.height);
+    expectOnAnchor(l, b, "Stacked", 0);
+  });
+
+  describe("a move re-places every float whose anchor it shifts", () => {
+    it("23: a float between the table and the pinned float's anchor follows its paragraph", () => {
+      const l = layout(docOf(
+        table("T", 3),
+        para("Mid", image({ wrapMode: "square", xAlign: "left", width: 80, height: 40 })),
+        para("Anchor", image({ wrapMode: "square", height: 60, yOffset: -5000 })),
+      ));
+      expectOnAnchor(l, floatOf(l, 0), "Mid", 0);
+      expectOnAnchor(l, floatOf(l, 1), "Anchor", -5000);
+      expectBelowFloat(rowsOf(l, "T"), floatOf(l, 1));
+    });
+
+    it("24: a pinned float cannot drag a free float off its anchor; the table stays", () => {
+      const plain = layout(docOf(para("Intro"), table("T", 3), para("Anchor"), para("Tail")));
+      const yOffset = must(rowsOf(plain, "T")[1], "row 1").y - blockWith(plain, "Anchor").y;
+      const l = layout(docOf(
+        para("Intro"), table("T", 3),
+        para("Anchor", image({ wrapMode: "square", height: 60, yOffset })),
+        para("Tail", image({ wrapMode: "square", xAlign: "left", width: 100, height: 60, yOffset: -5000 })),
+      ));
+      expectOnAnchor(l, floatOf(l, 0), "Anchor", yOffset);
+      expectOnAnchor(l, floatOf(l, 1), "Tail", -5000);
+      expect(rowsOf(l, "T").map((r) => r.y)).toEqual(rowsOf(plain, "T").map((r) => r.y));
+    });
+
+    it("25: a move that would carry the anchor onto the next page is refused", () => {
+      const lead = table("T", 3);
+      const probeDoc = layout(docOf(lead, ...Array.from({ length: 80 }, (_, n) => para(`Filler ${n}`))));
+      const fillersOnPage1 = blocksOf(probeDoc).filter((b) => b.page === 1 && b.kind === "text").length;
+      const fillers = Array.from({ length: fillersOnPage1 - 1 }, (_, n) => para(`Filler ${n}`));
+      const anchorDoc = (withFloat: boolean) => docOf(
+        table("T", 3),
+        ...fillers,
+        para("Anchor", ...(withFloat
+          ? [image({ wrapMode: "square", height: 10, margin: 40, yOffset: -5000 })]
+          : [])),
+      );
+      const plain = layout(anchorDoc(false));
+      expect(blockWith(plain, "Anchor").page).toBe(1);
+
+      const l = layout(anchorDoc(true));
+      const f = floatOf(l);
+      expect(blockWith(l, "Anchor").page).toBe(1);
+      expect(f.page).toBe(1);
+      expect(rowsOf(l, "T").map((r) => r.y)).toEqual(rowsOf(plain, "T").map((r) => r.y));
+    });
+  });
+
+  it("26: a table split across pages moves only its rows on the float's page", () => {
+    const l = layout(docOf(para("Anchor", image({ wrapMode: "square" })), table("T", 60)));
+    const f = floatOf(l);
+    const rows = rowsOf(l, "T");
+    expectBelowFloat(rows.filter((r) => r.page === f.page), f);
+    const page2 = computePageMetrics(defaultPageConfig, EMPTY_RESOLVED_CHROME, 2);
+    expect(must(rows.find((r) => r.page === 2), "page-2 row").y).toBe(page2.contentTop);
   });
 
   describe("19: the previous-layout tail cache", () => {
