@@ -239,6 +239,8 @@ Both are emitted only when there's something to report — a plain, default-styl
 
 If `@scrivr/plugins`' `TrackChanges` is loaded, suggested-**deletion** text (and a deleted line break) is excluded from `text`, breadcrumbs, and table-cell text (never embedded); suggested-**insertion** text is kept, since it is proposed content. Every pending act — insertion, deletion, paragraph join or split, heading, list or formatting change, row, move — is reported in `changes` on the unit, the part and the cell it falls in, placed by `at`/`length`, with author / status / timestamps and the act's `id` to pass to `reviewChanges`. Units with review changes omit `markdown`; use `text`/`spans`/`cells`/`changes` as the canonical data.
 
+A change's `text` is the act's own content, its pieces in separate blocks joined by `"\n"`. `at`/`length` give its extent in the owning text, from its first piece to its last: for an insertion with nothing else inside it, `text.slice(at, at + length) === change.text`; when another author's change or untouched text lies between its pieces, the slice holds that too and `change.text` does not. A deletion, and an inserted paragraph break (which sits between units), have `length: 0`.
+
 ## Determinism & stable ids
 
 `toSemanticUnits` is deterministic: same document tree ⇒ same units (order, ids, breadcrumbs). Real stable ids come from the `UniqueId` extension (bundled in `StarterKit`), which assigns and persists a `nodeId` on every block at edit-time. Documents loaded without persisted ids use the positional fallback, which is stable per tree shape but not across edits — fine for a one-shot index, but persist real ids if you rely on incremental re-embedding.

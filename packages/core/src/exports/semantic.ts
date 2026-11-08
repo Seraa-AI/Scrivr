@@ -230,10 +230,10 @@ export interface SemanticPart {
 export interface SemanticChange {
   type: "suggestedDelete" | "suggestedInsert" | "suggestedAttrs";
   /**
-   * What it removes or adds: "\n" for a paragraph or line break, "" for an
-   * attribute change or an object. Text it spans across blocks keeps the break
-   * between them. Another author's change inside it is a change of its own and
-   * not in this text, though an insertion's `length` spans it.
+   * This act's own content: what it removes or adds, "\n" for a paragraph or
+   * line break, "" for an attribute change or an object. Pieces in separate
+   * blocks are joined by "\n". Anything else lying between its pieces —
+   * another author's change, untouched text — is not part of it.
    */
   text: string;
   /**
@@ -243,8 +243,11 @@ export interface SemanticChange {
    */
   at?: number;
   /**
-   * How much of the owning text it spans. 0 for a deletion, which is not in
-   * the proposed text.
+   * The extent in the owning text, from this act's first piece to its last.
+   * For an insertion with nothing else inside it, `text.slice(at, at + length)`
+   * is `text`; otherwise the slice also holds what lies between its pieces.
+   * 0 for a deletion, which is not in the proposed text, and for an inserted
+   * paragraph break, which sits between units rather than in one.
    */
   length?: number;
   /**

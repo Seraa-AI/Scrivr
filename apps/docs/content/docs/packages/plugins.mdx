@@ -210,7 +210,7 @@ says where it sits:
 |-------|---------|
 | `type` | `suggestedInsert`, `suggestedDelete`, or `suggestedAttrs` (a heading, list or formatting change) |
 | `text` | What it adds or removes. `"\n"` for a paragraph or line break; text across blocks keeps the break between them |
-| `at`, `length` | Its place in the owning `text`. A deletion sits where its first piece stood and always has `length: 0`. A hard break counts as one character |
+| `at`, `length` | Its extent in the owning `text`, from its first piece to its last. For an insertion with nothing else inside it, `text.slice(at, at + length)` is the change's `text`; another author's change inside it is in the slice but not in the change's `text`. A deletion sits where its first piece stood and has `length: 0`, as does an inserted paragraph break. A hard break counts as one character |
 | `id` | The act's id: the one to pass to `reviewChanges`. Every piece of one act shares it, including both halves of a replacement or a move |
 | `authorId`, `createdAt` | Whose, and when |
 | `groupId` / `moveId` | Which kind of pair it belongs to: a replacement (`groupId`) or a move (`moveId`) |

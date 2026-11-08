@@ -104,13 +104,13 @@ export const isMarkRemoved = (mark: Mark): boolean =>
   isValidTrackableMark(mark) && hasPending(mark, CHANGE_OPERATION.delete);
 
 /**
- * A node type a block could have been instead of this one: never text, and the
- * same kind of node — block or inline, leaf or not — with every attr it
- * requires given. A synced record may name anything.
+ * The type a textblock was before a type change — a paragraph that became a
+ * heading — only if that, too, is a textblock with every attr it requires
+ * given. A synced record may name anything: a container, a leaf, text.
  */
 function formerType(node: PMNode, name: string | undefined, attrs: Record<string, unknown>) {
   const type = name !== undefined ? node.type.schema.nodes[name] : undefined;
-  const fits = !!type && !type.isText && type.isBlock === node.type.isBlock && type.isLeaf === node.type.isLeaf &&
+  const fits = !!type && type.isTextblock && node.type.isTextblock &&
     Object.entries(type.spec.attrs ?? {}).every(([key, spec]) => "default" in spec || key in attrs);
   return type && fits ? type : node.type;
 }

@@ -265,6 +265,9 @@ describe("one act reads under one id", () => {
     ]);
     expect(ids.size).toBe(1);
     expect(table.changes).toHaveLength(1);
+    const actId = table.changes?.[0]?.id;
+    const cellIds = (table.cells?.rows ?? []).flatMap((r) => r.cells).flatMap((c) => c.changes ?? []).map((c) => c.id);
+    expect(cellIds).toEqual([actId, actId, actId, actId]);
   });
 
 });
@@ -567,7 +570,7 @@ describe("records built straight into a synced document", () => {
   });
 
   it("survive a former node type that cannot be created there", () => {
-    for (const oldNodeTypeName of ["text", "image", "nope"]) {
+    for (const oldNodeTypeName of ["text", "image", "nope", "doc", "tableRow", "listItem", "bulletList"]) {
       const editor = editorWith([{
         type: "paragraph",
         attrs: { nodeId: "a", dataTracked: [{ id: "s", operation: "set_attrs", status: "pending", oldAttrs: {}, oldNodeTypeName }] },
@@ -575,5 +578,66 @@ describe("records built straight into a synced document", () => {
       }]);
       expect(unitOf(editor, "a").changes?.[0]?.oldAttrs).toEqual({});
     }
+  });
+});
+
+describe("a grouped unit", () => {
+  it("is proposed for deletion only when every block in it is", () => {
+    const editor = editorWith([{ type: "heading", attrs: { nodeId: "h", level: 1 }, content: [{ type: "text", text: "Title" }] }, para("l", "Short lede.")]);
+    const heading = editor.getState().doc.child(0);
+    editor.applyTransaction(editor.getState().tr.delete(0, heading.nodeSize));
+    const [unit] = toSemanticUnits(editor);
+    expect(unit?.nodeIds).toEqual(["h", "l"]);
+    expect(unit?.proposedForDeletion).toBeUndefined();
+  });
+});
+
+describe("where an act's change sits", () => {
+  const insertions = (editor: ServerEditor) =>
+    units(editor).flatMap((u) => [
+      ...(u.changes ?? []).map((c) => ({ c, text: u.text })),
+      ...(u.parts ?? []).flatMap((p) => (p.changes ?? []).map((c) => ({ c, text: p.text }))),
+    ]).filter(({ c }) => c.type === "suggestedInsert");
+  const slice = (text: string, c: SemanticChange) => text.slice(c.at ?? 0, (c.at ?? 0) + (c.length ?? 0));
+  const inOrderWithin = (needle: string, hay: string) => {
+    let from = 0;
+    for (const ch of needle) {
+      const at = hay.indexOf(ch, from);
+      if (at < 0) return false;
+      from = at + 1;
+    }
+    return true;
+  };
+
+  it("spans exactly its text when nothing else sits inside it", () => {
+    const editor = editorWith([para("a", "Alpha")]);
+    editor.applyTransaction(editor.getState().tr.insertText("ABCD", 3));
+    expect(insertions(editor).map(({ c, text }) => [c.text, slice(text, c)])).toEqual([["ABCD", "ABCD"]]);
+  });
+
+  it("spans another author's change inside it, while its text is its own", () => {
+    const editor = editorWith([para("a", "Alpha")]);
+    editor.applyTransaction(editor.getState().tr.insertText("ABCD", 3));
+    editor.commands.setTrackChangesUserID("bob");
+    editor.applyTransaction(editor.getState().tr.insertText("x", 5));
+    const alice = insertions(editor).find(({ c }) => c.authorId === "alice");
+    expect(alice && [alice.c.text, slice(alice.text, alice.c)]).toEqual(["ABCD", "ABxCD"]);
+  });
+
+  it("spans what lies between its pieces in separate blocks, its text joined by the break", () => {
+    const editor = editorWith([{ type: "bulletList", attrs: { nodeId: "L" }, content: ["one", "two", "three"].map((t, i) => ({ type: "listItem", content: [para(`p${i}`, t)] })) }]);
+    const at: number[] = [];
+    editor.getState().doc.descendants((node, pos) => {
+      if (node.isText) at.push(pos);
+      return true;
+    });
+    editor.applyTransaction(editor.getState().tr.insertText("X", (at[2] ?? 0) + 1).insertText("Y", (at[0] ?? 0) + 1));
+    for (const { c, text } of insertions(editor)) expect(inOrderWithin(c.text, slice(text, c))).toBe(true);
+  });
+
+  it("reads a split's break as an insertion with no length, at the first block's end", () => {
+    const editor = editorWith([para("a", "AlphaBeta")]);
+    editor.applyTransaction(editor.getState().tr.split(6));
+    expect(insertions(editor).map(({ c }) => [c.text, c.at, c.length])).toEqual([["\n", 5, 0]]);
   });
 });

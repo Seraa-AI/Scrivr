@@ -279,11 +279,13 @@ export interface SemanticChange {
 
 Invariants, each tested:
 
-- For a `suggestedInsert`, `owner.text.slice(at, at + length)` is its `text`,
-  except where another author's change sits inside it — an insertion typed
-  into it is in the slice but not in `text`, and a deletion of part of it
-  takes that part out of the slice. Text across blocks keeps the break between
-  them in both.
+- `text` is the act's own content, its pieces in separate blocks joined by
+  `"\n"`; `at`/`length` are its extent from its first piece to its last. For a
+  `suggestedInsert` with nothing else inside it, `owner.text.slice(at, at +
+  length)` is its `text`. When another author's change or untouched text lies
+  between its pieces, the slice holds that too and `text` does not. An
+  inserted paragraph break is `"\n"` with `length: 0`: the break sits between
+  units, not in one's text.
 - For a `suggestedDelete`, `length === 0` and `at` is where its first piece
   stood.
 - A hard break counts as 1 in `at` (D6), because it is `"\n"` in `text` and in

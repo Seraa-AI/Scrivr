@@ -120,7 +120,8 @@ export function walkSemantic(
     if (changes.length === 0 && markdown.length > 0) unit.markdown = markdown;
     if (result.cells !== undefined) unit.cells = result.cells;
     if (result.image !== undefined) unit.image = result.image;
-    if (ctx.isRemoved(anchor)) unit.proposedForDeletion = true;
+    // A grouped unit is gone only when every block in it is.
+    if (nodes.every((node) => ctx.isRemoved(node))) unit.proposedForDeletion = true;
     // Container units (list, table, …) expose their inner leaf textblocks as
     // individually addressable `parts` — the edit surface. A leaf unit has none.
     const parts = extractParts(nodes, ctx, breadcrumb);
