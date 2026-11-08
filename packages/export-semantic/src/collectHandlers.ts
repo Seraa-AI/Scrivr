@@ -7,11 +7,15 @@ import type {
   SemanticMarkHandler,
 } from "@scrivr/core";
 
+type NodeChanges = NonNullable<SemanticHandlers["nodeChanges"]>;
+
 export interface ResolvedHandlers {
   nodes: Record<string, SemanticNodeHandler>;
   marks: Record<string, SemanticMarkHandler>;
   /** Every contributed `isRemoved`; a node any of them claims is left out. */
   removers: Array<(node: PmNode) => boolean>;
+  /** Every contributed `nodeChanges`, read in contribution order. */
+  nodeChangers: NodeChanges[];
 }
 
 /**
@@ -28,7 +32,8 @@ function semanticOf(contrib: ExportContributionMap): SemanticHandlers | undefine
   const record: Record<string, unknown> = contrib;
   const value = record["semantic"];
   if (value && typeof value === "object" &&
-    ("nodes" in value || "marks" in value || ("isRemoved" in value && typeof value.isRemoved === "function"))) {
+    ("nodes" in value || "marks" in value || ("isRemoved" in value && typeof value.isRemoved === "function") ||
+      ("nodeChanges" in value && typeof value.nodeChanges === "function"))) {
     return value as SemanticHandlers; // single guarded cast after typeof/in checks
   }
   return undefined;
@@ -46,6 +51,7 @@ export function collectHandlers(
   const nodes: Record<string, SemanticNodeHandler> = {};
   const marks: Record<string, SemanticMarkHandler> = {};
   const removers: Array<(node: PmNode) => boolean> = [];
+  const nodeChangers: NodeChanges[] = [];
 
   for (const contrib of editor.getExportContributions()) {
     const semantic = semanticOf(contrib);
@@ -53,13 +59,15 @@ export function collectHandlers(
     if (semantic.nodes) Object.assign(nodes, semantic.nodes);
     if (semantic.marks) Object.assign(marks, semantic.marks);
     if (semantic.isRemoved) removers.push(semantic.isRemoved);
+    if (semantic.nodeChanges) nodeChangers.push(semantic.nodeChanges);
   }
 
   if (overrides) {
     if (overrides.nodes) Object.assign(nodes, overrides.nodes);
     if (overrides.marks) Object.assign(marks, overrides.marks);
     if (overrides.isRemoved) removers.push(overrides.isRemoved);
+    if (overrides.nodeChanges) nodeChangers.push(overrides.nodeChanges);
   }
 
-  return { nodes, marks, removers };
+  return { nodes, marks, removers, nodeChangers };
 }

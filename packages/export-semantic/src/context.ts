@@ -4,6 +4,7 @@ import type {
   InlineMark,
   InlineSpan,
   SemanticChange,
+  SemanticHandlers,
   SemanticMarkHandler,
   SemanticRun,
   UnitCtx,
@@ -74,28 +75,95 @@ function describeAttrs(node: PmNode): Record<string, unknown> | undefined {
 
 const NEWLINE_SPAN: InlineSpan = { text: "\n", marks: [] };
 
-/** Join per-block span groups with a newline span, dropping empty groups. */
-function joinGroups(groups: InlineSpan[][]): InlineSpan[] {
-  const out: InlineSpan[] = [];
-  for (const group of groups) {
-    if (group.length === 0) continue;
-    if (out.length > 0) out.push(NEWLINE_SPAN);
-    out.push(...group);
+type NodeChanges = NonNullable<SemanticHandlers["nodeChanges"]>;
+
+/** A node's spans and the review changes in them, placed by offset into their text. */
+interface Extracted {
+  spans: InlineSpan[];
+  changes: SemanticChange[];
+}
+
+const textOf = (spans: readonly InlineSpan[]) => spans.map((s) => s.text).join("");
+
+const shifted = (changes: readonly SemanticChange[], by: number): SemanticChange[] =>
+  changes.map((c) => ({ ...c, at: (c.at ?? 0) + by }));
+
+/**
+ * One record reads as one change. Pieces that touch join, as a deletion split
+ * across formatting runs does; a piece inside a record covering a whole node is
+ * already part of it, as a new paragraph's text is part of the new paragraph.
+ */
+function mergePieces(changes: readonly SemanticChange[]): SemanticChange[] {
+  const out: SemanticChange[] = [];
+  for (const change of changes) {
+    const prev = out[out.length - 1];
+    if (prev && prev.id !== undefined && prev.id === change.id && prev.type === change.type) {
+      const start = prev.at ?? 0;
+      const end = start + (prev.length ?? 0);
+      const at = change.at ?? 0;
+      const changeEnd = at + (change.length ?? 0);
+      if (at === end) {
+        out[out.length - 1] = { ...prev, text: prev.text + change.text, length: changeEnd - start };
+        continue;
+      }
+      if (at >= start && changeEnd <= end) continue;
+    }
+    out.push(change);
   }
   return out;
+}
+
+/** Join block children with a newline, dropping empty ones, and place their changes in the result. */
+function joinExtracted(parts: readonly Extracted[]): Extracted {
+  const spans: InlineSpan[] = [];
+  const changes: SemanticChange[] = [];
+  let offset = 0;
+  for (const part of parts) {
+    if (part.spans.length > 0 && spans.length > 0) {
+      spans.push(NEWLINE_SPAN);
+      offset += 1;
+    }
+    changes.push(...shifted(part.changes, offset));
+    spans.push(...part.spans);
+    offset += textOf(part.spans).length;
+  }
+  return { spans, changes: mergePieces(changes) };
 }
 
 /**
  * Walk a node into inline formatting runs (`spans`) plus review `changes`. The
  * semantic mark handlers are folded over each text run: a handler may drop the
  * run (excluded from spans) or retain structured changes. `spans` reconstruct
- * the plain text exactly, so `toText` derives from them.
+ * the plain text exactly, so `toText` derives from them, and every change is
+ * placed by offset into that text.
  */
 function extractSemantic(
   node: PmNode,
   markHandlers: Record<string, SemanticMarkHandler>,
+  nodeChangers: readonly NodeChanges[],
   ctx: UnitCtx,
-): { spans: InlineSpan[]; changes: SemanticChange[] } {
+): Extracted {
+  // A node's own records are read before its content's, so a contributor sees
+  // a container before what it contains.
+  const own = nodeChangers.flatMap((changesOf) => changesOf(node, ctx));
+  const content = extractContent(node, markHandlers, nodeChangers, ctx);
+  const text = textOf(content.spans);
+  if (own.length === 0) return content;
+  const covers: SemanticChange[] = [];
+  const after: SemanticChange[] = [];
+  for (const { change, place } of own) {
+    if (place === "after") after.push({ ...change, at: text.length, length: 0 });
+    else covers.push({ ...change, ...(change.type === "suggestedInsert" ? { text } : {}), at: 0, length: text.length });
+  }
+  return { spans: content.spans, changes: mergePieces([...covers, ...content.changes, ...after]) };
+}
+
+function extractContent(
+  node: PmNode,
+  markHandlers: Record<string, SemanticMarkHandler>,
+  nodeChangers: readonly NodeChanges[],
+  ctx: UnitCtx,
+): Extracted {
   if (node.isText) {
     let run: SemanticRun | null = { text: node.text ?? "" };
     for (const mark of node.marks) {
@@ -104,8 +172,9 @@ function extractSemantic(
       run = handler(run, mark, ctx);
       if (run === null) return { spans: [], changes: [] };
     }
-    const changes = run.changes ?? [];
-    const spans = run.text.length > 0 ? [{ text: run.text, marks: formattingMarks(node.marks, markHandlers) }] : [];
+    const length = run.text.length;
+    const changes = (run.changes ?? []).map((c) => ({ ...c, at: 0, length }));
+    const spans = length > 0 ? [{ text: run.text, marks: formattingMarks(node.marks, markHandlers) }] : [];
     return { spans, changes };
   }
 
@@ -113,18 +182,21 @@ function extractSemantic(
   // nodes (e.g. images) have no intrinsic plain text.
   if (node.type.name === "hardBreak") return { spans: [NEWLINE_SPAN], changes: [] };
 
-  const parts: { spans: InlineSpan[]; changes: SemanticChange[] }[] = [];
+  const parts: Extracted[] = [];
   node.forEach((child) => {
-    parts.push(extractSemantic(child, markHandlers, ctx));
+    parts.push(extractSemantic(child, markHandlers, nodeChangers, ctx));
   });
-  const changes = parts.flatMap((p) => p.changes);
 
   // A textblock (paragraph, heading) concatenates its inline runs; a block
   // container (list, table, cell) joins its block children with newlines.
-  const spans = node.isTextblock
-    ? parts.flatMap((p) => p.spans)
-    : joinGroups(parts.map((p) => p.spans));
-  return { spans, changes };
+  if (!node.isTextblock) return joinExtracted(parts);
+  const changes: SemanticChange[] = [];
+  let offset = 0;
+  for (const part of parts) {
+    changes.push(...shifted(part.changes, offset));
+    offset += textOf(part.spans).length;
+  }
+  return { spans: parts.flatMap((p) => p.spans), changes: mergePieces(changes) };
 }
 
 /**
@@ -135,9 +207,15 @@ export function createUnitCtx(
   editor: IBaseEditor,
   markHandlers: Record<string, SemanticMarkHandler>,
   removers: ReadonlyArray<(node: PmNode) => boolean> = [],
+  nodeChangers: readonly NodeChanges[] = [],
 ): UnitCtx {
   const schema = editor.getState().doc.type.schema;
   const serializer = editor.getMarkdownSerializer();
+
+  const extractAll = (nodes: PmNode | readonly PmNode[]): Extracted => {
+    const list = Array.isArray(nodes) ? nodes : [nodes];
+    return joinExtracted(list.map((n) => extractSemantic(n, markHandlers, nodeChangers, ctx)));
+  };
 
   const ctx: UnitCtx = {
     schema,
@@ -157,15 +235,13 @@ export function createUnitCtx(
       }
     },
     toSpans(nodes) {
-      const list = Array.isArray(nodes) ? nodes : [nodes];
-      return joinGroups(list.map((n) => extractSemantic(n, markHandlers, ctx).spans));
+      return extractAll(nodes).spans;
     },
     toText(nodes) {
-      return ctx.toSpans(nodes).map((s) => s.text).join("");
+      return textOf(ctx.toSpans(nodes));
     },
     toChanges(nodes) {
-      const list = Array.isArray(nodes) ? nodes : [nodes];
-      return list.flatMap((node) => extractSemantic(node, markHandlers, ctx).changes);
+      return extractAll(nodes).changes;
     },
     attrsOf(node) {
       return describeAttrs(node);

@@ -192,16 +192,42 @@ export interface SemanticPart {
   text: string;
   spans?: InlineSpan[];
   attrs?: Record<string, unknown>;
+  /** Review changes inside this part, placed in `text`. Also in the parent unit. */
+  changes?: SemanticChange[];
 }
 
+/**
+ * One pending review record as an agent reads it. `at`/`length` place it in the
+ * text of the list it appears in: `unit.text`, `part.text` or `cell.text`.
+ */
 export interface SemanticChange {
-  type: "suggestedDelete";
+  type: "suggestedDelete" | "suggestedInsert" | "suggestedAttrs";
+  /** What it removes or adds; "\n" for a paragraph break, "" for an attribute change. */
   text: string;
+  /** Offset into the owning text. Absent when a node handler overrides the unit's text. */
+  at?: number;
+  /** How much of the owning text it covers: 0 for a deletion, the block for an attribute change. */
+  length?: number;
   id?: string;
   authorId?: string;
   status?: string;
   createdAt?: number;
+  /** Shared by the two halves of one replacement. */
   groupId?: string;
+  /** Shared by the two halves of one move. */
+  moveId?: string;
+  /** `suggestedAttrs` only: what the block was. */
+  oldAttrs?: Record<string, unknown>;
+}
+
+/**
+ * A review record written on a node rather than on its text. `covers` spans
+ * the node's text; `after` sits where it ends, as a paragraph break does. A
+ * covering insertion reads the node's proposed text.
+ */
+export interface SemanticNodeChange {
+  change: SemanticChange;
+  place: "covers" | "after";
 }
 
 export interface TableCells {
@@ -274,6 +300,8 @@ export interface SemanticHandlers {
    * beside one.
    */
   isRemoved?: (node: PmNode) => boolean;
+  /** Review records on a node's own attrs, which no mark handler sees. */
+  nodeChanges?: (node: PmNode, ctx: UnitCtx) => SemanticNodeChange[];
 }
 
 // ── Producer context ─────────────────────────────────────────────────────────

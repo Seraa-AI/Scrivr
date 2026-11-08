@@ -11,6 +11,7 @@ import {
   sha256Hex,
   stableStringify,
   type InlineSpan,
+  type SemanticChange,
   type SemanticImage,
   type SemanticPart,
   type SemanticUnit,
@@ -28,6 +29,8 @@ export interface SemanticPartRichInput {
   text: string;
   spans: InlineSpan[];
   attrs: Record<string, unknown>;
+  /** Pending review changes; absent when there are none, so those hashes stay as they were. */
+  changes?: SemanticChange[];
 }
 
 /**
@@ -42,6 +45,7 @@ export function semanticPartRichInput(part: SemanticPart): SemanticPartRichInput
     text: part.text,
     spans: part.spans ?? [],
     attrs: part.attrs ?? {},
+    ...(part.changes?.length ? { changes: part.changes } : {}),
   };
 }
 
@@ -95,6 +99,8 @@ export interface UnitRichInput {
   cells: TableCells | null;
   /** An image unit's image; absent on every other unit, so their hashes stay as they were. */
   image?: SemanticImage;
+  /** Pending review changes; absent when there are none, so those hashes stay as they were. */
+  changes?: SemanticChange[];
 }
 
 /**
@@ -115,6 +121,9 @@ export function unitRichInput(unit: SemanticUnit): UnitRichInput {
     // alignment/merge/header edit is invisible without this.
     cells: unit.cells ?? null,
     ...(unit.image ? { image: unit.image } : {}),
+    // Accepting or rejecting a change can leave the text as it was; this is
+    // what tells a stale-edit guard that a reviewer acted.
+    ...(unit.changes?.length ? { changes: unit.changes } : {}),
   };
 }
 

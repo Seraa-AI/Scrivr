@@ -1,5 +1,5 @@
 import type { Node as PmNode } from "@scrivr/core/pm";
-import type { SemanticNodeResult, SemanticPart, SemanticUnit, UnitCtx } from "@scrivr/core";
+import type { SemanticChange, SemanticNodeResult, SemanticPart, SemanticUnit, UnitCtx } from "@scrivr/core";
 import type { ResolvedHandlers } from "./collectHandlers";
 import { groupBlocks } from "./grouping";
 import { resolveNodeId, type BlockEntry } from "./id";
@@ -14,6 +14,10 @@ function warnUnknown(name: string): void {
   // A node with no registered `semantic` handler is not dropped — it emits a
   // default `unknown` unit. Surface it once so the gap is visible, not silent.
   console.warn(`[semantic] no handler for node type "${name}" — emitting type:"unknown"`);
+}
+
+function unplaced({ at: _at, length: _length, ...change }: SemanticChange): SemanticChange {
+  return change;
 }
 
 function headingLevelOf(node: PmNode): number {
@@ -94,7 +98,10 @@ export function walkSemantic(
       order: order++,
       text,
     };
-    const changes = ctx.toChanges(nodes);
+    // Offsets index the walker's own text; a handler that overrides it gets none.
+    const changes = result.text === undefined || result.text === ctx.toText(nodes)
+      ? ctx.toChanges(nodes)
+      : ctx.toChanges(nodes).map(unplaced);
     if (changes.length > 0) unit.changes = changes;
     if (headingLevel !== undefined) unit.headingLevel = headingLevel;
     // Block styling markdown can't express (alignment, indent, font, …), taken
@@ -193,6 +200,8 @@ function collectParts(
         }
         const attrs = ctx.attrsOf(child);
         if (attrs) part.attrs = attrs;
+        const changes = ctx.toChanges(child);
+        if (changes.length > 0) part.changes = changes;
         out.push(part);
       }
       return; // textblocks hold only inline content — nothing deeper to collect
