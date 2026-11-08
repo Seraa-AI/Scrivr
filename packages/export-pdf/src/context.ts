@@ -42,7 +42,7 @@ import {
   type LayoutLine,
   type ResolvedTheme,
 } from "@scrivr/core";
-import { SYNTHETIC_ITALIC_SHEAR, emboldenWidth, fontSizeOf } from "@scrivr/core";
+import { SYNTHETIC_ITALIC_SHEAR, bulletBox, bulletShape, emboldenWidth, fontSizeOf, type BulletShape } from "@scrivr/core";
 import type { PdfNodeHandler } from "./augmentation";
 import { resolvePdfSpanStyle, type ResolvedPdfSpanStyle } from "./spanStyle";
 
@@ -101,6 +101,47 @@ export type PdfDrawHelpers = PdfBlockDrawSurface;
 /** Flip from top-left (layout) to bottom-left (PDF) coordinate space. */
 function flipY(yPx: number, pageHeightPt: number): number {
   return pageHeightPt - yPx * PT_PER_PX;
+}
+
+/** A bullet drawn as core's shape for it, with its left edge at `leftPx`. */
+function drawBulletShape(
+  page: PDFPage,
+  shape: BulletShape,
+  leftPx: number,
+  baselinePx: number,
+  fontSizePx: number,
+  pageHeightPt: number,
+  color: ReturnType<typeof rgb>,
+): void {
+  const { size, centerAboveBaseline, stroke } = bulletBox(fontSizePx);
+  const radius = size / 2;
+  const centerY = flipY(baselinePx - centerAboveBaseline, pageHeightPt);
+  if (shape === "square") {
+    page.drawRectangle({
+      x: leftPx * PT_PER_PX,
+      y: centerY - radius * PT_PER_PX,
+      width: size * PT_PER_PX,
+      height: size * PT_PER_PX,
+      color,
+    });
+    return;
+  }
+  const circle = {
+    x: (leftPx + radius) * PT_PER_PX,
+    y: centerY,
+  };
+  if (shape === "circle") {
+    const ringRadius = (radius - stroke / 2) * PT_PER_PX;
+    page.drawEllipse({
+      ...circle,
+      xScale: ringRadius,
+      yScale: ringRadius,
+      borderColor: color,
+      borderWidth: stroke * PT_PER_PX,
+    });
+    return;
+  }
+  page.drawEllipse({ ...circle, xScale: radius * PT_PER_PX, yScale: radius * PT_PER_PX, color });
 }
 
 // ── Draw helpers implementation ──────────────────────────────────────────────
@@ -357,23 +398,31 @@ export function createDrawHelpers(
       // size. Pinning it to the fallback puts the number of a numbered clause
       // in a different typeface from the clause.
       const firstSpan = firstLine.spans[0];
-      const markerFont =
-        firstSpan?.kind === "text"
-          ? fontRegistry.resolve(firstSpan.font, firstSpan.resolution)
-          : fontRegistry.fallback;
       const fontSize = extractFontSizePx(
         (firstSpan?.kind === "text" ? firstSpan.font : undefined) ?? "12px sans-serif",
       );
-      const markerText = fontRegistry.isUnicode(markerFont)
-        ? stripInvisible(block.listMarker)
-        : sanitizeForWinAnsi(block.listMarker);
-      page.drawText(markerText, {
-        x: block.listMarkerX * PT_PER_PX,
-        y: flipY(block.y + firstLine.ascent, pageHeightPt),
-        size: fontSize * PT_PER_PX,
-        font: markerFont,
-        color: themeListMarker,
-      });
+      const baselinePx = block.y + firstLine.ascent;
+      // Bullets are the shapes the canvas draws, so they never depend on
+      // whether the face can encode the glyph.
+      const shape = bulletShape(block.listMarker);
+      if (shape) {
+        drawBulletShape(page, shape, block.listMarkerX, baselinePx, fontSize, pageHeightPt, themeListMarker);
+      } else {
+        const markerFont =
+          firstSpan?.kind === "text"
+            ? fontRegistry.resolve(firstSpan.font, firstSpan.resolution)
+            : fontRegistry.fallback;
+        const markerText = fontRegistry.isUnicode(markerFont)
+          ? stripInvisible(block.listMarker)
+          : sanitizeForWinAnsi(block.listMarker);
+        page.drawText(markerText, {
+          x: block.listMarkerX * PT_PER_PX,
+          y: flipY(baselinePx, pageHeightPt),
+          size: fontSize * PT_PER_PX,
+          font: markerFont,
+          color: themeListMarker,
+        });
+      }
     }
 
     let lineY = block.y;

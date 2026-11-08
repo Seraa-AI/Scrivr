@@ -1,0 +1,64 @@
+/**
+ * List markers in the PDF. Bullets are drawn as the same shapes the canvas
+ * draws, so a bullet never depends on whether the face can encode its glyph —
+ * a standard PDF font cannot encode `◦` or `▪`. Numbers are text.
+ */
+
+import { describe, expect, it } from "vitest";
+import { buildPdf as buildPdfWithEditor } from "../index";
+import { PT_PER_PX } from "../context";
+import { exportEditor, textLine, block, onePage } from "./fixtures";
+import { recordDrawOps, type DrawOp } from "./opLog";
+
+const MARKER_X = 60;
+
+async function markerOps(marker: string): Promise<DrawOp[]> {
+  const layout = onePage([
+    block("paragraph", [textLine("item", { font: "16px Helvetica" })], {
+      y: 100,
+      listMarker: marker,
+      listMarkerX: MARKER_X,
+    }),
+  ]);
+  const ops = await recordDrawOps(() => buildPdfWithEditor(layout, exportEditor));
+  return ops.filter((op) => op.op !== "state" && !(op.op === "text" && op["value"] === "item"));
+}
+
+const shapes = (ops: DrawOp[]) => ops.filter((op) => op.op === "ellipse" || (op.op === "rect" && op["x"] !== 0));
+const texts = (ops: DrawOp[]) => ops.filter((op) => op.op === "text");
+
+describe("list markers in the PDF", () => {
+  it("draws a level-1 bullet as a filled disc", async () => {
+    const ops = await markerOps("•");
+    expect(texts(ops)).toEqual([]);
+    expect(shapes(ops)).toEqual([expect.objectContaining({ op: "ellipse", color: expect.any(String) })]);
+  });
+
+  it("draws a level-2 bullet as a ring, not a `?`", async () => {
+    const ops = await markerOps("◦");
+    expect(texts(ops)).toEqual([]);
+    const [ring] = shapes(ops);
+    expect(ring).toMatchObject({ op: "ellipse", borderColor: expect.any(String) });
+    expect(ring?.["color"]).toBeUndefined();
+  });
+
+  it("draws a level-3 bullet as a square, not a `?`", async () => {
+    const ops = await markerOps("▪");
+    expect(texts(ops)).toEqual([]);
+    expect(shapes(ops)).toEqual([expect.objectContaining({ op: "rect" })]);
+  });
+
+  it("starts each shape at the marker's left edge", async () => {
+    const [disc] = shapes(await markerOps("•"));
+    const [square] = shapes(await markerOps("▪"));
+    const radius = Number(disc?.["xScale"]);
+    expect(Number(disc?.["x"]) - radius).toBeCloseTo(MARKER_X * PT_PER_PX, 3);
+    expect(Number(square?.["x"])).toBeCloseTo(MARKER_X * PT_PER_PX, 3);
+  });
+
+  it("draws a number as text at the marker's left edge", async () => {
+    const ops = await markerOps("1.");
+    expect(texts(ops)).toEqual([expect.objectContaining({ value: "1.", x: MARKER_X * PT_PER_PX })]);
+    expect(shapes(ops)).toEqual([]);
+  });
+});
