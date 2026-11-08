@@ -103,11 +103,12 @@ function flipY(yPx: number, pageHeightPt: number): number {
   return pageHeightPt - yPx * PT_PER_PX;
 }
 
-/** Where a bullet goes, in PDF points: its box's left edge and centre line. */
+/** Where a bullet goes: its box's left edge and centre line, in PDF points. */
 interface BulletAt {
   page: PDFPage;
   left: number;
   centerY: number;
+  /** The bullet's box from core, in px. */
   box: BulletBox;
   color: ReturnType<typeof rgb>;
 }
@@ -386,8 +387,10 @@ export function createDrawHelpers(
     // Draw list marker if present.
     const firstLine = block.lines[0];
     if (block.listMarker && block.listMarkerX !== undefined && firstLine) {
-      const firstSpan = firstLine.spans[0];
-      const fontSize = listMarkerFont(firstLine).size;
+      // Core chose the marker's face and size when layout measured it; the PDF
+      // draws in the same, so a number pushed past its hanging lands as measured.
+      const marker = listMarkerFont(firstLine);
+      const fontSize = marker.size;
       const baselinePx = block.y + firstLine.ascent;
       // A bullet takes only its line's size: it is drawn as the canvas's
       // shape, so it never depends on whether the face can encode the glyph.
@@ -402,13 +405,7 @@ export function createDrawHelpers(
           color: themeListMarker,
         });
       } else {
-        // A number labels its line, so it takes that line's face as well as
-        // its size. Pinning it to the fallback puts the number of a numbered
-        // clause in a different typeface from the clause.
-        const markerFont =
-          firstSpan?.kind === "text"
-            ? fontRegistry.resolve(firstSpan.font, firstSpan.resolution)
-            : fontRegistry.fallback;
+        const markerFont = fontRegistry.resolve(marker.font, marker.resolution);
         const markerText = fontRegistry.isUnicode(markerFont)
           ? stripInvisible(block.listMarker)
           : sanitizeForWinAnsi(block.listMarker);
