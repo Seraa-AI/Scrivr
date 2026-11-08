@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { Node } from "prosemirror-model";
 import { ServerEditor } from "../ServerEditor";
 import { StarterKit } from "../extensions/StarterKit";
+import { SourcedBlockExtension } from "../extensions/built-in/SourcedBlock";
 import { createMeasurer } from "../test-utils";
 import { layoutTableRowCells, CELL_PADDING_H, CELL_PADDING_V } from "./TableLayoutEngine";
 
@@ -160,5 +161,51 @@ describe("TableLayoutEngine — height", () => {
     const firstBlock = cells[0]!.blocks[0]!;
     expect(firstBlock.y).toBe(CELL_PADDING_V); // relative to row top
     expect(firstBlock.x).toBe(30 + CELL_PADDING_H); // absolute content x
+  });
+});
+
+describe("TableLayoutEngine — layout participation", () => {
+  it("lays out a transparent node in a cell as its children, as the body flow does", () => {
+    const paragraph = (text: string) => ({ type: "paragraph", content: [{ type: "text", text }] });
+    const editor = new ServerEditor({
+      extensions: [StarterKit.configure({ table: true }), SourcedBlockExtension],
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "table",
+            attrs: { layout: "fixed", grid: [200] },
+            content: [
+              {
+                type: "tableRow",
+                content: [
+                  {
+                    type: "tableCell",
+                    content: [
+                      {
+                        type: "sourcedBlock",
+                        attrs: { instanceId: "src_1", kind: "clause", resourceId: "cl_1", versionId: "v1" },
+                        content: [paragraph("First"), paragraph("Second")],
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const doc = editor.getState().doc;
+    const paragraphPositions: number[] = [];
+    doc.descendants((node, pos) => {
+      if (node.type.name === "paragraph") paragraphPositions.push(pos);
+    });
+
+    const rowNodePos = 1;
+    const { cells } = layoutTableRowCells(doc.child(0).child(0), baseCtx([200], rowNodePos));
+
+    expect(cells[0]!.blocks.map((block) => block.nodePos)).toEqual(paragraphPositions);
+    expect(cells[0]!.blocks.map((block) => block.node.type.name)).toEqual(["paragraph", "paragraph"]);
   });
 });

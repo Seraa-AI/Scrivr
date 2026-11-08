@@ -1,6 +1,6 @@
 {
   "name": "@scrivr/react",
-  "version": "1.0.21",
+  "version": "1.0.22",
   "description": "React bindings for the Scrivr canvas document editor",
   "license": "Apache-2.0",
   "author": "Seraa AI <hello@seraa.ai>",
@@ -79,6 +79,9 @@
     "@scrivr/plugins": "workspace:*",
     "@types/react": "^18.0.0",
     "@types/react-dom": "^18.0.0",
+    "happy-dom": "^20.8.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "tsup": "^8.0.0",
     "typescript": "^5.4.0"
   }

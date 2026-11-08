@@ -35,24 +35,7 @@ returned the *last* match regardless, despite a comment claiming it stopped at
 the first. Core still knows nothing about tracking; the predicate is what lets
 the plugins layer own that rule.
 
-Three tracking replay defects the moves surfaced:
-
-- reverse replay mapped from the wrong document, counting only removed pending
-  inserts, so retained insertions before a position were lost. It now composes a
-  bridge from each step's forward map, the prior bridge, and the replay steps.
-- the inverse step's end boundary swallowed a later insertion at the same
-  position, so moving a block and inserting beside it lost the second edit. A
-  collapsed range stays collapsed.
-- a tracked node insertion put inline tracking marks inside parents whose schema
-  forbids them, such as a code block, producing an invalid document. Child marks
-  are now filtered through the parent's `allowedMarks`; the node-level change
-  stays reviewable.
-
-One batch is also bounded by what tracking can replay. A second move of the same
-node emits a second overlapping delete/insert pair, which the engine pairs
-wrongly and replays into a duplicated block carrying a duplicated `nodeId`; it
-is now refused. And `MAX_TRACKED_STEPS_PER_TR` is exported, because a move costs
-two steps — so twelve moves in one batch used to cross the engine's limit, at
-which point replay stops and the document is left mangled while the result
-claimed every op applied. Ops that would cross it are refused before any step is
-written.
+One batch moves a node once. A second move of the same node would emit a
+second overlapping delete/insert pair, replayed into a duplicated block carrying
+a duplicated `nodeId`; it is refused. A batch is otherwise as long as it needs
+to be: tracking records gestures of any length in full.

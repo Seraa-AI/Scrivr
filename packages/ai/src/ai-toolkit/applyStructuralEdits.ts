@@ -11,7 +11,7 @@
  * agent sees leaves, so ops that act on a container climb to it.
  */
 import { findNodeById, spansToFragment, tableColumnCount } from "@scrivr/core";
-import { MAX_TRACKED_STEPS_PER_TR, findLiveNodeById, pickAgentAttrs, shadowRanges } from "@scrivr/plugins";
+import { findLiveNodeById, pickAgentAttrs, shadowRanges } from "@scrivr/plugins";
 import type { Node as PmNode, Schema, Transaction } from "@scrivr/core/pm";
 
 import type { SemanticBlockInput, SemanticCellInput, StructuralSemanticEdit } from "../schema/edit";
@@ -244,16 +244,6 @@ export function applyStructuralEdits(
   const result: StructuralEditResult = { changed: [], notFound: [], rejected: [] };
   const resolve = createLiveResolver(tr);
   const moved = new Set<string>();
-  for (const edit of edits) {
-    // A step past the engine's limit is not tracked: replay stops and the
-    // document is left mangled rather than reviewable. A move writes two
-    // steps, so the budget has to be checked before the op, not after.
-    const steps = edit.op === "moveBlock" || edit.op === "moveListItem" ? 2 : 1;
-    if (tr.steps.length + steps > MAX_TRACKED_STEPS_PER_TR) {
-      result.rejected.push("nodeId" in edit ? edit.nodeId : edit.anchorNodeId);
-      continue;
-    }
-    applyOne(tr, edit, result, resolve, moved);
-  }
+  for (const edit of edits) applyOne(tr, edit, result, resolve, moved);
   return result;
 }

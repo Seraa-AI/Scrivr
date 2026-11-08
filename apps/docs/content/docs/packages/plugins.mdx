@@ -244,9 +244,16 @@ The demo app ships a fully styled `ModeSwitcher` dropdown you can copy as a star
 ### Commands
 
 ```ts
-// Accept or reject changes by ID
-editor.commands.setChangeStatuses('accepted', [changeId1, changeId2]);
-editor.commands.setChangeStatuses('rejected', [changeId1]);
+import { reviewChanges } from '@scrivr/plugins';
+
+// Accept or reject changes by ID. The outcome says whether it happened, and why not.
+const outcome = reviewChanges(editor, { accepted: [changeId1, changeId2], rejected: [] });
+if (outcome.status === 'blocked' && outcome.reason === 'dependent-changes') {
+  // Show outcome.dependencies, then decide them together once the reviewer agrees.
+}
+
+// Keep one author's change and discard another's, as one decision and one undo step.
+reviewChanges(editor, { accepted: [insertionId], rejected: [deletionId] });
 
 // Update the current author ID (e.g. after a user switch)
 editor.commands.setTrackChangesUserID('user-2');
@@ -281,12 +288,18 @@ const cleanup = createChangePopover(editor, {
 });
 
 // Wire up accept/reject buttons
-acceptBtn.onclick = () => editor.commands.setChangeStatuses('accepted', [info.id]);
-rejectBtn.onclick = () => editor.commands.setChangeStatuses('rejected', [info.id]);
+acceptBtn.onclick = () => reviewChanges(editor, { accepted: [info.id], rejected: [] });
+rejectBtn.onclick = () => reviewChanges(editor, { accepted: [], rejected: [info.id] });
 ```
 
-When `info.isConflict` is `true`, `info.conflictChanges` contains all overlapping changes from
-different authors — render per-author accept/reject controls for each.
+When `info.isConflict` is `true`, `info.conflictChanges` contains one entry per overlapping
+act — render controls for each. Keeping one is accepting it and rejecting the others in a single
+`reviewChanges` call.
+
+`reviewChanges` reports what actually happened, so it is what a review button should call. The
+`setChangeStatuses` command only returns whether it dispatched, and `false` when the decision is
+blocked. `planReview` previews a decision without carrying it out, and `changeActs` groups records
+into the acts a reviewer decides, so a list of changes shows one card per act.
 
 For React, `@scrivr/react` exports a `TrackChangesPopover` component built on
 `createChangePopover` that handles positioning, single-change and conflict layouts, and author

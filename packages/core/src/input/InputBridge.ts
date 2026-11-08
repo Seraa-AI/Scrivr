@@ -460,7 +460,8 @@ export class InputBridge {
       state.selection instanceof CellSelection
         ? clearSelectedCellsTr(state)
         : deleteSelection(state);
-    if (clear) this.opts.dispatch(clear);
+    // Marked so a plugin can tell a cut from a deletion, as it can a paste.
+    if (clear) this.opts.dispatch(clear.setMeta("uiEvent", "cut"));
   };
 
   private handlePaste = (e: ClipboardEvent): void => {
@@ -474,7 +475,8 @@ export class InputBridge {
       this.opts.getState(),
       { preferPlain },
     );
-    if (tr) this.opts.dispatch(tr);
+    // Marked so a plugin can tell pasted content from typing, as it can a cut.
+    if (tr) this.opts.dispatch(tr.setMeta("uiEvent", "paste"));
 
     // "Paste without formatting" means text only — an image is formatting the
     // user opted out of, so the bytes are not read at all.
@@ -494,7 +496,7 @@ export class InputBridge {
     );
     if (!imagePaste) return;
     this.pendingImagePastes.add(imagePaste);
-    this.opts.dispatch(imagePaste.insert);
+    this.opts.dispatch(imagePaste.insert.setMeta("uiEvent", "paste"));
     void imagePaste
       .resolve(this.opts.getState)
       .then((fileTr) => {

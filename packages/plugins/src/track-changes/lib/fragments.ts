@@ -1,4 +1,4 @@
-import { Fragment, Node as PMNode, ResolvedPos, Schema } from "@scrivr/core/pm";
+import { Fragment, MarkType, Node as PMNode, NodeType, ResolvedPos, Schema } from "@scrivr/core/pm";
 import { Transaction } from "@scrivr/core/pm";
 
 import {
@@ -16,7 +16,7 @@ import {
   NewMoveAttrs,
   NewTrackedAttrs,
 } from "../helpers";
-import { CHANGE_OPERATION, CHANGE_STATUS, ExposedFragment } from "../types";
+import { CHANGE_OPERATION, CHANGE_STATUS } from "../types";
 
 export function setFragmentAsInserted(inserted: Fragment, insertAttrs: NewInsertAttrs, schema: Schema) {
   const updatedInserted = loopContentAndMergeText(inserted, insertAttrs, schema);
@@ -26,10 +26,12 @@ export function setFragmentAsInserted(inserted: Fragment, insertAttrs: NewInsert
 export function setFragmentAsWrapChange(inserted: Fragment, attrs: NewEmptyAttrs, schema: Schema) {
   const content: PMNode[] = [];
   inserted.forEach(node => {
+    const wrap = addTrackIdIfDoesntExist(createNewWrapAttrs(attrs));
     content.push(
       node.type.create(
-        { ...node.attrs, dataTracked: [addTrackIdIfDoesntExist(createNewWrapAttrs(attrs))] },
-        setFragmentAsInserted(node.content, createNewInsertAttrs(attrs), schema),
+        { ...node.attrs, dataTracked: [wrap] },
+        // What the wrapper brought with it exists only as part of wrapping.
+        setFragmentAsInserted(node.content, { ...createNewInsertAttrs(attrs), ...(wrap.id ? { creationId: wrap.id } : {}) }, schema),
         node.marks,
       ),
     );
@@ -40,9 +42,21 @@ export function setFragmentAsWrapChange(inserted: Fragment, attrs: NewEmptyAttrs
 export function setFragmentAsMoveChange(fragment: Fragment, moveAttrs: NewMoveAttrs) {
   const content: PMNode[] = [];
   fragment.forEach(node => {
+    const records = getBlockInlineTrackedData(node) ?? [];
+    const pending = (operation: CHANGE_OPERATION) =>
+      records.filter(record => record.operation === operation && record.status === CHANGE_STATUS.pending);
+    const pendingCreations = pending(CHANGE_OPERATION.insert)
+      .flatMap(record => record.creationId ? [record.creationId] : record.id ? [record.id] : []);
+    const earlierPlacements = pending(CHANGE_OPERATION.move).flatMap(record => record.id ? [record.id] : []);
     content.push(
       node.type.create(
-        { ...node.attrs, dataTracked: [addTrackIdIfDoesntExist(moveAttrs)] },
+        { ...node.attrs, dataTracked: [
+          ...records.filter(record => record.operation !== CHANGE_OPERATION.move),
+          addTrackIdIfDoesntExist({ ...moveAttrs,
+            dependsOn: [...new Set([...(moveAttrs.dependsOn ?? []), ...pendingCreations])],
+            placementDependsOn: earlierPlacements,
+          }),
+        ] },
         node.content,
         node.marks,
       ),
@@ -75,70 +89,35 @@ export function setFragmentAsNodeSplit(
   const splitSource = oldDataTracked.find(c => c.operation === "reference");
   const dataTracked = { ...createNewSplitAttrs({ ...attrs }), id: referenceId };
 
-  if (lastChild.type.name === "list_item") {
-    let firstChild = lastChild.content.firstChild!;
-    firstChild = firstChild.type.create(
+  inserted = inserted.replaceChild(
+    inserted.childCount - 1,
+    lastChild.type.create(
       { ...lastChild.attrs, dataTracked: splitSource ? [dataTracked, splitSource] : [dataTracked] },
-      firstChild.content,
-    );
-    inserted = inserted.replaceChild(
-      inserted.childCount - 1,
-      lastChild.type.create(
-        lastChild.attrs,
-        lastChild.content.cut(firstChild.nodeSize).addToStart(firstChild),
-      ),
-    );
-  } else {
-    inserted = inserted.replaceChild(
-      inserted.childCount - 1,
-      lastChild.type.create(
-        { ...lastChild.attrs, dataTracked: splitSource ? [dataTracked, splitSource] : [dataTracked] },
-        lastChild.content,
-      ),
-    );
-  }
+      lastChild.content,
+    ),
+  );
   return inserted;
 }
 
-/** Cuts a fragment similar to Fragment.cut but also removes the parent node. */
-export function cutFragment(matched: number, deleted: number, content: Fragment) {
-  const newContent: PMNode[] = [];
-  for (let i = 0; matched <= deleted && i < content.childCount; i += 1) {
-    const child = content.child(i);
-    if (!child.isText && child.content.size > 0) {
-      const cut = cutFragment(matched + 1, deleted, child.content);
-      matched = cut[0];
-      newContent.push(...cut[1].content);
-    } else if (child.isText && matched + child.nodeSize > deleted) {
-      if (deleted - matched > 0) {
-        newContent.push(child.cut(deleted - matched));
-      } else {
-        newContent.push(child);
-      }
-      matched = deleted + 1;
-    } else {
-      matched += child.nodeSize;
-    }
-  }
-  return [matched, Fragment.fromArray(newContent)] as [number, ExposedFragment];
+/** The mark standing in for this operation on text. */
+function trackedMarkType(newTrackAttrs: NewTrackedAttrs, schema: Schema) {
+  return newTrackAttrs.operation === CHANGE_OPERATION.insert
+    ? schema.marks.trackedInsert
+    : schema.marks.trackedDelete;
 }
 
-function markInlineNodeChange(node: PMNode, newTrackAttrs: NewTrackedAttrs, schema: Schema) {
+function markInlineNodeChange(node: PMNode, mark: MarkType, newTrackAttrs: NewTrackedAttrs, schema: Schema) {
   const filtered = node.marks.filter(
     m => m.type !== schema.marks.trackedInsert && m.type !== schema.marks.trackedDelete,
   );
-  const mark =
-    newTrackAttrs.operation === CHANGE_OPERATION.insert
-      ? schema.marks.trackedInsert
-      : schema.marks.trackedDelete;
-  const createdMark = mark!.create({ dataTracked: addTrackIdIfDoesntExist(newTrackAttrs) });
+  const createdMark = mark.create({ dataTracked: addTrackIdIfDoesntExist(newTrackAttrs) });
   return node.mark(filtered.concat(createdMark));
 }
 
-function loopContentAndMergeText(content: Fragment, newTrackAttrs: NewTrackedAttrs, schema: Schema) {
+function loopContentAndMergeText(content: Fragment, newTrackAttrs: NewTrackedAttrs, schema: Schema, parent?: NodeType) {
   const updatedChildren: PMNode[] = [];
   for (let i = 0; i < content.childCount; i += 1) {
-    const recursed = recurseNodeContent(content.child(i), newTrackAttrs, schema);
+    const recursed = recurseNodeContent(content.child(i), newTrackAttrs, schema, parent);
     const prev = i > 0 ? updatedChildren[i - 1] : null;
     if (
       prev?.isText &&
@@ -154,17 +133,23 @@ function loopContentAndMergeText(content: Fragment, newTrackAttrs: NewTrackedAtt
   return updatedChildren;
 }
 
-function recurseNodeContent(node: PMNode, newTrackAttrs: NewTrackedAttrs, schema: Schema) {
+function recurseNodeContent(node: PMNode, newTrackAttrs: NewTrackedAttrs, schema: Schema, parent?: NodeType) {
+  const mark = trackedMarkType(newTrackAttrs, schema);
   if (node.isText) {
-    return markInlineNodeChange(node, newTrackAttrs, schema);
+    // Marks and node attrs are the two representations, and a parent admitting
+    // no marks has only the second. Its own stamp already records the whole
+    // subtree, so marking the text here would just build content its type
+    // rejects — invisibly, since create() does not validate.
+    if (!mark || (parent && !parent.allowsMarkType(mark))) return node;
+    return markInlineNodeChange(node, mark, newTrackAttrs, schema);
   } else if (node.isBlock || node.isInline) {
-    const updatedChildren = loopContentAndMergeText(node.content, newTrackAttrs, schema);
+    const entry = addTrackIdIfDoesntExist(newTrackAttrs);
+    const creationId = newTrackAttrs.creationId ?? (newTrackAttrs.operation === CHANGE_OPERATION.insert ? entry.id : undefined);
+    const composed = creationId ? { ...newTrackAttrs, creationId } : newTrackAttrs;
+    const updatedChildren = loopContentAndMergeText(node.content, composed, schema, node.type);
     return node.type.create(
-      { ...node.attrs, dataTracked: [addTrackIdIfDoesntExist(newTrackAttrs)] },
-      // A tracked node insertion already represents the whole subtree. Do not
-      // put inline tracking marks into parents (such as code blocks) whose
-      // schema forbids them; the node-level change remains reviewable.
-      Fragment.fromArray(updatedChildren.map(child => child.mark(node.type.allowedMarks(child.marks)))),
+      { ...node.attrs, dataTracked: [{ ...entry, ...(creationId ? { creationId } : {}) }] },
+      Fragment.fromArray(updatedChildren),
       node.marks,
     );
   }

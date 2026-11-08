@@ -27,7 +27,6 @@ export { isTrackedMark } from "./helpers";
 export { trackChangesPluginKey } from "./engine/trackChangesPlugin";
 export { findChanges } from "./findChanges";
 export { findLiveNodeById, isShadowNode, shadowRanges } from "./liveNode";
-export { MAX_TRACKED_STEPS_PER_TR } from "./engine/transactionProcessing";
 export { applyChanges } from "./applyChanges";
 export { ChangeSet } from "./ChangeSet";
 export {
@@ -40,6 +39,7 @@ export {
 } from "./actions";
 export type { TrackChangesActionParams } from "./actions";
 export { TrackChangesStatus, CHANGE_STATUS, CHANGE_OPERATION } from "./types";
+export type { TrackChangesState } from "./engine/trackChangesPlugin";
 export type {
   TrackChangesOptions,
   TrackedAttrs,
@@ -52,6 +52,9 @@ export type {
   ReferenceChange,
   ChangeStep,
   IncompleteChange,
+  TrackingResult,
+  TrackingRefusal,
+  ListLevel,
 } from "./types";
 
 // Rich (leaf-based) semantic edits → tracked suggestions. The write-side merge
@@ -59,3 +62,18 @@ export type {
 export { applyRichDiffAsSuggestion, pickAgentAttrs } from "./lib/applyRichDiffAsSuggestion";
 export type { RichBlockEdit, RichDiffOptions, RichDiffResult } from "./lib/applyRichDiffAsSuggestion";
 export { clearAuthorPendingMarks } from "./lib/applyDiffAsSuggestion";
+
+export { planChangeReview, changeActs } from "./reviewPlan";
+export { planReview, planReviewIn, reviewChanges } from "./reviewChanges";
+export type {
+  ChangeAct,
+  ReviewPlan,
+  ReviewOutcome,
+  ReviewRefusal,
+  ReviewUnavailable,
+  ReviewPlanResult,
+  ReviewDependency,
+  ReviewDecision,
+  ReviewDecisions,
+} from "./reviewPlan";
+

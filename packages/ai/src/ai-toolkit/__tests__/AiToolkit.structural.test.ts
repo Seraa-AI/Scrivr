@@ -481,22 +481,22 @@ describe("what one batch can ask of tracking", () => {
     expect(ids).toHaveLength(1);
   });
 
-  it("refuses the ops that would pass the engine's step limit", () => {
-    // A move costs two steps, so a long reorder crosses the limit — past it
-    // the engine stops replaying and leaves the document mangled.
+  it("applies a long reorder in full, however many steps it takes", () => {
     const blocks = Array.from({ length: 14 }, (_, i) => para(`p${i}`, `t${i}`));
     const { editor, ai } = build(blocks);
-    const result = ai.applySemanticEdits(
-      Array.from({ length: 12 }, (_, i) => ({
-        kind: "structural" as const, op: "moveBlock" as const,
-        nodeId: `p${i}`, anchorNodeId: "p13", position: "after" as const,
-      })),
-    );
+    const original = textOf(editor);
+    const moves: SemanticEdit[] = Array.from({ length: 12 }, (_, i) => ({
+      kind: "structural", op: "moveBlock", nodeId: `p${i}`, anchorNodeId: "p13", position: "after",
+    }));
+    const result = ai.applySemanticEdits(moves);
 
-    expect(result.changed).toHaveLength(10);
-    expect(result.rejected).toEqual(["p10", "p11"]);
-    editor.commands.setChangeStatuses("accepted", changesOf(editor).map((c) => c.id));
-    // Every block still present exactly once, which over-cap replay does not do.
-    expect(editor.getState().doc.childCount).toBe(14);
+    expect(result.changed).toHaveLength(12);
+    expect(result.rejected).toEqual([]);
+    const accepted = build(blocks);
+    accepted.ai.applySemanticEdits(moves);
+    accepted.editor.commands.setChangeStatuses("accepted", changesOf(accepted.editor).map((c) => c.id));
+    expect(textOf(accepted.editor).split("\n")).toEqual(["t12", "t13", "t11", "t10", "t9", "t8", "t7", "t6", "t5", "t4", "t3", "t2", "t1", "t0"]);
+    editor.commands.setChangeStatuses("rejected", changesOf(editor).map((c) => c.id));
+    expect(textOf(editor)).toBe(original);
   });
 });

@@ -12,6 +12,13 @@ import { planBlockIdAssignments } from "../../model/assignBlockIds";
 export const COLLAB_SYNC_META = "scrivr:collabSync";
 
 /**
+ * Transaction meta for an edit that keeps the document well-formed rather than
+ * changing what it says — nobody authored it. Track changes does not record it
+ * as anyone's suggestion.
+ */
+export const NORMALIZATION_META = "scrivr:normalization";
+
+/**
  * Find the first node with this nodeId that satisfies the optional predicate.
  * Stops at the first accepted match; the caller defines eligibility.
  * Returns the node and its absolute ProseMirror position, or null if not found.
@@ -85,7 +92,7 @@ export const UniqueId = Extension.create({
           // triggering transaction left pending (e.g. bold carried across an
           // Enter split), so restore them.
           tr.setStoredMarks(newState.storedMarks);
-          return tr;
+          return tr.setMeta(NORMALIZATION_META, true);
         },
       }),
     ];

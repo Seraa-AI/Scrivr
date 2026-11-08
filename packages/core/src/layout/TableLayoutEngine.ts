@@ -26,7 +26,7 @@ import { layoutBlock, type LayoutBlock, type CellSubBlock } from "./BlockLayout"
 import type { TextMeasurerLike } from "./TextMeasurer";
 import type { FontConfig } from "./FontConfig";
 import type { FontModifier } from "../extensions/types";
-import type { InlineRegistry } from "./BlockRegistry";
+import { nodeLayout, type InlineRegistry } from "./BlockRegistry";
 import type { LayoutFontResolver } from "../fonts/layoutResolver";
 
 /** Horizontal cell padding (left + right) in CSS px. */
@@ -57,6 +57,22 @@ export interface TableRowLayoutContext {
 
 function columnWidth(columns: number[], index: number): number {
   return columns[index] ?? DEFAULT_COLUMN_WIDTH;
+}
+
+/**
+ * Visit the blocks a cell lays out. A `transparent` node has no box of its own,
+ * so its children take its place, as they do in the body flow.
+ */
+function forEachFlowChild(
+  parent: Node,
+  base: number,
+  visit: (node: Node, nodePos: number) => void,
+): void {
+  parent.forEach((node, offset) => {
+    const nodePos = base + offset;
+    if (nodeLayout(node.type).kind === "transparent") forEachFlowChild(node, nodePos + 1, visit);
+    else visit(node, nodePos);
+  });
 }
 
 /**
@@ -101,8 +117,7 @@ export function layoutTableRowCells(
     // Lay out the cell's child blocks, stacking `y` relative to the row top.
     const blocks: LayoutBlock[] = [];
     let relY = CELL_PADDING_V;
-    cellNode.forEach((childNode, childOffsetInCell) => {
-      const childNodePos = cellPos + 1 + childOffsetInCell;
+    forEachFlowChild(cellNode, cellPos + 1, (childNode, childNodePos) => {
       const childBlock = layoutBlock(childNode, {
         nodePos: childNodePos,
         x: contentX,

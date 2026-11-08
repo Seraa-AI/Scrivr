@@ -1,7 +1,17 @@
 import { describe, it, expect } from "vitest";
 import { doc, p, h, TestEditor, schema } from "./helpers";
 import { CHANGE_OPERATION } from "../types";
-import type { NodeAttrChange, TextChange } from "../types";
+import type { NodeAttrChange, TextChange, TrackedChange } from "../types";
+
+function nodeAttrChange(change: TrackedChange | undefined): NodeAttrChange {
+  if (change?.type !== "node-attr-change") throw new Error(`expected a node-attr-change, got ${change?.type}`);
+  return change;
+}
+
+function textChange(change: TrackedChange | undefined): TextChange {
+  if (change?.type !== "text-change") throw new Error(`expected a text-change, got ${change?.type}`);
+  return change;
+}
 
 // ── Text change detection ──────────────────────────────────────────────────────
 
@@ -93,7 +103,7 @@ describe("findChanges — node-attr-change detection", () => {
     const editor = new TestEditor(doc(p("hello")));
     editor.dispatch(editor.state.tr.setNodeMarkup(0, schema.nodes.heading, { level: 2 }));
 
-    const change = editor.pendingChanges[0]! as NodeAttrChange;
+    const change = nodeAttrChange(editor.pendingChanges[0]);
     // paragraph has no level attr → null
     expect(change.oldAttrs?.level ?? null).toBeNull();
   });
@@ -102,7 +112,7 @@ describe("findChanges — node-attr-change detection", () => {
     const editor = new TestEditor(doc(p("hello")));
     editor.dispatch(editor.state.tr.setNodeMarkup(0, schema.nodes.heading, { level: 2 }));
 
-    const change = editor.pendingChanges[0]! as NodeAttrChange;
+    const change = nodeAttrChange(editor.pendingChanges[0]);
     expect(change.newAttrs?.level).toBe(2);
   });
 
@@ -110,7 +120,7 @@ describe("findChanges — node-attr-change detection", () => {
     const editor = new TestEditor(doc(h(1, "hello")));
     editor.dispatch(editor.state.tr.setNodeMarkup(0, schema.nodes.heading, { level: 2 }));
 
-    const change = editor.pendingChanges[0]! as NodeAttrChange;
+    const change = nodeAttrChange(editor.pendingChanges[0]);
     expect(change.oldAttrs?.level).toBe(1);
     expect(change.newAttrs?.level).toBe(2);
   });
@@ -223,7 +233,7 @@ describe("findChanges — text accumulation across adjacent text nodes", () => {
 
     const change = editor.pendingChanges[0]!;
     expect(change.type).toBe("text-change");
-    expect((change as TextChange).text).toBe("!");
+    expect(textChange(change).text).toBe("!");
   });
 
   it("multiple adjacent inserts from same author merge into one change with full text", () => {
@@ -233,7 +243,7 @@ describe("findChanges — text accumulation across adjacent text nodes", () => {
     editor.insertAt(7, "B");
 
     expect(editor.pendingChanges).toHaveLength(1);
-    const change = editor.pendingChanges[0]! as TextChange;
+    const change = textChange(editor.pendingChanges[0]);
     expect(change.text).toBe("AB");
   });
 });

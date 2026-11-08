@@ -2,11 +2,10 @@ import type { IEditor } from "@scrivr/core";
 import { subscribeViewUpdates, subscribeEditorFocusOutside, isAnchorInsideContainer } from "@scrivr/core";
 
 import { trackChangesPluginKey } from "./engine/trackChangesPlugin";
+import { changeActs } from "./reviewPlan";
 import {
   CHANGE_OPERATION,
   CHANGE_STATUS,
-  NodeAttrChange,
-  MarkChange,
 } from "./types";
 
 export interface ChangePopoverInfo {
@@ -65,6 +64,8 @@ export interface ChangePopoverInfo {
    * destination insertion (or vice-versa). Use this to locate the paired change.
    */
   moveNodeId?: string;
+  /** The move this text is half of, when it was moved rather than written or removed. */
+  moveId?: string;
   /**
    * For move operations: whether this end of the move is the source block
    * (content was cut from here) or the destination (content was pasted here).
@@ -163,9 +164,7 @@ export function createChangePopover(
       return;
     }
 
-    const primaryIsConflict = !!(
-      primary.dataTracked as { isConflict?: boolean }
-    ).isConflict;
+    const primaryIsConflict = !!primary.dataTracked.isConflict;
 
     // When the primary change is flagged as a conflict, collect ALL pending
     // changes that overlap its range — not just those at the cursor.
@@ -212,16 +211,14 @@ export function createChangePopover(
     // When char-level expansion produces many 1-char marks sharing a groupId,
     // we aggregate them here so the popover shows the full replacement text
     // and accept/reject applies to the whole group atomically.
-    const primaryGroupId = (primary.dataTracked as { groupId?: string })
-      .groupId;
+    const primaryGroupId = primary.dataTracked.groupId;
     let groupIds: string[] = [primary.id];
     let replacedText: string | undefined;
     let insertedText: string | undefined;
 
     if (primaryGroupId) {
       const groupChanges = pending.filter(
-        (c) =>
-          (c.dataTracked as { groupId?: string }).groupId === primaryGroupId,
+        (c) => c.dataTracked.groupId === primaryGroupId,
       );
       groupIds = groupChanges.map((c) => c.id);
 
@@ -282,7 +279,7 @@ export function createChangePopover(
     };
 
     const toInfo = (c: typeof primary): ChangePopoverInfo => {
-      const op = c.dataTracked.operation as CHANGE_OPERATION;
+      const op = c.dataTracked.operation;
 
       // ── Change kind ─────────────────────────────────────────────────────────
       const changeKind: ChangePopoverInfo["changeKind"] =
@@ -303,16 +300,15 @@ export function createChangePopover(
       let newAttrs: Record<string, any> | undefined;
       let oldNodeTypeName: string | undefined;
       let newNodeTypeName: string | undefined;
-      if (op === CHANGE_OPERATION.set_node_attributes) {
-        const attrChange = c as NodeAttrChange;
-        oldAttrs = attrChange.oldAttrs;
-        newAttrs = attrChange.newAttrs;
-        oldNodeTypeName = attrChange.oldNodeTypeName;
-        newNodeTypeName = attrChange.newNodeTypeName;
+      if (op === CHANGE_OPERATION.set_node_attributes && c.type === "node-attr-change") {
+        oldAttrs = c.oldAttrs;
+        newAttrs = c.newAttrs;
+        oldNodeTypeName = c.oldNodeTypeName;
+        newNodeTypeName = c.newNodeTypeName;
       }
 
       // ── Move operation fields ────────────────────────────────────────────────
-      const moveNodeId = (c.dataTracked as { moveNodeId?: string }).moveNodeId;
+      const moveNodeId = c.dataTracked.moveNodeId;
       let moveRole: "source" | "destination" | undefined;
       if (moveNodeId) {
         moveRole = op === CHANGE_OPERATION.delete ? "source" : "destination";
@@ -321,7 +317,7 @@ export function createChangePopover(
       // ── Mark change fields ───────────────────────────────────────────────────
       let markName: string | undefined;
       if (c.type === "mark-change") {
-        markName = (c as MarkChange).mark.type.name;
+        markName = c.mark.type.name;
       }
 
       // ── Text preview — kind-aware ────────────────────────────────────────────
@@ -361,11 +357,11 @@ export function createChangePopover(
         id: c.id,
         operation: op,
         authorID: c.dataTracked.authorID ?? "unknown",
-        status: c.dataTracked.status as CHANGE_STATUS,
+        status: c.dataTracked.status,
         from: c.from,
         to: c.to,
         text,
-        isConflict: !!(c.dataTracked as { isConflict?: boolean }).isConflict,
+        isConflict: !!c.dataTracked.isConflict,
         conflictChanges: [],
         groupIds,
         changeKind,
@@ -376,6 +372,7 @@ export function createChangePopover(
         ...(oldNodeTypeName !== undefined ? { oldNodeTypeName } : {}),
         ...(newNodeTypeName !== undefined ? { newNodeTypeName } : {}),
         ...(moveNodeId !== undefined ? { moveNodeId } : {}),
+        ...(c.dataTracked.moveId !== undefined ? { moveId: c.dataTracked.moveId } : {}),
         ...(moveRole !== undefined ? { moveRole } : {}),
         ...(markName !== undefined ? { markName } : {}),
       };
@@ -383,7 +380,10 @@ export function createChangePopover(
 
     const primaryInfo = toInfo(primary);
     primaryInfo.isConflict = isConflict;
-    primaryInfo.conflictChanges = isConflict ? conflictGroup.map(toInfo) : [];
+    // One party per act: a whole-paragraph change is recorded on the node and on
+    // its text, and those are one thing to keep or to discard.
+    const parties = changeActs(conflictGroup).map((act) => act.primary);
+    primaryInfo.conflictChanges = isConflict ? parties.map(toInfo) : [];
 
     // Stable key: use groupId when available (so moving across chars within the
     // same replacement group doesn't re-trigger onShow), or sorted ids for conflicts.

@@ -7,7 +7,7 @@
 import { describe, expect, it } from "vitest";
 import { ServerEditor } from "../../ServerEditor";
 import { StarterKit } from "../StarterKit";
-import { COLLAB_SYNC_META, findNodeById } from "./UniqueId";
+import { COLLAB_SYNC_META, NORMALIZATION_META, findNodeById } from "./UniqueId";
 
 describe("findNodeById", () => {
   it("returns the first accepted match and does not inspect later matches", () => {
@@ -54,6 +54,19 @@ function appendNullIdParagraph(ed: ServerEditor, text: string, remote: boolean):
   if (remote) tr = tr.setMeta(COLLAB_SYNC_META, true);
   ed.applyTransaction(tr);
 }
+
+describe("UniqueId — stamping is housekeeping", () => {
+  it("marks the ids it stamps as an edit nobody authored", () => {
+    const ed = editor();
+    const state = ed.getState();
+    const para = ed.schema.node("paragraph", null, [ed.schema.text("new")]);
+    const { transactions } = state.applyTransaction(state.tr.insert(state.doc.content.size, para));
+    const stamped = transactions.slice(1);
+
+    expect(stamped.length).toBeGreaterThan(0);
+    expect(stamped.every(tr => tr.getMeta(NORMALIZATION_META))).toBe(true);
+  });
+});
 
 describe("UniqueId — collab-safe stamping", () => {
   it("stamps a new block on a LOCAL edit", () => {
