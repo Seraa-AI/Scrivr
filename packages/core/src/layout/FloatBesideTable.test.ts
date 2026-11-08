@@ -624,8 +624,9 @@ describe("float beside a table — the table moves below the float", () => {
     });
 
     // Each float's own wrap grows the paragraph above it, which moves its
-    // anchor: no fixed point. Each is locked where it was placed, so it sits
-    // at most one displaced paragraph above its anchor, with no text under it.
+    // anchor: no fixed point. Each locks where it stood when its placement
+    // first repeated, so it sits within the paragraph above's height of
+    // `anchor + yOffset`, with no text under it.
     it("30: floats with no fixed point lock in place without dragging later ones", () => {
       const l = expectStable(docOf(...Array.from({ length: 6 }, (_, i) => para(`P${i} ${words(25)}`,
         image({ wrapMode: "square", xAlign: i % 2 ? "left" : "right", width: 120, height: 30, yOffset: -40 })))));
@@ -637,8 +638,7 @@ describe("float beside a table — the table moves below the float", () => {
         const anchor = must(blocks[anchorIndex], "anchor");
         const above = blocks[anchorIndex - 1];
         if (f.clamped) return;
-        expect(f.y).toBeLessThanOrEqual(anchor.y - 40 + 1e-6);
-        expect(f.y).toBeGreaterThanOrEqual(anchor.y - 40 - (above?.height ?? 0));
+        expect(Math.abs(f.y - (anchor.y - 40))).toBeLessThanOrEqual(above?.height ?? 0);
       });
     });
 
@@ -830,6 +830,86 @@ describe("float beside a table — the table moves below the float", () => {
         table("T", 4),
         para("A2", image({ wrapMode: "top-bottom", xAlign: "left", width: 200, height: 250 })),
         para(`A3 ${words(40)}`, image({ wrapMode: "top-bottom", xAlign: "left", width: 200, height: 150, yOffset: -120 })),
+      ));
+      expect(textUnderFloats(l)).toEqual([]);
+      expectFloatsOnAnchorPages(l);
+    });
+
+    it("42: a locked float anchored after a table still lets it clear a float anchored before it (seed 367)", () => {
+      const l = expectStable(docOf(
+        sized("P0", 57),
+        sized("P1", 97, image({ wrapMode: "square", width: 69, height: 215, yOffset: -5000 })),
+        table("T1", 3),
+        sized("P2", 87),
+        sized("P3", 137, image({ wrapMode: "top-bottom", width: 258, height: 166, yOffset: 60 })),
+        sized("P4", 272, image({ wrapMode: "top-bottom", width: 245, height: 83, yOffset: -100 })),
+        sized("P5", 97, image({ wrapMode: "square", xAlign: "left", width: 209, height: 150, yOffset: -5000 })),
+        sized("P6", 12), sized("P7", 292), table("T0", 4),
+      ));
+      const before = floatOf(l, 0);
+      for (const row of rowsOf(l, "T1")) expect(overlaps(row, before)).toBe(false);
+      expectFloatsOnAnchorPages(l);
+    });
+
+    it("44: a paragraph that runs onto the next page keeps its wrap on the first (seed 153)", () => {
+      const l = expectStable(docOf(
+        table("T0", 3),
+        sized("P0", 247, image({ wrapMode: "square", xAlign: "left", width: 170, height: 81, yOffset: -5000 })),
+        table("T1", 3),
+        sized("P1", 92, image({ wrapMode: "top-bottom", xAlign: "left", width: 233, height: 207, yOffset: 200 })),
+        sized("P2", 262), sized("P3", 12), sized("P4", 297), sized("P5", 247),
+        sized("P6", 332, image({ wrapMode: "square", width: 104, height: 81, yOffset: 200 })),
+        sized("P7", 67),
+        sized("P8", 87, image({ wrapMode: "square", width: 223, height: 206, yOffset: -5000 })),
+      ));
+      expect(textUnderFloats(l)).toEqual([]);
+    });
+
+    it("45: a table carried onto the next page is cleared against the floats of the page it would return to (seed 50)", () => {
+      const l = expectStable(docOf(
+        sized("P0", 357, image({ wrapMode: "square", xAlign: "left", width: 97, height: 38, yOffset: 200 })),
+        sized("P1", 287), table("T0", 4),
+        sized("P3", 192, image({ wrapMode: "square", width: 106, height: 98, yOffset: 200 })),
+        sized("P4", 107, image({ wrapMode: "square", xAlign: "left", width: 64, height: 88, yOffset: 400 })),
+        sized("P5", 212), table("T1", 5),
+        sized("P7", 257, image({ wrapMode: "square", width: 146, height: 191, yOffset: 400 })),
+        sized("P8", 287), sized("P9", 247),
+      ));
+      for (const f of l.anchoredObjects ?? []) {
+        for (const row of [...rowsOf(l, "T0"), ...rowsOf(l, "T1")]) expect(overlaps(row, f)).toBe(false);
+      }
+      expect(textUnderFloats(l)).toEqual([]);
+    });
+
+    it("46: a float stacks below a later float that locked in its way (seed 200)", () => {
+      const l = expectStable(docOf(
+        sized("P0", 87),
+        sized("P1", 92, image({ wrapMode: "square", width: 75, height: 72 })),
+        sized("P2", 147),
+        sized("P3", 312, image({ wrapMode: "square", xAlign: "left", width: 239, height: 166, yOffset: -100 })),
+        sized("P4", 362, image({ wrapMode: "square", xAlign: "left", width: 107, height: 121, yOffset: 60 })),
+        sized("P5", 287), table("T0", 4),
+        sized("P7", 262, image({ wrapMode: "top-bottom", width: 98, height: 200, yOffset: -5000 })),
+        table("T1", 2), sized("P9", 272),
+      ));
+      const placed = l.anchoredObjects ?? [];
+      for (const a of placed) for (const b of placed) {
+        if (a !== b && a.wrapMode === "square" && b.wrapMode === "square") expect(floatsOverlap(a, b)).toBe(false);
+      }
+      expect(textUnderFloats(l)).toEqual([]);
+    });
+
+    it("43: a float whose anchor flips between pages locks on the later page (seed 103)", () => {
+      const l = expectStable(docOf(
+        sized("P0", 172, image({ wrapMode: "square", width: 239, height: 187, yOffset: -100 })),
+        para("P1 word"),
+        sized("P2", 202, image({ wrapMode: "top-bottom", width: 210, height: 115 })),
+        table("T0", 4), table("T1", 4),
+        sized("P5", 67),
+        sized("P6", 37, image({ wrapMode: "top-bottom", xAlign: "left", width: 126, height: 108, yOffset: 60 })),
+        sized("P7", 87),
+        sized("P8", 42, image({ wrapMode: "top-bottom", width: 127, height: 130, yOffset: -100 })),
+        sized("P9", 217), sized("P10", 138),
       ));
       expect(textUnderFloats(l)).toEqual([]);
       expectFloatsOnAnchorPages(l);
