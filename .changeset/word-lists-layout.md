@@ -24,6 +24,12 @@ Lists lay out, print and export like Word's.
   line to the next tab stop, as Word's tab after the number does; with no stop
   left on the line, the text follows the number after a space and is never
   drawn over it. Existing lists move a quarter inch to the right.
+- **Lists inside table cells are drawn.** A list in a cell (pasting one
+  there makes one) used to lay out as one empty line, its text never painted
+  on canvas or in PDF. A cell now lays out its blocks as the page body does:
+  numbered, nested and indented, and a table nested in a cell shows its rows.
+  A block that holds other blocks but is not a list or a table — a custom
+  container, say — lays out the blocks it holds instead of one empty line.
 - **No block is indented past an inch from the right margin.** Any block's
   indent — a deeply nested list, or a paragraph's own `indent` — leaves at
   least an inch of the line for its text.
@@ -38,14 +44,17 @@ Lists lay out, print and export like Word's.
   second- or third-level bullet no longer prints as `?` with a standard PDF
   font. Numbers are drawn in the face and size of the item's first text, past
   any image that opens the line, on the canvas and in the PDF. Lists in
-  headers and footers draw their numbers again.
+  headers and footers draw their numbers again. In the PDF a block's number
+  is drawn once, after its handler, so a custom PDF handler that never calls
+  `draw.lines` keeps it.
 - **DOCX levels match the screen.** Numbering has nine levels with the same
   formats, glyphs and indents the editor draws; an item's further blocks
   export as Word's unnumbered continuation paragraphs, a table in an item with
   `w:tblInd` and a width that fits the rest of the column, and a sourced block
-  indented with them; list properties are written in schema order. Not yet: every ordered list still shares one numbering
-  instance and `order` is not exported, so in Word separate ordered lists
-  continue each other's numbering.
+  indented with them; list properties are written in schema order. Not yet:
+  every ordered list still shares one numbering instance and `order` is not
+  exported, so in Word separate ordered lists continue each other's
+  numbering.
 
 **API changes**
 
@@ -66,7 +75,8 @@ Lists lay out, print and export like Word's.
 - `BlockLayoutOptions.firstLineOffset` (new) adds to a node's own
   `textIndent` on the first line; `BlockLayoutOptions.keepAnchorLine` (new)
   keeps a line for a paragraph holding only floating images' anchors.
-- `DocxContext.textWidthTwips` (new): the width of the exported section's
-  text column.
+- `DocxContext.textWidthTwips` (new, required): the width of the exported
+  section's text column. Code that builds a `DocxContext` by hand must now
+  set it; contexts from `@scrivr/docx` have it.
 - `DocxNumberingLevel.format` accepts `"lowerLetter"` and `"lowerRoman"`, and
   takes optional `left` / `hanging` indents in twips.

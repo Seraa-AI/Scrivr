@@ -419,7 +419,7 @@ listed here; L1 indents it — see What shipped.)
 
 | PR | Contents | Scenarios | Gate |
 |---|---|---|---|
-| **L1** | `model/lists.ts` (`isListType`, `listKind`, levels, `listMarker`); the six call sites switch; `collectLayoutItems` recursion; left-aligned markers and Word's tab rule for wide numbers; marker shapes on canvas and in PDF; DOCX levels, continuation indents and schema order (brought forward from L3) | 1, 2 (drawn), 4, 6, 7, 8, 9, and 10's levels and continuation indents | Core, plugins, PDF and DOCX suites green; incremental and streamed layout agree with a fresh layout |
+| **L1** | `model/lists.ts` (`isListType`, `listKind`, levels, `listMarker`); the six call sites switch; `collectLayoutItems` recursion; left-aligned markers and Word's tab rule for wide numbers; marker shapes on canvas and in PDF; DOCX levels, continuation indents and schema order (brought forward from L3) | 1, 2 (drawn), 4, 6, 7, 8, 9, and 10's levels and continuation indents | Core, plugins, PDF and DOCX suites green; incremental and streamed layout agree with a fresh layout; **the float re-break fix has landed (after W1) and turned its `it.fails` tests green** |
 | **L2** | `deleteAndMergeSplitNodes` gap classification; Tab refusal at level 8 and first-item consumption | 2 (keys), 3, 5, 13, 14, 15 | `trackedGestures` contract holds for the new rows |
 | **L3** | `numbering.getOrCreate` `instance` / `start` and the abstract/num split, so separate lists restart in Word; import per-level kind, start, resumed `order`, continuation, `numId` 0; paste `aria-level` and markdown | 6 and 7 (DOCX), 10 (round trip), 11, 12 | Fidelity report: list counts change only where intended; round trip of the 13 list fixtures |
 
@@ -429,8 +429,10 @@ scenarios need nested items drawn. L3 last; it touches `packages/docx` and
 merges it in.
 
 W1 also edits `PageLayout.ts` (`reflowFlowsAgainstExclusions`). L1 carries one
-fix in that function, the wide number's first-line push on the float re-break
-paths; it waits for W1 to land on `main` and is made in the merged code.
+fix in that function: forwarding a block's first-line settings (a wide
+number's push, and the line a float-only first paragraph keeps) on the float
+re-break paths. It waits for W1 to land on `main` and is made in the merged
+code. **L1 does not merge until that fix is in and its `it.fails` tests pass.**
 
 ## Risks
 
@@ -446,12 +448,14 @@ paths; it waits for W1 to land on `main` and is made in the merged code.
   never saw. That is correct, and it may surprise.
 - **First-line settings beside a float.** A wide number's push, and the line
   a float-only first paragraph keeps for its number, are lost on the paths
-  that re-break lines against a float; see "Not shipped yet" below.
+  that re-break lines against a float. This blocks the L1 merge; see "Not
+  shipped yet" below.
 - **A painter that skips `paintBlock` drops list numbers.** Core no longer
   draws markers through a block strategy, so a surface that loops over blocks
   and calls strategies itself paints no numbers. Every surface in the
-  repository goes through `paintBlock`; pages, pageless tiles and header and
-  footer bands each have a test that a list's numbers reach them.
+  repository goes through `paintBlock`; pages, pageless tiles, table cells
+  and header and footer bands each have a test that a list's numbers are
+  drawn on them.
 - **Google Docs clipboard shape** is undocumented and changes. The captured
   fixture pins one version.
 - **Word's paragraph-mark rule.** In Word, the paragraph that survives a join
@@ -503,6 +507,8 @@ section is what is true.
   number to the item's next block, which is removed with `LayoutItem.listItemPos`
   and its streamed replay; with it go the cases where a handed-on number was
   lost on a table row or a nested list, or drawn on a code block.
+- **D7 — New API approved** (user, 2026-11-08): `paintBlock`,
+  `DocxContext.textWidthTwips` and `BlockLayoutOptions.keepAnchorLine`.
 
 ### Where the code differs from the design above
 
@@ -550,7 +556,9 @@ section is what is true.
   marker keeps its own `blockType`. `ListItemStrategy`, which existed only to
   draw markers on blocks relabelled `list_item`, is removed; a header list lost
   its numbers on canvas until the band loops went through `paintBlock` too.
-  The PDF draws the marker in `drawLines`, for every block that has one.
+  The PDF does the same in its one block route (`renderBlocks`): it draws the
+  marker after the block's handler, so a handler that never calls
+  `draw.lines` keeps its number.
 - **NEW: `MeasureCacheEntry.listMarker`, `BlockLayoutOptions.firstLineOffset`
   and `BlockLayoutOptions.keepAnchorLine`.** A marker draws on its block, can
   move its first line, and keeps a line for an anchor-only first paragraph, so
@@ -563,7 +571,7 @@ section is what is true.
   replaces every node once and so hides the stale tail. The tests type a word
   first, then press the keys.
 - **A list's start is kept within 0–32767**, in layout, copied HTML,
-  markdown and the ordered-list input rule alike (all read `listStart`). The
+  and markdown alike (all read `listStart`). The
   schema's `ST_DecimalNumber` allows any integer, and no published Word limit
   for `w:start` was found. 32767 is Word's documented cap for the nearest
   equivalent, the line-numbering start (MS-OI29500, Part 1 §17.6.8). Without a
@@ -585,6 +593,22 @@ section is what is true.
   from the section the exporter writes.
 - **A sourced block in a list item is indented to the item's text** in DOCX
   too: the item descends into the content control (`w:sdt` / `w:sdtContent`).
+- **Lists inside table cells are laid out.** A cell's content is `block+`, so
+  it can hold a list (pasting one into a cell makes one), but cells laid each
+  child out with `layoutBlock` directly: the list became one empty line and its
+  text was never painted, on canvas or in PDF (already so on `main`). The body
+  and every cell now collect their blocks through one walk
+  (`layout/layoutItems.ts`: `collectChildItems`) and measure them through
+  `layoutBlockWithMarker`, so a list in a cell is numbered, nested and indented
+  as in the body, and a table nested in a cell lays out its rows. DOCX already
+  numbered lists in cells.
+- **A block that holds blocks is laid out through its blocks.** A container
+  that is neither a list nor a table — such as a custom `(listItem |
+  paragraph)+` node, no longer a list since `isListType` tightened — has no
+  lines of its own, so its blocks are laid out in its place, as a transparent
+  node's are; before, it painted as one empty line. A transparent or
+  container first block of an item passes the item's number to its own first
+  block only.
 - **DOCX paragraph and table properties are written in schema order.** One
   ordered insert per properties element (`CT_PPrBase` / `CT_PPr`,
   `CT_TblPrBase` / `CT_TblPr`) places `w:numPr`, `w:ind` and `w:tblInd`.
@@ -593,15 +617,22 @@ section is what is true.
   requires the same result as one pass, rather than adding fixtures to the
   general streaming tests in `PageLayout.test.ts`.
 
-### Not shipped yet
+### Not shipped yet — blocks the L1 merge
 
-- **First-line settings beside a float.** `reflowFlowsAgainstExclusions` and
-  `rebreakWrappedLinesWithoutExclusions` re-break lines without the
-  measurement's first-line settings. Beside a float, or after a wrapped block
-  moves page, a pushed number is drawn over its first word; and the float's
-  own exclusion pass re-lays a list item's anchor-only first paragraph without
-  `keepAnchorLine`, so its line collapses and its number sits on the next
-  item's line. The fix gives these settings one owner on the measured entry and
-  forwards them on every re-break path; it waits for W1, which rewrites
-  `reflowFlowsAgainstExclusions`, to land on `main`. The collapsed line is
-  pinned by an `it.fails` test in `listLayout.test.ts`.
+- **First-line settings beside a float.** `reflowFlowsAgainstExclusions`
+  re-lays a block beside a float without the measurement's first-line
+  settings. A wide number's push is lost, so the text starts under the number
+  (pinned: "moves the first line past a wide number beside a float too"). A
+  list item's float-only first paragraph loses `keepAnchorLine` in the float's
+  own exclusion pass, so its line collapses: the number is drawn at the line's
+  top edge, about one ascent above where its line would sit — in the top
+  margin when the item is first on a page — and in the fallback face, since
+  the collapsed line holds no text (pinned: "keeps the image's paragraph a line
+  for its number", and the PDF position test in `listFloatMarkers.test.ts`).
+  `rebreakWrappedLinesWithoutExclusions` drops the same settings when a wrapped
+  block moves page; probing could not reach it with a list item, because the
+  float travels with its anchor onto the item's page. The fix gives these
+  settings one owner on the measured entry and forwards them on every
+  re-break path. It waits for W1, which rewrites
+  `reflowFlowsAgainstExclusions`, to land on `main`. **L1 does not merge until
+  that fix is in and the three `it.fails` tests pass.**
