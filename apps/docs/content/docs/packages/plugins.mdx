@@ -180,8 +180,11 @@ Without track changes the two return the same node.
 The AI toolkit reads with `findLiveNodeById`, so the copy a pending move leaves
 behind is left out of `getRichBlocks`: an agent reads one unit per id, the live
 one. A block proposed for deletion has no live copy, so it stays in
-`getRichBlocks`. It reads `text: ""`, with its deletion in `changes`, and it
-cannot be edited (an edit to it comes back `rejected`). Block markers and
+`getRichBlocks`. It reads `text: ""` and `proposedForDeletion: true`, with its
+deletion in `changes`, and it cannot be edited (an edit to it comes back
+`rejected`). A split or a list Enter can leave it sharing its id with a live
+block; `applyRichEdit` matches each unit handed back with the copy it was
+read as. Block markers and
 citations still reach it, since it is on screen, struck through, until someone
 decides it.
 
@@ -212,7 +215,7 @@ says where it sits:
 | `authorId`, `createdAt` | Whose, and when |
 | `groupId` / `moveId` | Which kind of pair it belongs to: a replacement (`groupId`) or a move (`moveId`) |
 | `oldAttrs` | For `suggestedAttrs`, what it was: a block's former styling (`{ nodeType: "paragraph" }`, `{ level: 1 }`), a list change's lists (`{ list: ["bulletList"] }`, `[]` for none), or a formatting change's marks (`{ marks: [{ type: "italic" }] }`) |
-| `image` | The image an inserted or deleted image is |
+| `image` | The image an inserted or deleted image is; an act that adds or removes several images lists one change per image, under its id |
 
 An agent decides changes by those ids. A replacement or a move lists two
 changes with one id; that id decides both:

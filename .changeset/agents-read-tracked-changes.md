@@ -13,6 +13,10 @@ Agents read pending tracked changes and can review them.
   `reviewChanges`, shared by every piece of the act.
 - `SemanticPart` gains `changes`. `UnitRichInput.changes` and
   `SemanticPartRichInput.changes` carry them into the rich hashes.
+- `SemanticUnit` and `SemanticPart` gain `proposedForDeletion: true` when the
+  block itself — not only its text — is proposed for deletion. Such a unit
+  cannot be edited (`applyRichEdit` rejects it) or placed after.
+- `@scrivr/export-semantic` re-exports `SemanticImage` and `SemanticPart`.
 - `SemanticHandlers` gains `nodeChanges`, which runs for every node, text
   included: it reports records on a block's own attrs and on a text node's
   formatting marks, returning `SemanticNodeChange[]` (exported from
@@ -28,8 +32,14 @@ Agents read pending tracked changes and can review them.
   block insertions and deletions, paragraph joins and splits, heading, list and
   formatting changes, wrapped and structurally moved nodes, table rows and
   moves. An act reads as one change per type: a replacement or a move is its
-  two halves under one id, and a formatting change over text with different
-  prior marks is one change per run, each under the act's id.
+  two halves under one id, a formatting change over text with different
+  prior marks is one change per run, and each image an act adds or removes is
+  a change of its own — all under the act's id. An insertion reads what
+  remains of it in the proposed text. Text whose deletion is already decided
+  stays in the proposed text, as `proposedForDeletion` reads it.
+- A tracked record naming an operation the engine does not know — including
+  one like `"toString"` from a synced document — is read as an unknown
+  operation instead of breaking `findChanges`.
 - `ai.reviewChanges(decisions)` accepts or rejects changes by the ids an agent
   read, returning the `ReviewOutcome` type from `@scrivr/plugins`. It is a
   pass-through to `reviewChanges`, so the host's `canAcceptReject` still

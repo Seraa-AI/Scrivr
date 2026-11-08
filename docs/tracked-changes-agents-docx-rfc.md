@@ -768,10 +768,27 @@ The user approved these on 2026-11-08:
 - `SemanticChange.image`.
 - The `semanticImage` export from `@scrivr/core`.
 
-Added in the second review round, after that approval:
-`SemanticHandlers.isMarkRemoved` (a formatting mark proposed for removal has no
-other way off the spans) and `moveShadowRanges` from `@scrivr/plugins` (the
-move records, not duplicated ids, say what is a move's left-behind copy).
+The user also approved, on 2026-11-08, two added in the second review round:
+
+- `SemanticHandlers.isMarkRemoved` — a formatting mark proposed for removal
+  has no other way off the spans.
+- The `moveShadowRanges` export from `@scrivr/plugins` — the move records, not
+  duplicated ids, say what is a move's left-behind copy. It shares one cached
+  walk with `shadowRanges`.
+
+NEW in the third review round, awaiting the user's approval:
+
+- **`SemanticUnit.proposedForDeletion` and `SemanticPart.proposedForDeletion`**
+  (`true` when present). Whether a block itself is proposed for deletion — not
+  only its text — is the engine's fact (`proposedForDeletion` in
+  `track-changes/helpers.ts`, surfaced as `isRemoved`), and nothing on a unit
+  carried it. A reader that guessed it from `text` and `changes` got it wrong
+  both ways: a live paragraph whose words are all struck read as deleted, and a
+  deleted one holding another author's insertion read as live. The walker sets
+  it from `ctx.isRemoved`; `applyRichEdit` rejects an edit to such a unit, and
+  the playground stops placing blocks after one.
+- `@scrivr/export-semantic` re-exports `SemanticImage` and `SemanticPart`
+  (types already public from core).
 
 ### Where PR A differs from the design above
 
@@ -796,11 +813,24 @@ move records, not duplicated ids, say what is a move's left-behind copy).
   `SemanticNodeChange`, the `{ change, place }` pair, is exported from
   `@scrivr/core` and `@scrivr/export-semantic`.
 - **`SemanticChange.image`** says which image an inserted or deleted image is,
-  reusing `SemanticImage`. A deleted image's unit still reads as a paragraph:
-  the image is no longer in the proposed view, so the paragraph no longer is
-  one.
-- **Decided records are not reported**, and malformed record fields are left
-  out rather than passed on.
+  reusing `SemanticImage`. Each image an act adds or removes is a change of its
+  own under the act's id — chosen over widening the field to a list, which would
+  change an approved field's type and make one change carry several objects. A
+  deleted image's unit still reads as a paragraph: the image is no longer in
+  the proposed view, so the paragraph no longer is one.
+- **An insertion reads what remains of it** in the proposed text; a part
+  another author proposed deleting is left out of its `text`.
+- **Decided records are not reported.** Text whose deletion is already decided
+  stays in the proposed text, as `proposedForDeletion` reads it. Malformed
+  record fields are left out rather than passed on; a former node type that
+  cannot stand in for the block falls back to the block's own.
+- **A formatting change's `oldAttrs.marks` is the text's marks before any
+  pending formatting change on it**, so a mark both added and proposed for
+  removal reads absent in both the spans and `oldAttrs`.
+- **Units handed back to `applyRichEdit` are matched by the copy of their id**
+  they were read as: a split or a list Enter leaves two blocks with one id.
+- **`findChanges` looks operations up in a map**, so a synced record naming
+  `"toString"` is an unknown operation rather than a crash on load.
 
 ### Not shipped in PR A
 
