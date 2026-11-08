@@ -411,9 +411,9 @@ where marked, through PDF and DOCX.
 | 14 | Tracked Tab | Recorded as one `list_change`; Reject un-nests; Accept keeps it; the nested item is drawn throughout | L2 |
 | 15 | Undo | Tab, Shift-Tab, Backspace, a tracked cross-boundary delete and its Accept are each one undo step | L2 |
 
-Pinned as known gaps, with tests that state today's behaviour: a table inside a
-list item does not indent; numbering through paragraph styles is not imported;
-Backspace on a continuation block joins rather than outdents.
+Known gaps: numbering through paragraph styles is not imported; Backspace on a
+continuation block joins rather than outdents. (A table inside a list item was
+listed here; L1 indents it — see What shipped.)
 
 ## PR slices, in order
 
@@ -474,25 +474,59 @@ section is what is true.
 
 | PR | Landed | What it changed |
 |---|---|---|
-| **L1** | `feat/word-lists` (not yet merged) | `model/lists.ts` owns what a list is (`isListType`, `listKind`, `listStart`), the nine-level table (`LIST_LEVELS`, `listLevel`, `LIST_MARKER_HANGING`) and markers (`listMarker`, `bulletShape`, `bulletBox`); the six call sites ask it. `collectLayoutItems` lays out every block of an item at its level's indent, with the marker on the first block only. D5 geometry. Bullets drawn as shapes on canvas and in PDF. Scenarios 1, 2 (drawn), 4, 6 and 7 (screen), 8, 9 green; scenario 5's continuation block is drawn |
+| **L1** | `feat/word-lists` (not yet merged) | `model/lists.ts` owns what a list is (`isListType`, `listKind`, `listStart`), the nine levels (`listLevel`) and markers (`listMarker`, `bulletShape`, `bulletBox`, `listMarkerFont`); the six call sites ask it. `collectLayoutItems` lays out every block of an item at its level's indent; the marker goes on the item's first visible line. D5 geometry, with Word's push of a wide number's first line to the next tab stop. Bullets drawn as shapes on canvas and in PDF. DOCX export brought forward from L3: nine levels with the drawn formats, glyphs and indents, and continuation paragraphs. Scenarios 1, 2 (drawn), 4, 6 and 7 (screen), 8, 9 green; scenario 5's continuation block is drawn |
 | **L2** | — | Not built |
-| **L3** | — | Not built |
+| **L3** | — | Not built. Its export half is now only a `numId` per list and `start` (`w:startOverride`); the per-level formats, nine levels and continuation `w:ind` shipped in L1 |
 
 ### Where the code differs from the design above
 
+- **The level table is not exported, and its type changed.** §2's
+  `ListLevel` is `ListLevelStyle`, because track changes already has a
+  `ListLevel`. Its `ordered.text` is gone (the marker text is
+  `listMarker`'s, and DOCX writes `%n.`), and so is `hanging`: every level
+  hangs by the one constant `LIST_MARKER_HANGING`. `listLevel(depth)` builds a
+  level from the depth instead of indexing a table, so nothing outside can
+  change it. `@scrivr/core` exports only `isListType`, `bulletShape`,
+  `bulletBox` (with its `BulletBox` type) and `listMarkerFont`, the pieces
+  another package reads.
 - **No new `LayoutBlock` field for the bullet shape.** §4 proposed carrying the
   shape beside `listMarker`. The shape is a function of the glyph, which comes
   only from the level table, so canvas and PDF both read it with
   `bulletShape(listMarker)`. A marker that is not one of the table's glyphs is
   drawn as text, as before.
 - **The canvas draws bullets as shapes too**, not glyphs. Both surfaces draw
-  from `bulletBox`, so screen and PDF match whatever font the line uses.
-- **A number too wide for the hanging moves left, not the text right.** §3
-  proposed pushing the first line through the `textIndent` path. Moving the
-  marker keeps it clear of the text without touching line breaking or the
-  measure cache. Word moves the text instead; this differs only for numbers
-  wider than about a quarter inch (`1000.`, `xviii.`).
+  from `bulletBox` at the size `listMarkerFont` gives, so screen and PDF match
+  whatever font the line uses.
+- **NEW: `LayoutItem.listItemPos`.** Whether a block shows a line is known
+  only after it is measured, so the flow stage needs to know which blocks share
+  an item to hand a marker from a float-only first block to the item's next
+  block. A streamed chunk that starts part-way through an item replays the
+  hand-off over the item's earlier blocks.
+- **NEW: `MeasureCacheEntry.listMarker` and `BlockLayoutOptions.firstLineOffset`.**
+  A marker draws on its block and can move its first line, so it is part of
+  what a cached measurement describes: a renumbered item is a cache miss.
+  Without it, incremental layout reused blocks from the previous layout with
+  their old numbers (Tab, Shift-Tab and joins showed stale or duplicate
+  numbers while the PDF, laid out fresh, did not). `firstLineOffset` adds to a
+  node's own `textIndent` for a wide number.
+- **A list's start is kept within 0–32767.** The schema's `ST_DecimalNumber`
+  allows any integer, and no published Word limit for `w:start` was found.
+  32767 is Word's documented cap for the nearest equivalent, the line-numbering
+  start (MS-OI29500, Part 1 §17.6.8). Without a cap, a pasted or synced
+  `start=2147483647` built a marker 82 million characters long.
+- **An indent never leaves less than an inch of text.** At depth 8 the text
+  indent is 4.5in, more than an A5 page's text width. Word's behaviour when an
+  indent exceeds the text width is not documented, and Word cannot be run here
+  to see it. Layout bounds every block's indent at the content width less one
+  inch, list or not; deeper levels on a narrow page share that edge.
+- **A table in a list item is indented with the item.** Its columns keep
+  their grid widths, so a table as wide as the page runs past the right margin
+  by the indent, as it does in Word.
 - **PDF op-log baselines did not move.** The baselines are built from
   hand-written layouts, not from the layout pipeline, so the geometry change
-  does not reach them. The new `listMarkers.test.ts` covers the PDF markers,
-  and the op recorder now records `drawEllipse`.
+  does not reach them. `listMarkers.test.ts` covers the PDF markers, and the op
+  recorder now records `drawEllipse`.
+- **The nested-list streaming check lives with the list tests.**
+  `listLayout.test.ts` lays nested lists out in chunks of 1, 2, 3 and 5 blocks
+  and requires the same result as one pass, rather than adding fixtures to the
+  general streaming tests in `PageLayout.test.ts`.
