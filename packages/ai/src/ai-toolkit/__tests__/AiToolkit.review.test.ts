@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { ServerEditor, StarterKit } from "@scrivr/core";
 import type { SemanticUnit } from "@scrivr/core";
 import { TrackChanges, TrackChangesStatus, trackChangesPluginKey } from "@scrivr/plugins";
-import { AiToolkit, getAiToolkit } from "../../index";
+import { AiToolkit, getAiToolkit, unitRichHash } from "../../index";
 
 type DocNode = Record<string, unknown>;
 
@@ -164,6 +164,67 @@ describe("an agent sees structural changes", () => {
     }));
     expect(units[0]?.cells?.rows[0]?.cells[0]?.text).toBe("NEW a1");
     expect(ai.applyRichEdit(units)).toEqual({ applied: false, changed: [], stale: [], notFound: [], rejected: [] });
+  });
+});
+
+describe("an agent's edit lands on the block it read", () => {
+  const rewrite = (unit: SemanticUnit, text: string): SemanticUnit => ({ ...unit, text, spans: [{ text, marks: [] }] });
+  const acceptAll = (editor: ServerEditor, ai: ReturnType<typeof build>["ai"]) =>
+    ai.reviewChanges({ accepted: (trackChangesPluginKey.getState(editor.getState())?.changeSet.pending ?? []).map((c) => c.id), rejected: [] });
+
+  it("after a split is accepted, rewriting the second block leaves the first alone", () => {
+    const { editor, ai } = build([para("a", "Alpha Beta")]);
+    editor.applyTransaction(editor.getState().tr.split(7));
+    acceptAll(editor, ai);
+    const [first, second] = ai.getRichBlocks();
+    if (!first || !second) throw new Error("two blocks");
+    expect(ai.applyRichEdit([first, rewrite(second, "Gamma")]).changed).toEqual([second.id]);
+    expect(ai.getRichBlocks().map((u) => u.text)).toEqual(["Alpha ", "Gamma"]);
+  });
+
+  it("an edit pinned to the second block's hash is checked against, and written to, that block", () => {
+    const { editor, ai } = build([para("a", "Alpha Beta")]);
+    editor.applyTransaction(editor.getState().tr.split(7));
+    acceptAll(editor, ai);
+    const second = ai.getRichBlocks()[1];
+    if (!second) throw new Error("two blocks");
+    const result = ai.applyRichEdit([{ nodeId: second.id, spans: [{ text: "Delta", marks: [] }], expectedContentHash: unitRichHash(second) }]);
+    expect(result.stale).toEqual([]);
+    expect(ai.getRichBlocks().map((u) => u.text)).toEqual(["Alpha ", "Delta"]);
+  });
+
+  it("a caption written under the paragraph split off an image goes there, not onto the image", () => {
+    const { editor, ai } = build([{ type: "paragraph", attrs: { nodeId: "fig" }, content: [{ type: "image", attrs: { src: "https://example.com/a.png", alt: "A" } }] }]);
+    editor.applyTransaction(editor.getState().tr.split(2));
+    acceptAll(editor, ai);
+    const [image, caption] = ai.getRichBlocks();
+    if (!image || !caption) throw new Error("two blocks");
+    expect(image.type).toBe("image");
+    expect(ai.applyRichEdit([{ nodeId: caption.id, spans: [{ text: "Caption", marks: [] }] }]).changed).toEqual([caption.id]);
+    expect(ai.getRichBlocks().map((u) => [u.type, u.text])).toEqual([["image", ""], ["paragraph", "Caption"]]);
+  });
+
+  it("in a document saved with a deleted and a live copy of one id, handing back only the live one edits it", () => {
+    const { editor, ai } = build([para("p", "Alpha"), para("p", "Beta")]);
+    editor.applyTransaction(editor.getState().tr.delete(0, editor.getState().doc.child(0).nodeSize));
+    const live = ai.getRichBlocks()[1];
+    if (!live) throw new Error("two units");
+    expect(ai.applyRichEdit([rewrite(live, "Gamma")]).changed).toEqual(["p"]);
+    expect(ai.getRichBlocks().map((u) => u.text)).toEqual(["", "Gamma"]);
+  });
+
+  it("in a document saved with two live copies of one id, an edit by that id is refused, not guessed", () => {
+    const { editor, ai } = build([para("p", "Alpha"), para("p", "Beta"), para("z", "z")]);
+    const read = ai.getRichBlocks();
+    const [first] = read;
+    if (!first) throw new Error("units");
+    ai.applySemanticEdits([{ kind: "structural", op: "moveBlock", nodeId: "p", position: "after", anchorNodeId: "z" }], { authorID: "bob" });
+    const before = editor.getState().doc;
+    expect(ai.applyRichEdit(read)).toMatchObject({ applied: false, changed: [] });
+    expect(editor.getState().doc.eq(before)).toBe(true);
+    const result = ai.applyRichEdit([rewrite(first, "Alpha2"), ...read.slice(1)]);
+    expect(result).toMatchObject({ applied: false, changed: [], rejected: ["p"] });
+    expect(editor.getState().doc.eq(before)).toBe(true);
   });
 });
 
