@@ -18,18 +18,20 @@ export interface ListMarkerFont {
 const FALLBACK_MARKER_FONT = `${DEFAULT_FONT_SIZE_PX}px Arial, sans-serif`;
 
 /**
- * A marker takes the face and size of the text it labels: the first run of
- * the item's first line. Layout measures the marker, and canvas and PDF draw
- * it, in what this returns, so all three use one face.
+ * A marker takes the face and size of the text it labels: the first text run
+ * of the item's first line, past any image or anchor that opens it — Word sizes
+ * the number from the paragraph's text, not from a picture. Layout measures
+ * the marker, and canvas and PDF draw it, in what this returns, so all three
+ * use one face.
  */
 export function listMarkerFont(firstLine: LayoutLine | undefined): ListMarkerFont {
-  const firstSpan = firstLine?.spans[0];
-  if (firstSpan?.kind !== "text") return { font: FALLBACK_MARKER_FONT, size: DEFAULT_FONT_SIZE_PX };
-  const parsed = parseFontSizePx(firstSpan.font);
+  const firstText = firstLine?.spans.find((span) => span.kind === "text");
+  if (firstText?.kind !== "text") return { font: FALLBACK_MARKER_FONT, size: DEFAULT_FONT_SIZE_PX };
+  const parsed = parseFontSizePx(firstText.font);
   return {
-    font: firstSpan.font,
+    font: firstText.font,
     size: parsed !== null && parsed > 0 ? parsed : DEFAULT_FONT_SIZE_PX,
-    ...(firstSpan.resolution !== undefined ? { resolution: firstSpan.resolution } : {}),
+    ...(firstText.resolution !== undefined ? { resolution: firstText.resolution } : {}),
   };
 }
 

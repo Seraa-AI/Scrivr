@@ -4,6 +4,7 @@ import type { Node } from "prosemirror-model";
 import { runPipeline, defaultPageConfig, type MeasureCacheEntry } from "./PageLayout";
 import type { LayoutBlock } from "./BlockLayout";
 import { drawListMarker } from "./listMarkers";
+import { listMarker } from "../model/lists";
 import { CharacterMap } from "./CharacterMap";
 import { defaultEditorTheme } from "../model/theme";
 import { renderPage } from "../renderer/PageRenderer";
@@ -112,24 +113,34 @@ describe("list geometry (Word's built-in lists)", () => {
 });
 
 describe("a number too wide for its hanging indent (Word: the tab after it goes to the next stop)", () => {
-  /** For each item, whether its text moved, and whether Word would move it: the number reaching the text. */
-  const pushes = (blocks: LayoutBlock[]) => blocks.filter((block) => block.listMarker !== undefined).map((block) => ({
-    marker: block.listMarker,
-    moved: firstLineStart(block) > 0,
-    reachesText: measureTextWidth(block.listMarker ?? "", fontOf(block)) >= QUARTER_INCH,
-  }));
-  const agreesWithWord = (blocks: LayoutBlock[]) =>
-    pushes(blocks).filter((row) => row.moved !== row.reachesText).map((row) => row.marker);
+  /**
+   * A list item whose number, measured in the item's own font, is `minWidth`
+   * to `maxWidth` wide — found by measuring, not assumed, so the test asks the
+   * same question on any machine's fonts. Searches font sizes and numbers at
+   * the top level (decimal) and the third (roman).
+   */
+  function itemWithNumberWidth(minWidth: number, maxWidth: number): LayoutBlock {
+    for (let size = 10; size <= 40; size++) {
+      const probe = blockOf(laidOut([ol(li(sized(size, "probe")))]), "probe");
+      for (const depth of [0, 2]) {
+        for (let n = 1; n <= 200; n++) {
+          const width = measureTextWidth(listMarker("ordered", depth, n), fontOf(probe));
+          if (width < minWidth || width >= maxWidth) continue;
+          const numbered = olFrom(n, li(sized(size, "measured")));
+          const content = depth === 0 ? [numbered] : [ol(item("a", ol(item("b", numbered))))];
+          return blockOf(laidOut(content), "measured");
+        }
+      }
+    }
+    throw new Error(`no number measures ${minWidth}–${maxWidth}px at any size`);
+  }
 
-  it("moves the text only when the number reaches it: roman numbers at 16px", () => {
-    const romans = Array.from({ length: 9 }, (_, i) => li(sized(16, `roman ${i}`)));
-    const blocks = laidOut([ol(item("a", ol(item("b", ol(...romans)))))]);
-    expect(agreesWithWord(blocks)).toEqual([]);
+  it("keeps the text in place when the number nearly reaches it", () => {
+    expect(firstLineStart(itemWithNumberWidth(QUARTER_INCH - 4, QUARTER_INCH))).toBe(0);
   });
 
-  it("moves the text only when the number reaches it: two-digit numbers at 18px", () => {
-    const items = Array.from({ length: 12 }, (_, i) => li(sized(18, `item ${i}`)));
-    expect(agreesWithWord(laidOut([ol(...items)]))).toEqual([]);
+  it("moves the text when the number reaches it", () => {
+    expect(firstLineStart(itemWithNumberWidth(QUARTER_INCH, QUARTER_INCH + 4))).toBeGreaterThan(0);
   });
 
   it("keeps every number in the column, however wide", () => {
@@ -158,11 +169,44 @@ describe("a number too wide for its hanging indent (Word: the tab after it goes 
     expect(firstLineStart(block)).toBe(HALF_INCH);
   });
 
-  it("keeps text on the first line when the next tab stop is past its end", () => {
+  /** Where the first line's text starts, and where the number ends, both on the page. */
+  const textAndNumber = (block: LayoutBlock) => ({
+    textStart: block.x + firstLineStart(block),
+    numberEnd: (block.listMarkerX ?? 0) + measureTextWidth(block.listMarker ?? "", fontOf(block)),
+  });
+
+  it("never starts the text over a number that runs past the line's last tab stop", () => {
     const text = "letter item with words to wrap";
     const block = blockOf(laidOut([ol(item("top", olFrom(32767, item(text))))]), text);
-    expect(firstLineStart(block)).toBeGreaterThan(0);
-    expect(firstLineStart(block)).toBeLessThan(block.availableWidth);
+    const { textStart, numberEnd } = textAndNumber(block);
+    expect(textStart).toBeGreaterThan(numberEnd);
+  });
+
+  it("follows the number with a space when it ends past the line's last tab stop", () => {
+    // Nine levels deep on a narrow page: the text is held an inch wide, so the
+    // line's last tab stop falls inside it. The number is chosen by measuring,
+    // so that it ends past that stop but before the line does, on any fonts.
+    const narrow = { ...defaultPageConfig, pageWidth: 559 };
+    const deep = (order: number): Json[] => {
+      let nested: Json = olFrom(order, item("deep text"));
+      for (let depth = 0; depth < 8; depth++) nested = ol(item(`L${depth}`, nested));
+      return [nested];
+    };
+    const probe = blockOf(laidOut(deep(1), narrow), "deep text");
+    const indent = probe.x - narrow.margins.left;
+    const lineEnd = indent + probe.availableWidth;
+    const lastStop = Math.floor((lineEnd - QUARTER_INCH) / HALF_INCH) * HALF_INCH;
+    const roman = (n: number) => listMarker("ordered", 8, n);
+    const fitting = Array.from({ length: 3999 }, (_, i) => i + 1).find((n) => {
+      const end = indent - QUARTER_INCH + measureTextWidth(roman(n), fontOf(probe));
+      return end >= lastStop && end < lineEnd - QUARTER_INCH;
+    });
+    if (fitting === undefined) throw new Error("no roman number ends between the last stop and the line's end");
+
+    const block = blockOf(laidOut(deep(fitting), narrow), "deep text");
+    const { textStart, numberEnd } = textAndNumber(block);
+    expect(textStart).toBeGreaterThan(numberEnd);
+    expect(textStart - numberEnd).toBeLessThan(QUARTER_INCH);
   });
 });
 

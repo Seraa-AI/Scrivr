@@ -80,3 +80,22 @@ describe("the marker's size", () => {
     expect(marker?.["size"]).toBeCloseTo(listMarkerFont(line).size * PT_PER_PX, 3);
   });
 });
+
+describe("the marker's face", () => {
+  it("is the face of the text after an image that opens the line", async () => {
+    const image = schema.nodes["image"]?.create({ src: "data:image/png;base64,AA==", width: 10, height: 10 });
+    if (!image) throw new Error("no image node");
+    const text = textLine("clause", { font: "16px Courier" });
+    const line: LayoutLine = {
+      ...text,
+      spans: [{ kind: "object", node: image, x: 0, width: 10, height: 10, docPos: 1, verticalAlign: "baseline" }, ...text.spans],
+    };
+    const ops = await recordDrawOps(() => buildPdfWithEditor(
+      onePage([block("paragraph", [line], { y: 100, listMarker: "1.", listMarkerX: MARKER_X })]),
+      exportEditor,
+    ));
+    const faceOf = (value: string) => ops.find((op) => op.op === "text" && op["value"] === value)?.["font"];
+    expect(faceOf("clause")).not.toBe("font(Helvetica)");
+    expect(faceOf("1.")).toBe(faceOf("clause"));
+  });
+});

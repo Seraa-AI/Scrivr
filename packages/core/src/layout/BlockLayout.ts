@@ -549,13 +549,14 @@ export function layoutBlock(
             firstLineConsumed = true;
             return {
               ...base,
-              segments: base.segments
-                .map((segment, index) =>
-                  index === 0
-                    ? { x: segment.x + firstLineIndent, width: Math.max(0, segment.width - firstLineIndent) }
-                    : segment,
-                )
-                .filter((segment) => segment.width > 0),
+              // An indent wider than the line still moves the text: a list
+              // number that runs past the line keeps its text after it,
+              // overflowing, rather than drawn over it at the line's start.
+              segments: base.segments.map((segment, index) =>
+                index === 0
+                  ? { x: segment.x + firstLineIndent, width: Math.max(1, segment.width - firstLineIndent) }
+                  : segment,
+              ),
             };
           }
           return base;

@@ -1936,7 +1936,9 @@ function isCacheHitFor(entry: MeasureCacheEntry, blockWidth: number, marker: Mar
  * number with a tab (`w:suff`, a tab when omitted) that follows the normal tab
  * stop rules: the text stays where it is unless the number reaches it, and
  * then moves to the next default stop past the number. With no stop left on
- * the line, the text follows the number, keeping a hanging indent's width.
+ * the line, the text follows the number after a space, as Word's
+ * `w:suff="space"` places it; what Word does with a tab past the line's last
+ * stop is not documented.
  */
 function markerFirstLineOffset(
   marker: MarkerPlacement,
@@ -1954,7 +1956,7 @@ function markerFirstLineOffset(
   if (markerEnd < textStart) return 0;
   const nextStop = (Math.floor(markerEnd / DEFAULT_TAB_STOP) + 1) * DEFAULT_TAB_STOP;
   const lastTextStart = marker.indentLeft + blockWidth - LIST_MARKER_HANGING;
-  const target = nextStop <= lastTextStart ? nextStop : Math.min(markerEnd, lastTextStart);
+  const target = nextStop <= lastTextStart ? nextStop : markerEnd + measurer.measureWidth(" ", font);
   return Math.max(0, target - textStart);
 }
 
