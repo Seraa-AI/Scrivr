@@ -645,22 +645,24 @@ describe("float beside a table — the table moves below the float", () => {
     it("31: settling scales with the floats, not their square", () => {
       const build = (n: number) => docOf(...Array.from({ length: n }, (_, i) => para(`P${i} ${words(25)}`,
         image({ wrapMode: "square", xAlign: i % 2 ? "left" : "right", width: 120, height: 30, yOffset: -40 }))));
-      // The fastest of several runs, so one scheduler hiccup cannot decide it.
-      const time = (n: number): number => {
-        const d = build(n);
-        layout(d);
-        let best = Infinity;
-        for (let run = 0; run < 5; run++) {
-          const start = performance.now();
-          layout(d);
-          best = Math.min(best, performance.now() - start);
-        }
-        return best;
-      };
-      const small = time(60);
-      const large = time(240);
+      // Runs alternate between the two sizes and the fastest of each counts,
+      // so load from other test workers hits both alike and cannot decide it.
+      const small = build(100);
+      const large = build(400);
+      layout(small);
+      layout(large);
+      let bestSmall = Infinity;
+      let bestLarge = Infinity;
+      for (let run = 0; run < 7; run++) {
+        let start = performance.now();
+        layout(small);
+        bestSmall = Math.min(bestSmall, performance.now() - start);
+        start = performance.now();
+        layout(large);
+        bestLarge = Math.min(bestLarge, performance.now() - start);
+      }
       // Linear work grows 4x; quadratic would grow 16x.
-      expect(large).toBeLessThan(small * 10);
+      expect(bestLarge).toBeLessThan(bestSmall * 10);
     });
 
     it("32: a restamp inside one reflow never moves a table below a stale float rect", () => {
