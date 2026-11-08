@@ -1958,53 +1958,6 @@ function markerFirstLineOffset(
   return Math.max(0, target - textStart);
 }
 
-/**
- * A list item's marker goes on its first visible line. When the item's first
- * block shows none — it holds only a floating image's anchor — the marker
- * waits for the item's next block.
- */
-type WaitingMarker = { text: string; itemPos: number } | null;
-
-/** The marker a block is measured with: its own, or the one its item left waiting. */
-function markerFor(item: LayoutItem, waiting: WaitingMarker, indentLeft: number): MarkerPlacement | undefined {
-  const handedOn = waiting !== null && waiting.itemPos === item.listItemPos ? waiting.text : undefined;
-  const text = item.listMarker ?? handedOn;
-  return text !== undefined ? { text, indentLeft } : undefined;
-}
-
-function waitingMarkerAfter(item: LayoutItem, marker: MarkerPlacement | undefined, anchorOnly: boolean): WaitingMarker {
-  return marker !== undefined && anchorOnly && item.listItemPos !== undefined
-    ? { text: marker.text, itemPos: item.listItemPos }
-    : null;
-}
-
-/**
- * The marker waiting when a streamed chunk starts part-way through a list
- * item: the hand-off replayed over the item's earlier blocks, which the
- * measure cache already holds. A page break in the item hands the marker on
- * unchanged, as it does in one pass.
- */
-function markerWaitingBefore(
-  items: LayoutItem[],
-  startIndex: number,
-  config: FlowConfig,
-  ctx: MeasureContext,
-): WaitingMarker {
-  const itemPos = items[startIndex]?.listItemPos;
-  if (itemPos === undefined) return null;
-  let first = startIndex;
-  while (first > 0 && items[first - 1]?.listItemPos === itemPos) first--;
-  let waiting: WaitingMarker = null;
-  for (const item of items.slice(first, startIndex)) {
-    if (item.isPageBreak) continue;
-    const { indentLeft, blockWidth, blockX } = blockGeometry(item, config);
-    const marker = markerFor(item, waiting, indentLeft);
-    const entry = resolveBlockEntry(item.node, item.nodePos, blockX, 0, blockWidth, 1, ctx, item.tableColumns, marker);
-    waiting = waitingMarkerAfter(item, marker, isAnchorOnlyFlowEntry(entry));
-  }
-  return waiting;
-}
-
 export function buildBlockFlow(
   items: LayoutItem[],
   startIndex: number,
@@ -2015,7 +1968,6 @@ export function buildBlockFlow(
   const { fontConfig, measurer, fontModifiers, measureCache, inlineRegistry } = ctx;
   const flows: FlowBlock[] = [];
   let processedBlocks = 0;
-  let waitingMarker = markerWaitingBefore(items, startIndex, config, ctx);
 
   for (let itemIdx = startIndex; itemIdx < items.length; itemIdx++) {
     const item = items[itemIdx]!;
@@ -2051,7 +2003,7 @@ export function buildBlockFlow(
     const level = node.attrs["level"] as number | undefined;
     const blockStyle = getBlockStyle(fontConfig, styleKey ?? node.type.name, level);
     const { indentLeft, blockWidth, blockX } = blockGeometry(item, config);
-    const marker = markerFor(item, waitingMarker, indentLeft);
+    const marker = item.listMarker !== undefined ? { text: item.listMarker, indentLeft } : undefined;
 
     // Phase 1b: capture cache snapshot BEFORE resolveBlockEntry may update it.
     const preCached = measureCache?.get(node);
@@ -2062,8 +2014,7 @@ export function buildBlockFlow(
       node, nodePos, blockX, 0, blockWidth, 1, ctx, item.tableColumns, marker,
     );
     const anchorOnlyFlow = isAnchorOnlyFlowEntry(entry);
-    const listMarker = marker && !anchorOnlyFlow ? marker.text : undefined;
-    waitingMarker = waitingMarkerAfter(item, marker, anchorOnlyFlow);
+    const listMarker = marker?.text;
 
     flows.push({
       node,
@@ -2241,12 +2192,6 @@ export interface LayoutItem {
   /** Bullet or number, e.g. "•" or "1.", on the first block of a list item only. */
   listMarker?: string;
   /**
-   * Position of the list item this block (or page break) belongs to. A first
-   * block that turns out to have no visible line hands the item's marker to
-   * the item's next block.
-   */
-  listItemPos?: number;
-  /**
    * Override the FontConfig key used for block-style lookup.
    * A paragraph in a list item takes the `list_item` spacing defined in
    * addBlockStyles(), not the paragraph style.
@@ -2269,8 +2214,6 @@ const blockIndentOf = (node: Node): number => {
 /** Where a block sits in a list. */
 interface ListPlace {
   depth: number;
-  /** Position of the list item the block belongs to. */
-  itemPos: number;
   /** The item's marker, on its first block only. */
   marker?: string;
 }
@@ -2298,11 +2241,8 @@ export function collectLayoutItems(doc: Node, _fontConfig: FontConfig): LayoutIt
   };
 
   const walkOne = (node: Node, offset: number, list: ListPlace | null): void => {
-    // A break inside a list item stays part of the item, so a marker waiting
-    // in the item crosses it.
-    const inItem = list ? { listItemPos: list.itemPos } : {};
     if (node.type.name === "pageBreak") {
-      items.push({ isPageBreak: true, node, nodePos: offset, indentLeft: 0, ...inItem });
+      items.push({ isPageBreak: true, node, nodePos: offset, indentLeft: 0 });
       return;
     }
 
@@ -2318,7 +2258,6 @@ export function collectLayoutItems(doc: Node, _fontConfig: FontConfig): LayoutIt
           node,
           nodePos: offset,
           indentLeft: 0,
-          ...inItem,
         });
       }
       return;
@@ -2330,10 +2269,9 @@ export function collectLayoutItems(doc: Node, _fontConfig: FontConfig): LayoutIt
       let n = kind === "ordered" ? listStart(node) : 1;
       node.forEach((listItem, itemOffset) => {
         const marker = listMarker(kind, depth, n++);
-        const itemPos = offset + 1 + itemOffset;
+        const itemContentStart = offset + 1 + itemOffset + 1;
         listItem.forEach((child, childOffset, index) => {
-          const place: ListPlace = index === 0 ? { depth, itemPos, marker } : { depth, itemPos };
-          walkOne(child, itemPos + 1 + childOffset, place);
+          walkOne(child, itemContentStart + childOffset, index === 0 ? { depth, marker } : { depth });
         });
       });
       return;
@@ -2375,7 +2313,6 @@ export function collectLayoutItems(doc: Node, _fontConfig: FontConfig): LayoutIt
           nodePos: offset,
           indentLeft: listLevel(list.depth).textIndent + blockIndentOf(node),
           ...(list.marker !== undefined ? { listMarker: list.marker } : {}),
-          listItemPos: list.itemPos,
           // A heading or code block in an item keeps its own style.
           ...(node.type.name === "paragraph" ? { styleKey: "list_item" } : {}),
         });
@@ -2476,6 +2413,9 @@ function resolveBlockEntry(
     ...(inlineRegistry ? { inlineRegistry } : {}),
     ...(fonts ? { fonts } : {}),
     ...(firstLineOffset > 0 ? { firstLineOffset } : {}),
+    // A list item's first block carries its number, so it keeps a line even
+    // when all it holds is a floating image's anchor, as Word draws it.
+    ...(marker ? { keepAnchorLine: true } : {}),
   });
   // The marker is sized by the first line's font, which only measuring tells;
   // a marker too wide for its hanging then re-breaks the lines past it.

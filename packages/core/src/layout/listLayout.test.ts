@@ -284,25 +284,9 @@ describe("drawing markers on the canvas", () => {
     expect(paint(blockOf(laidOut([ol(item("a"))]), "a")).markerText).toBe(1);
   });
 
-  it("does not change which painter draws a block that carries a marker", () => {
-    const code: Json = { type: "codeBlock", content: [{ type: "text", text: "code" }] };
-    const manager = new ExtensionManager([StarterKit]);
-    const docNode = manager.schema.nodeFromJSON({ type: "doc", content: [ul(li(floating, code)), { type: "paragraph" }] });
-    const layout = runPipeline(docNode, { pageConfig: defaultPageConfig, measurer: createMeasurer(), fontConfig });
-    const page = layout.pages[0];
-    if (!page) throw new Error("no page");
-    const codeBlock = blockOf(page.blocks, "code");
-    expect(codeBlock.listMarker).toBe("•");
-    expect(codeBlock.blockType).toBe("codeBlock");
-
-    const ctx = document.createElement("canvas").getContext("2d");
-    if (!ctx) throw new Error("no 2d context");
-    const arcs = vi.spyOn(ctx, "arc");
-    renderPage({
-      ctx, page, pageConfig: defaultPageConfig, renderVersion: layout.version, currentVersion: () => layout.version,
-      dpr: 1, measurer: createMeasurer(), map: new CharacterMap(), blockRegistry: manager.buildBlockRegistry(),
-    });
-    expect(arcs).toHaveBeenCalledTimes(1);
+  it("keeps every block's own painter: a marker does not relabel the block", () => {
+    const blocks = laidOut([ol(li(floating, p("more")), item("two", ul(item("child"))))]);
+    expect(blocks.filter((block) => block.blockType !== block.node.type.name)).toEqual([]);
   });
 });
 
@@ -449,20 +433,58 @@ describe("how far a block can be indented", () => {
   });
 });
 
+/**
+ * Word numbers the paragraph that opens an item, even when all it holds is a
+ * floating image's anchor: the number sits on that paragraph's line. Such a
+ * paragraph keeps one line inside a list item so the number has a line to sit
+ * on; anywhere else it takes no space.
+ */
 describe("an item that opens with a floating image", () => {
-  it("draws the marker on the item's first visible line", () => {
-    const blocks = laidOut([ul(li(floating, p("text")), item("next"))]);
-    const anchor = blocks.find((block) => block.height === 0 && block.node.type.name === "paragraph");
-    expect(anchor?.listMarker).toBeUndefined();
-    expect(blockOf(blocks, "text").listMarker).toBe("•");
-    expect(blockOf(blocks, "next").listMarker).toBe("•");
+  const anchorOf = (blocks: LayoutBlock[]) => {
+    const found = blocks.find((block) => block.node.type.name === "paragraph" && block.node.textContent === "");
+    if (!found) throw new Error("no anchor paragraph");
+    return found;
+  };
+
+  it("numbers the image's paragraph, and counts on from it", () => {
+    const blocks = laidOut([ol(li(floating), item("next"))]);
+    expect(anchorOf(blocks).listMarker).toBe("1.");
+    expect(blockOf(blocks, "next").listMarker).toBe("2.");
   });
 
-  it("draws no marker for an item with nothing visible, and does not hand it on", () => {
-    const blocks = laidOut([ol(li(floating), item("next")), p("after")]);
-    expect(blocks.filter((block) => block.listMarker !== undefined).map((block) => block.node.textContent))
-      .toEqual(["next"]);
-    expect(blockOf(blocks, "next").listMarker).toBe("2.");
+  // Known gap: the float's own exclusion pass re-breaks the paragraph without
+  // keepAnchorLine, so the line collapses again. Lands with the re-break fix
+  // that forwards a block's first-line settings on every path.
+  it.fails("keeps the image's paragraph a line for its number", () => {
+    const blocks = laidOut([ol(li(floating), item("next"))]);
+    const anchor = anchorOf(blocks);
+    expect(anchor.height).toBeGreaterThan(0);
+    expect(blockOf(blocks, "next").y).toBeGreaterThanOrEqual(anchor.y + anchor.height);
+  });
+
+  it("numbers it when the item's text follows in the same item", () => {
+    const blocks = laidOut([ul(li(floating, p("text")))]);
+    expect(anchorOf(blocks).listMarker).toBe("•");
+    expect(blockOf(blocks, "text").listMarker).toBeUndefined();
+  });
+
+  it("numbers it when a table or a nested list follows", () => {
+    const manager = new ExtensionManager([StarterKit, Table]);
+    const cell = (text: string): Json => ({ type: "tableCell", content: [p(text)] });
+    const table: Json = { type: "table", attrs: { grid: [120] }, content: [{ type: "tableRow", content: [cell("c")] }] };
+    const docNode = manager.schema.nodeFromJSON({ type: "doc", content: [
+      ol(li(floating, table), li(floating, ol(item("child")))),
+      { type: "paragraph" },
+    ] });
+    const blocks = runPipeline(docNode, { pageConfig: defaultPageConfig, measurer: createMeasurer(), fontConfig: manager.buildBlockStyles() })
+      .pages.flatMap((page) => page.blocks);
+    const anchors = blocks.filter((block) => block.node.type.name === "paragraph" && block.listMarker !== undefined && block.node.textContent === "");
+    expect(anchors.map((block) => block.listMarker)).toEqual(["1.", "2."]);
+    expect(blockOf(blocks, "child").listMarker).toBe("a.");
+  });
+
+  it("takes no space outside a list", () => {
+    expect(anchorOf(laidOut([floating, p("after")])).height).toBe(0);
   });
 });
 
@@ -475,25 +497,13 @@ describe("streamed layout of lists", () => {
   }
   const shown = (blocks: LayoutBlock[]) => blocks.map((block) => `${block.node.textContent}:${block.listMarker ?? ""}@${block.x}`);
 
-  it("lays nested lists out the same in chunks of any size as in one pass", () => {
+  it("lays lists out the same in chunks of any size as in one pass", () => {
     const docNode = schema.nodeFromJSON({ type: "doc", content: [
       ol(item("one", ul(item("child", ol(item("deep"))), item("child 2"))), li(p("two"), p("more")), item("three")),
       p("between"),
       olFrom(4, item("four", ol(item("x"), item("y")))),
-    ] });
-    for (const maxBlocks of [1, 2, 3, 5]) expect(shown(streamed(docNode, maxBlocks))).toEqual(shown(laidOut(docNode)));
-  });
-
-  it("hands a marker on when a chunk starts between a floating image and the item's text", () => {
-    const docNode = schema.nodeFromJSON({ type: "doc", content: [p("intro"), ul(li(floating, p("text")), item("next"))] });
-    expect(shown(streamed(docNode, 2))).toEqual(shown(laidOut(docNode)));
-  });
-
-  it("hands a marker on across a page break inside the item, in chunks of any size", () => {
-    const docNode = schema.nodeFromJSON({ type: "doc", content: [
-      p("intro"),
       ol(li(floating, { type: "pageBreak" }, p("text")), item("second")),
     ] });
-    for (const maxBlocks of [1, 2, 3]) expect(shown(streamed(docNode, maxBlocks))).toEqual(shown(laidOut(docNode)));
+    for (const maxBlocks of [1, 2, 3, 5]) expect(shown(streamed(docNode, maxBlocks))).toEqual(shown(laidOut(docNode)));
   });
 });

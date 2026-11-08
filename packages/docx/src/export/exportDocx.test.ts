@@ -657,4 +657,22 @@ describe("list levels match what the editor draws", () => {
     const schemaOrder = ["tblStyle", "tblW", "jc", "tblInd", "tblBorders", "tblLayout", "tblCellMar", "tblLook"];
     expect(order).toEqual(schemaOrder.filter((name) => order.includes(name)));
   });
+
+  it.each([
+    ["holds nothing else", []],
+    ["is followed by a table", [{ type: "table", attrs: { grid: [120] }, content: [{ type: "tableRow", content: [{ type: "tableCell", content: [p("cell")] }] }] }]],
+    ["is followed by a nested list", [list("orderedList", item("child"))]],
+  ])("numbers an item's floating-image paragraph when it %s, as the editor does", async (_case, after) => {
+    const floating: Json = {
+      type: "paragraph",
+      content: [{ type: "image", attrs: { src: "data:image/png;base64,AA==", width: 40, height: 40, wrapMode: "square" } }],
+    };
+    const editor = new ServerEditor({ extensions: [StarterKit.configure({ table: true })] });
+    editor.setContent({ type: "doc", content: [list("orderedList", { type: "listItem", content: [floating, ...after] }, item("next"))] });
+    const document = readZip(await exportDocxBytes(editor))["word/document.xml"] ?? "";
+    editor.destroy();
+    const anchorParagraph = document.split("<w:p>").find((part) => part.includes("<w:drawing>")) ?? "";
+    expect(anchorParagraph).toContain('<w:ilvl w:val="0"/>');
+    expect(paragraphWith(document, "next")).toContain('<w:ilvl w:val="0"/>');
+  });
 });

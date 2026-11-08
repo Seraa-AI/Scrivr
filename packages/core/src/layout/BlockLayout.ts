@@ -251,6 +251,11 @@ export interface BlockLayoutOptions {
    * list marker too wide for its hanging pushes the first line of text.
    */
   firstLineOffset?: number;
+  /**
+   * A paragraph holding only floating images' anchors still takes one line.
+   * Set for a list item's first block, whose number sits on that line.
+   */
+  keepAnchorLine?: boolean;
 }
 
 // ── Constants ───────────────────────────────────────────────────────────────────
@@ -436,6 +441,7 @@ export function layoutBlock(
     inlineRegistry,
     fonts,
     firstLineOffset = 0,
+    keepAnchorLine = false,
   } = options;
 
   const fontConfig = options.fontConfig ?? defaultFontConfig;
@@ -475,7 +481,8 @@ export function layoutBlock(
   // non-inline image sentinels is structural ownership, not visible document
   // content. Preserve those zero-size object spans so anchored-object layout
   // can find them, but do not inject a ZWS. That yields a zero-height flow
-  // instead of the blank line users were seeing behind floating images.
+  // instead of the blank line users were seeing behind floating images —
+  // unless the paragraph opens a list item, whose number needs its line.
   const hasNonZeroContent = spans.some(
     (s) =>
       s.kind === "text" ||
@@ -485,7 +492,7 @@ export function layoutBlock(
     (s) => s.kind === "object" && s.width === 0 && s.height === 0,
   );
   const isAnchorOnlyFlow = !hasNonZeroContent && hasZeroSizeObjectSentinel;
-  if (isAnchorOnlyFlow) {
+  if (isAnchorOnlyFlow && !keepAnchorLine) {
     return {
       kind: "text",
       node,
@@ -516,7 +523,12 @@ export function layoutBlock(
     ...(zwsAnswer ? { resolution: zwsAnswer.resolution } : {}),
     docPos: nodePos + 1,
   };
-  const inputSpans: InputSpan[] = hasNonZeroContent ? spans : [zwsSpan];
+  // A kept anchor line ends in the sentinel, after the anchors it carries.
+  const inputSpans: InputSpan[] = hasNonZeroContent
+    ? spans
+    : isAnchorOnlyFlow
+      ? [...spans, { ...zwsSpan, docPos: nodePos + 1 + node.content.size }]
+      : [zwsSpan];
 
   // ── 3. Break into lines ───────────────────────────────────────────────────
   const breaker = new LineBreaker(measurer);

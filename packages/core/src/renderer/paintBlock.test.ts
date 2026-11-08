@@ -3,6 +3,7 @@ import * as painter from "./paintBlock";
 import { renderPage } from "./PageRenderer";
 import { TileManager } from "./TileManager";
 import { CharacterMap } from "../layout/CharacterMap";
+import { BlockRegistry } from "../layout/BlockRegistry";
 import { defaultPageConfig, defaultPagelessConfig, runPipeline } from "../layout/PageLayout";
 import type { LayoutBlock } from "../layout/BlockLayout";
 import { ExtensionManager } from "../extensions/ExtensionManager";
@@ -36,26 +37,28 @@ const markedBlocksPainted = (spy: { mock: { calls: Array<[LayoutBlock, ...unknow
 afterEach(() => vi.restoreAllMocks());
 
 describe("painting a block", () => {
-  it("draws the marker over the block, so a code block's background cannot hide it", () => {
-    const floating: Json = {
-      type: "paragraph",
-      content: [{ type: "image", attrs: { src: "data:image/png;base64,AA==", width: 40, height: 40, wrapMode: "square" } }],
-    };
-    const code: Json = { type: "codeBlock", content: [{ type: "text", text: "code" }] };
+  it("draws the marker over the block, so a painter's background cannot hide it", () => {
     const docNode = manager.schema.nodeFromJSON({ type: "doc", content: [
-      { type: "orderedList", attrs: { order: 10 }, content: [{ type: "listItem", content: [floating, code] }] },
+      { type: "orderedList", attrs: { order: 10 }, content: [{ type: "listItem", content: [p("shaded")] }] },
     ] });
     const layout = runPipeline(docNode, { pageConfig: defaultPageConfig, measurer: createMeasurer(), fontConfig: manager.buildBlockStyles() });
-    const block = layout.pages[0]?.blocks.find((b) => b.node.type.name === "codeBlock");
-    if (!block) throw new Error("no code block");
+    const block = layout.pages[0]?.blocks.find((b) => b.node.textContent === "shaded");
+    if (!block) throw new Error("no block");
     expect(block.listMarker).toBe("10.");
 
     const ctx = canvas();
     const fillRect = vi.spyOn(ctx, "fillRect");
     const fillText = vi.spyOn(ctx, "fillText");
+    // A painter that fills the block's box before its text, as a shaded block does.
+    const shaded = new BlockRegistry().register("paragraph", {
+      render: (painted, renderCtx) => {
+        renderCtx.ctx.fillRect(0, painted.y, 1000, painted.height);
+        return renderCtx.lineIndexOffset;
+      },
+    });
     painter.paintBlock(block, {
       ctx, pageNumber: 1, lineIndexOffset: 0, dpr: 1, measurer: createMeasurer(), theme: defaultEditorTheme,
-      blockRegistry: manager.buildBlockRegistry(),
+      blockRegistry: shaded,
     }, new CharacterMap());
 
     const background = Math.max(...fillRect.mock.invocationCallOrder);
