@@ -11,6 +11,7 @@
 import type { Editor } from "@scrivr/core";
 import { getAiToolkit } from "@scrivr/ai";
 import { findChanges } from "@scrivr/plugins";
+import type { ReviewDecisions, ReviewOutcome } from "@scrivr/plugins";
 
 /** One `edit_document` batch: what the agent sent, and what applying it did. */
 export interface AgentEditRecord {
@@ -21,9 +22,18 @@ export interface AgentEditRecord {
   result: { applied: boolean; changed: string[]; rejected: string[]; notFound: string[]; stale: string[] };
 }
 
+/** One `review_changes` call: what the agent decided, and what the engine did with it. */
+export interface AgentReviewRecord {
+  at: string;
+  toolCallId: string;
+  decisions: ReviewDecisions;
+  outcome: ReviewOutcome;
+}
+
 interface AgentDebugRecord {
   thread: unknown[];
   edits: AgentEditRecord[];
+  reviews: AgentReviewRecord[];
 }
 
 const STORAGE_KEY = "scrivr-playground-agent-debug";
@@ -37,18 +47,27 @@ function isAgentEditRecord(value: unknown): value is AgentEditRecord {
     "result" in value && typeof value.result === "object" && value.result !== null;
 }
 
+function isAgentReviewRecord(value: unknown): value is AgentReviewRecord {
+  return typeof value === "object" && value !== null &&
+    "at" in value && typeof value.at === "string" &&
+    "toolCallId" in value && typeof value.toolCallId === "string" &&
+    "decisions" in value && typeof value.decisions === "object" && value.decisions !== null &&
+    "outcome" in value && typeof value.outcome === "object" && value.outcome !== null;
+}
+
 function load(): AgentDebugRecord {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     const parsed: unknown = raw ? JSON.parse(raw) : null;
     if (parsed && typeof parsed === "object" && "thread" in parsed && "edits" in parsed &&
       Array.isArray(parsed.thread) && Array.isArray(parsed.edits)) {
-      return { thread: parsed.thread, edits: parsed.edits.filter(isAgentEditRecord) };
+      const reviews = "reviews" in parsed && Array.isArray(parsed.reviews) ? parsed.reviews.filter(isAgentReviewRecord) : [];
+      return { thread: parsed.thread, edits: parsed.edits.filter(isAgentEditRecord), reviews };
     }
   } catch {
     // Storage can be unavailable or hold something else; start empty.
   }
-  return { thread: [], edits: [] };
+  return { thread: [], edits: [], reviews: [] };
 }
 
 let record = load();
@@ -72,8 +91,13 @@ export function recordEdit(entry: AgentEditRecord) {
   save();
 }
 
+export function recordReview(entry: AgentReviewRecord) {
+  record = { ...record, reviews: [...record.reviews, entry] };
+  save();
+}
+
 export function clearAgentDebug() {
-  record = { thread: [], edits: [] };
+  record = { thread: [], edits: [], reviews: [] };
   save();
 }
 

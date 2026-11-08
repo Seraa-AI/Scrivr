@@ -36,8 +36,6 @@ const DocUnitSchema = z.object({
     wrap: z.enum(IMAGE_WRAPS),
     align: z.enum([...IMAGE_ALIGNS, "custom"]),
   }).optional(),
-  /** No live copy: the whole block is proposed for deletion. */
-  proposedForDeletion: z.boolean().optional(),
   changes: z.array(z.object({
     type: z.enum(["suggestedInsert", "suggestedDelete", "suggestedAttrs"]),
     text: z.string(),
@@ -52,14 +50,23 @@ const DocUnitSchema = z.object({
 export type DocUnit = z.infer<typeof DocUnitSchema>;
 type DocChange = NonNullable<DocUnit["changes"]>[number];
 
-/** One pending change as the agent reads it: what it does, where, whose, and the id to review it by. */
-function describeChange(change: DocChange): string {
-  const what = change.type === "suggestedAttrs"
-    ? `format, was ${JSON.stringify(change.oldAttrs ?? {})}`
-    : `${change.type === "suggestedInsert" ? "insert" : "delete"} ${change.image ? `image ${change.image}` : JSON.stringify(change.text)}`;
-  const at = change.at !== undefined ? ` at ${change.at}` : "";
+const CHANGE_VERBS: Record<DocChange["type"], string> = {
+  suggestedInsert: "insert",
+  suggestedDelete: "delete",
+  suggestedAttrs: "format",
+};
+
+/** What a change adds, removes or changes, as the agent reads it. */
+function changeSubject(change: DocChange): string {
+  if (change.type === "suggestedAttrs") return `was ${JSON.stringify(change.oldAttrs ?? {})}`;
+  return change.image ? `image ${change.image}` : JSON.stringify(change.text);
+}
+
+/** One pending change: what it does, where in the block's text, whose, and the id to review it by. */
+function describeChange(change: DocChange, showsText: boolean): string {
+  const at = showsText && change.at !== undefined ? ` at ${change.at}` : "";
   const by = change.authorId ? ` by ${change.authorId}` : "";
-  return `  pending ${what}${at}${by}${change.id ? ` (id ${change.id})` : ""}`;
+  return `  pending ${CHANGE_VERBS[change.type]} ${changeSubject(change)}${at}${by}${change.id ? ` (id ${change.id})` : ""}`;
 }
 
 const RequestBodySchema = z.object({
@@ -85,13 +92,16 @@ export const Route = createFileRoute("/api/ai")({
             "Blocks are listed in document order, first to last. Each has a stable nodeId; a list or table",
             "also lists the nodeIds of its items or cells. Address blocks by these ids in every tool. Text",
             "is the proposed version: pending insertions are in it, pending deletions are not. A block's",
-            "pending changes are listed under it, each with the id to review it by; a block proposed for",
-            "deletion reads empty. To put something at the end of the document, place it after the block",
-            "marked `last block`.",
+            "pending changes are listed under it, each with the id to review it by and, where given, `at`:",
+            "the character offset into that block's `text` line. The two halves of a replacement or a move",
+            "are listed under one id. A block proposed for deletion reads empty. To put something at the end",
+            "of the document, place it after the block marked `last block`.",
             "",
           );
-          // A block proposed for deletion cannot be placed after; the last live one can.
-          const lastLive = units.reduce((last, u, index) => (u.proposedForDeletion ? last : index), -1);
+          // A block that reads empty because its text is all proposed for
+          // deletion is not one to place after; the last block with text is.
+          const readsDeleted = (u: DocUnit) => u.text === "" && (u.changes ?? []).some((c) => c.type === "suggestedDelete");
+          const lastLive = units.reduce((last, u, index) => (readsDeleted(u) ? last : index), -1);
           for (const [index, u] of units.entries()) {
             const kind = u.headingLevel ? `heading ${u.headingLevel}` : u.type;
             const last = index === lastLive ? ", last block" : "";
@@ -99,12 +109,11 @@ export const Route = createFileRoute("/api/ai")({
             if (u.image) {
               const { src, alt, width, height, wrap, align } = u.image;
               docContextLines.push(`image: ${src} "${alt}" ${width}×${height}, wrap ${wrap}, align ${align}`);
-            } else if (u.parts?.length) {
-              for (const part of u.parts) docContextLines.push(`  - nodeId: ${part.nodeId} — ${part.text}`);
             } else {
-              docContextLines.push(`text: ${u.text}`);
+              docContextLines.push(`text: ${JSON.stringify(u.text)}`);
+              for (const part of u.parts ?? []) docContextLines.push(`  - nodeId: ${part.nodeId} — ${part.text}`);
             }
-            for (const change of u.changes ?? []) docContextLines.push(describeChange(change));
+            for (const change of u.changes ?? []) docContextLines.push(describeChange(change, !u.image));
             docContextLines.push("");
           }
         } else if (context) {
@@ -131,7 +140,8 @@ export const Route = createFileRoute("/api/ai")({
           "- Headings: change a block's level with `richText` and `attrs: { level }` — 1-6 sets the heading level",
           "  (a paragraph becomes a heading), 0 makes a heading a paragraph.",
           "- To accept or reject pending changes → `review_changes(accepted, rejected)` with the ids listed under the",
-          "  blocks. Deciding one half of a replacement or a move decides both. Only when the user asks you to review.",
+          "  blocks; both halves of a replacement or a move are listed under one id, which decides both. Only when the",
+          "  user asks you to review. The result says what was decided, or why not.",
           "- You MAY include a short text message (1-2 sentences) explaining what you are doing.",
           "- NEVER write suggested content only in a text reply — always put it in a tool call.",
           "- If the user is asking a general question (not requesting new content), reply with text only.",
@@ -244,20 +254,15 @@ export const Route = createFileRoute("/api/ai")({
                   },
                 }),
 
+                // No execute: it runs in the browser, where the document is, and
+                // the editor's own outcome — refusals included — goes back to the model.
                 review_changes: tool({
                   description:
-                    "Accept or reject pending tracked changes by the ids listed under each block. Deciding one record decides its whole act.",
+                    "Accept or reject pending changes by the ids listed under each block. One id decides every change listed with it.",
                   inputSchema: z.object({
                     accepted: z.array(z.string()).describe("Ids of the changes to accept"),
                     rejected: z.array(z.string()).describe("Ids of the changes to reject"),
                   }),
-                  execute: async ({ accepted, rejected }, { toolCallId }) => {
-                    writer.write({
-                      type: "data-tool_result",
-                      data: { toolCallId, toolType: "review_changes", output: { accepted, rejected } } satisfies ToolOutputData,
-                    });
-                    return { accepted, rejected };
-                  },
                 }),
 
                 replace_selection: tool({

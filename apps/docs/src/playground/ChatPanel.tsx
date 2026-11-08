@@ -1,11 +1,12 @@
 import { useRef, useEffect, useMemo, useState } from "react";
 import { useChat } from "@ai-sdk/react";
-import { DefaultChatTransport } from "ai";
+import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls } from "ai";
 import type { UIMessage, DataUIPart } from "ai";
 import type { Editor } from "@scrivr/core";
-import { findLiveNodeById, getAiToolkit, parseSemanticEdits } from "@scrivr/ai";
+import { getAiToolkit, parseSemanticEdits } from "@scrivr/ai";
 import type { DocUnit, ToolOutputData } from "../routes/api/ai";
-import { clearAgentDebug, downloadAgentDebug, recordEdit, recordThread } from "./agentDebug";
+import { clearAgentDebug, downloadAgentDebug, recordEdit, recordReview, recordThread } from "./agentDebug";
+import type { ReviewOutcome } from "@scrivr/plugins";
 
 type AppDataTypes = { tool_result: ToolOutputData };
 type AppUIMessage = UIMessage<unknown, AppDataTypes>;
@@ -43,7 +44,6 @@ function getDocContext(editor: Editor | null): {
     ...(unit.headingLevel ? { headingLevel: unit.headingLevel } : {}),
     ...(unit.parts ? { parts: unit.parts.map((part) => ({ nodeId: part.nodeId, text: part.text })) } : {}),
     ...(unit.image ? { image: unit.image } : {}),
-    ...(findLiveNodeById(state.doc, unit.id) ? {} : { proposedForDeletion: true }),
     ...(unit.changes ? {
       changes: unit.changes.map(({ type, text, id, at, authorId, oldAttrs, image }) => ({
         type,
@@ -156,18 +156,6 @@ export function ChatPanel({ editor, hideBorder }: ChatPanelProps) {
       return;
     }
 
-    if (toolType === "review_changes") {
-      // A host decides whether an agent may review (`canAcceptReject`); the
-      // outcome says what happened, or why not.
-      const ai = getAiToolkit(ed);
-      if (!ai) return;
-      const outcome = ai.reviewChanges({ accepted: stringList(output["accepted"]), rejected: stringList(output["rejected"]) });
-      setLastEdit(outcome.status === "applied"
-        ? `accepted ${outcome.accepted.join(", ") || "nothing"} · rejected ${outcome.rejected.join(", ") || "nothing"}`
-        : `review ${outcome.status}: ${outcome.reason}`);
-      return;
-    }
-
     const isInsert  = toolType === "insert_text";
     const isReplace = toolType === "replace_selection";
     if (!(isInsert || isReplace)) return;
@@ -181,9 +169,28 @@ export function ChatPanel({ editor, hideBorder }: ChatPanelProps) {
     ed.commands["insertAsSuggestion"]?.(text, from, to, "AI Assistant");
   }
 
-  const { messages, sendMessage, status, setMessages } = useChat<AppUIMessage>({
+  // `review_changes` runs here, against the document, and the editor's own
+  // outcome — refusals included — is the tool's output the model reads.
+  function reviewForAgent(toolCallId: string, input: unknown) {
+    const ed = editorRef.current;
+    const ai = ed ? getAiToolkit(ed) : null;
+    const field = (key: string) => (typeof input === "object" && input !== null && key in input ? Reflect.get(input, key) : undefined);
+    const decisions = { accepted: stringList(field("accepted")), rejected: stringList(field("rejected")) };
+    const outcome: ReviewOutcome = ai ? ai.reviewChanges(decisions) : { status: "unavailable", reason: "no-editor" };
+    setLastEdit(outcome.status === "applied"
+      ? `accepted ${outcome.accepted.join(", ") || "nothing"} · rejected ${outcome.rejected.join(", ") || "nothing"}`
+      : `review ${outcome.status}: ${outcome.reason}`);
+    recordReview({ at: new Date().toISOString(), toolCallId, decisions, outcome });
+    void addToolOutput({ tool: "review_changes", toolCallId, output: outcome });
+  }
+
+  const { messages, sendMessage, status, setMessages, addToolOutput } = useChat<AppUIMessage>({
     transport,
     onData: applyToolResult,
+    onToolCall: ({ toolCall }) => {
+      if (toolCall.toolName === "review_changes") reviewForAgent(toolCall.toolCallId, toolCall.input);
+    },
+    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
   });
   const isLoading = status === "streaming" || status === "submitted";
 
