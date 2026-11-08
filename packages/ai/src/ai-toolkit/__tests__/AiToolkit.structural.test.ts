@@ -690,3 +690,33 @@ describe("what one batch can ask of tracking", () => {
     expect(textOf(editor)).toBe(original);
   });
 });
+
+describe("an agent's structural edit is a proposal", () => {
+  /** A person editing directly: their own edits are not tracked. */
+  const editing = () => {
+    const editor = new ServerEditor({
+      extensions: [StarterKit, TrackChanges.configure({ userID: "person", initialStatus: TrackChangesStatus.disabled, canAcceptReject: true }), AiToolkit],
+      content: { type: "doc", content: [para("a", "alpha"), para("b", "beta")] },
+    });
+    const ai = getAiToolkit(editor);
+    if (!ai) throw new Error("no toolkit");
+    return { editor, ai };
+  };
+
+  it("is tracked even while the person is editing, and credited to the agent", () => {
+    const { editor, ai } = editing();
+    ai.applySemanticEdits([{ kind: "structural", op: "moveBlock", nodeId: "a", anchorNodeId: "b", position: "after" }], { authorID: "agent" });
+
+    const moves = changesOf(editor).filter((c) => c.dataTracked.operation === "move");
+    expect(moves.map((c) => c.dataTracked.authorID)).toEqual(["agent"]);
+    editor.commands.setChangeStatuses("rejected", changesOf(editor).map((c) => c.id));
+    expect(textOf(editor)).toBe("alpha\nbeta");
+  });
+
+  it("is credited to the AI Assistant when no author is named, as a rewrite is", () => {
+    const { editor, ai } = editing();
+    ai.applySemanticEdits([{ kind: "structural", op: "deleteBlock", nodeId: "b" }]);
+
+    expect(changesOf(editor).map((c) => c.dataTracked.authorID)).toContain("AI Assistant");
+  });
+});

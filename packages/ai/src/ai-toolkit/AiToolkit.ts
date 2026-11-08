@@ -3,11 +3,13 @@ import type { IBaseEditor, IEditor, SemanticPart, SemanticUnit } from "@scrivr/c
 import { semanticPartRichHash, toSemanticUnits, unitRichHash } from "@scrivr/export-semantic";
 import type { SemanticEdit, StructuralSemanticEdit } from "../schema/edit";
 import { applyStructuralEdits } from "./applyStructuralEdits";
+import { applyImageLayout, type ImageLayoutEdit } from "./imageAttrs";
+import { SemanticImageAttrsSchema } from "../schema/edit";
 import { toCoreSpans } from "./spans";
 import { UniqueId } from "./UniqueId";
 import { GhostText, ghostTextPluginKey } from "./GhostText";
 import { AiCaret, aiCaretPluginKey } from "./AiCaret";
-import { findLiveNodeById, isShadowNode, shadowRanges } from "@scrivr/plugins";
+import { findLiveNodeById, isShadowNode, shadowRanges, trackAsSuggestion } from "@scrivr/plugins";
 import { aiToolkitRegistry } from "./aiToolkitRegistry";
 import { applyRichDiffAsSuggestion, buildAcceptedTextMap, type RichBlockEdit } from "@scrivr/plugins";
 
@@ -396,6 +398,14 @@ export class AiToolkitAPI {
     const changed: string[] = [];
     const stale: string[] = [];
     const notFound: string[] = [];
+    // An image unit has no words to diff; its layout is set as image attrs.
+    const imageLayouts: ImageLayoutEdit[] = [];
+    const rejected: string[] = [];
+    const layoutOf = (nodeId: string, attrs: unknown) => {
+      const parsed = SemanticImageAttrsSchema.safeParse(attrs ?? {});
+      if (parsed.success) imageLayouts.push({ nodeId, attrs: parsed.data });
+      else rejected.push(nodeId);
+    };
 
     for (const item of edits) {
       if (isSemanticUnit(item)) {
@@ -413,6 +423,10 @@ export class AiToolkitAPI {
           continue;
         }
         if (unitRichHash(item) === current) continue; // unchanged — skip
+        if (currentUnit.type === "image") {
+          layoutOf(nodeId, item.image);
+          continue;
+        }
 
         // Container units are context envelopes; their individually-addressable
         // parts are the edit surface. Diff those leaves and never send the
@@ -446,12 +460,21 @@ export class AiToolkitAPI {
           stale.push(item.nodeId);
           continue;
         }
+        if (currentUnits.get(item.nodeId)?.type === "image") {
+          // An image unit holds no words: spans are refused, attrs set its layout.
+          if (item.spans) rejected.push(item.nodeId);
+          else layoutOf(item.nodeId, item.attrs);
+          continue;
+        }
         resolved.push(item);
         changed.push(item.nodeId);
       }
     }
 
-    if (resolved.length === 0) return { applied: false, changed, stale, notFound, rejected: [] };
+    const laidOut = imageLayouts.length > 0 ? applyImageLayout(this.editor, imageLayouts, authorID) : [];
+    if (resolved.length === 0) {
+      return { applied: laidOut.length > 0, changed: [...changed, ...laidOut], stale, notFound, rejected };
+    }
 
     const result = applyRichDiffAsSuggestion(
       this.editor.getState(),
@@ -460,11 +483,11 @@ export class AiToolkitAPI {
     );
     const unapplied = new Set([...result.notFound, ...result.rejected]);
     return {
-      applied: result.applied,
-      changed: changed.filter((nodeId) => !unapplied.has(nodeId)),
+      applied: result.applied || laidOut.length > 0,
+      changed: [...changed.filter((nodeId) => !unapplied.has(nodeId)), ...laidOut],
       stale,
       notFound: [...notFound, ...result.notFound],
-      rejected: result.rejected,
+      rejected: [...rejected, ...result.rejected],
     };
   }
 
@@ -476,9 +499,9 @@ export class AiToolkitAPI {
    * `applyStructuralEdits`. Both report into one result; `stale` comes only from
    * the rich half, which is the only one with a hash to check against.
    *
-   * `authorID` names the author of the rich half. Structural changes are
-   * attributed by the track-changes author, because the engine assigns them as
-   * it tracks the transaction and takes no per-transaction override.
+   * Both halves are proposals by `authorID` (default "AI Assistant"), tracked
+   * whether or not the person is suggesting: an agent's edit is never applied
+   * to the document directly.
    */
   applySemanticEdits(
     edits: SemanticEdit[],
@@ -505,7 +528,7 @@ export class AiToolkitAPI {
     if (structural.length === 0) return richResult;
 
     // One transaction: the structural batch is one undo step.
-    const tr = this.editor.getState().tr;
+    const tr = trackAsSuggestion(this.editor.getState().tr, options.authorID ?? "AI Assistant");
     const structuralResult = applyStructuralEdits(tr, structural);
     const touched = tr.docChanged;
     if (touched) this.editor.applyTransaction(tr);

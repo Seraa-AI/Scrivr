@@ -42,12 +42,7 @@ import {
 } from "../helpers";
 import { CHANGE_STATUS } from "../types";
 import { acceptedRangeToDocRange, buildAcceptedTextMap } from "./acceptedTextMap";
-import {
-  computeEditDensity,
-  diffText,
-  expandCharLevel,
-  pairReplacements,
-} from "./diffText";
+import { computeEditDensity, diffText, phraseReplacements } from "./diffText";
 import { applyTrackedDelete } from "./splitRangeForNewMark";
 import { skipTracking, TrackChangesAction, setAction } from "../actions";
 
@@ -192,7 +187,7 @@ function applyBlockToTr(
 
   const rawOps     = diffText(acceptedText, proposedText);
   const editDensity = computeEditDensity(rawOps);
-  const ops        = expandCharLevel(pairReplacements(rawOps));
+  const ops        = phraseReplacements(rawOps);
 
   const now = Date.now();
   let acceptedOffset = 0; // cursor into acceptedText

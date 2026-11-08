@@ -261,3 +261,38 @@ describe("pasting a table from another editor", () => {
     ]);
   });
 });
+
+describe("pasting a markdown table", () => {
+  function pasteMarkdown(text: string): Node {
+    const state = EditorState.create({ schema, plugins: manager.buildPlugins() });
+    const clipboardData = new DataTransfer();
+    clipboardData.setData("text/plain", text);
+    const transformer = new PasteTransformer(schema, manager.buildMarkdownRules(), manager.buildMarkdownParserTokens(), {
+      pasteTransforms: manager.buildPasteTransforms(),
+    });
+    const tr = transformer.transform(clipboardData, state);
+    if (!tr) throw new Error("paste produced no transaction");
+    return tr.doc;
+  }
+
+  it("becomes a table, its header row first", () => {
+    const doc = pasteMarkdown([
+      "## Equipment",
+      "",
+      "| Item | Provided |",
+      "|------|----------|",
+      "| Monitor | On request |",
+      "| Laptop | Always |",
+    ].join("\n"));
+
+    const table = findTable(doc);
+    const text = (row: Node) => {
+      const out: string[] = [];
+      row.forEach((cell) => out.push(cell.textContent));
+      return out;
+    };
+    const rows: string[][] = [];
+    table.forEach((row) => rows.push(text(row)));
+    expect(rows).toEqual([["Item", "Provided"], ["Monitor", "On request"], ["Laptop", "Always"]]);
+  });
+});

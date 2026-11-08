@@ -10,10 +10,8 @@
  *   - passed to showAiSuggestion() to render as an overlay
  *   - passed to applyAiSuggestion() to commit to the document
  *
- * Notably does NOT call expandCharLevel — AI suggestions stay at word/token
- * granularity. Character-level surgical marks are appropriate for human edits
- * (where lawyers want to see exactly which suffix changed) but produce visual
- * noise for AI suggestions where the unit of accept/reject is a whole word.
+ * AI suggestions stay at word/token granularity: a change is never made
+ * inside a word, since the unit a reviewer accepts or rejects is a whole word.
  */
 
 import type { EditorState, Node as PmNode, Schema } from "@scrivr/core/pm";

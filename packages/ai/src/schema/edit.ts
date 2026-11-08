@@ -47,17 +47,37 @@ export type RichSemanticEdit = z.infer<typeof RichSemanticEditSchema>;
 export const EditPositionSchema = z.enum(["before", "after"]);
 export type EditPosition = z.infer<typeof EditPositionSchema>;
 
+/** px. Larger than any page, so a runaway number is refused rather than laid out. */
+const ImageSizeSchema = z.number().positive().max(4000);
+
 /**
- * A block the agent can ask for. Limited to the textblock types a semantic unit
- * is made of — a container (list, table) is built by its own ops, not dropped in
- * whole, because the agent would have to get its internal structure right.
+ * How an image sits, as an agent sets it: on a new image, or through `richText`
+ * `attrs` on an image unit. Keys it does not know are dropped.
  */
-export const SemanticBlockInputSchema = z.strictObject({
-  type: z.enum(["paragraph", "heading", "codeBlock"]),
-  attrs: z.record(z.string(), z.unknown()).optional(),
-  spans: z.array(InlineSpanSchema).optional(),
-  level: z.number().int().min(1).max(6).optional(),
+export const SemanticImageAttrsSchema = z.object({
+  alt: z.string().optional(),
+  width: ImageSizeSchema.optional(),
+  height: ImageSizeSchema.optional(),
+  wrap: z.enum(["inline", "square", "top-bottom", "behind", "front"]).optional(),
+  align: z.enum(["left", "center", "right"]).optional(),
 });
+export type SemanticImageAttrs = z.infer<typeof SemanticImageAttrsSchema>;
+
+/**
+ * A block the agent can ask for: one of the textblock types a semantic unit is
+ * made of, or an image (a paragraph holding it). A container (list, table) is
+ * built by its own ops, not dropped in whole, because the agent would have to
+ * get its internal structure right.
+ */
+export const SemanticBlockInputSchema = z.discriminatedUnion("type", [
+  z.strictObject({
+    type: z.enum(["paragraph", "heading", "codeBlock"]),
+    attrs: z.record(z.string(), z.unknown()).optional(),
+    spans: z.array(InlineSpanSchema).optional(),
+    level: z.number().int().min(1).max(6).optional(),
+  }),
+  z.strictObject({ type: z.literal("image"), src: z.string().min(1), ...SemanticImageAttrsSchema.shape }),
+]);
 export type SemanticBlockInput = z.infer<typeof SemanticBlockInputSchema>;
 
 /** One cell of an inserted table row. */

@@ -295,3 +295,28 @@ describe("toSemanticUnits — parts (editable leaves)", () => {
     expect(ungrouped.map((u) => u.type)).toEqual(["heading", "paragraph"]);
   });
 });
+
+describe("toSemanticUnits — an image unit", () => {
+  const imageParagraph = (attrs: Record<string, unknown>) => ({
+    type: "paragraph",
+    attrs: { nodeId: "fig" },
+    content: [{ type: "image", attrs: { src: "https://example.com/a.png", alt: "A chart", width: 240, height: 160, ...attrs } }],
+  });
+
+  it("describes the image a paragraph holds alone, addressed by the paragraph", () => {
+    const units = toSemanticUnits(edit({ type: "doc", content: [imageParagraph({ wrapMode: "square", xAlign: "right" })] }));
+    expect(units[0]).toMatchObject({
+      id: "fig",
+      type: "image",
+      image: { src: "https://example.com/a.png", alt: "A chart", width: 240, height: 160, wrap: "square", align: "right" },
+    });
+  });
+
+  it("leaves out an image an extension says the view removes", () => {
+    const units = toSemanticUnits(edit({ type: "doc", content: [imageParagraph({ alt: "gone" })] }), {
+      overrides: { removes: (node) => node.attrs["alt"] === "gone" },
+    });
+    expect(units[0]?.type).toBe("paragraph");
+    expect(units[0]?.image).toBeUndefined();
+  });
+});

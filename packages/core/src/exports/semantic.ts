@@ -125,6 +125,23 @@ export interface SemanticUnit {
   cells?: TableCells;
   /** Review changes excluded from `text` but preserved for audit/UI use. */
   changes?: SemanticChange[];
+  /** The image an `image` unit is — a paragraph holding one image and nothing else. */
+  image?: SemanticImage;
+}
+
+/**
+ * An image as an agent reads and writes it. An image has no id of its own; the
+ * unit that carries it is addressed by its paragraph's id.
+ */
+export interface SemanticImage {
+  src: string;
+  alt: string;
+  width: number;
+  height: number;
+  /** How text flows around it: `inline | square | top-bottom | behind | front`. */
+  wrap: string;
+  /** Where it sits across the line: `left | center | right`, or `custom`. */
+  align: string;
 }
 
 /** One inline run of a unit's text and the formatting marks around it. */
@@ -201,6 +218,7 @@ export interface TableCell {
 export interface SemanticNodeResult {
   type: SemanticUnitType;
   cells?: TableCells;
+  image?: SemanticImage;
   text?: string;
   markdown?: string;
 }
@@ -231,6 +249,11 @@ export type SemanticMarkHandler = (
 export interface SemanticHandlers {
   nodes?: Record<string, SemanticNodeHandler>;
   marks?: Record<string, SemanticMarkHandler>;
+  /**
+   * Whether the proposed view leaves a node out — an object proposed for
+   * deletion, which carries no text for a mark handler to drop.
+   */
+  removes?: (node: PmNode) => boolean;
 }
 
 // ── Producer context ─────────────────────────────────────────────────────────
@@ -252,6 +275,8 @@ export interface UnitCtx {
   toChanges(nodes: PmNode | readonly PmNode[]): SemanticChange[];
   /** A block's non-default styling attrs (align/indent/font/…), or undefined. */
   attrsOf(node: PmNode): Record<string, unknown> | undefined;
+  /** Whether the proposed view leaves this node out (see `SemanticHandlers.removes`). */
+  isRemoved(node: PmNode): boolean;
   /** Physical column count = max over rows of Σ gridSpan (never TableMap.width). */
   physicalColumns(table: PmNode): number;
 }

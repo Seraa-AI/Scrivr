@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { snapRect, setActiveDpr, renderTrackedFormatting, renderTrackedObject } from "./OverlayRenderer";
+import { snapRect, setActiveDpr, renderTrackedFormatting, renderTrackedMove, renderTrackedObject, renderTrackedRow } from "./OverlayRenderer";
 import type { GlyphEntry } from "../layout/CharacterMap";
 
 describe("snapRect — pixel-grid snapping", () => {
@@ -53,10 +53,16 @@ describe("snapRect — pixel-grid snapping", () => {
   });
 });
 
+function context(): CanvasRenderingContext2D {
+  const ctx = document.createElement("canvas").getContext("2d");
+  if (!ctx) throw new Error("no 2d context");
+  return ctx;
+}
+
 describe("a formatting change", () => {
   it("is washed, never underlined, so it is not mistaken for underlining", () => {
     const calls: string[] = [];
-    const ctx = document.createElement("canvas").getContext("2d")!;
+    const ctx = context();
     ctx.fillRect = () => calls.push("fillRect");
     ctx.stroke = () => calls.push("stroke");
     const glyph = (docPos: number): GlyphEntry => ({ docPos, x: docPos * 8, y: 0, lineY: 0, width: 8, height: 16, page: 1, lineIndex: 0 });
@@ -70,7 +76,7 @@ describe("a formatting change", () => {
 describe("a changed object", () => {
   const painted = (removed: boolean) => {
     const calls: string[] = [];
-    const ctx = document.createElement("canvas").getContext("2d")!;
+    const ctx = context();
     ctx.fillRect = () => calls.push("fill");
     ctx.strokeRect = () => calls.push("frame");
     ctx.stroke = () => calls.push("strike");
@@ -84,5 +90,51 @@ describe("a changed object", () => {
 
   it("is also struck through when removed, as Word marks a deleted object", () => {
     expect(painted(true)).toEqual(["fill", "frame", "strike"]);
+  });
+});
+
+describe("moved content", () => {
+  const strokes = (removed: boolean) => {
+    const ys: number[] = [];
+    const ctx = context();
+    ctx.fillRect = () => undefined;
+    ctx.moveTo = (_x: number, y: number) => { ys.push(y); };
+    ctx.stroke = () => undefined;
+    const glyph: GlyphEntry = { docPos: 1, x: 0, y: 0, lineY: 0, width: 8, height: 16, page: 1, lineIndex: 0 };
+    renderTrackedMove(ctx, [glyph], [], "#15803d", removed);
+    return ys;
+  };
+
+  it("is double-underlined where it moved to, as Word marks it", () => {
+    const ys = strokes(false);
+    expect(ys).toHaveLength(2);
+    expect(Math.min(...ys)).toBeGreaterThan(8);
+  });
+
+  it("is double-struck where it moved from", () => {
+    const ys = strokes(true);
+    expect(ys).toHaveLength(2);
+    expect(Math.max(...ys)).toBeLessThan(12);
+  });
+});
+
+describe("a table row added or removed", () => {
+  const painted = (removed: boolean) => {
+    const calls: string[] = [];
+    let dashed = false;
+    const ctx = context();
+    ctx.fillRect = () => { calls.push("wash"); };
+    ctx.strokeRect = () => { calls.push(dashed ? "dashed frame" : "frame"); };
+    ctx.setLineDash = (segments: number[]) => { dashed = segments.length > 0; };
+    renderTrackedRow(ctx, { x: 10, y: 10, width: 400, height: 38 }, "#16a34a", removed);
+    return calls;
+  };
+
+  it("is washed and framed across the whole row", () => {
+    expect(painted(false)).toEqual(["wash", "frame"]);
+  });
+
+  it("is framed with a dashed line when removed", () => {
+    expect(painted(true)).toEqual(["wash", "dashed frame"]);
   });
 });

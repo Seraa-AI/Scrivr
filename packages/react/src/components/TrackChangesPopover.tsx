@@ -7,7 +7,7 @@ import { shortName } from "../utils/authorName";
 import { useTrackChangesPopover } from "../hooks/useTrackChangesPopover";
 import { useReviewAction } from "../hooks/useReviewAction";
 import { ReviewRefusalNotice } from "./ReviewRefusalNotice";
-import { changeName, getChangeMeta, type ChangeMeta, type NamedChangeType } from "../utils/changeMeta";
+import { changeName, decisionLabel, getChangeMeta, type ChangeMeta, type NamedChangeType } from "../utils/changeMeta";
 
 export interface TrackChangesPopoverProps {
   editor: Editor | null;
@@ -90,9 +90,13 @@ const KIND_TYPE: Record<ChangePopoverInfo["changeKind"], NamedChangeType> = {
 
 /** What text a change adds or removes; other changes show it as it is. */
 const VERB: Partial<Record<CHANGE_OPERATION, string>> = {
-  [CHANGE_OPERATION.insert]: "Adding: ",
-  [CHANGE_OPERATION.delete]: "Removing: ",
+  [CHANGE_OPERATION.insert]: "Adding",
+  [CHANGE_OPERATION.delete]: "Removing",
 };
+
+/** "Adding: " or, for a change decided whole, "Adding row: ". */
+const previewPrefix = (verb: string | undefined, meta: ChangeMeta) =>
+  verb ? `${verb}${meta.unit ? ` ${meta.unit}` : ""}: ` : "";
 
 const REPLACEMENT: ChangeMeta = { icon: "↔", label: "Replacement" };
 
@@ -169,7 +173,7 @@ function SingleChangePopover({
         data-part="description"
         style={textPreview}
       >
-        {info.moveId ? "Moving: " : VERB[info.operation] ?? ""}
+        {info.moveId ? "Moving: " : previewPrefix(VERB[info.operation], bm)}
         <em>"{info.text}"</em>
       </div>
     );
@@ -192,14 +196,14 @@ function SingleChangePopover({
           onClick={() => decide("accepted", ids)}
           style={btnStyle}
         >
-          Accept
+          {decisionLabel("Accept", bm)}
         </button>
         <button
           className={cx("scrivr-menu-item", itemClassName)}
           onClick={() => decide("rejected", ids)}
           style={btnStyle}
         >
-          Reject
+          {decisionLabel("Reject", bm)}
         </button>
       </div>
       {preview}

@@ -17,7 +17,7 @@ import type {
 } from "@scrivr/plugins";
 import { cx } from "../utils/classNames";
 import { shortName } from "../utils/authorName";
-import { getChangeMeta, MARK_LABELS } from "../utils/changeMeta";
+import { blockText, decisionLabel, getChangeMeta, MARK_LABELS } from "../utils/changeMeta";
 import type { ChangeMeta } from "../utils/changeMeta";
 import { useTrackChangesPanel } from "../hooks/useTrackChangesPanel";
 import type { TrackChangesDisplayItem } from "../hooks/useTrackChangesPanel";
@@ -275,12 +275,12 @@ function SingleRow({
       </div>
     );
   } else if (change.type === "node-change") {
-    const nc = change
+    const verb = change.dataTracked.operation === CHANGE_OPERATION.delete ? "Removing" : "Adding";
+    const text = blockText(change.node);
     preview = (
-      <div
-        style={previewLine}
-      >
-        {nc.node.type.name}
+      <div style={previewLine}>
+        <span style={prefixLabel}>{meta.unit ? `${verb} ${meta.unit}` : verb}</span>
+        {text ? <em>"{truncate(text)}"</em> : change.node.type.name}
       </div>
     );
   }
@@ -346,14 +346,14 @@ function ChangeRow({
         </span>
         <button
           onClick={onReject}
-          title="Reject"
+          title={decisionLabel("Reject", meta)}
           style={iconBtn}
         >
           ✗
         </button>
         <button
           onClick={onAccept}
-          title="Accept"
+          title={decisionLabel("Accept", meta)}
           style={iconBtn}
         >
           ✓

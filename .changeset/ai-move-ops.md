@@ -2,6 +2,8 @@
 "@scrivr/core": patch
 "@scrivr/plugins": patch
 "@scrivr/ai": patch
+"@scrivr/react": patch
+"@scrivr/export-semantic": patch
 ---
 
 Semantic move ops, and the tracking defects they exposed.
@@ -63,3 +65,43 @@ block added right after a list or table, together with a move made since, no
 longer deletes the list's text and fails; and deleting a paragraph while typing
 its words elsewhere in one transaction is a deletion and an insertion rather
 than an error.
+
+A document with pending changes serializes to markdown: `getMarkdown()` writes a
+proposed insertion as `{++text++}` and a deletion as `{--text--}` (CriticMarkup)
+instead of throwing.
+
+An agent's rewrite reads as a person's edit: each changed phrase is one deletion
+and one insertion, changes a few words apart are one replacement, and no change
+is made inside a word.
+
+An agent's structural edits are proposals like its rewrites: `applySemanticEdits`
+tracks a structural batch as a suggestion by `authorID` (default "AI
+Assistant") whether or not the person is suggesting, so a move, insert or
+delete is never applied to the document directly.
+
+Pasting a markdown table, or loading markdown content that holds one, makes a
+table: the Table extension reads markdown tables, with the header row as header
+cells.
+
+Moves read as moves: moved content is double-underlined where it went and
+double-struck where it was, in one move colour as Word marks it, with edits
+inside a moved block drawn over it (`renderTrackedMove`). A card previews a
+block change as the block will read, and a move once, by where it went.
+
+A table row added or removed reads as a row: it is washed and framed across
+the whole row, dashed when removed (`renderTrackedRow`), and its card is named
+"Row added" or "Row removed". With the caret anywhere in the row, the popover
+offers the row — its words are part of adding or removing it — so one Accept
+or Reject decides the whole row. Those words carry no marks of their own under
+the row's, the buttons read "Accept row" and "Reject row", and the preview reads
+"Adding row: Headset · On request · Yes".
+
+An agent works with images through the protocol it already has: a paragraph
+holding one image is an `image` unit with `image` (`src`, `alt`, `width`,
+`height`, `wrap`, `align`); `insertBlock` adds one with `block.type: "image"`
+(`src` must pass `safeImageUrl`); `richText` `attrs` on an image unit change its
+`wrap`, `align`, size or `alt`; `deleteBlock` removes it — each the agent's
+tracked suggestion. `SemanticImage` and `SemanticImageAttrsSchema` are exported.
+A semantic contribution can name nodes the proposed view leaves out
+(`removes`); track changes uses it so an image proposed for deletion is not read
+as present.

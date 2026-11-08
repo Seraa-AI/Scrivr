@@ -134,6 +134,7 @@ function extractSemantic(
 export function createUnitCtx(
   editor: IBaseEditor,
   markHandlers: Record<string, SemanticMarkHandler>,
+  removes: ReadonlyArray<(node: PmNode) => boolean> = [],
 ): UnitCtx {
   const schema = editor.getState().doc.type.schema;
   const serializer = editor.getMarkdownSerializer();
@@ -168,6 +169,9 @@ export function createUnitCtx(
     },
     attrsOf(node) {
       return describeAttrs(node);
+    },
+    isRemoved(node) {
+      return removes.some((removed) => removed(node));
     },
     physicalColumns,
   };

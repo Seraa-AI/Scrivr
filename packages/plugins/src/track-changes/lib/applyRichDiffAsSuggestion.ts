@@ -50,7 +50,7 @@ import { findNodeById } from "@scrivr/core";
 import { findLiveNodeById } from "../liveNode";
 import { acceptedRangeToDocRange, type PosMapEntry } from "./acceptedTextMap";
 import { clearAuthorPendingMarks } from "./applyDiffAsSuggestion";
-import { diffText, expandCharLevel, pairReplacements } from "./diffText";
+import { diffText, phraseReplacements } from "./diffText";
 import { applyTrackedDelete } from "./splitRangeForNewMark";
 import { setAction, skipTracking, TrackChangesAction } from "../actions";
 
@@ -255,7 +255,7 @@ function applyInlineChange(
   // change over a retained region is emitted as ONE mark-add (one tracking id)
   // spanning the whole region — correct even when the region is interleaved
   // with a pending trackedInsert that stops the text nodes from fusing.
-  const ops = coalesceKeeps(expandCharLevel(pairReplacements(rawOps)));
+  const ops = coalesceKeeps(phraseReplacements(rawOps));
 
   const insertType = schema.marks.trackedInsert;
   let aOff = 0; // cursor into acceptedText

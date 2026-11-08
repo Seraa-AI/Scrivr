@@ -3,8 +3,9 @@ import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import type { UIMessage, DataUIPart } from "ai";
 import type { Editor } from "@scrivr/core";
-import { getAiToolkit } from "@scrivr/ai";
-import type { ToolOutputData } from "../routes/api/ai";
+import { getAiToolkit, parseSemanticEdits } from "@scrivr/ai";
+import type { DocUnit, ToolOutputData } from "../routes/api/ai";
+import { clearAgentDebug, downloadAgentDebug, recordEdit, recordThread } from "./agentDebug";
 
 type AppDataTypes = { tool_result: ToolOutputData };
 type AppUIMessage = UIMessage<unknown, AppDataTypes>;
@@ -16,6 +17,7 @@ interface ChatPanelProps {
 
 function getDocContext(editor: Editor | null): {
   blocks?: Array<{ nodeId: string; text: string }>;
+  units?: DocUnit[];
   context?: string;
 } {
   if (!editor) return {};
@@ -30,8 +32,16 @@ function getDocContext(editor: Editor | null): {
   const { from, to } = state.selection;
   const hasSelection = from !== to;
 
-  const blocks = hasSelection ? ai.getBlocks(from, to) : ai.getBlocks();
-  return blocks.length > 0 ? { blocks } : {};
+  // The rich view carries the ids of list items and table cells, which
+  // structural edits address; a host sends the agent the same.
+  const units: DocUnit[] = (hasSelection ? ai.getRichBlocks(from, to) : ai.getRichBlocks()).map((unit) => ({
+    id: unit.id,
+    type: unit.type,
+    text: unit.text,
+    ...(unit.parts ? { parts: unit.parts.map((part) => ({ nodeId: part.nodeId, text: part.text })) } : {}),
+    ...(unit.image ? { image: unit.image } : {}),
+  }));
+  return units.length > 0 ? { units } : {};
 }
 
 export function ChatPanel({ editor, hideBorder }: ChatPanelProps) {
@@ -72,6 +82,7 @@ export function ChatPanel({ editor, hideBorder }: ChatPanelProps) {
   );
 
   const [inputValue, setInputValue] = useState("");
+  const [lastEdit, setLastEdit] = useState<string | null>(null);
   const pendingSelection = useRef<{ from: number; to: number } | null>(null);
 
   function applyToolResult(dataPart: DataUIPart<AppDataTypes>) {
@@ -105,6 +116,32 @@ export function ChatPanel({ editor, hideBorder }: ChatPanelProps) {
       return;
     }
 
+    if (toolType === "edit_document") {
+      // What a host does with an agent's batch: validate it against the
+      // protocol, apply it as tracked changes, and report what landed.
+      const ai = getAiToolkit(ed);
+      if (!ai) return;
+      const parsed = parseSemanticEdits(output["edits"]);
+      const result = ai.applySemanticEdits(parsed.edits);
+      const parts = [
+        `changed ${result.changed.join(", ") || "nothing"}`,
+        result.rejected.length ? `rejected ${result.rejected.join(", ")}` : "",
+        result.notFound.length ? `not found ${result.notFound.join(", ")}` : "",
+        result.stale.length ? `stale ${result.stale.join(", ")}` : "",
+        parsed.rejected.length ? `invalid ${parsed.rejected.map((r) => r.error).join("; ")}` : "",
+      ].filter(Boolean);
+      setLastEdit(parts.join(" · "));
+      recordEdit({
+        at: new Date().toISOString(),
+        toolCallId: dataPart.data.toolCallId,
+        edits: parsed.edits,
+        invalid: parsed.rejected,
+        result: { applied: result.applied, changed: result.changed, rejected: result.rejected, notFound: result.notFound, stale: result.stale },
+      });
+      console.info("[edit_document]", { edits: parsed.edits, result, invalid: parsed.rejected });
+      return;
+    }
+
     const isInsert  = toolType === "insert_text";
     const isReplace = toolType === "replace_selection";
     if (!(isInsert || isReplace)) return;
@@ -118,7 +155,7 @@ export function ChatPanel({ editor, hideBorder }: ChatPanelProps) {
     ed.commands["insertAsSuggestion"]?.(text, from, to, "AI Assistant");
   }
 
-  const { messages, sendMessage, status } = useChat<AppUIMessage>({
+  const { messages, sendMessage, status, setMessages } = useChat<AppUIMessage>({
     transport,
     onData: applyToolResult,
   });
@@ -126,6 +163,8 @@ export function ChatPanel({ editor, hideBorder }: ChatPanelProps) {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    // A fresh page starts with no messages; keep the last run's record until there is a new one.
+    if (messages.length > 0) recordThread(messages);
   }, [messages]);
 
   function submit() {
@@ -172,6 +211,28 @@ export function ChatPanel({ editor, hideBorder }: ChatPanelProps) {
         >
           Claude
         </span>
+        <button
+          type="button"
+          className="text-[11px] border rounded px-1.5 py-px"
+          style={{ borderColor: "var(--app-border)", color: "var(--app-text-muted)" }}
+          title="Download the document, its pending changes, the agent thread and every batch it applied"
+          onClick={() => downloadAgentDebug(editorRef.current)}
+        >
+          Export
+        </button>
+        <button
+          type="button"
+          className="text-[11px] border rounded px-1.5 py-px"
+          style={{ borderColor: "var(--app-border)", color: "var(--app-text-muted)" }}
+          title="Start a new thread and forget the recorded one"
+          onClick={() => {
+            setMessages([]);
+            setLastEdit(null);
+            clearAgentDebug();
+          }}
+        >
+          Clear
+        </button>
       </div>
 
       {/* Messages */}
@@ -197,6 +258,12 @@ export function ChatPanel({ editor, hideBorder }: ChatPanelProps) {
             <span className="text-[12px] italic" style={{ color: "var(--app-text-faint)" }}>
               Thinking…
             </span>
+          </div>
+        )}
+
+        {lastEdit && (
+          <div className="text-[11px] leading-snug px-1" style={{ color: "var(--app-text-muted)" }}>
+            Agent edit: {lastEdit}
           </div>
         )}
 

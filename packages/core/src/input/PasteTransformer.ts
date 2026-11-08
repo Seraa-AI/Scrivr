@@ -7,7 +7,8 @@ import {
 import type { Schema, Node } from "prosemirror-model";
 import type { EditorState, Transaction } from "prosemirror-state";
 import { MarkdownParser } from "prosemirror-markdown";
-import MarkdownIt from "markdown-it";
+import type MarkdownIt from "markdown-it";
+import { createMarkdownIt } from "../model/parseMarkdown";
 import type {
   MarkdownBlockRule,
   MarkdownParserTokenSpec,
@@ -130,7 +131,7 @@ export class PasteTransformer {
   ) {
     // Disable rules that generate tokens our schema can't handle (blockquote, link, image).
     // Their content still renders as plain text — no data loss, just no special formatting.
-    this.md = new MarkdownIt({ html: false });
+    this.md = createMarkdownIt();
     //TODO: add these to the schema
     this.md.disable(["blockquote", "image", "link"]);
   }

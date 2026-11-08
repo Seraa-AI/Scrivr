@@ -1,5 +1,6 @@
 import type { IEditor } from "@scrivr/core";
 import { subscribeViewUpdates, subscribeEditorFocusOutside, isAnchorInsideContainer } from "@scrivr/core";
+import type { Node as PMNode } from "@scrivr/core/pm";
 
 import { trackChangesPluginKey } from "./engine/trackChangesPlugin";
 import { changeActs } from "./reviewPlan";
@@ -7,6 +8,7 @@ import {
   CHANGE_OPERATION,
   CHANGE_STATUS,
 } from "./types";
+import type { TrackedChange } from "./types";
 
 export interface ChangePopoverInfo {
   id: string;
@@ -104,6 +106,43 @@ export interface ChangePopoverCallbacks {
 }
 
 /**
+ * The change a popover offers at the caret: the act that owns the innermost
+ * pending record there, shown by that act's primary. Inside a row someone
+ * added, that is the row — its words are part of adding it — while an edit
+ * someone else made inside the row is its own act and shows as itself.
+ */
+export function changeAtCaret(pending: readonly TrackedChange[], head: number): TrackedChange | undefined {
+  const atCaret = pending.filter((c) => head >= c.from && head <= c.to);
+  const innermost = atCaret.reduce<TrackedChange | undefined>(
+    (best, c) => (!best || c.to - c.from < best.to - best.from ? c : best),
+    undefined,
+  );
+  if (!innermost) return undefined;
+  return changeActs(pending).find((act) => act.records.includes(innermost))?.primary ?? innermost;
+}
+
+/**
+ * A block change as the block will read: one moved or added without the words
+ * proposed for deletion inside it, one removed or moved away without the words
+ * proposed for insertion. Blocks, such as the cells of a row, are joined by " · ".
+ */
+export function blockPreviewText(doc: PMNode, from: number, to: number, removed: boolean): string {
+  const left = removed ? "trackedInsert" : "trackedDelete";
+  const blocks: string[] = [];
+  doc.nodesBetween(from, to, (node, pos) => {
+    if (node.isTextblock) blocks.push("");
+    if (!node.isText || node.marks.some((mark) => mark.type.name === left)) return true;
+    const text = node.text ?? "";
+    const start = Math.max(from, pos) - pos;
+    const end = Math.min(to, pos + text.length) - pos;
+    if (blocks.length === 0) blocks.push("");
+    blocks[blocks.length - 1] += text.slice(start, end);
+    return true;
+  });
+  return blocks.filter(Boolean).join(" · ");
+}
+
+/**
  * createChangePopover — headless controller for an accept/reject popover.
  *
  * Subscribes to editor state changes and fires onShow/onMove/onHide whenever
@@ -139,8 +178,7 @@ export function createChangePopover(
       (c) => c.dataTracked.status === CHANGE_STATUS.pending,
     );
 
-    // Primary: first pending change whose range contains the cursor
-    const primary = pending.find((c) => head >= c.from && head <= c.to);
+    const primary = changeAtCaret(pending, head);
 
     if (!primary) {
       if (visible) {
@@ -208,9 +246,8 @@ export function createChangePopover(
     };
 
     // Build group information for the primary change.
-    // When char-level expansion produces many 1-char marks sharing a groupId,
-    // we aggregate them here so the popover shows the full replacement text
-    // and accept/reject applies to the whole group atomically.
+    // A replacement's deletion and insertion share a groupId; aggregate them so
+    // the popover shows the whole replacement and decides it as one.
     const primaryGroupId = primary.dataTracked.groupId;
     let groupIds: string[] = [primary.id];
     let replacedText: string | undefined;
@@ -349,6 +386,15 @@ export function createChangePopover(
         // Empty string when no meaningful attrs differ — the popover will show
         // the "Style changed" badge without a misleading preview row.
         text = parts.join(" · ");
+      } else if (c.type === "node-change") {
+        // A move is previewed once, by where it went, whichever half was clicked.
+        const moveNodeId = c.dataTracked.moveNodeId;
+        const copy = moveNodeId
+          ? pending.find((o) => o.dataTracked.moveNodeId === moveNodeId && o.dataTracked.operation === CHANGE_OPERATION.move)
+          : undefined;
+        text = copy
+          ? blockPreviewText(state.doc, copy.from, copy.to, false)
+          : blockPreviewText(state.doc, c.from, c.to, op === CHANGE_OPERATION.delete);
       } else {
         text = readText(c.from, c.to);
       }

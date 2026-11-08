@@ -6,6 +6,8 @@ import {
   renderTrackedAttrChange,
   renderTrackedObject,
   renderTrackedFormatting,
+  renderTrackedMove,
+  renderTrackedRow,
 } from "@scrivr/core";
 import type {
   CharacterMap,
@@ -21,9 +23,11 @@ import type { EditorState, Node, Transaction } from "@scrivr/core/pm";
 import { setAction, skipTracking, TrackChangesAction } from "./actions";
 import { trackChangesPlugin, trackChangesPluginKey } from "./engine/trackChangesPlugin";
 import { lastCutPlugin } from "./lib/cutAndPaste";
-import { addTrackIdIfDoesntExist, createNewDeleteAttrs, createNewInsertAttrs, createNewPendingAttrs } from "./helpers";
+import { addTrackIdIfDoesntExist, createNewDeleteAttrs, createNewInsertAttrs, createNewPendingAttrs, getBlockInlineTrackedData } from "./helpers";
 import { CHANGE_OPERATION, CHANGE_STATUS, TrackChangesOptions, TrackChangesStatus } from "./types";
 import { planReviewIn } from "./reviewChanges";
+import { changeActs } from "./reviewPlan";
+import type { ChangeSet } from "./ChangeSet";
 import { cloneTrackedChanges } from "./cloneTrackedChanges";
 
 declare module "@scrivr/core" {
@@ -80,6 +84,8 @@ const DELETE_COLORS = ["#dc2626", "#b91c1c", "#e11d48", "#be185d", "#c2410c", "#
  * immediately recognise "formatting was changed here".
  */
 const ATTR_CHANGE_COLOR = "#d97706";
+/** Moves are one colour whoever made them, as Word marks moved text. */
+const MOVE_COLOR = "#15803d";
 
 type Box = { x: number; y: number; width: number; height: number };
 
@@ -102,6 +108,26 @@ function objectBox(
   const line = lines[0];
   if (node.isBlock && line) return { x: line.x, y: line.y, width: line.contentWidth, height: line.height };
   return null;
+}
+
+const rowRecordsCache = new WeakMap<ChangeSet, ReadonlySet<string>>();
+
+/**
+ * A row added or removed is shown by the row: the cells, paragraphs and words
+ * that are part of adding or removing it carry no marks of their own. Cached
+ * per change set, which every page of a paint shares.
+ */
+function recordsInsideRowChanges(changeSet: ChangeSet): ReadonlySet<string> {
+  const cached = rowRecordsCache.get(changeSet);
+  if (cached) return cached;
+  const ids = new Set(
+    changeActs(changeSet.pending)
+      .filter(({ primary }) => primary.type === "node-change" && primary.node.type.name === "tableRow" &&
+        (primary.dataTracked.operation === CHANGE_OPERATION.insert || primary.dataTracked.operation === CHANGE_OPERATION.delete))
+      .flatMap(({ primary, records }) => records.filter((record) => record !== primary).map((record) => record.id)),
+  );
+  rowRecordsCache.set(changeSet, ids);
+  return ids;
 }
 
 /** How a change to an object is coloured, by what it did. */
@@ -234,7 +260,28 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
         ],
       };
     };
-    return { semantic: { marks: { trackedDelete: dropDeleted, trackedInsert: keepInserted } } };
+    // An object proposed for deletion has no text for `dropDeleted` to drop; the
+    // proposed view leaves the node out instead.
+    const proposedForDeletion = (node: Node) =>
+      (getBlockInlineTrackedData(node) ?? []).some((record) =>
+        record.operation === CHANGE_OPERATION.delete && record.status === CHANGE_STATUS.pending);
+    return {
+      semantic: {
+        marks: { trackedDelete: dropDeleted, trackedInsert: keepInserted },
+        removes: proposedForDeletion,
+      },
+    };
+  },
+
+  // Markdown has no tracked changes of its own; CriticMarkup keeps a pending
+  // suggestion readable rather than failing to serialize the document.
+  addMarkdownSerializerRules() {
+    return {
+      marks: {
+        trackedInsert: { open: "{++", close: "++}" },
+        trackedDelete: { open: "{--", close: "--}" },
+      },
+    };
   },
 
   addProseMirrorPlugins() {
@@ -377,6 +424,10 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
       const deleteGlyphs = new Map<number, { glyph: GlyphEntry; color: string }>();
       const insertLines = new Map<number, { line: LineEntry; color: string }>();
       const deleteLines = new Map<number, { line: LineEntry; color: string }>();
+      const movedTo = { glyphs: new Map<number, GlyphEntry>(), lines: new Map<number, LineEntry>() };
+      const movedFrom = { glyphs: new Map<number, GlyphEntry>(), lines: new Map<number, LineEntry>() };
+      const rows: Array<{ box: Box; color: string; removed: boolean }> = [];
+      const pageBlocks = editor.layout.pages.find(page => page.pageNumber === pageNumber)?.blocks ?? [];
       // Conflict glyphs/lines are also deduplicated by position — without this,
       // N overlapping conflict changes push the same glyphs N times, causing
       // renderTrackedConflict to layer N semi-transparent amber fills at the
@@ -392,7 +443,10 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
       const formattedGlyphs = new Map<number, GlyphEntry>();
       const placements = (editor.layout.anchoredObjects ?? []).filter(placement => placement.page === pageNumber);
 
+      const partOfRow = recordsInsideRowChanges(changeSet);
+
       for (const change of changeSet.changes) {
+        if (partOfRow.has(change.id)) continue;
         const { operation, authorID } = change.dataTracked;
         const author = authorID ?? "unknown";
         const isConflict = !!change.dataTracked.isConflict;
@@ -415,6 +469,28 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
           for (const g of glyphs) formattedGlyphs.set(g.docPos, g);
           for (const l of lines) if (!blockChangeLines.has(l.lineIndex)) blockChangeLines.set(l.lineIndex, l);
           continue;
+        }
+
+        // Moved content is marked as a move wherever it is, not as an insertion
+        // or deletion; edits made inside a moved block draw over it.
+        const moved = !!(change.dataTracked.moveNodeId || change.dataTracked.moveId);
+        if (moved && (operation === CHANGE_OPERATION.move || operation === CHANGE_OPERATION.insert ||
+          operation === CHANGE_OPERATION.delete)) {
+          const into = operation === CHANGE_OPERATION.delete ? movedFrom : movedTo;
+          for (const g of glyphs) into.glyphs.set(g.docPos, g);
+          for (const l of lines) into.lines.set(l.lineIndex, l);
+          continue;
+        }
+
+        // A row added or removed is marked as a row, not as loose words in its cells.
+        if (change.type === "node-change" && change.node.type.name === "tableRow" &&
+          (operation === CHANGE_OPERATION.insert || operation === CHANGE_OPERATION.delete)) {
+          const row = pageBlocks.find(block => block.nodePos === change.from);
+          if (row) {
+            const removed = operation === CHANGE_OPERATION.delete;
+            rows.push({ box: { x: row.x, y: row.y, width: row.width, height: row.height }, color: removed ? deleteColor(author) : insertColor(author), removed });
+            continue;
+          }
         }
 
         if (operation === CHANGE_OPERATION.insert || operation === CHANGE_OPERATION.move) {
@@ -449,6 +525,10 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
           }
         }
       }
+
+      for (const { box, color, removed } of rows) renderTrackedRow(ctx, box, color, removed);
+      renderTrackedMove(ctx, [...movedTo.glyphs.values()], [...movedTo.lines.values()], MOVE_COLOR, false);
+      renderTrackedMove(ctx, [...movedFrom.glyphs.values()], [...movedFrom.lines.values()], MOVE_COLOR, true);
 
       // Render inserts — each glyph rendered exactly once
       if (insertGlyphs.size > 0 || insertLines.size > 0) {

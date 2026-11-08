@@ -10,7 +10,8 @@
  * container (a `listItem`) or the leaf inside it (the item's paragraph) — the
  * agent sees leaves, so ops that act on a container climb to it.
  */
-import { findNodeById, spansToFragment, tableColumnCount } from "@scrivr/core";
+import { findNodeById, safeImageUrl, spansToFragment, tableColumnCount } from "@scrivr/core";
+import { imageNodeAttrs } from "./imageAttrs";
 import { findLiveNodeById, pickAgentAttrs, shadowRanges } from "@scrivr/plugins";
 import type { ShadowRange } from "@scrivr/plugins";
 import type { Node as PmNode, Schema, Transaction } from "@scrivr/core/pm";
@@ -90,10 +91,20 @@ function resolveTopLevel(doc: PmNode, nodeId: string, resolve: ResolveNode): { n
 }
 
 function buildBlock(schema: Schema, block: SemanticBlockInput): PmNode | null {
+  if (block.type === "image") return buildImageParagraph(schema, block);
   const type = schema.nodes[block.type];
   if (!type) return null;
   const attrs = { ...pickAgentAttrs(block.attrs ?? {}), ...(block.level !== undefined ? { level: block.level } : {}) };
   return type.createAndFill(attrs, spansToFragment(toCoreSpans(block.spans ?? []), schema, { parentType: type }));
+}
+
+/** A paragraph holding the image, or null when its source is not a safe image. */
+function buildImageParagraph(schema: Schema, block: Extract<SemanticBlockInput, { type: "image" }>): PmNode | null {
+  const src = safeImageUrl(block.src);
+  const image = schema.nodes["image"];
+  const paragraph = schema.nodes["paragraph"];
+  if (!src || !image || !paragraph) return null;
+  return paragraph.create({}, image.create({ ...imageNodeAttrs(block), src }));
 }
 
 function buildCell(schema: Schema, cell: SemanticCellInput | undefined): PmNode | null {

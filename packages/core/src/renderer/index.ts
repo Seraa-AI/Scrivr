@@ -14,6 +14,8 @@ export {
   renderTrackedAttrChange,
   renderTrackedObject,
   renderTrackedFormatting,
+  renderTrackedMove,
+  renderTrackedRow,
 } from "./OverlayRenderer";
 export { CursorManager } from "./CursorManager";
 export { TileManager } from "./TileManager";

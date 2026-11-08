@@ -11,7 +11,7 @@
  * stamped where the order still is the proposal's own.
  */
 import { describe, expect, it } from "vitest";
-import { diffText, expandCharLevel, pairReplacements } from "./diffText";
+import { diffText, pairReplacements, phraseReplacements } from "./diffText";
 
 const CLAUSE = "Neither party shall be liable for any indirect loss.";
 
@@ -74,26 +74,15 @@ describe("the quadratic guard still protects genuinely different long text", () 
   });
 });
 
-describe("character-level expansion", () => {
-  it("never reports an offset measured from the token it re-diffed", () => {
-    // Expansion re-diffs one word pair, so an offset it produced would be
-    // counted from that word and point into a different one. An op that still
-    // carries an offset must still be telling the truth about the proposal.
-    const proposed = "the indemnity clause";
-    const ops = expandCharLevel(
-      pairReplacements(diffText("the indemnification clause", proposed)),
-    );
-
-    let expandedOps = 0;
+describe("phrase replacements", () => {
+  it("keep their offsets on what they leave unchanged", () => {
+    // A replacement joins words from across a gap, so it carries no offset of
+    // its own; what it leaves kept still points at the proposal truthfully.
+    const proposed = "All staff; contractors are covered.";
+    const ops = phraseReplacements(diffText("All staff, contractors is covered.", proposed));
     for (const op of ops) {
-      if (op.type === "delete") continue;
-      if (!("proposedOffset" in op) || op.proposedOffset === undefined) {
-        expandedOps += 1;
-        continue;
-      }
+      if (op.type !== "keep" || op.proposedOffset === undefined) continue;
       expect(proposed.slice(op.proposedOffset, op.proposedOffset + op.text.length)).toBe(op.text);
     }
-    // The case does expand, so the assertion above is not vacuous.
-    expect(expandedOps).toBeGreaterThan(0);
   });
 });

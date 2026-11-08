@@ -402,6 +402,17 @@ export const Table = Extension.create({
     ];
   },
 
+  addMarkdownParserTokens() {
+    return {
+      table: { block: "table" },
+      thead: { ignore: true },
+      tbody: { ignore: true },
+      tr: { block: "tableRow" },
+      th: { block: "tableHeader" },
+      td: { block: "tableCell" },
+    };
+  },
+
   addMarkdownSerializerRules() {
     return {
       nodes: {

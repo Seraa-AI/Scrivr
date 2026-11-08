@@ -296,6 +296,13 @@ The schemas are part of the public API.
   The primitive this RFC deferred to Phase 5 as `CHANGE_OPERATION.move_node`
   already exists and is wired end to end; Phase 3 produces it rather than
   inventing anything:
+- **D8 — An agent's rewrite reads as a person's edit.** Each changed phrase is
+  one deletion of the old words and one insertion of the new, as when someone
+  selects text and types over it; changes separated by a short unchanged gap (up
+  to five tokens) are one replacement. No change is ever made inside a word: the
+  earlier character-level refinement, meant to mark only a changed suffix,
+  showed a reviewer fragments ("y" → "ies") and a card per word, where a person
+  editing the same sentence leaves one or two changes.
 
   - `CHANGE_OPERATION.move` and `NodeMoveAttrs`
     (`packages/plugins/src/track-changes/types.ts:33,96`), with `moveNodeId`
@@ -421,6 +428,40 @@ within the same transaction. List-item moves are restricted to the same list.
 `insertTableColumn`, `deleteTableColumn`. Reject complex merged-cell tables rather
 than corrupt geometry.
 
+### Phase 3b — images (shipped in #229)
+
+An agent could move a paragraph holding an image but could not see the image,
+add one, change how it sits, or remove it. The existing protocol already has a
+place for each of these, so images extend it rather than adding ops.
+
+**Reading — the reserved `image` unit.** `SemanticUnitType` has carried
+`"image"` without producing it. A paragraph whose only content is an image is
+now an `image` unit: its `id` is the paragraph's `nodeId` (an image has no id of
+its own), and `image` describes it — `{ src, alt, width, height, wrap, align }`.
+The view is the proposed one, like `text`.
+
+**Writing — the existing ops.**
+
+- Add: `insertBlock` with `block: { type: "image", src, alt?, width?, height?,
+  wrap?, align? }` — a paragraph holding the image, before or after a top-level
+  block. `src` must pass `safeImageUrl` (https or a raster `data:` URL; never
+  SVG) or the op is rejected before any step is written.
+- Change: `richText` on an image unit, with `attrs` — `wrap`, `align`, `width`,
+  `height`, `alt`. `attrs` already means the styling of the leaf an edit names;
+  for an image unit that is the image. Reviewed as one attribute change: "Image
+  moved" when only its placement changed, "Style changed" otherwise. `spans`
+  on an image unit are rejected.
+- Remove: `deleteBlock` on the image unit, as for any block.
+
+`wrap` is `inline | square | top-bottom | behind | front` and `align` is
+`left | center | right` — the image node's own `wrapMode` / `xAlign`. Size is in
+px, positive and bounded. Every change is the agent's tracked suggestion, and
+the batch rules hold.
+
+Not in this phase: an image that shares a paragraph with text (it is not its
+own unit, so not addressable), replacing `src` in place, captions, and custom
+`x` / `yOffset` placement.
+
 ### Phase 5 — first-class structural track-change primitives
 Narrower than first written (see **D7**): `move`, `node_split`,
 `wrap_with_node` and `structure` already exist in `CHANGE_OPERATION`, and
@@ -494,6 +535,7 @@ section is what is true.
 | **1** | #133, #134, #136 | `@scrivr/ai` extracted from `@scrivr/plugins` as a hard move (D2); leaf-based `RichSemanticEdit` with `getRichBlocks` / `applyRichEdit`; zod edit protocol with `parseSemanticEdits`. #133 first grouped adjacent formatting-mark tracked changes into one, which the leaf merge depends on |
 | **2** | #209, #210, #218 | Six structural ops — `insertBlock`, `deleteBlock`, `insertListItem`, `deleteListItem`, `insertTableRow`, `deleteTableRow` — in `StructuralSemanticEditSchema`, applied by `applyStructuralEdits`; `applySemanticEdits` routes rich vs structural; formatting proposals became visible, addressable and acceptable; a finding may propose no edit at all (block markers) |
 | **3** | #229 | `moveBlock` and `moveListItem`. No new tracked representation — the engine's content-and-identity pairing yields one `CHANGE_OPERATION.move`. Core's `findNodeById` gained an `accept` predicate and `findLiveNodeById` skips a pending move's shadow in either direction, for every consumer. The replay fixes the moves exposed shipped in #228 |
+| **3b** | #229 | Images through the existing protocol: the reserved `image` unit now carries `image` (`src`, `alt`, size, `wrap`, `align`); `insertBlock` adds one (`block.type: "image"`, `src` through `safeImageUrl`), `richText` `attrs` on an image unit set its layout, `deleteBlock` removes it. An object proposed for deletion is left out of the semantic view through a `removes` contribution, which track changes supplies. |
 | **4-5** | — | Not built. Table columns, and `CHANGE_OPERATION.insert_node` / `delete_node` |
 
 ### Where the code differs from the design above

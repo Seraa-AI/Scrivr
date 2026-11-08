@@ -1,10 +1,13 @@
 import { IMAGE_PLACEMENT_ATTRS } from "@scrivr/core";
 import { CHANGE_OPERATION } from "@scrivr/plugins";
 import type { NodeAttrChange, TrackedChange } from "@scrivr/plugins";
+import type { Node as PmNode } from "@scrivr/core/pm";
 
 export interface ChangeMeta {
   icon: string;
   label: string;
+  /** What one decision on this change takes or keeps whole, such as a "row". */
+  unit?: string;
 }
 
 const MARK_ICONS: Record<string, string> = {
@@ -60,6 +63,14 @@ const NAMES: Record<NamedChangeType, NamesByOperation> = {
 };
 
 
+/** Blocks named by what they are when added or removed, rather than as "a block". */
+const NODE_NAMES: Partial<Record<string, Partial<Record<CHANGE_OPERATION, ChangeMeta>>>> = {
+  tableRow: {
+    [CHANGE_OPERATION.insert]: { icon: "▤+", label: "Row added", unit: "row" },
+    [CHANGE_OPERATION.delete]: { icon: "▤−", label: "Row removed", unit: "row" },
+  },
+};
+
 /** Only where the node sits changed, not what it is. */
 const onlyPlaced = ({ oldAttrs, newAttrs }: NodeAttrChange) => {
   const changed = Object.keys({ ...oldAttrs, ...newAttrs }).filter(key =>
@@ -84,9 +95,27 @@ export function getChangeMeta(change: TrackedChange): ChangeMeta {
       label: `${MARK_LABELS[name] ?? name} ${op === CHANGE_OPERATION.delete ? "removed" : "added"}`,
     };
   }
+  const named = change.type === "node-change" && !change.dataTracked.moveNodeId
+    ? NODE_NAMES[change.node.type.name]?.[op]
+    : undefined;
+  if (named) return named;
   if (change.type === "node-attr-change" && onlyPlaced(change)) {
     const name = change.node.type.name;
     return { icon: "⇄", label: `${name.charAt(0).toUpperCase()}${name.slice(1)} moved` };
   }
   return changeName(change.type, op, !!change.dataTracked.moveId);
+}
+
+/** "Accept" or, for a change decided whole, "Accept row". */
+export const decisionLabel = (verb: "Accept" | "Reject", meta: ChangeMeta) =>
+  meta.unit ? `${verb} ${meta.unit}` : verb;
+
+/** The words a block holds, one block — such as a cell — per " · ". */
+export function blockText(node: PmNode): string {
+  const blocks: string[] = [];
+  node.descendants((child) => {
+    if (child.isTextblock) blocks.push(child.textContent);
+    return !child.isTextblock;
+  });
+  return blocks.filter(Boolean).join(" · ");
 }
