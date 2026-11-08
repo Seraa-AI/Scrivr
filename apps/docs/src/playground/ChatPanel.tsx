@@ -42,7 +42,9 @@ function getDocContext(editor: Editor | null): {
     type: unit.type,
     text: unit.text,
     ...(unit.headingLevel ? { headingLevel: unit.headingLevel } : {}),
-    ...(unit.parts ? { parts: unit.parts.map((part) => ({ nodeId: part.nodeId, text: part.text })) } : {}),
+    ...(unit.parts ? {
+      parts: unit.parts.map((part) => ({ nodeId: part.nodeId, text: part.text, ...(part.proposedForDeletion ? { proposedForDeletion: true } : {}) })),
+    } : {}),
     ...(unit.image ? { image: unit.image } : {}),
     ...(unit.proposedForDeletion ? { proposedForDeletion: true } : {}),
     ...(unit.changes ? {
@@ -184,7 +186,7 @@ export function ChatPanel({ editor, hideBorder }: ChatPanelProps) {
     recordReview({ at: new Date().toISOString(), toolCallId, decisions, outcome });
     // A refused review goes back to the model once, with the user's next
     // message, rather than being retried on its own without end.
-    reviewRefused.current = outcome.status !== "applied";
+    reviewRefused.current ||= outcome.status !== "applied";
     void addToolOutput({ tool: "review_changes", toolCallId, output: outcome });
   }
 

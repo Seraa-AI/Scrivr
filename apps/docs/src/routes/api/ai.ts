@@ -27,7 +27,7 @@ const DocUnitSchema = z.object({
   type: z.string(),
   text: z.string(),
   headingLevel: z.number().int().optional(),
-  parts: z.array(z.object({ nodeId: z.string(), text: z.string() })).optional(),
+  parts: z.array(z.object({ nodeId: z.string(), text: z.string(), proposedForDeletion: z.literal(true).optional() })).optional(),
   image: z.object({
     src: z.string(),
     alt: z.string(),
@@ -111,7 +111,10 @@ export const Route = createFileRoute("/api/ai")({
               docContextLines.push(`image: ${src} "${alt}" ${width}×${height}, wrap ${wrap}, align ${align}`);
             } else {
               docContextLines.push(`text: ${JSON.stringify(u.text)}`);
-              for (const part of u.parts ?? []) docContextLines.push(`  - nodeId: ${part.nodeId} — ${part.text}`);
+              for (const part of u.parts ?? []) {
+                const gone = part.proposedForDeletion ? " (proposed for deletion)" : "";
+                docContextLines.push(`  - nodeId: ${part.nodeId}${gone} — ${part.text}`);
+              }
             }
             for (const change of u.changes ?? []) docContextLines.push(describeChange(change, !u.image));
             docContextLines.push("");
