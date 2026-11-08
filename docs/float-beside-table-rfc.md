@@ -1,10 +1,27 @@
 # Float Beside Table RFC
 
-> Status: **design / RFC**, not started. A floating image with square or
-> top-and-bottom wrap must not cover a table. The table moves below the float as
-> one unit; it is never narrowed. Written 2026-11-08 against `main` @ `288119e`.
-> See [What shipped](#what-shipped). Where the code and this design disagree,
-> that section says so; this document is not rewritten to match.
+> Status: **approved 2026-11-08**, implementation in progress. A floating image
+> with square or top-and-bottom wrap must not cover a table. The table moves
+> below the float as one unit; it is never narrowed. Written 2026-11-08 against
+> `main` @ `288119e`. See [What shipped](#what-shipped). Where the code and this
+> design disagree, that section says so; this document is not rewritten to
+> match.
+
+## Decisions
+
+Approved by the user on 2026-11-08.
+
+1. **A whole table moves below a square or top-bottom float.** The unit is the
+   table's run of rows on the float's page. It is never narrowed.
+2. **Rows never wrap separately.** Word's per-row mode exists only behind the
+   `layoutTableRowsApart` compatibility flag, which we do not model.
+3. **Backward anchors.** A table *above* the float's anchor moves like any other
+   table. If moving it would carry the anchor paragraph onto the next page, the
+   table stays put and the float overlaps it. The rule is deterministic,
+   converges within the existing settle cap, and the float never leaves its
+   anchor's page. See [Backward anchors](#backward-anchors).
+4. **Re-anchoring on drop is out of scope.** Dragging a float keeps its anchor
+   and changes `yOffset`, which matches Word with a locked anchor.
 
 ## Problem
 
@@ -78,14 +95,35 @@ float, consistent with the above. §20.4.2.17 `wrapSquare` and §20.4.2.20
 `wrapTopAndBottom` define the two modes that carve space; `behindDoc` floats
 (our `behind`/`front`) carve none.
 
-**LibreOffice.** tdf#117134 records the interop symptom from the other side:
-on a DOCX where Word pushes the table below a frame, Writer left the table in
-place and the two overlapped. It was resolved as a duplicate after Writer
-learned to move the table. I could not open the Bugzilla pages for tdf#117134
-or tdf#116270 while writing this (the tracker returned 503 / a bot wall), so
-the summary above comes from search excerpts, not the bug text. The spec
-passages are the primary evidence; the LibreOffice bugs only corroborate that
-Word's observable behaviour is "push down".
+**LibreOffice's Word-compatible layout.** `SwTabFrame::CalcFlyOffsets` in
+`sw/source/core/layout/tabfrm.cxx`
+(<https://docs.libreoffice.org/sw/html/tabfrm_8cxx_source.html>) is the code
+Writer runs to imitate Word here. It computes the table's *upper space*: a
+qualifying fly raises the table's print position to the fly's bottom, so the
+**whole table** shifts down, not a row. Under the Word-compat setting
+`ADD_VERTICAL_FLY_OFFSETS`, a fly that would otherwise wrap in parallel is
+switched to shift-down when the table's range overlaps it. The same function
+skips flys anchored inside the table itself, skips flys whose anchor is on a
+*following* page (the anchor's page decides, not the page the fly is still
+registered on), and notes that it does not require the anchor to precede the
+table because "fly frames can be negative positioned". All three match the
+design below.
+
+**Anchors keep their page.** A Word float is positioned relative to its
+anchor paragraph and stays on that paragraph's page; when the paragraph moves to
+another page, the float goes with it. Our solver already clamps a float onto its
+anchor's page (`placeAt`, inside `resolveAnchoredObjects`).
+
+**`allowOverlap` is not a wrap switch.** The `wp:anchor` attribute
+(§20.4.2.3) governs whether this *object* may overlap other floating
+objects. It does not turn off text or table wrap around the object.
+
+**LibreOffice bugs (unverified).** tdf#117134 reportedly records the interop
+symptom from the other side: on a DOCX where Word pushes the table below a
+frame, Writer left it in place and the two overlapped. I could not open the
+Bugzilla pages for tdf#117134 or tdf#116270 (the tracker returned 503 / a bot
+wall), so both remain **unverified**; the summary comes from search excerpts.
+The spec passages and `tabfrm.cxx` are the evidence this design rests on.
 
 ### What this means for Scrivr
 
@@ -136,9 +174,10 @@ the skip at `PageLayout.ts:931` becomes a branch:
    already marks table boundaries (`PageLayout.ts:308`), so two adjacent tables
    stay two units without a new table-identity field.
 3. **Find the clear y.** The first y at or below the fragment's top where a
-   band of the fragment's height (clipped to the page bottom) is free across
-   the whole content width. This is the one extension to an existing concept;
-   see below.
+   band from there to the table's end is free across the whole content width.
+   Rects belong to one page, so the part of the band past the page bottom is
+   free by construction and no clipping is needed. This is the one extension
+   to an existing concept; see below.
 4. **Move it.** Set the fragment's first row to
    `advanceFlowGlobalY(row, clearY, …).startGlobalY` (`PageLayout.ts:391`) so
    the existing atomic page-fit rule applies (a row that no longer fits on the
@@ -159,6 +198,44 @@ The row does **not** get `overlapsWrapZone`. That flag tells
 lines when it lands on a page other than the zone's page, and a row's `lines`
 are `[]` (`layout/BlockLayout.ts:377`), so re-breaking would set its height to
 0. A push to the next page is exactly when that would happen.
+
+### Backward anchors
+
+A float anchored *after* a table can reach back over it with a negative
+`yOffset`, for example after the user drags it up (the drag keeps the anchor
+and changes `yOffset`). Moving the table then moves the anchor, and the float
+follows the anchor. Taken step by step that is a chase:
+
+- If the float follows its anchor freely, the table and float move by the
+  same distance, so the overlap is never resolved. It ends only when the anchor
+  would cross onto the next page, at which point the rule says the table stays.
+- If the float is pinned (clamped to its page's top or bottom), one move clears
+  it and the next settle pass finds nothing to do.
+
+Running the chase inside the settle loop would not converge within
+`MAX_ANCHOR_SETTLE_PASSES` (`PageLayout.ts:627`) and would leave a placement
+that disagrees with its anchor. So the reflow evaluates the rule's end state in
+one step instead. For a table fragment that precedes the anchor flow, it
+tentatively moves the table, restamps, and accepts the move only if:
+
+1. the anchor flow is still on the float's page, and
+2. the float, re-placed at the anchor's new y, no longer intersects the moved
+   table.
+
+Otherwise the tentative flows are discarded: the table stays at its natural
+y and the float overlaps it. A table after the anchor cannot move the anchor,
+so the check never applies to it.
+
+This is deterministic, needs no extra settle pass in the "stays" case, and
+one in the "moves" case (the anchor moved, so the float is re-placed once and
+then finds the table clear). The float never leaves its anchor's page because
+the move that would take the anchor elsewhere is refused.
+
+The reflow needs two inputs for this: the anchor flow's index, and a way to
+ask where the float's band would be for a given anchor y.
+`resolveAnchoredObjects` already has both (`i`, and the `placeAt` closure plus
+the zone band computation), and passes them in. These are new parameters on a
+private function, not a new concept.
 
 ### The one extension: `ExclusionManager.getNextFreeY` (changed in place)
 
@@ -242,23 +319,23 @@ floats: pass the exclusions into row layout and have the table position itself.
   If images or HRs ever need it (see Known gaps), it is the same branch at the
   same seam.
 
-## The open question: overlapping row or whole table?
+## Resolved: overlapping row or whole table?
 
 **Question.** When a float's band cuts through the middle of a table, does Word
 push only the rows that overlap, or the whole table?
 
-**Answer: the whole table (its fragment on that page).** Confidence: **high**
-that this is Word's default as specified; **medium** that Word's rendering
-matches it in every configuration, since I could not open Word here.
+**Answer: the whole table (its fragment on that page).** Decided by the user on
+2026-11-08 (Decisions 1 and 2).
 
 **Evidence.** §14.8.3.24 states the default directly: "the table shall wrap the
-object as a unit (i.e. the whole table square wraps the object)", and per-row
+object as a unit (i.e. the whole table square wraps the object)"; per-row
 wrapping exists only behind the `layoutTableRowsApart` compat flag. The
-§14.8.3.23 example says "the entire table moved below the shape". None of the
-25 Word documents in `packages/docx/src/wordTestFiles/` sets
-`layoutTableRowsApart`, all declare `compatibilityMode` 14 or 15 (one declares
-none), and none places a square float beside a body table, so they neither
-contradict nor demonstrate it.
+§14.8.3.23 example says "the entire table moved below the shape".
+LibreOffice's `SwTabFrame::CalcFlyOffsets` shifts the whole table through its
+upper space. None of the 25 Word documents in
+`packages/docx/src/wordTestFiles/` sets `layoutTableRowsApart`, and none places
+a square float beside a body table, so they neither contradict nor demonstrate
+it.
 
 **Where the two answers differ.** Only when the float's *top* is below the
 table's top, so some rows sit wholly above the float:
@@ -268,26 +345,14 @@ table's top, so some rows sit wholly above the float:
 | Float top above the table, bottom mid-table | rows 1…k move below; the rest follow by restamp | identical |
 | Float top mid-table (rows above it) | rows above the float keep their y, a gap, the rest below | the whole fragment moves below the float |
 
-The common case (anchor in the paragraph above the table) is the first row and
-gives the same picture either way. The second case needs a float pulled down
-by `yOffset`, or anchored after the table with a negative `yOffset`.
-
 **A constructed `.docx` to confirm it.** One section, a 6-row full-width table
 (`w:tblW w:type="pct" w:w="5000"`), and a paragraph before it holding
 `<wp:anchor layoutInCell="0" …><wp:positionV relativeFrom="paragraph">
 <wp:posOffset>` set to about two row heights, `<wp:wrapSquare
 wrapText="bothSides"/>`, and a picture narrower than the content width.
 Expected in Word with no compat flags: the whole table starts below the
-picture. Expected with `<w:compat><w:layoutTableRowsApart/></w:compat>` added
-to `settings.xml`: rows 1–2 stay above the picture. Opening that pair in Word is
-the cheapest way to raise the confidence to high; it is a five-minute check for
-the reviewer and should happen before Slice A merges.
-
-**The scope disagrees.** The W1 scope lists "float bottom mid-table (rows above
-keep y, order holds)". If "rows above" means rows above the float's top, that
-is the per-row (`layoutTableRowsApart`) behaviour, not Word's default. This
-RFC proposes the whole-fragment rule and rewrites that scenario accordingly
-(scenario 7 below).
+picture. With `<w:compat><w:layoutTableRowsApart/></w:compat>` in
+`settings.xml`: rows 1–2 stay above it.
 
 ## Scenario matrix
 
@@ -310,23 +375,26 @@ contentWidth`.
 | 9 | Table split across pages; float on page 2 only | Page-1 rows unchanged against the no-float document; page-2 fragment starts at or below `F`'s bottom |
 | 10 | Two square floats on one page, the second below the first, table under both | `T[0].y >=` the lower float's bottom; no row overlaps either float |
 | 11 | Two adjacent tables, float beside the second only | First table unchanged; second table moves (the `isLastRow` boundary holds) |
-| 12 | Float anchored *after* the table with a negative `yOffset` reaching back over it | Settles: `placement.anchorGlobalY` equals the anchor flow's final `globalY`; the table is not moved (see Risks: the settle loop) |
+| 12 | Float anchored *after* the table with a negative `yOffset` reaching back over it, free to follow its anchor | Settles: `placement.anchorGlobalY` equals the anchor flow's final `globalY`; the table stays at its no-float y and the float overlaps it ([Backward anchors](#backward-anchors)) |
+| 12b | Same, but the float is pinned to the page top by the clamp | The table moves below the float; the anchor stays on the float's page; placement agrees with the anchor |
 | 13 | Click inside a cell of a moved row | `cellAtCoords` at the moved row's cell centre returns that cell's position; a click where the row used to be does not |
 | 14 | PDF export of scenario 1 | The table-row rects the PDF handler receives equal the layout's `block.y + cell.y` |
 | 15 | Square float anchored inside a table cell | Pinned as a known gap: asserts today's behaviour so a change is noticed |
 | 16 | Pageless mode, scenario 1 | Same relation as 1 (no page split, `advanceFlowGlobalY`'s pageless arm) |
+| 17 | Pagination feedback: add content above the anchor paragraph until it crosses onto the next page | The float is on the anchor's page; the table is below the float on that page; a second layout of the same document gives identical blocks and placements |
+| 18 | Page-break guard: table row taller than a page under a float | Layout terminates; the row is placed once |
+| 19 | Tail cache: edit that moves the float off the table, laid out with the previous layout | The table returns to its no-float y, equal to a fresh layout of the edited document |
 
 ## Slices
 
-**Slice A: the seam.** Scenarios 1–11 and 16 written first and failing, then
-the `tableRow` branch in `reflowFlowsAgainstExclusions` and the in-place
-`getNextFreeY` change with its tests updated. Run the core suite after
+**Slice A: the seam.** Scenarios 1–11, 16, 18 and 19 written first and
+failing, then the `tableRow` branch in `reflowFlowsAgainstExclusions` and the
+in-place `getNextFreeY` change with its tests updated. Run the core suite after
 each change and report which scenarios flipped.
 
-**Slice B: settle and consumers.** Scenarios 12–15: the settle-loop exemption
-(below), cell hit-test, PDF parity and the in-cell gap pin. B is small and can
-ship in the same PR as A if review prefers one integrated change; the split is
-for review order, not for merging separately.
+**Slice B: settle and consumers.** Scenarios 12, 12b, 13–15 and 17: the
+backward-anchor check, cell hit-test, PDF parity, the in-cell gap pin and
+pagination feedback. A and B land in one PR; the split is review order.
 
 No public API changes. No changeset beyond a `patch` for `@scrivr/core`.
 
@@ -336,27 +404,10 @@ No public API changes. No changeset beyond a `patch` for `@scrivr/core`.
 
 `resolveAnchoredObjects` re-places a float until its anchor stops moving, capped
 at `MAX_ANCHOR_SETTLE_PASSES` (`PageLayout.ts:627`, loop at `:814`, exit at
-`:880`). Moving a table moves every flow after it, so a float anchored *after*
-the table whose rect reaches back over it (scenario 12) has no fixed point: the
-table moves below the float by at least the float's height, which moves the
-anchor by the same amount, which moves the float back over the table. The loop
-would run to the cap and leave a placement that disagrees with its anchor.
-
-Text above the anchor does not have this problem because narrowing it converges
-(the existing `zoneTop` rule at `PageLayout.ts:833` exists for the margin case
-of the same cycle). A table move cannot converge.
-
-**Proposal:** a table fragment that precedes the float's anchor flow in flow
-order is not moved by that float. The float paints over it, as today. This
-keeps the invariant the settle loop already relies on — blocks above the anchor
-fix the anchor's position — and makes scenario 12 converge in one pass. It is a
-divergence from Word only in a configuration Word users rarely build (a float
-pulled up over content above its own anchor), and it is the reviewer's call:
-the alternative is accepting a capped, disagreeing placement.
-
-To decide "precedes the anchor", the reflow needs the anchor flow's index.
-`resolveAnchoredObjects` has it (`i`) and passes it in; that is a new parameter
-on a private function, not a new concept.
+`:880`). A table that moves the float's own anchor would chase the float past
+the cap; [Backward anchors](#backward-anchors) replaces the chase with a
+one-step check so the loop needs at most one extra pass. Scenarios 12 and 12b
+assert the placement agrees with its anchor after settling.
 
 ### Header rows
 
@@ -416,12 +467,21 @@ manager after each restamp, still inside this function.
   table. Six of the 25 Word test documents use `tblpPr`, so this is a real
   fidelity gap, but it is a different feature: the table becomes an exclusion
   source, not a block that avoids one.
-- **"Beside if it fits".** With `tblInd` or a table narrower than the content
-  width, Word keeps the table beside the float when it fits
-  (§14.8.3.23). Our tables always fill the content width, so the branch is
-  unreachable today. When narrower tables land, step 1's test becomes "the
-  table's own x range intersects a rect" instead of "any content width is
-  taken", which is the same seam.
+- **`layoutRawTableWidth` and "beside if it fits".** With `tblInd` or a table
+  narrower than the content width, Word keeps the table beside the float when
+  it fits (§14.8.3.23), and this compat flag drops the indent from that fit
+  test. Our tables always fill the content width, so the branch is unreachable
+  today. When narrower tables land, step 1's test becomes "the table's own x
+  range intersects a rect" instead of "any content width is taken", which is
+  the same seam.
+- **`layoutTableRowsApart`** (§14.8.3.24). Per-row wrapping is not modelled;
+  the compat flag is ignored on import (Decision 2).
+- **`allowOverlap`** (§20.4.2.3). Object-to-object overlap is not modelled;
+  square floats stack as they do today. It never affected wrap, so it does not
+  change this design.
+- **Re-anchor on drop.** Dragging a float keeps its anchor and changes
+  `yOffset` (Decision 4). Moving the anchor to the paragraph under the drop
+  point is an existing todo.
 - **Images and horizontal rules.** `leaf` flows are skipped by the same line
   for the same reason. An inline-only image beside a float overlapping it is a
   separate bug with the same fix; it is not in this RFC's scope.
