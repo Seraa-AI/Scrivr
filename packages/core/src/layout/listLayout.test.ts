@@ -151,6 +151,24 @@ describe("a number too wide for its hanging indent (Word: the tab after it goes 
     expect([...xs]).toEqual([(blocks[0]?.x ?? 0) - QUARTER_INCH]);
   });
 
+  // BLOCKS THE L1 MERGE. Beside a float, reflowFlowsAgainstExclusions re-lays
+  // the item without its first-line offset, so the text starts under the
+  // number. Fixed, after W1 lands on main, by forwarding a block's first-line
+  // settings on every re-break path; this test then passes and `.fails` comes off.
+  it.fails("moves the first line past a wide number beside a float too", () => {
+    const text = "wide ".repeat(40).trim();
+    const float: Json = {
+      type: "paragraph",
+      content: [
+        { type: "image", attrs: { src: "data:image/png;base64,AA==", width: 100, height: 200, wrapMode: "square", xAlign: "right" } },
+        { type: "text", text: "anchor" },
+      ],
+    };
+    const wide = blockOf(laidOut([float, olFrom(100, item(text))]), text);
+    const numberEnd = (wide.listMarkerX ?? 0) + measureTextWidth("100.", fontOf(wide));
+    expect(wide.x + firstLineStart(wide)).toBeGreaterThan(numberEnd);
+  });
+
   it("moves the first line to the next tab stop, and only the first line", () => {
     const text = "wide ".repeat(60).trim();
     const wide = blockOf(laidOut([olFrom(1000, item(text))]), text);
@@ -497,9 +515,11 @@ describe("an item that opens with a floating image", () => {
     expect(blockOf(blocks, "next").listMarker).toBe("2.");
   });
 
-  // Known gap: the float's own exclusion pass re-breaks the paragraph without
-  // keepAnchorLine, so the line collapses again. Lands with the re-break fix
-  // that forwards a block's first-line settings on every path.
+  // BLOCKS THE L1 MERGE. The float's own exclusion pass
+  // (reflowFlowsAgainstExclusions) re-lays the paragraph without
+  // keepAnchorLine, so its line collapses again. Fixed, after W1 lands on
+  // main, by forwarding a block's first-line settings on every re-break path;
+  // this test then passes and `.fails` comes off.
   it.fails("keeps the image's paragraph a line for its number", () => {
     const blocks = laidOut([ol(li(floating), item("next"))]);
     const anchor = anchorOf(blocks);

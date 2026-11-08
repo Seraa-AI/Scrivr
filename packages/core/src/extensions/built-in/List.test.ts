@@ -32,7 +32,10 @@ describe("where an ordered list starts, in every format it is written to", () =>
     expect(htmlStart(editor)).toBe("32767");
   });
 
-  it("joins a typed '32768. ' onto a list showing 32767, as its numbers read", () => {
+  // Tests the ordered-list input rule's own join check, called through the
+  // input-rules plugin with a stand-in view. Not editor behaviour: the editor
+  // does not run input rules on typing today.
+  it("the input rule joins '32768. ' onto a list showing 32767, as its numbers read", () => {
     const editor = new ServerEditor({
       extensions: [StarterKit],
       content: { type: "doc", content: [
@@ -45,7 +48,6 @@ describe("where an ordered list starts, in every format it is written to", () =>
     const rules = editor.getState().plugins.find((plugin) => plugin.spec.isInputRules);
     const handleTextInput = rules?.props.handleTextInput;
     if (!handleTextInput) throw new Error("no input rules");
-    // Input rules run from a view; a headless editor stands in with its state and dispatch.
     const view = { state: editor.getState(), composing: false, dispatch: (tr: Transaction) => editor.applyTransaction(tr) };
     expect(Reflect.apply(handleTextInput, rules, [view, end, end, " ", () => null])).toBe(true);
 

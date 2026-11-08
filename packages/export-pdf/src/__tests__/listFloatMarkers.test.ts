@@ -16,6 +16,7 @@ import {
 } from "@scrivr/core";
 import { buildPdf } from "../index";
 import { exportEditor, PAGE_CONFIG, schema } from "./fixtures";
+import { PT_PER_PX } from "../context";
 import { recordDrawOps } from "./opLog";
 
 /** Skia's context supplies the two members a measurer reads. */
@@ -61,6 +62,27 @@ describe("an item that opens with a floating image, in the PDF", () => {
     const layout = layoutOf(content);
     expect(markersIn(layout)).toEqual(expected);
     expect(await markersDrawn(layout)).toEqual(expected);
+  });
+});
+
+describe("where the PDF draws a floating-image paragraph's number", () => {
+  // BLOCKS THE L1 MERGE. The float's exclusion pass re-lays the paragraph
+  // without keepAnchorLine, so its line collapses and the number is drawn at
+  // the line's top edge, in the margin when it is first on the page. Fixed,
+  // after W1 lands on main, by forwarding a block's first-line settings on
+  // every re-break path; this test then passes and `.fails` comes off.
+  it.fails("draws it on its own line, inside the page, a line above the next item's", async () => {
+    const layout = layoutOf([ordered(item(floating), item(p("next")))]);
+    const ops = await recordDrawOps(() => buildPdf(layout, exportEditor));
+    const pageHeightPt = PAGE_CONFIG.pageHeight * PT_PER_PX;
+    const baselineOf = (value: string) => {
+      const op = ops.find((candidate) => candidate.op === "text" && candidate["value"] === value);
+      return (pageHeightPt - Number(op?.["y"])) / PT_PER_PX;
+    };
+    const next = layout.pages.flatMap((page) => page.blocks).find((block) => block.node.textContent === "next");
+    const lineHeight = next?.lines[0]?.lineHeight ?? 0;
+    expect(baselineOf("1.")).toBeGreaterThan(PAGE_CONFIG.margins.top + lineHeight / 2);
+    expect(baselineOf("2.") - baselineOf("1.")).toBeGreaterThanOrEqual(lineHeight);
   });
 });
 

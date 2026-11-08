@@ -384,7 +384,9 @@ export const List = Extension.create({
     // walked. Pre-compute the per-listItem (numId, ilvl) in
     // onBeforeExport by walking the doc with a list-type stack, then
     // the listItem handler reads from that map. The levels come from
-    // listLevel, as layout's do, so Word shows what the editor shows.
+    // listLevel, as layout's do, so each level's format, glyph and indent
+    // match the screen. Every list of a kind still shares one numId, so in
+    // Word separate ordered lists continue each other's numbering.
     const onBeforeExport = (ctx: DocxContext) => {
       const itemMap = ctx.shared.getOrInit<Map<PmNode, ListItemDocxInfo>>(
         LIST_ITEMS_KEY,
