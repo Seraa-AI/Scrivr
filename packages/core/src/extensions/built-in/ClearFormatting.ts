@@ -69,9 +69,8 @@ function clearFormatting(): Command {
     }
 
     // ── 3. Flatten lists back to plain paragraphs ────────────────────────────
-    // Replace each bullet_list / ordered_list with the paragraph content
-    // extracted from its list_item children. Process in reverse so earlier
-    // positions stay valid as the document shrinks.
+    // Replace each list with the paragraphs its items hold. Process in reverse
+    // so earlier positions stay valid as the document shrinks.
     if (paragraph) {
       const listsInRange: Array<{ pos: number; node: Node }> = [];
       tr.doc.nodesBetween(from, to || from, (node, pos) => {

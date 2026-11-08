@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { TextSelection } from "prosemirror-state";
+import { EditorState, TextSelection, type Command } from "prosemirror-state";
+import { liftListItem, sinkListItem } from "prosemirror-schema-list";
 import type { Node } from "prosemirror-model";
 import { runPipeline, defaultPageConfig } from "./PageLayout";
 import type { LayoutBlock } from "./BlockLayout";
@@ -8,6 +9,8 @@ import { CharacterMap } from "./CharacterMap";
 import { defaultEditorTheme } from "../model/theme";
 import { ServerEditor } from "../ServerEditor";
 import { StarterKit } from "../extensions/StarterKit";
+import { Table } from "../extensions/built-in/Table";
+import { ExtensionManager } from "../extensions/ExtensionManager";
 import { buildStarterKitContext, createMeasurer, measureTextWidth } from "../test-utils";
 
 /**
@@ -78,14 +81,26 @@ describe("list geometry (Word's built-in lists)", () => {
     expect(two.listMarkerX).toBe(one.listMarkerX);
   });
 
-  it("draws a number too wide for the hanging further left, clear of the text", () => {
-    const blocks = laidOut([olFrom(1000, item("wide"))]);
-    const wide = blockOf(blocks, "wide");
+  it("keeps every number in the column, however wide (viii. at level 3)", () => {
+    const items = Array.from({ length: 12 }, (_, i) => item(`n${i}`));
+    const blocks = laidOut([ol(item("top", ol(item("mid", ol(...items)))))]);
+    const xs = new Set(items.map((_, i) => blockOf(blocks, `n${i}`).listMarkerX));
+    expect(xs.size).toBe(1);
+    expect([...xs][0]).toBe(blockOf(blocks, "n0").x - QUARTER_INCH);
+  });
+
+  it("moves a wide number's first line of text to the next tab stop, as Word does", () => {
+    const text = "wide ".repeat(60).trim();
+    const wide = blockOf(laidOut([olFrom(1000, item(text))]), text);
     const firstSpan = wide.lines[0]?.spans[0];
     const font = firstSpan?.kind === "text" ? firstSpan.font : "";
     const markerRight = (wide.listMarkerX ?? 0) + measureTextWidth("1000.", font);
-    expect(wide.listMarkerX).toBeLessThan(wide.x - QUARTER_INCH);
-    expect(markerRight).toBeLessThan(wide.x);
+    const firstTextX = wide.x + (firstSpan?.x ?? 0);
+
+    expect(wide.listMarkerX).toBe(wide.x - QUARTER_INCH);
+    expect(firstTextX).toBeGreaterThan(markerRight);
+    expect((firstTextX - defaultPageConfig.margins.left) % HALF_INCH).toBe(0);
+    for (const line of wide.lines.slice(1)) expect(line.spans[0]?.x).toBe(0);
   });
 
   it("indents each level half an inch past the one above", () => {
@@ -232,5 +247,196 @@ describe("drawing markers on the canvas", () => {
 
   it("draws numbers as text", () => {
     expect(paint(blockOf(laidOut([ol(item("a"))]), "a")).markerText).toBe(1);
+  });
+});
+
+describe("incremental layout agrees with a fresh one", () => {
+  /** Lays each document out in turn the way LayoutCoordinator does: one cache, the previous layout and version. */
+  function incremental(docs: Node[]): LayoutBlock[] {
+    const measureCache = new WeakMap();
+    const measurer = createMeasurer();
+    let previous: ReturnType<typeof runPipeline> | undefined;
+    for (const docNode of docs) {
+      previous = runPipeline(docNode, {
+        pageConfig: defaultPageConfig,
+        measurer,
+        fontConfig,
+        measureCache,
+        ...(previous ? { previousLayout: previous, previousVersion: previous.version } : {}),
+      });
+    }
+    return previous ? previous.pages.flatMap((page) => page.blocks) : [];
+  }
+
+  const shown = (blocks: LayoutBlock[]) =>
+    blocks.map((block) => `${block.node.textContent}:${block.listMarker ?? ""}@${block.x}`);
+  /**
+   * The documents a run of edits passes through. A bare state keeps every
+   * unchanged node's identity, as ProseMirror's structural sharing does, so
+   * the measure cache sees the hits a long-lived editor sees.
+   */
+  function edited(content: Json[], caretIn: string, ...commands: Command[]): Node[] {
+    const docNode = schema.nodeFromJSON({ type: "doc", content });
+    let at = -1;
+    docNode.descendants((node, pos) => {
+      if (at < 0 && node.isTextblock && node.textContent === caretIn) at = pos + 1;
+      return at < 0;
+    });
+    let state = EditorState.create({ doc: docNode, selection: TextSelection.create(docNode, at) });
+    const docs = [state.doc];
+    for (const command of commands) {
+      expect(command(state, (tr) => { state = state.apply(tr); })).toBe(true);
+      docs.push(state.doc);
+    }
+    return docs;
+  }
+
+  const listItemType = schema.nodes["listItem"];
+  if (!listItemType) throw new Error("no listItem");
+  const tab = sinkListItem(listItemType);
+  const shiftTab = liftListItem(listItemType);
+  const fiveItems = [ol(...["a", "b", "c", "d", "e"].map((t) => item(t)))];
+  const fresh = (docs: Node[]) => laidOut(docs[docs.length - 1] ?? schema.node("doc"));
+
+  it("renumbers the items after one Tab nested", () => {
+    const docs = edited(fiveItems, "b", tab);
+    expect(shown(incremental(docs))).toEqual(shown(fresh(docs)));
+  });
+
+  it("renumbers the items after Shift-Tab lifts a nested one", () => {
+    const docs = edited([ol(item("a"), item("b", ol(item("c"))), item("d"), item("e"))], "c", shiftTab);
+    expect(shown(incremental(docs))).toEqual(shown(fresh(docs)));
+  });
+
+  it("keeps the numbers after a Tab and its Shift-Tab", () => {
+    const docs = edited(fiveItems, "b", tab, shiftTab);
+    expect(shown(incremental(docs))).toEqual(shown(fresh(docs)));
+  });
+
+  it("renumbers the items after two are joined, across a page break", () => {
+    const content = [ol(item("A"), item("B"), li(p("C"), { type: "pageBreak" }), item("D"), item("E"), item("F"))];
+    const joinAB: Command = (state, dispatch) => {
+      let aEnd = -1;
+      let bStart = -1;
+      state.doc.descendants((node, pos) => {
+        if (node.isTextblock && node.textContent === "A") aEnd = pos + 1 + node.content.size;
+        if (node.isTextblock && node.textContent === "B") bStart = pos + 1;
+        return true;
+      });
+      dispatch?.(state.tr.delete(aEnd, bStart));
+      return true;
+    };
+    const docs = edited(content, "A", joinAB);
+    expect(shown(incremental(docs))).toEqual(shown(fresh(docs)));
+  });
+
+  it("re-lays a wide number's first line when the start changes", () => {
+    const text = "wide ".repeat(60).trim();
+    const restart: Command = (state, dispatch) => {
+      dispatch?.(state.tr.setNodeAttribute(0, "order", 1));
+      return true;
+    };
+    const docs = edited([olFrom(1000, item(text))], text, restart);
+    const firstLineX = (blocks: LayoutBlock[]) => blockOf(blocks, text).lines[0]?.spans[0]?.x;
+    expect(firstLineX(incremental(docs))).toBe(firstLineX(fresh(docs)));
+  });
+});
+
+describe("blocks other than paragraphs inside an item", () => {
+  it("keeps a heading's own style, at the item's indent", () => {
+    const heading: Json = { type: "heading", attrs: { level: 2 }, content: [{ type: "text", text: "H" }] };
+    const blocks = laidOut([ul(li(p("a"), heading))]);
+    const inList = blockOf(blocks, "H");
+    const alone = blockOf(laidOut([heading]), "H");
+    expect(inList.lines[0]?.lineHeight).toBe(alone.lines[0]?.lineHeight);
+    expect(inList.spaceBefore).toBe(alone.spaceBefore);
+    expect(inList.spaceAfter).toBe(alone.spaceAfter);
+    expect(inList.x).toBe(blockOf(blocks, "a").x);
+  });
+
+  it("indents a table with the item it sits in", () => {
+    const manager = new ExtensionManager([StarterKit, Table]);
+    const cell = (text: string): Json => ({ type: "tableCell", content: [p(text)] });
+    const table: Json = {
+      type: "table",
+      attrs: { grid: [120, 120] },
+      content: [{ type: "tableRow", content: [cell("c1"), cell("c2")] }],
+    };
+    const docNode = manager.schema.nodeFromJSON({ type: "doc", content: [ul(li(p("a"), table)), { type: "paragraph" }] });
+    const blocks = runPipeline(docNode, {
+      pageConfig: defaultPageConfig,
+      measurer: createMeasurer(),
+      fontConfig: manager.buildBlockStyles(),
+    }).pages.flatMap((page) => page.blocks);
+    const row = blocks.find((block) => block.node.type.name === "tableRow");
+    expect(row?.x).toBe(blockOf(blocks, "a").x);
+  });
+});
+
+describe("deep nesting on a narrow page", () => {
+  it("keeps every level's text on the page, at least an inch wide", () => {
+    const narrow = { ...defaultPageConfig, pageWidth: 559 };
+    const contentRight = narrow.pageWidth - narrow.margins.right;
+    let nested: Json = item("deepest text with several words");
+    for (let depth = 0; depth < 9; depth++) nested = item(`L${depth}`, ul(nested));
+    const docNode = schema.nodeFromJSON({ type: "doc", content: [ul(nested)] });
+    const blocks = runPipeline(docNode, { pageConfig: narrow, measurer: createMeasurer(), fontConfig })
+      .pages.flatMap((page) => page.blocks);
+    for (const block of blocks) {
+      expect(block.availableWidth).toBeGreaterThanOrEqual(96);
+      expect(block.x + block.availableWidth).toBeLessThanOrEqual(contentRight);
+      expect(block.listMarkerX ?? narrow.margins.left).toBeGreaterThanOrEqual(narrow.margins.left);
+    }
+  });
+});
+
+describe("an item that opens with a floating image", () => {
+  const floating: Json = {
+    type: "paragraph",
+    content: [{ type: "image", attrs: { src: "data:image/png;base64,AA==", width: 40, height: 40, wrapMode: "square" } }],
+  };
+
+  it("draws the marker on the item's first visible line", () => {
+    const blocks = laidOut([ul(li(floating, p("text")), item("next"))]);
+    const anchor = blocks.find((block) => block.height === 0 && block.node.type.name === "paragraph");
+    expect(anchor?.listMarker).toBeUndefined();
+    expect(blockOf(blocks, "text").listMarker).toBe("•");
+    expect(blockOf(blocks, "next").listMarker).toBe("•");
+  });
+
+  it("draws no marker for an item with nothing visible, and does not hand it on", () => {
+    const blocks = laidOut([ol(li(floating), item("next")), p("after")]);
+    expect(blocks.filter((block) => block.listMarker !== undefined).map((block) => block.node.textContent))
+      .toEqual(["next"]);
+    expect(blockOf(blocks, "next").listMarker).toBe("2.");
+  });
+
+  it("hands the marker on when a streamed chunk starts between the two blocks", () => {
+    const content = [p("intro"), ul(li(floating, p("text")), item("next"))];
+    const docNode = schema.nodeFromJSON({ type: "doc", content });
+    const options = { pageConfig: defaultPageConfig, measurer: createMeasurer(), fontConfig, maxBlocks: 2 };
+    let layout = runPipeline(docNode, options);
+    while (layout.resumption) layout = runPipeline(docNode, { ...options, resumption: layout.resumption });
+    expect(blockOf(layout.pages.flatMap((page) => page.blocks), "text").listMarker).toBe("•");
+  });
+});
+
+describe("streamed layout of nested lists", () => {
+  it("lays out the same in chunks of any size as in one pass", () => {
+    const content = [
+      ol(item("one", ul(item("child", ol(item("deep"))), item("child 2"))), li(p("two"), p("more")), item("three")),
+      p("between"),
+      olFrom(4, item("four", ol(item("x"), item("y")))),
+    ];
+    const docNode = schema.nodeFromJSON({ type: "doc", content });
+    const whole = laidOut(docNode).map((block) => `${block.node.textContent}:${block.listMarker ?? ""}@${block.x}`);
+    for (const maxBlocks of [1, 2, 3, 5]) {
+      const options = { pageConfig: defaultPageConfig, measurer: createMeasurer(), fontConfig, maxBlocks };
+      let layout = runPipeline(docNode, options);
+      while (layout.resumption) layout = runPipeline(docNode, { ...options, resumption: layout.resumption });
+      const chunked = layout.pages.flatMap((page) => page.blocks)
+        .map((block) => `${block.node.textContent}:${block.listMarker ?? ""}@${block.x}`);
+      expect(chunked).toEqual(whole);
+    }
   });
 });

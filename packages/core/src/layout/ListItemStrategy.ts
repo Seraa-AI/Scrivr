@@ -1,44 +1,31 @@
 import type { CharacterMap } from "./CharacterMap";
 import type { LayoutBlock } from "./BlockLayout";
 import type { BlockStrategy, BlockRenderContext } from "./BlockRegistry";
-import type { LayoutLine } from "./LineBreaker";
 import { TextBlockStrategy } from "./TextBlockStrategy";
-import { bulletBox, bulletShape, type BulletShape } from "../model/lists";
-import { parseFontSizePx } from "../fonts/activeFontSize";
+import { bulletBox, bulletShape, listMarkerFont, type BulletShape } from "../model/lists";
 
-const FALLBACK_MARKER_FONT = "14px Arial, sans-serif";
+type BulletPainter = (ctx: CanvasRenderingContext2D, left: number, centerY: number, fontSize: number) => void;
 
-/** A marker takes the face and size of the text it labels: its line's first run. */
-export function markerFont(firstLine: LayoutLine | undefined): string {
-  const firstSpan = firstLine?.spans[0];
-  return firstSpan?.kind === "text" ? firstSpan.font : FALLBACK_MARKER_FONT;
-}
-
-function drawBullet(
-  ctx: CanvasRenderingContext2D,
-  shape: BulletShape,
-  left: number,
-  baseline: number,
-  fontSize: number,
-): void {
-  const { size, centerAboveBaseline, stroke } = bulletBox(fontSize);
-  const radius = size / 2;
-  const cx = left + radius;
-  const cy = baseline - centerAboveBaseline;
-  ctx.beginPath();
-  if (shape === "square") {
-    ctx.fillRect(left, cy - radius, size, size);
-    return;
-  }
-  if (shape === "circle") {
+const BULLET_PAINTERS: Record<BulletShape, BulletPainter> = {
+  disc: (ctx, left, centerY, fontSize) => {
+    const radius = bulletBox(fontSize).size / 2;
+    ctx.beginPath();
+    ctx.arc(left + radius, centerY, radius, 0, Math.PI * 2);
+    ctx.fill();
+  },
+  circle: (ctx, left, centerY, fontSize) => {
+    const { size, stroke } = bulletBox(fontSize);
+    const radius = size / 2;
+    ctx.beginPath();
     ctx.lineWidth = stroke;
-    ctx.arc(cx, cy, radius - stroke / 2, 0, Math.PI * 2);
+    ctx.arc(left + radius, centerY, radius - stroke / 2, 0, Math.PI * 2);
     ctx.stroke();
-    return;
-  }
-  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-  ctx.fill();
-}
+  },
+  square: (ctx, left, centerY, fontSize) => {
+    const { size } = bulletBox(fontSize);
+    ctx.fillRect(left, centerY - size / 2, size, size);
+  },
+};
 
 /**
  * ListItemStrategy — renders a list item block.
@@ -54,12 +41,12 @@ export const ListItemStrategy: BlockStrategy = {
 
     if (block.listMarker !== undefined && block.listMarkerX !== undefined && firstLine) {
       const baseline = block.y + firstLine.ascent;
-      const font = markerFont(firstLine);
+      const { font, size } = listMarkerFont(firstLine);
       ctx.fillStyle = theme.listMarker;
       ctx.strokeStyle = theme.listMarker;
       const shape = bulletShape(block.listMarker);
       if (shape) {
-        drawBullet(ctx, shape, block.listMarkerX, baseline, parseFontSizePx(font) ?? 0);
+        BULLET_PAINTERS[shape](ctx, block.listMarkerX, baseline - bulletBox(size).centerAboveBaseline, size);
       } else {
         ctx.font = font;
         ctx.textAlign = "left";

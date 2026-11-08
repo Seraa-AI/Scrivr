@@ -1,4 +1,6 @@
 import type { Node, NodeType } from "prosemirror-model";
+import type { LayoutLine } from "../layout/LineBreaker";
+import { DEFAULT_FONT_SIZE_PX, parseFontSizePx } from "../fonts/activeFontSize";
 
 export type ListKind = "bullet" | "ordered";
 export type BulletShape = "disc" | "circle" | "square";
@@ -7,47 +9,56 @@ export type OrderedFormat = "decimal" | "lowerLetter" | "lowerRoman";
 /** How one nesting level of a list looks. Lengths in px at 96 DPI. */
 export interface ListLevelStyle {
   /** Left edge of the item's text, measured from the content edge. */
-  textIndent: number;
-  /** Distance from the marker's left edge to the text. */
-  hanging: number;
-  bullet: { glyph: string; shape: BulletShape };
-  ordered: { format: OrderedFormat };
+  readonly textIndent: number;
+  readonly bullet: { readonly glyph: string; readonly shape: BulletShape };
+  readonly ordered: { readonly format: OrderedFormat };
 }
 
-const HALF_INCH = 48;
-
-/** How far every level's marker hangs before its text: a quarter inch. */
+/** Word's built-in lists have nine levels; deeper nesting stays at the ninth. */
+export const LIST_LEVEL_COUNT = 9;
+/** Each level's text sits half an inch further in than the level above. */
+const LEVEL_STEP = 48;
+/** Every level's marker hangs a quarter inch before its text. */
 export const LIST_MARKER_HANGING = 24;
-
-const BULLETS: ReadonlyArray<ListLevelStyle["bullet"]> = [
-  { glyph: "•", shape: "disc" },
-  { glyph: "◦", shape: "circle" },
-  { glyph: "▪", shape: "square" },
-];
-const ORDERED_FORMATS: readonly OrderedFormat[] = ["decimal", "lowerLetter", "lowerRoman"];
+/** Word's default tab stops: every half inch from the content edge. */
+export const DEFAULT_TAB_STOP = 48;
+/** Least space between a marker's right edge and the item's text. */
+export const LIST_MARKER_MIN_GAP = 4;
 
 /**
- * Word's built-in lists: nine levels, each indenting its text another half
- * inch, with the marker hanging a quarter inch before the text. Bullets and
- * number formats repeat every three levels.
+ * The range a list may start in. The schema allows any integer
+ * (`ST_DecimalNumber`); this is Word's documented range for the line-numbering
+ * start (MS-OI29500 §17.6.8), the nearest limit Word publishes.
  */
-export const LIST_LEVELS: readonly ListLevelStyle[] = Array.from({ length: 9 }, (_, depth) => ({
-  textIndent: HALF_INCH * (depth + 1),
-  hanging: LIST_MARKER_HANGING,
-  bullet: BULLETS[depth % BULLETS.length] ?? { glyph: "•", shape: "disc" },
-  ordered: { format: ORDERED_FORMATS[depth % ORDERED_FORMATS.length] ?? "decimal" },
-}));
+const MIN_START = 0;
+const MAX_START = 32767;
 
-const DEEPEST_LEVEL: ListLevelStyle = {
-  textIndent: HALF_INCH * LIST_LEVELS.length,
-  hanging: LIST_MARKER_HANGING,
-  bullet: { glyph: "▪", shape: "square" },
-  ordered: { format: "lowerRoman" },
+/** Bullets and number formats repeat every three levels. */
+type Cycle = 0 | 1 | 2;
+const cycleOf = (level: number): Cycle => {
+  const step = level % 3;
+  return step === 0 ? 0 : step === 1 ? 1 : 2;
 };
 
-/** The style of a nesting depth; lists nested past the ninth level stay at the ninth. */
+const BULLETS: Readonly<Record<Cycle, ListLevelStyle["bullet"]>> = Object.freeze({
+  0: Object.freeze({ glyph: "•", shape: "disc" }),
+  1: Object.freeze({ glyph: "◦", shape: "circle" }),
+  2: Object.freeze({ glyph: "▪", shape: "square" }),
+});
+const ORDERED_FORMATS: Readonly<Record<Cycle, OrderedFormat>> = {
+  0: "decimal",
+  1: "lowerLetter",
+  2: "lowerRoman",
+};
+
+/** The style of a nesting depth (0 = top level), as Word's built-in lists draw it. */
 export function listLevel(depth: number): ListLevelStyle {
-  return LIST_LEVELS[Math.min(Math.max(depth, 0), LIST_LEVELS.length - 1)] ?? DEEPEST_LEVEL;
+  const level = Math.min(Math.max(Math.trunc(depth), 0), LIST_LEVEL_COUNT - 1);
+  return {
+    textIndent: LEVEL_STEP * (level + 1),
+    bullet: BULLETS[cycleOf(level)],
+    ordered: { format: ORDERED_FORMATS[cycleOf(level)] },
+  };
 }
 
 /** A list container: a node whose items are list items. */
@@ -62,10 +73,11 @@ export function listKind(node: Node): ListKind | null {
   return node.type.name === "orderedList" ? "ordered" : "bullet";
 }
 
-/** The number an ordered list starts at. */
+/** The number an ordered list starts at, kept within the range Word accepts. */
 export function listStart(node: Node): number {
   const order = node.attrs["order"];
-  return typeof order === "number" && Number.isInteger(order) ? order : 1;
+  if (typeof order !== "number" || !Number.isInteger(order)) return 1;
+  return Math.min(Math.max(order, MIN_START), MAX_START);
 }
 
 const ROMAN: ReadonlyArray<readonly [number, string]> = [
@@ -97,14 +109,14 @@ const FORMATTERS: Record<OrderedFormat, (n: number) => string> = {
   lowerRoman: (n) => (n > 0 ? toRoman(n) : String(n)),
 };
 
-/** The marker of the `n`th item (counting from the list's start) at `depth`. */
+/** The marker of item number `n` (the list's start counts as the first) at `depth`. */
 export function listMarker(kind: ListKind, depth: number, n: number): string {
   const level = listLevel(depth);
   return kind === "bullet" ? level.bullet.glyph : `${FORMATTERS[level.ordered.format](n)}.`;
 }
 
 const SHAPE_BY_GLYPH: ReadonlyMap<string, BulletShape> = new Map(
-  BULLETS.map((bullet) => [bullet.glyph, bullet.shape]),
+  Object.values(BULLETS).map((bullet) => [bullet.glyph, bullet.shape]),
 );
 
 /** The shape a bullet marker is drawn as, or null when the marker is text. */
@@ -112,14 +124,41 @@ export function bulletShape(marker: string): BulletShape | null {
   return SHAPE_BY_GLYPH.get(marker) ?? null;
 }
 
-/**
- * Where a bullet shape sits, relative to the marker's left edge and the line's
- * baseline. Canvas and PDF both draw from this, so the two agree.
- */
-export function bulletBox(fontSize: number): { size: number; centerAboveBaseline: number; stroke: number } {
+/** A bullet shape's size and where it sits, relative to the marker's left edge and the baseline. */
+export interface BulletBox {
+  /** Width and height of the shape. */
+  size: number;
+  centerAboveBaseline: number;
+  /** Line width of the ring. */
+  stroke: number;
+}
+
+/** The box a bullet is drawn in at `fontSize`. Canvas and PDF both draw from it, so the two agree. */
+export function bulletBox(fontSize: number): BulletBox {
   return {
     size: fontSize * 0.3,
     centerAboveBaseline: fontSize * 0.32,
     stroke: fontSize * 0.07,
   };
+}
+
+/** The face and size a marker is drawn in. */
+export interface ListMarkerFont {
+  font: string;
+  /** In px; never 0. */
+  size: number;
+}
+
+const FALLBACK_MARKER_FONT = `${DEFAULT_FONT_SIZE_PX}px Arial, sans-serif`;
+
+/**
+ * A marker takes the face and size of the text it labels: the first run of
+ * the item's first line. Layout measures it, and canvas and PDF draw it, from
+ * this one rule.
+ */
+export function listMarkerFont(firstLine: LayoutLine | undefined): ListMarkerFont {
+  const firstSpan = firstLine?.spans[0];
+  const font = firstSpan?.kind === "text" ? firstSpan.font : FALLBACK_MARKER_FONT;
+  const parsed = parseFontSizePx(font);
+  return { font, size: parsed !== null && parsed > 0 ? parsed : DEFAULT_FONT_SIZE_PX };
 }

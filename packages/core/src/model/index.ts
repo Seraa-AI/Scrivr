@@ -53,18 +53,10 @@ export {
   previousSection,
   sectionAt,
 } from "./sections";
-export {
-  LIST_LEVELS,
-  LIST_MARKER_HANGING,
-  bulletBox,
-  bulletShape,
-  isListType,
-  listKind,
-  listLevel,
-  listMarker,
-  listStart,
-} from "./lists";
-export type { BulletShape, ListKind, ListLevelStyle, OrderedFormat } from "./lists";
+// Track changes and the semantic exporter ask what a list is; PDF draws
+// markers. The level table itself stays internal to core.
+export { bulletBox, bulletShape, isListType, listMarkerFont } from "./lists";
+export type { BulletBox, BulletShape, ListMarkerFont } from "./lists";
 export type {
   Section,
   SectionBreakType,

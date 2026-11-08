@@ -129,9 +129,9 @@ export interface LayoutBlock {
   align: BlockStyle["align"];
   /** Available width — renderer needs this to compute alignment offsets */
   availableWidth: number;
-  /** Bullet character or ordered number string (e.g. "•", "1."). Present on list item blocks only. */
+  /** Bullet or number (e.g. "•", "1."), on the block that carries a list item's first visible line. */
   listMarker?: string;
-  /** Absolute x position to draw the list marker — to the left of the indented text. */
+  /** Absolute x of the marker's left edge — hanging before the indented text. */
   listMarkerX?: number;
   /**
    * True on the 2nd, 3rd, … visual parts of a block split across pages.
@@ -240,6 +240,11 @@ export interface BlockLayoutOptions {
    * every other block kind.
    */
   tableColumns?: number[];
+  /**
+   * Extra first-line indent, on top of the node's own `textIndent`: where a
+   * list marker too wide for its hanging pushes the first line of text.
+   */
+  firstLineOffset?: number;
 }
 
 // ── Constants ───────────────────────────────────────────────────────────────────
@@ -424,6 +429,7 @@ export function layoutBlock(
     lineSpaceProvider,
     inlineRegistry,
     fonts,
+    firstLineOffset = 0,
   } = options;
 
   const fontConfig = options.fontConfig ?? defaultFontConfig;
@@ -511,7 +517,7 @@ export function layoutBlock(
 
   // First-line indent: reduce first line's width so text wraps earlier.
   const rawTextIndent = node.attrs["textIndent"];
-  const textIndent = typeof rawTextIndent === "number" && rawTextIndent > 0 ? rawTextIndent : 0;
+  const textIndent = (typeof rawTextIndent === "number" && rawTextIndent > 0 ? rawTextIndent : 0) + firstLineOffset;
 
   // Wrap the line-space provider to apply textIndent on the first line.
   let firstLineConsumed = false;
