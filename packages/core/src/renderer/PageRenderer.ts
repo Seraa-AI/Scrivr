@@ -9,6 +9,7 @@ import {
 } from "../layout/AnchoredObjects";
 import { LayoutBlock, computeAlignmentOffset, isHiddenAnchorLine } from "../layout/BlockLayout";
 import { CharacterMap } from "../layout/CharacterMap";
+import { drawListMarker } from "../layout/listMarkers";
 import { atomStyle, computeObjectRenderY, paintInSpanStyle } from "../layout/LineBreaker";
 import type { TextMeasurerLike } from "../layout/TextMeasurer";
 import { clearCanvas } from "./canvas";
@@ -148,6 +149,8 @@ export function renderPage(options: RenderPageOptions): boolean {
   // and posAtCoords can't distinguish lines in different paragraphs.
   let lineIndexOffset = 0;
   for (const block of page.blocks) {
+    // A list marker is drawn the same whatever painter draws the block.
+    drawListMarker(ctx, block, theme);
     const strategy = blockRegistry?.get(block.blockType);
     if (strategy) {
       lineIndexOffset = strategy.render(

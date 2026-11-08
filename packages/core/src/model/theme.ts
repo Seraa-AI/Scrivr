@@ -107,7 +107,7 @@ export interface ResolvedTheme {
  * - cursor: slate-800 — OverlayRenderer cursor fill
  * - selectionFill: blue-500 @ 25% — OverlayRenderer selection rect
  * - imagePlaceholderBg / Border / Text: slate-100 / 300 / 500 — Image.ts
- * - listMarker: slate-800 — ListItemStrategy bullet/number fill
+ * - listMarker: slate-800 — list bullet/number fill (layout/listMarkers.ts)
  * - hrColor: slate-300 — HorizontalRule.ts HR_COLOR
  * - resizeHandle: blue-500 — ResizeController.ts HANDLE_COLOR
  */

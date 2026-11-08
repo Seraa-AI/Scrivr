@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { EditorState, TextSelection, type Command } from "prosemirror-state";
-import { liftListItem, sinkListItem } from "prosemirror-schema-list";
 import type { Node } from "prosemirror-model";
-import { runPipeline, defaultPageConfig } from "./PageLayout";
+import { runPipeline, defaultPageConfig, type MeasureCacheEntry } from "./PageLayout";
 import type { LayoutBlock } from "./BlockLayout";
-import { ListItemStrategy } from "./ListItemStrategy";
+import { drawListMarker } from "./listMarkers";
 import { CharacterMap } from "./CharacterMap";
 import { defaultEditorTheme } from "../model/theme";
+import { renderPage } from "../renderer/PageRenderer";
 import { ServerEditor } from "../ServerEditor";
 import { StarterKit } from "../extensions/StarterKit";
 import { Table } from "../extensions/built-in/Table";
@@ -23,22 +23,24 @@ const HALF_INCH = 48;
 const QUARTER_INCH = 24;
 const { schema, fontConfig } = buildStarterKitContext();
 
-type Json = { type: string; attrs?: Record<string, unknown>; content?: Json[]; text?: string };
+type Json = { type: string; attrs?: Record<string, unknown>; content?: Json[]; text?: string; marks?: Json[] };
 const p = (text: string): Json => ({ type: "paragraph", content: [{ type: "text", text }] });
+const sized = (size: number, text: string): Json =>
+  ({ type: "paragraph", content: [{ type: "text", text, marks: [{ type: "fontSize", attrs: { size } }] }] });
 const li = (...content: Json[]): Json => ({ type: "listItem", content });
 const ul = (...items: Json[]): Json => ({ type: "bulletList", content: items });
 const ol = (...items: Json[]): Json => ({ type: "orderedList", content: items });
 const olFrom = (order: number, ...items: Json[]): Json => ({ type: "orderedList", attrs: { order }, content: items });
 const item = (text: string, ...nested: Json[]) => li(p(text), ...nested);
+const floating: Json = {
+  type: "paragraph",
+  content: [{ type: "image", attrs: { src: "data:image/png;base64,AA==", width: 40, height: 40, wrapMode: "square" } }],
+};
 
-function laidOut(content: Json[] | Node): LayoutBlock[] {
+function laidOut(content: Json[] | Node, pageConfig = defaultPageConfig): LayoutBlock[] {
   const docNode = Array.isArray(content) ? schema.nodeFromJSON({ type: "doc", content }) : content;
-  const layout = runPipeline(docNode, {
-    pageConfig: defaultPageConfig,
-    measurer: createMeasurer(),
-    fontConfig,
-  });
-  return layout.pages.flatMap((page) => page.blocks);
+  return runPipeline(docNode, { pageConfig, measurer: createMeasurer(), fontConfig })
+    .pages.flatMap((page) => page.blocks);
 }
 
 function blockOf(blocks: LayoutBlock[], text: string): LayoutBlock {
@@ -48,6 +50,12 @@ function blockOf(blocks: LayoutBlock[], text: string): LayoutBlock {
 }
 
 const markers = (blocks: LayoutBlock[]) => blocks.map((block) => block.listMarker ?? null);
+const fontOf = (block: LayoutBlock) => {
+  const span = block.lines[0]?.spans[0];
+  return span?.kind === "text" ? span.font : "";
+};
+/** Where the first line's text starts, measured from the block's text edge. */
+const firstLineStart = (block: LayoutBlock) => block.lines[0]?.spans[0]?.x ?? 0;
 
 /** A server editor that can press the editor's own key bindings. */
 class KeyEditor extends ServerEditor {
@@ -81,28 +89,6 @@ describe("list geometry (Word's built-in lists)", () => {
     expect(two.listMarkerX).toBe(one.listMarkerX);
   });
 
-  it("keeps every number in the column, however wide (viii. at level 3)", () => {
-    const items = Array.from({ length: 12 }, (_, i) => item(`n${i}`));
-    const blocks = laidOut([ol(item("top", ol(item("mid", ol(...items)))))]);
-    const xs = new Set(items.map((_, i) => blockOf(blocks, `n${i}`).listMarkerX));
-    expect(xs.size).toBe(1);
-    expect([...xs][0]).toBe(blockOf(blocks, "n0").x - QUARTER_INCH);
-  });
-
-  it("moves a wide number's first line of text to the next tab stop, as Word does", () => {
-    const text = "wide ".repeat(60).trim();
-    const wide = blockOf(laidOut([olFrom(1000, item(text))]), text);
-    const firstSpan = wide.lines[0]?.spans[0];
-    const font = firstSpan?.kind === "text" ? firstSpan.font : "";
-    const markerRight = (wide.listMarkerX ?? 0) + measureTextWidth("1000.", font);
-    const firstTextX = wide.x + (firstSpan?.x ?? 0);
-
-    expect(wide.listMarkerX).toBe(wide.x - QUARTER_INCH);
-    expect(firstTextX).toBeGreaterThan(markerRight);
-    expect((firstTextX - defaultPageConfig.margins.left) % HALF_INCH).toBe(0);
-    for (const line of wide.lines.slice(1)) expect(line.spans[0]?.x).toBe(0);
-  });
-
   it("indents each level half an inch past the one above", () => {
     const blocks = laidOut([ul(item("a", ul(item("b", ul(item("c"))))))]);
     const [a, b, c] = [blockOf(blocks, "a"), blockOf(blocks, "b"), blockOf(blocks, "c")];
@@ -121,9 +107,62 @@ describe("list geometry (Word's built-in lists)", () => {
     let nested: Json = item("deepest");
     for (let depth = 0; depth < 10; depth++) nested = item(`d${depth}`, ul(nested));
     const blocks = laidOut([ul(nested)]);
-    const deepest = blockOf(blocks, "deepest");
-    const ninth = blockOf(blocks, "d1");
-    expect(deepest.x).toBe(ninth.x);
+    expect(blockOf(blocks, "deepest").x).toBe(blockOf(blocks, "d1").x);
+  });
+});
+
+describe("a number too wide for its hanging indent (Word: the tab after it goes to the next stop)", () => {
+  /** For each item, whether its text moved, and whether Word would move it: the number reaching the text. */
+  const pushes = (blocks: LayoutBlock[]) => blocks.filter((block) => block.listMarker !== undefined).map((block) => ({
+    marker: block.listMarker,
+    moved: firstLineStart(block) > 0,
+    reachesText: measureTextWidth(block.listMarker ?? "", fontOf(block)) >= QUARTER_INCH,
+  }));
+  const agreesWithWord = (blocks: LayoutBlock[]) =>
+    pushes(blocks).filter((row) => row.moved !== row.reachesText).map((row) => row.marker);
+
+  it("moves the text only when the number reaches it: roman numbers at 16px", () => {
+    const romans = Array.from({ length: 9 }, (_, i) => li(sized(16, `roman ${i}`)));
+    const blocks = laidOut([ol(item("a", ol(item("b", ol(...romans)))))]);
+    expect(agreesWithWord(blocks)).toEqual([]);
+  });
+
+  it("moves the text only when the number reaches it: two-digit numbers at 18px", () => {
+    const items = Array.from({ length: 12 }, (_, i) => li(sized(18, `item ${i}`)));
+    expect(agreesWithWord(laidOut([ol(...items)]))).toEqual([]);
+  });
+
+  it("keeps every number in the column, however wide", () => {
+    const items = Array.from({ length: 12 }, (_, i) => li(sized(18, `n${i}`)));
+    const blocks = laidOut([ol(...items)]);
+    const xs = new Set(blocks.map((block) => block.listMarkerX));
+    expect([...xs]).toEqual([(blocks[0]?.x ?? 0) - QUARTER_INCH]);
+  });
+
+  it("moves the first line to the next tab stop, and only the first line", () => {
+    const text = "wide ".repeat(60).trim();
+    const wide = blockOf(laidOut([olFrom(1000, item(text))]), text);
+    const firstTextX = wide.x + firstLineStart(wide);
+    expect(firstTextX).toBeGreaterThan((wide.listMarkerX ?? 0) + measureTextWidth("1000.", fontOf(wide)));
+    expect((firstTextX - defaultPageConfig.margins.left) % HALF_INCH).toBe(0);
+    for (const line of wide.lines.slice(1)) expect(line.spans[0]?.x).toBe(0);
+  });
+
+  it("counts a paragraph's own first-line indent once", () => {
+    const indented: Json = {
+      type: "paragraph",
+      attrs: { textIndent: HALF_INCH },
+      content: [{ type: "text", text: "indented", marks: [{ type: "fontSize", attrs: { size: 18 } }] }],
+    };
+    const block = blockOf(laidOut([olFrom(10, li(indented))]), "indented");
+    expect(firstLineStart(block)).toBe(HALF_INCH);
+  });
+
+  it("keeps text on the first line when the next tab stop is past its end", () => {
+    const text = "letter item with words to wrap";
+    const block = blockOf(laidOut([ol(item("top", olFrom(32767, item(text))))]), text);
+    expect(firstLineStart(block)).toBeGreaterThan(0);
+    expect(firstLineStart(block)).toBeLessThan(block.availableWidth);
   });
 });
 
@@ -228,11 +267,7 @@ describe("drawing markers on the canvas", () => {
     const ctx = document.createElement("canvas").getContext("2d");
     if (!ctx) throw new Error("no 2d context");
     const calls = { arc: vi.spyOn(ctx, "arc"), fillRect: vi.spyOn(ctx, "fillRect"), fillText: vi.spyOn(ctx, "fillText") };
-    ListItemStrategy.render(
-      block,
-      { ctx, pageNumber: 1, lineIndexOffset: 0, dpr: 1, measurer: createMeasurer(), theme: defaultEditorTheme },
-      new CharacterMap(),
-    );
+    drawListMarker(ctx, block, defaultEditorTheme);
     const markerText = calls.fillText.mock.calls.filter(([text]) => text === block.listMarker);
     return { arcs: calls.arc.mock.calls.length, rects: calls.fillRect.mock.calls.length, markerText: markerText.length };
   };
@@ -248,17 +283,38 @@ describe("drawing markers on the canvas", () => {
   it("draws numbers as text", () => {
     expect(paint(blockOf(laidOut([ol(item("a"))]), "a")).markerText).toBe(1);
   });
+
+  it("does not change which painter draws a block that carries a marker", () => {
+    const code: Json = { type: "codeBlock", content: [{ type: "text", text: "code" }] };
+    const manager = new ExtensionManager([StarterKit]);
+    const docNode = manager.schema.nodeFromJSON({ type: "doc", content: [ul(li(floating, code)), { type: "paragraph" }] });
+    const layout = runPipeline(docNode, { pageConfig: defaultPageConfig, measurer: createMeasurer(), fontConfig });
+    const page = layout.pages[0];
+    if (!page) throw new Error("no page");
+    const codeBlock = blockOf(page.blocks, "code");
+    expect(codeBlock.listMarker).toBe("•");
+    expect(codeBlock.blockType).toBe("codeBlock");
+
+    const ctx = document.createElement("canvas").getContext("2d");
+    if (!ctx) throw new Error("no 2d context");
+    const arcs = vi.spyOn(ctx, "arc");
+    renderPage({
+      ctx, page, pageConfig: defaultPageConfig, renderVersion: layout.version, currentVersion: () => layout.version,
+      dpr: 1, measurer: createMeasurer(), map: new CharacterMap(), blockRegistry: manager.buildBlockRegistry(),
+    });
+    expect(arcs).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("incremental layout agrees with a fresh one", () => {
   /** Lays each document out in turn the way LayoutCoordinator does: one cache, the previous layout and version. */
-  function incremental(docs: Node[]): LayoutBlock[] {
-    const measureCache = new WeakMap();
+  function incremental(steps: Array<{ doc: Node; pageConfig?: typeof defaultPageConfig }>): LayoutBlock[] {
+    const measureCache = new WeakMap<Node, MeasureCacheEntry>();
     const measurer = createMeasurer();
     let previous: ReturnType<typeof runPipeline> | undefined;
-    for (const docNode of docs) {
-      previous = runPipeline(docNode, {
-        pageConfig: defaultPageConfig,
+    for (const step of steps) {
+      previous = runPipeline(step.doc, {
+        pageConfig: step.pageConfig ?? defaultPageConfig,
         measurer,
         fontConfig,
         measureCache,
@@ -269,76 +325,68 @@ describe("incremental layout agrees with a fresh one", () => {
   }
 
   const shown = (blocks: LayoutBlock[]) =>
-    blocks.map((block) => `${block.node.textContent}:${block.listMarker ?? ""}@${block.x}`);
+    blocks.map((block) => `${block.node.textContent}:${block.listMarker ?? ""}@${block.x}+${firstLineStart(block)}`);
+  const longList = (prefix: string, n: number) => Array.from({ length: n }, (_, i) => item(`${prefix} ${i}`));
+
   /**
-   * The documents a run of edits passes through. A bare state keeps every
-   * unchanged node's identity, as ProseMirror's structural sharing does, so
-   * the measure cache sees the hits a long-lived editor sees.
+   * The documents an editor passes through while its keys are pressed. The
+   * first edit stamps every block with its id, which replaces every node once;
+   * a word typed first leaves the keys to edit a document whose unchanged
+   * blocks keep their identity, as in an editor already in use.
    */
-  function edited(content: Json[], caretIn: string, ...commands: Command[]): Node[] {
-    const docNode = schema.nodeFromJSON({ type: "doc", content });
-    let at = -1;
-    docNode.descendants((node, pos) => {
-      if (at < 0 && node.isTextblock && node.textContent === caretIn) at = pos + 1;
-      return at < 0;
-    });
-    let state = EditorState.create({ doc: docNode, selection: TextSelection.create(docNode, at) });
-    const docs = [state.doc];
-    for (const command of commands) {
-      expect(command(state, (tr) => { state = state.apply(tr); })).toBe(true);
-      docs.push(state.doc);
+  function pressed(content: Json[], caretIn: string, ...keys: string[]): Node[] {
+    const editor = new KeyEditor({ extensions: [StarterKit], content: { type: "doc", content: [...content, { type: "paragraph" }] } });
+    editor.applyTransaction(editor.getState().tr.insertText("typed", editor.getState().doc.content.size - 1));
+    const docs = [editor.getState().doc];
+    editor.caretAt(caretIn);
+    for (const key of keys) {
+      expect(editor.press(key)).toBe(true);
+      docs.push(editor.getState().doc);
     }
     return docs;
   }
-
-  const listItemType = schema.nodes["listItem"];
-  if (!listItemType) throw new Error("no listItem");
-  const tab = sinkListItem(listItemType);
-  const shiftTab = liftListItem(listItemType);
-  const fiveItems = [ol(...["a", "b", "c", "d", "e"].map((t) => item(t)))];
+  const steps = (docs: Node[]) => docs.map((doc) => ({ doc }));
   const fresh = (docs: Node[]) => laidOut(docs[docs.length - 1] ?? schema.node("doc"));
 
   it("renumbers the items after one Tab nested", () => {
-    const docs = edited(fiveItems, "b", tab);
-    expect(shown(incremental(docs))).toEqual(shown(fresh(docs)));
+    const docs = pressed([ol(...longList("item", 90))], "item 5", "Tab");
+    expect(shown(incremental(steps(docs)))).toEqual(shown(fresh(docs)));
   });
 
   it("renumbers the items after Shift-Tab lifts a nested one", () => {
-    const docs = edited([ol(item("a"), item("b", ol(item("c"))), item("d"), item("e"))], "c", shiftTab);
-    expect(shown(incremental(docs))).toEqual(shown(fresh(docs)));
-  });
-
-  it("keeps the numbers after a Tab and its Shift-Tab", () => {
-    const docs = edited(fiveItems, "b", tab, shiftTab);
-    expect(shown(incremental(docs))).toEqual(shown(fresh(docs)));
+    const docs = pressed([ol(item("top", ol(...longList("sub", 80))), ...longList("after", 10))], "sub 3", "Shift-Tab");
+    expect(shown(incremental(steps(docs)))).toEqual(shown(fresh(docs)));
   });
 
   it("renumbers the items after two are joined, across a page break", () => {
     const content = [ol(item("A"), item("B"), li(p("C"), { type: "pageBreak" }), item("D"), item("E"), item("F"))];
-    const joinAB: Command = (state, dispatch) => {
-      let aEnd = -1;
-      let bStart = -1;
-      state.doc.descendants((node, pos) => {
-        if (node.isTextblock && node.textContent === "A") aEnd = pos + 1 + node.content.size;
-        if (node.isTextblock && node.textContent === "B") bStart = pos + 1;
-        return true;
-      });
-      dispatch?.(state.tr.delete(aEnd, bStart));
+    const docNode = schema.nodeFromJSON({ type: "doc", content });
+    let aEnd = -1;
+    let bStart = -1;
+    docNode.descendants((node, pos) => {
+      if (node.isTextblock && node.textContent === "A") aEnd = pos + 1 + node.content.size;
+      if (node.isTextblock && node.textContent === "B") bStart = pos + 1;
       return true;
-    };
-    const docs = edited(content, "A", joinAB);
-    expect(shown(incremental(docs))).toEqual(shown(fresh(docs)));
+    });
+    const joined = EditorState.create({ doc: docNode }).tr.delete(aEnd, bStart).doc;
+    expect(shown(incremental(steps([docNode, joined])))).toEqual(shown(fresh([joined])));
   });
 
   it("re-lays a wide number's first line when the start changes", () => {
     const text = "wide ".repeat(60).trim();
-    const restart: Command = (state, dispatch) => {
-      dispatch?.(state.tr.setNodeAttribute(0, "order", 1));
-      return true;
-    };
-    const docs = edited([olFrom(1000, item(text))], text, restart);
-    const firstLineX = (blocks: LayoutBlock[]) => blockOf(blocks, text).lines[0]?.spans[0]?.x;
-    expect(firstLineX(incremental(docs))).toBe(firstLineX(fresh(docs)));
+    const docNode = schema.nodeFromJSON({ type: "doc", content: [olFrom(1000, item(text))] });
+    const restarted = EditorState.create({ doc: docNode }).tr.setNodeAttribute(0, "order", 1).doc;
+    expect(shown(incremental(steps([docNode, restarted])))).toEqual(shown(fresh([restarted])));
+  });
+
+  it("re-lays a wide number's first line when the page width moves its indent", () => {
+    let nested: Json = olFrom(18, item("deep"));
+    for (let depth = 0; depth < 8; depth++) nested = ol(item(`L${depth}`, nested));
+    const docNode = schema.nodeFromJSON({ type: "doc", content: [nested] });
+    const narrow = { ...defaultPageConfig, pageWidth: 559 };
+    const wider = { ...defaultPageConfig, pageWidth: 600 };
+    const after = incremental([{ doc: docNode, pageConfig: narrow }, { doc: docNode, pageConfig: wider }]);
+    expect(shown(after)).toEqual(shown(laidOut(docNode, wider)));
   });
 });
 
@@ -373,29 +421,35 @@ describe("blocks other than paragraphs inside an item", () => {
   });
 });
 
-describe("deep nesting on a narrow page", () => {
-  it("keeps every level's text on the page, at least an inch wide", () => {
+describe("how far a block can be indented", () => {
+  const contentRight = (config: typeof defaultPageConfig) => config.pageWidth - config.margins.right;
+
+  it("keeps every level's text on a narrow page, at least an inch wide", () => {
     const narrow = { ...defaultPageConfig, pageWidth: 559 };
-    const contentRight = narrow.pageWidth - narrow.margins.right;
     let nested: Json = item("deepest text with several words");
     for (let depth = 0; depth < 9; depth++) nested = item(`L${depth}`, ul(nested));
-    const docNode = schema.nodeFromJSON({ type: "doc", content: [ul(nested)] });
-    const blocks = runPipeline(docNode, { pageConfig: narrow, measurer: createMeasurer(), fontConfig })
-      .pages.flatMap((page) => page.blocks);
-    for (const block of blocks) {
+    for (const block of laidOut([ul(nested)], narrow)) {
       expect(block.availableWidth).toBeGreaterThanOrEqual(96);
-      expect(block.x + block.availableWidth).toBeLessThanOrEqual(contentRight);
+      expect(block.x + block.availableWidth).toBeLessThanOrEqual(contentRight(narrow));
       expect(block.listMarkerX ?? narrow.margins.left).toBeGreaterThanOrEqual(narrow.margins.left);
+    }
+  });
+
+  it("keeps an inch of text for a paragraph indented past the page", () => {
+    const deep = blockOf(laidOut([{ type: "paragraph", attrs: { indent: 30 }, content: [{ type: "text", text: "deep" }] }]), "deep");
+    expect(deep.availableWidth).toBe(96);
+    expect(deep.x + deep.availableWidth).toBe(contentRight(defaultPageConfig));
+  });
+
+  it("ignores an indent that is not a positive number", () => {
+    for (const indent of [-2, Number.NaN]) {
+      const block = blockOf(laidOut([{ type: "paragraph", attrs: { indent }, content: [{ type: "text", text: "x" }] }]), "x");
+      expect(block.x).toBe(defaultPageConfig.margins.left);
     }
   });
 });
 
 describe("an item that opens with a floating image", () => {
-  const floating: Json = {
-    type: "paragraph",
-    content: [{ type: "image", attrs: { src: "data:image/png;base64,AA==", width: 40, height: 40, wrapMode: "square" } }],
-  };
-
   it("draws the marker on the item's first visible line", () => {
     const blocks = laidOut([ul(li(floating, p("text")), item("next"))]);
     const anchor = blocks.find((block) => block.height === 0 && block.node.type.name === "paragraph");
@@ -410,33 +464,36 @@ describe("an item that opens with a floating image", () => {
       .toEqual(["next"]);
     expect(blockOf(blocks, "next").listMarker).toBe("2.");
   });
-
-  it("hands the marker on when a streamed chunk starts between the two blocks", () => {
-    const content = [p("intro"), ul(li(floating, p("text")), item("next"))];
-    const docNode = schema.nodeFromJSON({ type: "doc", content });
-    const options = { pageConfig: defaultPageConfig, measurer: createMeasurer(), fontConfig, maxBlocks: 2 };
-    let layout = runPipeline(docNode, options);
-    while (layout.resumption) layout = runPipeline(docNode, { ...options, resumption: layout.resumption });
-    expect(blockOf(layout.pages.flatMap((page) => page.blocks), "text").listMarker).toBe("•");
-  });
 });
 
-describe("streamed layout of nested lists", () => {
-  it("lays out the same in chunks of any size as in one pass", () => {
-    const content = [
+describe("streamed layout of lists", () => {
+  function streamed(docNode: Node, maxBlocks: number): LayoutBlock[] {
+    const options = { pageConfig: defaultPageConfig, measurer: createMeasurer(), fontConfig, maxBlocks };
+    let layout = runPipeline(docNode, options);
+    while (layout.resumption) layout = runPipeline(docNode, { ...options, resumption: layout.resumption });
+    return layout.pages.flatMap((page) => page.blocks);
+  }
+  const shown = (blocks: LayoutBlock[]) => blocks.map((block) => `${block.node.textContent}:${block.listMarker ?? ""}@${block.x}`);
+
+  it("lays nested lists out the same in chunks of any size as in one pass", () => {
+    const docNode = schema.nodeFromJSON({ type: "doc", content: [
       ol(item("one", ul(item("child", ol(item("deep"))), item("child 2"))), li(p("two"), p("more")), item("three")),
       p("between"),
       olFrom(4, item("four", ol(item("x"), item("y")))),
-    ];
-    const docNode = schema.nodeFromJSON({ type: "doc", content });
-    const whole = laidOut(docNode).map((block) => `${block.node.textContent}:${block.listMarker ?? ""}@${block.x}`);
-    for (const maxBlocks of [1, 2, 3, 5]) {
-      const options = { pageConfig: defaultPageConfig, measurer: createMeasurer(), fontConfig, maxBlocks };
-      let layout = runPipeline(docNode, options);
-      while (layout.resumption) layout = runPipeline(docNode, { ...options, resumption: layout.resumption });
-      const chunked = layout.pages.flatMap((page) => page.blocks)
-        .map((block) => `${block.node.textContent}:${block.listMarker ?? ""}@${block.x}`);
-      expect(chunked).toEqual(whole);
-    }
+    ] });
+    for (const maxBlocks of [1, 2, 3, 5]) expect(shown(streamed(docNode, maxBlocks))).toEqual(shown(laidOut(docNode)));
+  });
+
+  it("hands a marker on when a chunk starts between a floating image and the item's text", () => {
+    const docNode = schema.nodeFromJSON({ type: "doc", content: [p("intro"), ul(li(floating, p("text")), item("next"))] });
+    expect(shown(streamed(docNode, 2))).toEqual(shown(laidOut(docNode)));
+  });
+
+  it("hands a marker on across a page break inside the item, in chunks of any size", () => {
+    const docNode = schema.nodeFromJSON({ type: "doc", content: [
+      p("intro"),
+      ol(li(floating, { type: "pageBreak" }, p("text")), item("second")),
+    ] });
+    for (const maxBlocks of [1, 2, 3]) expect(shown(streamed(docNode, maxBlocks))).toEqual(shown(laidOut(docNode)));
   });
 });

@@ -62,4 +62,6 @@ export { LayoutCoordinator } from "./LayoutCoordinator";
 export type { LayoutCoordinatorOptions } from "./LayoutCoordinator";
 export type { BlockStrategy, BlockRenderContext, InlineStrategy, NodeLayout } from "./BlockRegistry";
 export { TextBlockStrategy } from "./TextBlockStrategy";
-export { ListItemStrategy } from "./ListItemStrategy";
+// PDF draws list markers in the face and size the canvas draws them in.
+export { listMarkerFont } from "./listMarkers";
+export type { ListMarkerFont } from "./listMarkers";

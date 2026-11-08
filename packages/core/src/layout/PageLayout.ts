@@ -11,7 +11,7 @@ import {
   BlockStyle,
   applyPageFont,
 } from "./FontConfig";
-import { layoutBlock, LayoutBlock, type LayoutBlockKind, type CellSubBlock } from "./BlockLayout";
+import { layoutBlock, LayoutBlock, ownFirstLineIndent, type LayoutBlockKind, type CellSubBlock } from "./BlockLayout";
 import type { InlineRegistry } from "./BlockRegistry";
 import { nodeLayout } from "./BlockRegistry";
 import { LineBreaker, type InputSpan, type LayoutLine, type LineSpaceProvider } from "./LineBreaker";
@@ -41,13 +41,12 @@ import {
   bulletShape,
   DEFAULT_TAB_STOP,
   LIST_MARKER_HANGING,
-  LIST_MARKER_MIN_GAP,
   listKind,
   listLevel,
   listMarker,
-  listMarkerFont,
   listStart,
 } from "../model/lists";
+import { listMarkerFont } from "./listMarkers";
 import type { SectionBreakType } from "../model/sections";
 import { fitLinesInCapacity } from "./splitLines";
 import { runChromeLoop } from "./aggregateChrome";
@@ -269,8 +268,8 @@ export interface MeasureCacheEntry {
   spaceAfter: number;
   blockType: string;
   align: BlockStyle["align"];
-  /** The list marker the block was measured with; a different one is a cache miss. */
-  listMarker?: string;
+  /** The list marker the block was measured with, and its indent; a different one is a cache miss. */
+  listMarker?: { text: string; indentLeft: number };
   /**
    * Phase 1b — early termination.
    *
@@ -1584,7 +1583,6 @@ export function paginateFlow(
     if (flow.listMarker !== undefined) {
       block.listMarker = flow.listMarker;
       block.listMarkerX = flow.listMarkerX!;
-      block.blockType = "list_item";
     }
 
     // ── Per-page geometry snapshot ───────────────────────────────────────────
@@ -1656,7 +1654,6 @@ export function paginateFlow(
         if (flow.listMarker !== undefined) {
           reflow.listMarker = flow.listMarker;
           reflow.listMarkerX = flow.listMarkerX!;
-          reflow.blockType = "list_item";
         }
 
         currentPage.blocks.push(reflow);
@@ -1762,7 +1759,6 @@ export function paginateFlow(
             partBlock.listMarker = flow.listMarker;
             partBlock.listMarkerX = flow.listMarkerX!;
           }
-          partBlock.blockType = "list_item";
         }
 
         if ((globalThis as Record<string,unknown>).__LAYOUT_DEBUG__) {
@@ -1906,10 +1902,60 @@ function isAnchorOnlyFlowEntry(entry: Pick<MeasureCacheEntry, "kind" | "height" 
   );
 }
 
-/** Where a block's text goes. However deep the indent, an inch of the line is left for text. */
+/** However deep a block is indented, an inch of the line is left for its text. */
+const MIN_TEXT_WIDTH = 96;
+
+/** Where a block's text goes. */
 function blockGeometry(item: LayoutItem, config: FlowConfig): { indentLeft: number; blockWidth: number; blockX: number } {
   const indentLeft = Math.min(item.indentLeft, Math.max(0, config.contentWidth - MIN_TEXT_WIDTH));
   return { indentLeft, blockWidth: config.contentWidth - indentLeft, blockX: config.margins.left + indentLeft };
+}
+
+// ── List markers ─────────────────────────────────────────────────────────────
+
+/** A list marker to measure a block against, and how far in its text is. */
+interface MarkerPlacement {
+  text: string;
+  indentLeft: number;
+}
+
+/**
+ * Whether a cached measurement still describes a block: the same width, and
+ * the same list marker at the same indent — a marker draws on its block and
+ * can move its first line. A renumbered item is a miss, so a layout that
+ * reuses the tail of the previous one never shows its old number.
+ */
+function isCacheHitFor(entry: MeasureCacheEntry, blockWidth: number, marker: MarkerPlacement | undefined): boolean {
+  return entry.availableWidth === blockWidth
+    && entry.listMarker?.text === marker?.text
+    && entry.listMarker?.indentLeft === marker?.indentLeft;
+}
+
+/**
+ * How far a list number pushes the item's first line of text. Word follows the
+ * number with a tab (`w:suff`, a tab when omitted) that follows the normal tab
+ * stop rules: the text stays where it is unless the number reaches it, and
+ * then moves to the next default stop past the number. With no stop left on
+ * the line, the text follows the number, keeping a hanging indent's width.
+ */
+function markerFirstLineOffset(
+  marker: MarkerPlacement,
+  firstLine: LayoutLine | undefined,
+  measurer: TextMeasurerLike,
+  ownFirstLineIndent: number,
+  blockWidth: number,
+): number {
+  const { font, size } = listMarkerFont(firstLine);
+  const width = bulletShape(marker.text)
+    ? bulletBox(size).size
+    : measurer.measureWidth(marker.text, font);
+  const textStart = marker.indentLeft + ownFirstLineIndent;
+  const markerEnd = marker.indentLeft - LIST_MARKER_HANGING + width;
+  if (markerEnd < textStart) return 0;
+  const nextStop = (Math.floor(markerEnd / DEFAULT_TAB_STOP) + 1) * DEFAULT_TAB_STOP;
+  const lastTextStart = marker.indentLeft + blockWidth - LIST_MARKER_HANGING;
+  const target = nextStop <= lastTextStart ? nextStop : Math.min(markerEnd, lastTextStart);
+  return Math.max(0, target - textStart);
 }
 
 /**
@@ -1926,7 +1972,7 @@ function markerFor(item: LayoutItem, waiting: WaitingMarker, indentLeft: number)
   return text !== undefined ? { text, indentLeft } : undefined;
 }
 
-function markerLeftWaiting(item: LayoutItem, marker: MarkerPlacement | undefined, anchorOnly: boolean): WaitingMarker {
+function waitingMarkerAfter(item: LayoutItem, marker: MarkerPlacement | undefined, anchorOnly: boolean): WaitingMarker {
   return marker !== undefined && anchorOnly && item.listItemPos !== undefined
     ? { text: marker.text, itemPos: item.listItemPos }
     : null;
@@ -1935,7 +1981,8 @@ function markerLeftWaiting(item: LayoutItem, marker: MarkerPlacement | undefined
 /**
  * The marker waiting when a streamed chunk starts part-way through a list
  * item: the hand-off replayed over the item's earlier blocks, which the
- * measure cache already holds.
+ * measure cache already holds. A page break in the item hands the marker on
+ * unchanged, as it does in one pass.
  */
 function markerWaitingBefore(
   items: LayoutItem[],
@@ -1949,10 +1996,11 @@ function markerWaitingBefore(
   while (first > 0 && items[first - 1]?.listItemPos === itemPos) first--;
   let waiting: WaitingMarker = null;
   for (const item of items.slice(first, startIndex)) {
+    if (item.isPageBreak) continue;
     const { indentLeft, blockWidth, blockX } = blockGeometry(item, config);
     const marker = markerFor(item, waiting, indentLeft);
     const entry = resolveBlockEntry(item.node, item.nodePos, blockX, 0, blockWidth, 1, ctx, item.tableColumns, marker);
-    waiting = markerLeftWaiting(item, marker, isAnchorOnlyFlowEntry(entry));
+    waiting = waitingMarkerAfter(item, marker, isAnchorOnlyFlowEntry(entry));
   }
   return waiting;
 }
@@ -2015,7 +2063,7 @@ export function buildBlockFlow(
     );
     const anchorOnlyFlow = isAnchorOnlyFlowEntry(entry);
     const listMarker = marker && !anchorOnlyFlow ? marker.text : undefined;
-    waitingMarker = markerLeftWaiting(item, marker, anchorOnlyFlow);
+    waitingMarker = waitingMarkerAfter(item, marker, anchorOnlyFlow);
 
     flows.push({
       node,
@@ -2193,8 +2241,9 @@ export interface LayoutItem {
   /** Bullet or number, e.g. "•" or "1.", on the first block of a list item only. */
   listMarker?: string;
   /**
-   * Position of the list item this block belongs to. A first block that turns
-   * out to have no visible line hands the item's marker to the next block here.
+   * Position of the list item this block (or page break) belongs to. A first
+   * block that turns out to have no visible line hands the item's marker to
+   * the item's next block.
    */
   listItemPos?: number;
   /**
@@ -2211,38 +2260,11 @@ export interface LayoutItem {
 
 /** Width of one step of a block's own `indent` attr. */
 const BLOCK_INDENT_STEP = 24;
-/** However deep a block is indented, an inch of the line is left for its text. */
-const MIN_TEXT_WIDTH = 96;
 
 const blockIndentOf = (node: Node): number => {
   const indent = node.attrs["indent"];
-  return typeof indent === "number" ? indent * BLOCK_INDENT_STEP : 0;
+  return typeof indent === "number" && Number.isFinite(indent) && indent > 0 ? indent * BLOCK_INDENT_STEP : 0;
 };
-
-/** A list marker to measure a block against, and how far in its text is. */
-interface MarkerPlacement {
-  text: string;
-  indentLeft: number;
-}
-
-/**
- * How far a marker too wide for its hanging indent pushes the first line of
- * text: to the next default tab stop past the marker, as Word does. 0 when the
- * marker fits.
- */
-function markerFirstLineOffset(
-  marker: MarkerPlacement,
-  firstLine: LayoutLine | undefined,
-  measurer: TextMeasurerLike,
-): number {
-  const { font, size } = listMarkerFont(firstLine);
-  const width = bulletShape(marker.text)
-    ? bulletBox(size).size
-    : measurer.measureWidth(marker.text, font);
-  const markerEnd = marker.indentLeft - LIST_MARKER_HANGING + width + LIST_MARKER_MIN_GAP;
-  if (markerEnd <= marker.indentLeft) return 0;
-  return Math.ceil(markerEnd / DEFAULT_TAB_STOP) * DEFAULT_TAB_STOP - marker.indentLeft;
-}
 
 /** Where a block sits in a list. */
 interface ListPlace {
@@ -2276,8 +2298,11 @@ export function collectLayoutItems(doc: Node, _fontConfig: FontConfig): LayoutIt
   };
 
   const walkOne = (node: Node, offset: number, list: ListPlace | null): void => {
+    // A break inside a list item stays part of the item, so a marker waiting
+    // in the item crosses it.
+    const inItem = list ? { listItemPos: list.itemPos } : {};
     if (node.type.name === "pageBreak") {
-      items.push({ isPageBreak: true, node, nodePos: offset, indentLeft: 0 });
+      items.push({ isPageBreak: true, node, nodePos: offset, indentLeft: 0, ...inItem });
       return;
     }
 
@@ -2293,6 +2318,7 @@ export function collectLayoutItems(doc: Node, _fontConfig: FontConfig): LayoutIt
           node,
           nodePos: offset,
           indentLeft: 0,
+          ...inItem,
         });
       }
       return;
@@ -2361,16 +2387,6 @@ export function collectLayoutItems(doc: Node, _fontConfig: FontConfig): LayoutIt
   walk(doc, 0, null);
 
   return items;
-}
-
-/**
- * Whether a cached measurement still describes a block: the same width, and
- * the same list marker, which both draws on the block and can move its first
- * line. A renumbered item is a miss, so a layout that reuses the tail of the
- * previous one never shows its old number.
- */
-function isCacheHitFor(entry: MeasureCacheEntry, blockWidth: number, marker: MarkerPlacement | undefined): boolean {
-  return entry.availableWidth === blockWidth && entry.listMarker === marker?.text;
 }
 
 /**
@@ -2464,8 +2480,10 @@ function resolveBlockEntry(
   // The marker is sized by the first line's font, which only measuring tells;
   // a marker too wide for its hanging then re-breaks the lines past it.
   let measured = measure(0);
-  const offset = marker ? markerFirstLineOffset(marker, measured.lines[0], measurer) : 0;
-  if (offset > 0) measured = measure(offset);
+  const firstLineOffset = marker
+    ? markerFirstLineOffset(marker, measured.lines[0], measurer, ownFirstLineIndent(node), blockWidth)
+    : 0;
+  if (firstLineOffset > 0) measured = measure(firstLineOffset);
 
   const entry: MeasureCacheEntry = {
     availableWidth: blockWidth,
@@ -2477,7 +2495,7 @@ function resolveBlockEntry(
     spaceAfter: measured.spaceAfter,
     blockType: measured.blockType,
     align: measured.align,
-    ...(marker ? { listMarker: marker.text } : {}),
+    ...(marker ? { listMarker: { text: marker.text, indentLeft: marker.indentLeft } } : {}),
   };
   measureCache?.set(node, entry);
   return entry;

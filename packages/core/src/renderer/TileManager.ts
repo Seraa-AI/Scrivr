@@ -4,6 +4,7 @@ import type { DocumentLayout, LayoutFragment } from "../layout/PageLayout";
 import { setupCanvas, clearCanvas, watchDpr } from "./canvas";
 import { renderPage } from "./PageRenderer";
 import { drawBlock } from "./PageRenderer";
+import { drawListMarker } from "../layout/listMarkers";
 import {
   clearOverlay,
   paintSelectionPrimitives,
@@ -616,6 +617,8 @@ export class TileManager {
 
     let lineIndexOffset = 0;
     for (const frag of fragments) {
+      // A list marker is drawn the same whatever painter draws the block.
+      drawListMarker(ctx, frag.block, theme);
       const strategy = this.editor.blockRegistry?.get(frag.block.blockType);
       if (strategy) {
         lineIndexOffset = strategy.render(

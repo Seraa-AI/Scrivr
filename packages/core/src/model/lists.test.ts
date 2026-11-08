@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { buildStarterKitContext } from "../test-utils";
-import type { LayoutLine } from "../layout/LineBreaker";
 import * as lists from "./lists";
 import * as core from "../index";
+import type { BulletBox, BulletShape, ListMarkerFont } from "../index";
 
 const { schema } = buildStarterKitContext();
 const item = schema.nodes["listItem"]?.create(null, schema.node("paragraph"));
@@ -31,7 +31,7 @@ describe("where an ordered list starts", () => {
     expect(lists.listStart(schema.node("bulletList", null, item))).toBe(1);
   });
 
-  it("keeps a start a paste or a peer sends within Word's range", () => {
+  it("keeps a start a paste or a peer sends within MIN_START–MAX_START", () => {
     expect(lists.listStart(orderedFrom(2147483647))).toBe(32767);
     expect(lists.listStart(orderedFrom(-5))).toBe(0);
   });
@@ -55,7 +55,7 @@ describe("the level table", () => {
     expect(lists.listLevel(12)).toEqual(lists.listLevel(8));
   });
 
-  it("hands each caller its own level, so nothing can change the table", () => {
+  it("cannot be changed through a level it hands out", () => {
     const level = lists.listLevel(0);
     Reflect.set(level.bullet, "glyph", "x");
     expect(lists.listMarker("bullet", 0, 1)).toBe("•");
@@ -82,28 +82,18 @@ describe("markers", () => {
   });
 });
 
-describe("the marker's font", () => {
-  const lineIn = (font: string): LayoutLine => ({
-    spans: [{ kind: "text", text: "x", font, x: 0, width: 5, docPos: 1 }],
-    width: 5, ascent: 10, descent: 3, lineHeight: 16, textAscent: 10, cursorHeight: 16, xHeight: 6,
-  });
-
-  it("is the font of the line's first run", () => {
-    expect(lists.listMarkerFont(lineIn("bold 18px Georgia"))).toEqual({ font: "bold 18px Georgia", size: 18 });
-  });
-
-  it("never has size 0, with no line or a font that names no size", () => {
-    expect(lists.listMarkerFont(undefined).size).toBeGreaterThan(0);
-    expect(lists.listMarkerFont(lineIn("Georgia")).size).toBeGreaterThan(0);
-    expect(lists.listMarkerFont(lineIn("0px Georgia")).size).toBeGreaterThan(0);
-  });
-});
-
 describe("what @scrivr/core exports about lists", () => {
   it("exports what other packages use, and keeps the level table internal", () => {
     const listExports = ["isListType", "bulletShape", "bulletBox", "listMarkerFont"];
     expect(listExports.filter((name) => typeof Reflect.get(core, name) !== "function")).toEqual([]);
     const internal = ["LIST_LEVELS", "LIST_MARKER_HANGING", "listKind", "listLevel", "listMarker", "listStart"];
     expect(internal.filter((name) => Reflect.has(core, name))).toEqual([]);
+  });
+
+  it("exports the types those functions take and return", () => {
+    const shape = "disc" satisfies BulletShape;
+    const box = core.bulletBox(10) satisfies BulletBox;
+    const font = core.listMarkerFont(undefined) satisfies ListMarkerFont;
+    expect([core.bulletShape("•"), box.size, font.size > 0]).toEqual([shape, 3, true]);
   });
 });

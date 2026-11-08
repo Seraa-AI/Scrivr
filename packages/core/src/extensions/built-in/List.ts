@@ -6,7 +6,6 @@ import { wrappingInputRule } from "prosemirror-inputrules";
 import type { Node as PmNode, NodeType } from "prosemirror-model";
 import type { Command } from "prosemirror-state";
 import { Extension } from "../Extension";
-import { ListItemStrategy } from "../../layout/ListItemStrategy";
 import {
   isListType,
   LIST_LEVEL_COUNT,
@@ -241,10 +240,6 @@ export const List = Extension.create({
       liftListItem: () => liftListItem(listItem!),
       sinkListItem: () => sinkListItem(listItem!),
     };
-  },
-
-  addLayoutHandlers() {
-    return { list_item: ListItemStrategy };
   },
 
   addBlockStyles() {

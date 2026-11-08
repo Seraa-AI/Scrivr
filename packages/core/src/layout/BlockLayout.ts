@@ -168,6 +168,12 @@ export interface LayoutBlock {
   isLastRow?: boolean;
 }
 
+/** The first-line indent a node asks for itself, through its `textIndent` attr. */
+export function ownFirstLineIndent(node: Node): number {
+  const indent = node.attrs["textIndent"];
+  return typeof indent === "number" && Number.isFinite(indent) && indent > 0 ? indent : 0;
+}
+
 export function isHiddenAnchorLine(line: LayoutLine): boolean {
   return (
     line.lineHeight === 0 &&
@@ -516,13 +522,12 @@ export function layoutBlock(
   const breaker = new LineBreaker(measurer);
 
   // First-line indent: reduce first line's width so text wraps earlier.
-  const rawTextIndent = node.attrs["textIndent"];
-  const textIndent = (typeof rawTextIndent === "number" && rawTextIndent > 0 ? rawTextIndent : 0) + firstLineOffset;
+  const firstLineIndent = ownFirstLineIndent(node) + firstLineOffset;
 
-  // Wrap the line-space provider to apply textIndent on the first line.
+  // Wrap the line-space provider to apply the indent on the first line.
   let firstLineConsumed = false;
   const indentAwareLineSpace: LineSpaceProvider | undefined =
-    textIndent > 0
+    firstLineIndent > 0
       ? (lineY: number, lineHeight: number) => {
           // Forward the real line height so the float-exclusion probe inside the
           // provider tests the line's true vertical extent (a 1px probe leaves a
@@ -535,7 +540,7 @@ export function layoutBlock(
               segments: base.segments
                 .map((segment, index) =>
                   index === 0
-                    ? { x: segment.x + textIndent, width: Math.max(0, segment.width - textIndent) }
+                    ? { x: segment.x + firstLineIndent, width: Math.max(0, segment.width - firstLineIndent) }
                     : segment,
                 )
                 .filter((segment) => segment.width > 0),
