@@ -135,6 +135,31 @@ export function buildAcceptedTextMap(
 }
 
 /**
+ * Whether the accepted text in `[from, to)` is a plain run a replacement may
+ * take in: its characters, and the ones either side, sit side by side in the
+ * document — no break or inline object between them — and none carries a
+ * suggestion of its own.
+ */
+export function bridgeable(doc: PMNode, map: readonly PosMapEntry[], from: number, to: number): boolean {
+  const lo = Math.max(0, from - 1);
+  const hi = Math.min(map.length - 1, to);
+  for (let k = lo; k < hi; k++) {
+    const here = map[k];
+    const next = map[k + 1];
+    if (!here || !next || next.docPos !== here.docPos + 1) return false;
+  }
+  const first = map[from];
+  const last = map[to - 1];
+  if (!first || !last) return false;
+  let tracked = false;
+  doc.nodesBetween(first.docPos, last.docPos + 1, (node) => {
+    tracked ||= node.marks.some((mark) => mark.type.name === "trackedInsert" || mark.type.name === "trackedDelete");
+    return !tracked;
+  });
+  return !tracked;
+}
+
+/**
  * Convert a 0-based offset in acceptedText to the absolute ProseMirror doc
  * position of that character.
  *

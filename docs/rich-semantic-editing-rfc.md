@@ -296,14 +296,6 @@ The schemas are part of the public API.
   The primitive this RFC deferred to Phase 5 as `CHANGE_OPERATION.move_node`
   already exists and is wired end to end; Phase 3 produces it rather than
   inventing anything:
-- **D8 — An agent's rewrite reads as a person's edit.** Each changed phrase is
-  one deletion of the old words and one insertion of the new, as when someone
-  selects text and types over it; changes separated by a short unchanged gap (up
-  to five tokens) are one replacement. No change is ever made inside a word: the
-  earlier character-level refinement, meant to mark only a changed suffix,
-  showed a reviewer fragments ("y" → "ies") and a card per word, where a person
-  editing the same sentence leaves one or two changes.
-
   - `CHANGE_OPERATION.move` and `NodeMoveAttrs`
     (`packages/plugins/src/track-changes/types.ts:33,96`), with `moveNodeId`
     (`:60`) pairing the moved copy to the delete it leaves behind.
@@ -357,6 +349,34 @@ The schemas are part of the public API.
   `node_split`, `wrap_with_node` and `structure` exist; only the
   `insert_node` / `delete_node` pair is genuinely absent, and Phase 2's ops do
   not need it.
+
+- **D8 — An agent's rewrite reads as a person's edit.** Applies to every caller
+  of `applyDiffAsSuggestion` and `applyRichDiffAsSuggestion`, not only the AI
+  toolkit. Each changed phrase is one deletion of the old words and one
+  insertion of the new, as when someone selects text and types over it. An
+  unchanged gap of up to five tokens inside what is being replaced is taken
+  into the replacement; a gap that holds a line break, an inline object or
+  another suggestion never is, and additions near each other stay additions. No
+  change is ever made inside a word: the earlier character-level refinement,
+  meant to mark only a changed suffix, showed a reviewer fragments ("y" →
+  "ies") and a card per word, where a person editing the same sentence leaves
+  one or two changes.
+
+  A replacement's two halves share a `groupId` unique to the call that made
+  them, and the engine decides them as one: accepting or rejecting either half
+  — through a card, `setChangeStatuses`, `reviewChanges` or accept-at-caret —
+  decides both (`sameReplacement` in `reviewPlan.ts`). One click, as for one
+  edit.
+
+  This departs from Word on purpose. Word's Compare marks changes word by word;
+  a reviewer of an agent's rewrite wants the edits a person would have made, and
+  a person rewriting a phrase types it once. The AI suggestion overlay groups
+  the same way, so a proposal reads the same before it is applied as after.
+
+  What overturns it: reviewers routinely accepting part of a replacement — the
+  deletion without the insertion — or a host that needs Word's Compare output
+  for round-trip fidelity. Either asks for the word-level grouping back as an
+  option, not as the default.
 
 ## Phase 3 — resolution and tracking boundaries (shipped in #229)
 
@@ -447,14 +467,20 @@ The view is the proposed one, like `text`.
   block. `src` must pass `safeImageUrl` (https or a raster `data:` URL; never
   SVG) or the op is rejected before any step is written.
 - Change: `richText` on an image unit, with `attrs` — `wrap`, `align`, `width`,
-  `height`, `alt`. `attrs` already means the styling of the leaf an edit names;
-  for an image unit that is the image. Reviewed as one attribute change: "Image
-  moved" when only its placement changed, "Style changed" otherwise. `spans`
-  on an image unit are rejected.
+  `height`, `alt` — or the unit handed back with its `image` edited. `attrs`
+  already means the styling of the leaf an edit names; for an image unit that
+  is the image. Only the fields that differ from the image are checked, so an
+  image placed by drag (`align: "custom"`) can be handed back untouched. Reviewed
+  as one attribute change: "Image moved" when only its placement changed, "Style
+  changed" otherwise. `spans`, a new `src`, paragraph styling on the unit, and an
+  edit that changes nothing are rejected. Setting `wrap` or `align` on an image
+  laid out by the legacy `wrappingMode` writes out what it meant and retires it.
 - Remove: `deleteBlock` on the image unit, as for any block.
 
 `wrap` is `inline | square | top-bottom | behind | front` and `align` is
-`left | center | right` — the image node's own `wrapMode` / `xAlign`. Size is in
+`left | center | right` — the image node's own `wrapMode` / `xAlign`. Core owns
+the value lists (`IMAGE_WRAPS`, `IMAGE_ALIGNS`) and the field-to-attr map
+(`IMAGE_NODE_ATTRS`); the zod schema is built from them. Size is in
 px, positive and bounded. Every change is the agent's tracked suggestion, and
 the batch rules hold.
 
@@ -535,7 +561,7 @@ section is what is true.
 | **1** | #133, #134, #136 | `@scrivr/ai` extracted from `@scrivr/plugins` as a hard move (D2); leaf-based `RichSemanticEdit` with `getRichBlocks` / `applyRichEdit`; zod edit protocol with `parseSemanticEdits`. #133 first grouped adjacent formatting-mark tracked changes into one, which the leaf merge depends on |
 | **2** | #209, #210, #218 | Six structural ops — `insertBlock`, `deleteBlock`, `insertListItem`, `deleteListItem`, `insertTableRow`, `deleteTableRow` — in `StructuralSemanticEditSchema`, applied by `applyStructuralEdits`; `applySemanticEdits` routes rich vs structural; formatting proposals became visible, addressable and acceptable; a finding may propose no edit at all (block markers) |
 | **3** | #229 | `moveBlock` and `moveListItem`. No new tracked representation — the engine's content-and-identity pairing yields one `CHANGE_OPERATION.move`. Core's `findNodeById` gained an `accept` predicate and `findLiveNodeById` skips a pending move's shadow in either direction, for every consumer. The replay fixes the moves exposed shipped in #228 |
-| **3b** | #229 | Images through the existing protocol: the reserved `image` unit now carries `image` (`src`, `alt`, size, `wrap`, `align`); `insertBlock` adds one (`block.type: "image"`, `src` through `safeImageUrl`), `richText` `attrs` on an image unit set its layout, `deleteBlock` removes it. An object proposed for deletion is left out of the semantic view through a `removes` contribution, which track changes supplies. |
+| **3b** | #229 | Images through the existing protocol: the reserved `image` unit now carries `image` (`src`, `alt`, size, `wrap`, `align`); `insertBlock` adds one (`block.type: "image"`, `src` through `safeImageUrl`), `richText` `attrs` on an image unit set its layout, `deleteBlock` removes it. What is proposed for deletion — an object, or the text beside an image — is left out of the semantic view through an `isRemoved` contribution, which track changes supplies. A heading's level is set with `richText` `attrs.level`: 1–6 on a heading or a paragraph, 0 to make a heading a paragraph, tracked with the old type so a reject restores it. An edit that changes nothing is reported `rejected`, not `changed`. D8: a rewrite lands as phrase replacements, each decided as one |
 | **4-5** | — | Not built. Table columns, and `CHANGE_OPERATION.insert_node` / `delete_node` |
 
 ### Where the code differs from the design above
@@ -545,9 +571,9 @@ section is what is true.
   `aiToolkit.applySemanticEdits(edits, { authorID })`. Tracked-ness is the
   track-changes status — the user's mode — not a per-call flag, because AI is not
   a fourth mode (see [ai-authoring.md](./ai-authoring.md)).
-- **`authorID` names the rich half only.** Structural changes are attributed to
-  the track-changes author, because the engine assigns attribution as it tracks
-  the transaction and takes no per-transaction override.
+- **`authorID` names every edit.** Structural changes were first attributed to
+  the track-changes author; since #229, `trackAsSuggestion` hands the engine a
+  per-transaction author, so a batch is the agent's in every half.
 - **`deleteTableRow` takes `nodeId`, not `anchorNodeId`.** It names the row it
   deletes, which is not an anchor. The design listed `anchorNodeId` for it;
   `deleteBlock` and `deleteListItem` always read `nodeId`.

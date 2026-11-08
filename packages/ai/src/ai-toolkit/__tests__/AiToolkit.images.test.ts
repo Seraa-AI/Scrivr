@@ -10,6 +10,7 @@ import { TrackChanges, TrackChangesStatus, trackChangesPluginKey } from "@scrivr
 import { AiToolkit } from "../AiToolkit";
 import { getAiToolkit } from "../aiToolkitRegistry";
 import type { SemanticEdit } from "../../schema/edit";
+import type { SemanticImage, SemanticUnit } from "@scrivr/core";
 
 const SRC = "https://example.com/chart.png";
 
@@ -125,5 +126,85 @@ describe("removing an image", () => {
       settle(editor, decision);
       expect(firstImage(editor) === null).toBe(decision === "accepted");
     }
+  });
+});
+
+describe("an edited image unit", () => {
+  const edited = (ai: NonNullable<ReturnType<typeof getAiToolkit>>, change: (unit: SemanticUnit, image: SemanticImage) => SemanticUnit) => {
+    const unit = imageUnit(ai, "fig");
+    if (!unit?.image) throw new Error("no image unit");
+    return ai.applyRichEdit([change(unit, unit.image)]);
+  };
+
+  it("changes only what the agent changed, keeping a position of its own", () => {
+    const { editor, ai } = build([figure("fig", { wrapMode: "square", xAlign: "custom", x: 120 })]);
+    const result = edited(ai, (unit, image) => ({ ...unit, image: { ...image, wrap: "top-bottom" } }));
+
+    expect(result).toMatchObject({ changed: ["fig"], rejected: [] });
+    expect(firstImage(editor)).toMatchObject({ wrapMode: "top-bottom", xAlign: "custom", x: 120 });
+  });
+
+  it("is rejected for a new source", () => {
+    const { editor, ai } = build([figure("fig")]);
+    const result = edited(ai, (unit, image) => ({ ...unit, image: { ...image, src: "https://example.com/other.png" } }));
+
+    expect(result).toMatchObject({ changed: [], rejected: ["fig"] });
+    expect(changesOf(editor)).toEqual([]);
+  });
+
+  it("is rejected for paragraph styling", () => {
+    const { editor, ai } = build([figure("fig")]);
+    const result = edited(ai, (unit) => ({ ...unit, attrs: { align: "center" } }));
+
+    expect(result).toMatchObject({ changed: [], rejected: ["fig"] });
+    expect(changesOf(editor)).toEqual([]);
+  });
+});
+
+describe("an image layout edit that changes nothing", () => {
+  it("is rejected, not changed", () => {
+    const { editor, ai } = build([figure("fig", { wrapMode: "square", xAlign: "right" })]);
+    const result = ai.applySemanticEdits([{ kind: "richText", nodeId: "fig", attrs: { wrap: "square", align: "right" } }]);
+
+    expect(result).toMatchObject({ applied: false, changed: [], rejected: ["fig"] });
+    expect(changesOf(editor)).toEqual([]);
+  });
+});
+
+describe("an image laid out by the legacy wrapping attr", () => {
+  it("takes the wrap the agent sets", () => {
+    const { ai } = build([figure("fig", { wrappingMode: "behind" })]);
+    ai.applySemanticEdits([{ kind: "richText", nodeId: "fig", attrs: { wrap: "inline" } }]);
+
+    expect(imageUnit(ai, "fig")?.image?.wrap).toBe("inline");
+  });
+
+  it("keeps its wrap when the agent sets only its alignment", () => {
+    const { ai } = build([figure("fig", { wrappingMode: "behind" })]);
+    ai.applySemanticEdits([{ kind: "richText", nodeId: "fig", attrs: { align: "center" } }]);
+
+    expect(imageUnit(ai, "fig")?.image).toMatchObject({ wrap: "behind", align: "center" });
+  });
+});
+
+describe("a new image with a size out of range", () => {
+  it("is refused, even when the edit skipped parsing", () => {
+    const { editor, ai } = build([para("a", "alpha")]);
+    const result = ai.applySemanticEdits([{
+      kind: "structural", op: "insertBlock", anchorNodeId: "a", position: "after",
+      block: { type: "image", src: SRC, width: -5 },
+    }]);
+
+    expect(result).toMatchObject({ changed: [], rejected: ["a"] });
+    expect(firstImage(editor)).toBeNull();
+  });
+});
+
+describe("reading a selection", () => {
+  it("keeps an image unit inside it", () => {
+    const { editor, ai } = build([para("a", "alpha"), figure("fig"), para("b", "beta")]);
+    const ids = ai.getRichBlocks(0, editor.getState().doc.content.size).map((unit) => unit.id);
+
+    expect(ids).toEqual(["a", "fig", "b"]);
   });
 });

@@ -103,7 +103,7 @@ See the [Collaboration example](/examples/collaboration) for a full backend + fr
 
 ## AI Toolkit
 
-`AiToolkit` is an aggregator extension that enables ghost-text AI suggestions directly on the
+`AiToolkit`, from `@scrivr/ai`, is an aggregator extension that enables ghost-text AI suggestions directly on the
 canvas overlay. Suggestions are rendered as a canvas overlay — the document is never mutated until
 the user explicitly accepts.
 
@@ -114,7 +114,7 @@ renderer), and `AiCaret` (cursor overlay during streaming).
 
 ```tsx title="AiEditor.tsx"
 import { useScrivrEditor, Scrivr, StarterKit } from '@scrivr/react';
-import { AiToolkit, getAiToolkit } from '@scrivr/plugins';
+import { AiToolkit, getAiToolkit } from '@scrivr/ai';
 
 export function AiEditor() {
   const editor = useScrivrEditor({
@@ -137,7 +137,7 @@ export function AiEditor() {
 After the editor is created, call `getAiToolkit(editor)` to get the toolkit handle:
 
 ```ts
-import { getAiToolkit } from '@scrivr/plugins';
+import { getAiToolkit } from '@scrivr/ai';
 
 const ai = getAiToolkit(editor);
 ```

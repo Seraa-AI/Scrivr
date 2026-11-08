@@ -10,8 +10,8 @@ import type {
 export interface ResolvedHandlers {
   nodes: Record<string, SemanticNodeHandler>;
   marks: Record<string, SemanticMarkHandler>;
-  /** Every contributed `removes`; a node any of them claims is left out. */
-  removes: Array<(node: PmNode) => boolean>;
+  /** Every contributed `isRemoved`; a node any of them claims is left out. */
+  isRemoved: Array<(node: PmNode) => boolean>;
 }
 
 /**
@@ -27,7 +27,8 @@ export interface ResolvedHandlers {
 function semanticOf(contrib: ExportContributionMap): SemanticHandlers | undefined {
   const record: Record<string, unknown> = contrib;
   const value = record["semantic"];
-  if (value && typeof value === "object" && ("nodes" in value || "marks" in value || "removes" in value)) {
+  if (value && typeof value === "object" &&
+    ("nodes" in value || "marks" in value || ("isRemoved" in value && typeof value.isRemoved === "function"))) {
     return value as SemanticHandlers; // single guarded cast after typeof/in checks
   }
   return undefined;
@@ -44,21 +45,21 @@ export function collectHandlers(
 ): ResolvedHandlers {
   const nodes: Record<string, SemanticNodeHandler> = {};
   const marks: Record<string, SemanticMarkHandler> = {};
-  const removes: Array<(node: PmNode) => boolean> = [];
+  const isRemoved: Array<(node: PmNode) => boolean> = [];
 
   for (const contrib of editor.getExportContributions()) {
     const semantic = semanticOf(contrib);
     if (!semantic) continue;
     if (semantic.nodes) Object.assign(nodes, semantic.nodes);
     if (semantic.marks) Object.assign(marks, semantic.marks);
-    if (semantic.removes) removes.push(semantic.removes);
+    if (semantic.isRemoved) isRemoved.push(semantic.isRemoved);
   }
 
   if (overrides) {
     if (overrides.nodes) Object.assign(nodes, overrides.nodes);
     if (overrides.marks) Object.assign(marks, overrides.marks);
-    if (overrides.removes) removes.push(overrides.removes);
+    if (overrides.isRemoved) isRemoved.push(overrides.isRemoved);
   }
 
-  return { nodes, marks, removes };
+  return { nodes, marks, isRemoved };
 }

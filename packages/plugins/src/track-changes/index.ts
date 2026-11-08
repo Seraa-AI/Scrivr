@@ -3,10 +3,11 @@ export { applyDiffAsSuggestion, applyMultiBlockDiff } from "./lib/applyDiffAsSug
 export type { ApplyDiffOptions, MultiBlockDiffOptions, ApplyDiffResult } from "./lib/applyDiffAsSuggestion";
 export { buildParagraphContexts } from "./lib/buildParagraphContexts";
 export type { ParagraphContext } from "./lib/buildParagraphContexts";
-export { diffText, pairReplacements } from "./lib/diffText";
+export { diffText, pairReplacements, phraseReplacements } from "./lib/diffText";
 export type { DiffOp, PairedDiffOp } from "./lib/diffText";
 export {
   buildAcceptedTextMap,
+  bridgeable,
   acceptedOffsetToDocPos,
   acceptedRangeToDocRange,
   docRangeToAcceptedRange,
@@ -20,8 +21,9 @@ export {
   createNewDeleteAttrs,
   createNewInsertAttrs,
   createNewPendingAttrs,
+  proposedForDeletion,
 } from "./helpers";
-export { createChangePopover } from "./createChangePopover";
+export { changePreviewText, createChangePopover } from "./createChangePopover";
 export type { ChangePopoverInfo, ChangePopoverCallbacks } from "./createChangePopover";
 export { isTrackedMark } from "./helpers";
 export { trackChangesPluginKey } from "./engine/trackChangesPlugin";

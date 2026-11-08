@@ -23,8 +23,8 @@ import type { EditorState, Node, Transaction } from "@scrivr/core/pm";
 import { setAction, skipTracking, TrackChangesAction } from "./actions";
 import { trackChangesPlugin, trackChangesPluginKey } from "./engine/trackChangesPlugin";
 import { lastCutPlugin } from "./lib/cutAndPaste";
-import { addTrackIdIfDoesntExist, createNewDeleteAttrs, createNewInsertAttrs, createNewPendingAttrs, getBlockInlineTrackedData } from "./helpers";
-import { CHANGE_OPERATION, CHANGE_STATUS, TrackChangesOptions, TrackChangesStatus } from "./types";
+import { addTrackIdIfDoesntExist, createNewDeleteAttrs, createNewInsertAttrs, createNewPendingAttrs, proposedForDeletion } from "./helpers";
+import { CHANGE_OPERATION, CHANGE_STATUS, TrackChangesOptions, TrackChangesStatus, type TrackedChange } from "./types";
 import { planReviewIn } from "./reviewChanges";
 import { changeActs } from "./reviewPlan";
 import type { ChangeSet } from "./ChangeSet";
@@ -117,13 +117,17 @@ const rowRecordsCache = new WeakMap<ChangeSet, ReadonlySet<string>>();
  * that are part of adding or removing it carry no marks of their own. Cached
  * per change set, which every page of a paint shares.
  */
+/** A table row someone added or removed, marked as a row rather than as loose words in its cells. */
+const isRowAddedOrRemoved = (change: TrackedChange) =>
+  change.type === "node-change" && change.node.type.name === "tableRow" &&
+  (change.dataTracked.operation === CHANGE_OPERATION.insert || change.dataTracked.operation === CHANGE_OPERATION.delete);
+
 function recordsInsideRowChanges(changeSet: ChangeSet): ReadonlySet<string> {
   const cached = rowRecordsCache.get(changeSet);
   if (cached) return cached;
   const ids = new Set(
     changeActs(changeSet.pending)
-      .filter(({ primary }) => primary.type === "node-change" && primary.node.type.name === "tableRow" &&
-        (primary.dataTracked.operation === CHANGE_OPERATION.insert || primary.dataTracked.operation === CHANGE_OPERATION.delete))
+      .filter(({ primary }) => isRowAddedOrRemoved(primary))
       .flatMap(({ primary, records }) => records.filter((record) => record !== primary).map((record) => record.id)),
   );
   rowRecordsCache.set(changeSet, ids);
@@ -260,15 +264,10 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
         ],
       };
     };
-    // An object proposed for deletion has no text for `dropDeleted` to drop; the
-    // proposed view leaves the node out instead.
-    const proposedForDeletion = (node: Node) =>
-      (getBlockInlineTrackedData(node) ?? []).some((record) =>
-        record.operation === CHANGE_OPERATION.delete && record.status === CHANGE_STATUS.pending);
     return {
       semantic: {
         marks: { trackedDelete: dropDeleted, trackedInsert: keepInserted },
-        removes: proposedForDeletion,
+        isRemoved: proposedForDeletion,
       },
     };
   },
@@ -482,9 +481,7 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
           continue;
         }
 
-        // A row added or removed is marked as a row, not as loose words in its cells.
-        if (change.type === "node-change" && change.node.type.name === "tableRow" &&
-          (operation === CHANGE_OPERATION.insert || operation === CHANGE_OPERATION.delete)) {
+        if (isRowAddedOrRemoved(change)) {
           const row = pageBlocks.find(block => block.nodePos === change.from);
           if (row) {
             const removed = operation === CHANGE_OPERATION.delete;

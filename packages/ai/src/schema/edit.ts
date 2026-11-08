@@ -13,6 +13,7 @@
  * success that changed nothing.
  */
 import { z } from "zod";
+import { IMAGE_ALIGNS, IMAGE_WRAPS } from "@scrivr/core";
 
 /** A formatting mark on an inline run — its type name and open attrs. */
 export const InlineMarkSchema = z.strictObject({
@@ -47,19 +48,20 @@ export type RichSemanticEdit = z.infer<typeof RichSemanticEditSchema>;
 export const EditPositionSchema = z.enum(["before", "after"]);
 export type EditPosition = z.infer<typeof EditPositionSchema>;
 
-/** px. Larger than any page, so a runaway number is refused rather than laid out. */
+/** px, capped above the largest page so a runaway number is refused rather than laid out. */
 const ImageSizeSchema = z.number().positive().max(4000);
 
 /**
  * How an image sits, as an agent sets it: on a new image, or through `richText`
- * `attrs` on an image unit. Keys it does not know are dropped.
+ * `attrs` or an edited unit's `image` on an image unit. Keys it does not know
+ * are dropped. `align` is never `custom`: that is a position only a drag sets.
  */
 export const SemanticImageAttrsSchema = z.object({
   alt: z.string().optional(),
   width: ImageSizeSchema.optional(),
   height: ImageSizeSchema.optional(),
-  wrap: z.enum(["inline", "square", "top-bottom", "behind", "front"]).optional(),
-  align: z.enum(["left", "center", "right"]).optional(),
+  wrap: z.enum(IMAGE_WRAPS).optional(),
+  align: z.enum(IMAGE_ALIGNS).optional(),
 });
 export type SemanticImageAttrs = z.infer<typeof SemanticImageAttrsSchema>;
 

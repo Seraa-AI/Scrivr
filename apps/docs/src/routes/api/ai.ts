@@ -11,6 +11,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { anthropic } from "@ai-sdk/anthropic";
 import { z } from "zod";
 import { SemanticEditSchema } from "@scrivr/ai";
+import type { SemanticImage } from "@scrivr/core";
 
 // ── Typed data parts emitted per tool result ────────────────────────────────
 // The client's onData callback receives these during streaming.
@@ -20,41 +21,45 @@ export type ToolOutputData = {
   output: Record<string, unknown>;
 };
 
-type DocBlock = { nodeId: string; text: string };
-
 /** A unit of `getRichBlocks()`, trimmed to what the agent needs to address it. */
 export type DocUnit = {
   id: string;
   type: string;
   text: string;
+  headingLevel?: number;
   parts?: Array<{ nodeId: string; text: string }>;
-  image?: { src: string; alt: string; width: number; height: number; wrap: string; align: string };
+  image?: SemanticImage;
 };
+
+const RequestBodySchema = z.object({
+  messages: z.array(z.custom<UIMessage>((message) => typeof message === "object" && message !== null)),
+  context: z.string().optional(),
+  units: z.array(z.custom<DocUnit>((unit) => typeof unit === "object" && unit !== null && "id" in unit)).optional(),
+});
 
 export const Route = createFileRoute("/api/ai")({
   server: {
     handlers: {
       POST: async ({ request }: { request: Request }) => {
-        const { messages, context, blocks, units } = (await request.json()) as {
-          messages: UIMessage[];
-          context?: string;
-          blocks?: DocBlock[];
-          units?: DocUnit[];
-        };
+        const body = RequestBodySchema.safeParse(await request.json());
+        if (!body.success) return new Response(body.error.message, { status: 400 });
+        const { messages, context, units } = body.data;
 
-        // Build structured document context for the system prompt.
-        // blocks come from AiToolkitAPI.getBlocks() — accepted text only, no markup.
         const docContextLines: string[] = [];
         if (units && units.length > 0) {
           docContextLines.push(
             "## Document content",
             "",
-            "Each block has a stable nodeId; a list or table also lists the nodeIds of its items or cells.",
-            "Address blocks by these ids in every tool. Text is the accepted view: pending changes are resolved.",
+            "Blocks are listed in document order, first to last. Each has a stable nodeId; a list or table",
+            "also lists the nodeIds of its items or cells. Address blocks by these ids in every tool. Text",
+            "reads as if every pending change were accepted; a block or image proposed for deletion is absent.",
+            "To put something at the end of the document, place it after the block marked `last block`.",
             "",
           );
-          for (const u of units) {
-            docContextLines.push(`nodeId: ${u.id} (${u.type})`);
+          for (const [index, u] of units.entries()) {
+            const kind = u.headingLevel ? `heading ${u.headingLevel}` : u.type;
+            const last = index === units.length - 1 ? ", last block" : "";
+            docContextLines.push(`nodeId: ${u.id} (${kind}${last})`);
             if (u.image) {
               const { src, alt, width, height, wrap, align } = u.image;
               docContextLines.push(`image: ${src} "${alt}" ${width}×${height}, wrap ${wrap}, align ${align}`);
@@ -63,20 +68,6 @@ export const Route = createFileRoute("/api/ai")({
             } else {
               docContextLines.push(`text: ${u.text}`);
             }
-            docContextLines.push("");
-          }
-        } else if (blocks && blocks.length > 0) {
-          docContextLines.push(
-            "## Document content",
-            "",
-            "Each block has a stable nodeId. Use it when calling `edit_paragraph` or `edit_section`.",
-            "The text shown is the clean accepted view (pending tracked changes already resolved).",
-            "Your proposedText replaces the entire block — plain text, no markup.",
-            "",
-          );
-          for (const b of blocks) {
-            docContextLines.push(`nodeId: ${b.nodeId}`);
-            docContextLines.push(`text: ${b.text}`);
             docContextLines.push("");
           }
         } else if (context) {
@@ -100,6 +91,8 @@ export const Route = createFileRoute("/api/ai")({
           "  and `block: { type: \"image\", src, alt, width, height, wrap, align }`; change how it sits with `richText`",
           "  and `attrs: { wrap, align, width, height, alt }` (wrap: inline|square|top-bottom|behind|front, align:",
           "  left|center|right); remove it with `deleteBlock`. `src` must be an https image URL.",
+          "- Headings: change a block's level with `richText` and `attrs: { level }` — 1-6 sets the heading level",
+          "  (a paragraph becomes a heading), 0 makes a heading a paragraph.",
           "- You MAY include a short text message (1-2 sentences) explaining what you are doing.",
           "- NEVER write suggested content only in a text reply — always put it in a tool call.",
           "- If the user is asking a general question (not requesting new content), reply with text only.",

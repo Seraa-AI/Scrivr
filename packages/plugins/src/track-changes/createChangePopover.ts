@@ -123,10 +123,21 @@ export function changeAtCaret(pending: readonly TrackedChange[], head: number): 
 
 /**
  * A block change as the block will read: one moved or added without the words
- * proposed for deletion inside it, one removed or moved away without the words
- * proposed for insertion. Blocks, such as the cells of a row, are joined by " · ".
+ * proposed for deletion inside it, one removed without the words proposed for
+ * insertion. A move reads from where it went, whichever half is given. Blocks,
+ * such as the cells of a row, are joined by " · ".
  */
-export function blockPreviewText(doc: PMNode, from: number, to: number, removed: boolean): string {
+export function changePreviewText(doc: PMNode, change: TrackedChange, pending: readonly TrackedChange[]): string {
+  const { moveNodeId } = change.dataTracked;
+  const copy = moveNodeId
+    ? pending.find((o) => o.dataTracked.moveNodeId === moveNodeId && o.dataTracked.operation === CHANGE_OPERATION.move)
+    : undefined;
+  return copy
+    ? blockPreviewText(doc, copy.from, copy.to, false)
+    : blockPreviewText(doc, change.from, change.to, change.dataTracked.operation === CHANGE_OPERATION.delete);
+}
+
+function blockPreviewText(doc: PMNode, from: number, to: number, removed: boolean): string {
   const left = removed ? "trackedInsert" : "trackedDelete";
   const blocks: string[] = [];
   doc.nodesBetween(from, to, (node, pos) => {
@@ -247,7 +258,7 @@ export function createChangePopover(
 
     // Build group information for the primary change.
     // A replacement's deletion and insertion share a groupId; aggregate them so
-    // the popover shows the whole replacement and decides it as one.
+    // the popover shows the whole replacement. Deciding either half decides both.
     const primaryGroupId = primary.dataTracked.groupId;
     let groupIds: string[] = [primary.id];
     let replacedText: string | undefined;
@@ -387,14 +398,7 @@ export function createChangePopover(
         // the "Style changed" badge without a misleading preview row.
         text = parts.join(" · ");
       } else if (c.type === "node-change") {
-        // A move is previewed once, by where it went, whichever half was clicked.
-        const moveNodeId = c.dataTracked.moveNodeId;
-        const copy = moveNodeId
-          ? pending.find((o) => o.dataTracked.moveNodeId === moveNodeId && o.dataTracked.operation === CHANGE_OPERATION.move)
-          : undefined;
-        text = copy
-          ? blockPreviewText(state.doc, copy.from, copy.to, false)
-          : blockPreviewText(state.doc, c.from, c.to, op === CHANGE_OPERATION.delete);
+        text = changePreviewText(state.doc, c, pending);
       } else {
         text = readText(c.from, c.to);
       }

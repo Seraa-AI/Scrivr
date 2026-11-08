@@ -23,6 +23,9 @@
  * phraseReplacements() turns a word-level diff into the edits a person would
  * make: each run of changes, bridging short unchanged gaps, is one deletion of
  * the old words and one insertion of the new — never a change inside a word.
+ * The tracked paths (applyDiffAsSuggestion, applyRichDiffAsSuggestion) and the
+ * AI suggestion overlay use it, so a proposal reads the same before and after
+ * it becomes tracked changes.
  *
  * ## Noise filter
  * computeEditDensity() returns the fraction of original characters that were
@@ -289,11 +292,25 @@ export function pairReplacements(ops: DiffOp[], lookAheadTokens = 5): PairedDiff
 /**
  * A diff as a person would make the edit: each run of changes becomes one
  * deletion of the old words and one insertion of the new, as when someone
- * selects text and types over it. Unchanged gaps of up to `bridgeTokens`
- * tokens between changes — a space, a comma, a word — are taken into the
- * replacement; longer ones stay. A replacement's two halves share a groupId.
+ * selects text and types over it. An unchanged gap of up to `bridgeTokens`
+ * tokens — a space, a comma, a word — inside what is being replaced is taken
+ * in, when `canBridge` allows its accepted-text range; additions near each
+ * other stay additions. A replacement's two halves share a groupId, unique
+ * within this diff. The insertion carries where its text starts in the proposal.
  */
-export function phraseReplacements(ops: DiffOp[], bridgeTokens = 5): PairedDiffOp[] {
+export function phraseReplacements(
+  ops: DiffOp[],
+  canBridge: (acceptedFrom: number, acceptedTo: number) => boolean = () => true,
+  bridgeTokens = 5,
+): PairedDiffOp[] {
+  // Where each op starts in the accepted text, which keeps and deletes advance.
+  const starts: number[] = [];
+  let offset = 0;
+  for (const op of ops) {
+    starts.push(offset);
+    if (op.type !== "insert") offset += op.text.length;
+  }
+
   const out: PairedDiffOp[] = [];
   let i = 0;
   while (i < ops.length) {
@@ -305,15 +322,20 @@ export function phraseReplacements(ops: DiffOp[], bridgeTokens = 5): PairedDiffO
       continue;
     }
     let last = i;
+    let deletes = op.type === "delete";
     let j = i + 1;
     while (j < ops.length) {
-      if (ops[j]?.type !== "keep") {
+      const next = ops[j];
+      if (next && next.type !== "keep") {
+        deletes ||= next.type === "delete";
         last = j++;
         continue;
       }
       let gapEnd = j;
       while (gapEnd < ops.length && ops[gapEnd]?.type === "keep") gapEnd++;
-      if (gapEnd === ops.length || gapEnd - j > bridgeTokens) break;
+      const gapFrom = starts[j] ?? 0;
+      const gapTo = starts[gapEnd] ?? offset;
+      if (!deletes || gapEnd === ops.length || gapEnd - j > bridgeTokens || !canBridge(gapFrom, gapTo)) break;
       j = gapEnd;
     }
     const region = ops.slice(i, last + 1);
@@ -321,7 +343,8 @@ export function phraseReplacements(ops: DiffOp[], bridgeTokens = 5): PairedDiffO
     const added = region.filter((o) => o.type !== "delete").map((o) => o.text).join("");
     const pair = removed && added ? { groupId: `grp_${i}_${last}` } : {};
     if (removed) out.push({ type: "delete", text: removed, ...pair });
-    if (added) out.push({ type: "insert", text: added, ...pair });
+    const proposedOffset = region.find((o) => o.type !== "delete")?.proposedOffset;
+    if (added) out.push({ type: "insert", text: added, ...pair, ...(proposedOffset === undefined ? {} : { proposedOffset }) });
     i = last + 1;
   }
   return out;

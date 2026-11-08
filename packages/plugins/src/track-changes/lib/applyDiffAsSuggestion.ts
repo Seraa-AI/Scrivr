@@ -7,12 +7,13 @@
  * Single-block flow (applyDiffAsSuggestion):
  *   1. Find the block node by its `nodeId` attribute.
  *   2. Build the accepted-text map for that node.
- *   3. Diff acceptedText → proposedText (legal-aware tokeniser).
- *   4. Group replacement pairs (look-ahead buffer, shared groupId).
- *   5. Expand similar word-level replacements to char-level marks.
- *   6. Convert each op's token offset to an absolute doc position.
- *   7. Apply inserts/deletes as tracked marks (conflict-aware).
- *   8. Dispatch the transaction.
+ *   3. Diff acceptedText → proposedText, word by word.
+ *   4. Group each run of changes into one phrase replacement — a deletion and
+ *      an insertion sharing a groupId — never across a line break, an inline
+ *      object or another suggestion.
+ *   5. Convert each op's offset to an absolute doc position.
+ *   6. Apply inserts/deletes as tracked marks (conflict-aware).
+ *   7. Dispatch the transaction.
  *
  * Multi-block flow (applyMultiBlockDiff):
  *   Same pipeline, but across an array of { nodeId, proposedText } pairs.
@@ -39,9 +40,10 @@ import {
   createNewDeleteAttrs,
   createNewInsertAttrs,
   createNewPendingAttrs,
+  genId,
 } from "../helpers";
 import { CHANGE_STATUS } from "../types";
-import { acceptedRangeToDocRange, buildAcceptedTextMap } from "./acceptedTextMap";
+import { acceptedRangeToDocRange, bridgeable, buildAcceptedTextMap } from "./acceptedTextMap";
 import { computeEditDensity, diffText, phraseReplacements } from "./diffText";
 import { applyTrackedDelete } from "./splitRangeForNewMark";
 import { skipTracking, TrackChangesAction, setAction } from "../actions";
@@ -187,7 +189,9 @@ function applyBlockToTr(
 
   const rawOps     = diffText(acceptedText, proposedText);
   const editDensity = computeEditDensity(rawOps);
-  const ops        = phraseReplacements(rawOps);
+  const ops        = phraseReplacements(rawOps, (from, to) => bridgeable(tr.doc, map, from, to));
+  // Group ids are unique within one diff; this block's call makes them unique everywhere.
+  const call = genId();
 
   const now = Date.now();
   let acceptedOffset = 0; // cursor into acceptedText
@@ -209,7 +213,7 @@ function applyBlockToTr(
       const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset + tokenLen);
       if (range) {
         const dataTracked: Record<string, unknown> = addTrackIdIfDoesntExist(createNewDeleteAttrs(baseAttrs));
-        if (op.groupId) dataTracked["groupId"] = op.groupId;
+        if (op.groupId) dataTracked["groupId"] = `${call}:${op.groupId}`;
         applyTrackedDelete(tr, range.from + insertedChars, range.to + insertedChars, dataTracked, schema);
         applied = true;
       }
@@ -221,7 +225,7 @@ function applyBlockToTr(
         const insertMarkType = schema.marks.trackedInsert;
         if (insertMarkType) {
           const dataTracked: Record<string, unknown> = addTrackIdIfDoesntExist(createNewInsertAttrs(baseAttrs));
-          if (op.groupId) dataTracked["groupId"] = op.groupId;
+          if (op.groupId) dataTracked["groupId"] = `${call}:${op.groupId}`;
           const safeText = op.text.replace(/\n/g, " ");
           tr.insert(range.from + insertedChars, schema.text(safeText, [insertMarkType.create({ dataTracked })]));
           insertedChars += safeText.length;

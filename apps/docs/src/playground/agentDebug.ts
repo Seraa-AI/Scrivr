@@ -11,7 +11,6 @@
 import type { Editor } from "@scrivr/core";
 import { getAiToolkit } from "@scrivr/ai";
 import { findChanges } from "@scrivr/plugins";
-import { EditorState } from "@scrivr/core/pm";
 
 /** One `edit_document` batch: what the agent sent, and what applying it did. */
 export interface AgentEditRecord {
@@ -29,13 +28,22 @@ interface AgentDebugRecord {
 
 const STORAGE_KEY = "scrivr-playground-agent-debug";
 
+function isAgentEditRecord(value: unknown): value is AgentEditRecord {
+  return typeof value === "object" && value !== null &&
+    "at" in value && typeof value.at === "string" &&
+    "toolCallId" in value && typeof value.toolCallId === "string" &&
+    "edits" in value && Array.isArray(value.edits) &&
+    "invalid" in value && Array.isArray(value.invalid) &&
+    "result" in value && typeof value.result === "object" && value.result !== null;
+}
+
 function load(): AgentDebugRecord {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     const parsed: unknown = raw ? JSON.parse(raw) : null;
     if (parsed && typeof parsed === "object" && "thread" in parsed && "edits" in parsed &&
       Array.isArray(parsed.thread) && Array.isArray(parsed.edits)) {
-      return { thread: parsed.thread, edits: parsed.edits };
+      return { thread: parsed.thread, edits: parsed.edits.filter(isAgentEditRecord) };
     }
   } catch {
     // Storage can be unavailable or hold something else; start empty.
@@ -73,7 +81,7 @@ export function clearAgentDebug() {
 export function agentDebugSnapshot(editor: Editor | null) {
   const state = editor?.getState();
   const ai = editor ? getAiToolkit(editor) : null;
-  const changes = state ? findChanges(EditorState.create({ doc: state.doc })).changes : [];
+  const changes = state ? findChanges(state).changes : [];
   return {
     exportedAt: new Date().toISOString(),
     document: {

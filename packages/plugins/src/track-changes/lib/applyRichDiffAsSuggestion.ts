@@ -16,7 +16,9 @@
  *      no text change" case. `diffText`'s char-offset KEEP regions are aligned
  *      to the doc's and the agent's per-character mark sets; where they differ,
  *      a tracked mark add (insert op) or remove (delete op) is emitted.
- *   3. block `attrs` (align, indent) — a tracked `set_node_attributes`.
+ *   3. block `attrs` (align, indent) — a tracked `set_node_attributes`. `level`
+ *      sets a heading's level; 0 makes it a paragraph, 1–6 makes a paragraph a
+ *      heading, tracked with the old type so a reject restores it.
  *
  * Agent output is untrusted: marks pass through `resolveInlineMark` (unknown
  * type dropped, `link.href` sanitized), so a malformed edit never crashes the
@@ -24,7 +26,7 @@
  * applications never invalidate later positions.
  */
 
-import { Fragment, type Mark, type Node as PMNode, type Schema } from "@scrivr/core/pm";
+import { Fragment, type Mark, type NodeType, type Node as PMNode, type Schema } from "@scrivr/core/pm";
 import type { EditorState, Transaction } from "@scrivr/core/pm";
 import {
   describeInlineMark,
@@ -41,6 +43,7 @@ import {
   createNewDeleteAttrs,
   createNewInsertAttrs,
   createNewPendingAttrs,
+  genId,
   createNewUpdateAttrs,
   getBlockInlineTrackedData,
   type NewEmptyAttrs,
@@ -48,7 +51,7 @@ import {
 import { CHANGE_STATUS } from "../types";
 import { findNodeById } from "@scrivr/core";
 import { findLiveNodeById } from "../liveNode";
-import { acceptedRangeToDocRange, type PosMapEntry } from "./acceptedTextMap";
+import { acceptedRangeToDocRange, bridgeable, type PosMapEntry } from "./acceptedTextMap";
 import { clearAuthorPendingMarks } from "./applyDiffAsSuggestion";
 import { diffText, phraseReplacements } from "./diffText";
 import { applyTrackedDelete } from "./splitRangeForNewMark";
@@ -62,7 +65,7 @@ export interface RichBlockEdit {
   nodeId: string;
   /** New inline content as rich runs. Omit to leave inline content untouched. */
   spans?: InlineSpan[];
-  /** New block styling (`align`, `indent`, `textIndent`). Omit to leave as-is. */
+  /** New block styling (`align`, `indent`, `textIndent`, `level`). Omit to leave as-is. */
   attrs?: Record<string, unknown>;
   /**
    * The rich hash of the unit the agent edited. The stale-edit guard lives in
@@ -86,9 +89,9 @@ export interface RichDiffResult {
   /** nodeIds whose block was not found in the document. */
   notFound: string[];
   /**
-   * nodeIds that resolved to a non-leaf node (a list/table container). Rich
-   * inline edits address a single leaf textblock; a container target is
-   * rejected untouched — edit its inner leaves by their own nodeId instead.
+   * nodeIds whose edit changed nothing: a container (list, table) rather than
+   * a leaf textblock, a block proposed for deletion, or an edit that matched
+   * the block already or asked only for what an agent may not set.
    */
   rejected: string[];
 }
@@ -154,6 +157,7 @@ export function applyRichDiffAsSuggestion(
   let applied = false;
   for (const { edit } of resolved) {
     if (applyRichBlockToTr(state.schema, tr, edit, authorID, onWarn)) applied = true;
+    else rejected.push(edit.nodeId);
   }
 
   if (!applied) return { applied: false, notFound, rejected };
@@ -211,19 +215,33 @@ function applyAttrsChange(
   editAttrs: Record<string, unknown>,
   base: NewEmptyAttrs,
 ): boolean {
-  const picked: Record<string, unknown> = {};
-  let changed = false;
-  for (const [key, next] of Object.entries(pickAgentAttrs(editAttrs))) {
-    if (!(key in node.attrs) || next === node.attrs[key]) continue;
-    picked[key] = next;
-    changed = true;
-  }
-  if (!changed) return false;
+  const { level } = editAttrs;
+  const type = level === undefined ? node.type : typeForLevel(node, level);
+  if (!type) return false;
+  const $node = tr.doc.resolve(nodeFrom);
+  if (!$node.parent.canReplaceWith($node.index(), $node.index() + 1, type)) return false;
 
-  const existing = getBlockInlineTrackedData(node) ?? [];
-  const dataTracked = [...existing, addTrackIdIfDoesntExist(createNewUpdateAttrs(base, node.attrs))];
-  tr.setNodeMarkup(nodeFrom, undefined, { ...node.attrs, ...picked, dataTracked }, node.marks);
+  const typeAttrs = Object.keys(type.spec.attrs ?? {});
+  const picked: Record<string, unknown> = { ...pickAgentAttrs(editAttrs), ...(level !== undefined && type.name === "heading" ? { level } : {}) };
+  const next = Object.fromEntries(typeAttrs.flatMap((key) =>
+    key in picked ? [[key, picked[key]]] : key in node.attrs ? [[key, node.attrs[key]]] : []));
+  if (type === node.type && typeAttrs.every((key) => next[key] === node.attrs[key])) return false;
+
+  const update = addTrackIdIfDoesntExist(createNewUpdateAttrs(base, node.attrs));
+  const dataTracked = [
+    ...(getBlockInlineTrackedData(node) ?? []),
+    type === node.type ? update : { ...update, oldNodeTypeName: node.type.name },
+  ];
+  tr.setNodeMarkup(nodeFrom, type, { ...next, dataTracked }, node.marks);
   return true;
+}
+
+/** The block a `level` asks for: a heading at 1–6, a paragraph at 0. Only those two change. */
+function typeForLevel(node: PMNode, level: unknown): NodeType | undefined {
+  const { heading, paragraph } = node.type.schema.nodes;
+  if (node.type !== heading && node.type !== paragraph) return undefined;
+  if (level === 0) return paragraph;
+  return Number.isInteger(level) && typeof level === "number" && level >= 1 && level <= 6 ? heading : undefined;
 }
 
 function isValidAttr(key: string, value: unknown): boolean {
@@ -255,7 +273,12 @@ function applyInlineChange(
   // change over a retained region is emitted as ONE mark-add (one tracking id)
   // spanning the whole region — correct even when the region is interleaved
   // with a pending trackedInsert that stops the text nodes from fusing.
-  const ops = coalesceKeeps(phraseReplacements(rawOps));
+  // A line break reads as "\n" here, and is never taken into a replacement.
+  const ops = coalesceKeeps(phraseReplacements(rawOps, (from, to) =>
+    !acceptedText.slice(from, to).includes("\n") && bridgeable(tr.doc, map, from, to)));
+  // Group ids are unique within one diff; this block's call makes them unique everywhere.
+  const call = genId();
+  const grouped = (groupId: string | undefined) => (groupId ? { groupId: `${call}:${groupId}` } : {});
 
   const insertType = schema.marks.trackedInsert;
   let aOff = 0; // cursor into acceptedText
@@ -275,7 +298,7 @@ function applyInlineChange(
     } else if (op.type === "delete") {
       const range = acceptedRangeToDocRange(map, aOff, aOff + len);
       if (range) {
-        const dataTracked = addTrackIdIfDoesntExist(createNewDeleteAttrs(base()));
+        const dataTracked = { ...addTrackIdIfDoesntExist(createNewDeleteAttrs(base())), ...grouped(op.groupId) };
         applyTrackedDelete(tr, range.from + insertedChars, range.to + insertedChars, dataTracked, schema);
         applied = true;
       }
@@ -290,7 +313,7 @@ function applyInlineChange(
         const fragment = spansToFragment(subSpans, schema, onWarn ? { onWarn } : {});
         if (fragment.size > 0) {
           const at = range.from + insertedChars;
-          const dataTracked = addTrackIdIfDoesntExist(createNewInsertAttrs(base()));
+          const dataTracked = { ...addTrackIdIfDoesntExist(createNewInsertAttrs(base())), ...grouped(op.groupId) };
           tr.insert(at, addMarkToFragment(fragment, insertType.create({ dataTracked })));
           insertedChars += fragment.size;
           applied = true;

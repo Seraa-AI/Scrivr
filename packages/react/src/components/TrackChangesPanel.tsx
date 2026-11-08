@@ -9,7 +9,7 @@
  */
 
 import type { IBaseEditor } from "@scrivr/core";
-import { CHANGE_OPERATION } from "@scrivr/plugins";
+import { CHANGE_OPERATION, changePreviewText, findChanges } from "@scrivr/plugins";
 import type {
   TrackedChange,
   MarkChange,
@@ -17,7 +17,7 @@ import type {
 } from "@scrivr/plugins";
 import { cx } from "../utils/classNames";
 import { shortName } from "../utils/authorName";
-import { blockText, decisionLabel, getChangeMeta, MARK_LABELS } from "../utils/changeMeta";
+import { decisionLabel, getChangeMeta, MARK_LABELS, previewVerb } from "../utils/changeMeta";
 import type { ChangeMeta } from "../utils/changeMeta";
 import { useTrackChangesPanel } from "../hooks/useTrackChangesPanel";
 import type { TrackChangesDisplayItem } from "../hooks/useTrackChangesPanel";
@@ -249,7 +249,7 @@ function SingleRow({
   if (change.type === "text-change") {
     // A move is shown once, by where it went, not as both of its halves.
     const moving = !!change.dataTracked.moveId;
-    const verb = moving ? "Moving" : change.dataTracked.operation === CHANGE_OPERATION.delete ? "Removing" : "Adding";
+    const verb = previewVerb(change.dataTracked.operation, moving);
     const shown = moving ? pieces.filter(piece => piece.dataTracked.operation === CHANGE_OPERATION.insert) : pieces;
     preview = (
       <div
@@ -275,11 +275,13 @@ function SingleRow({
       </div>
     );
   } else if (change.type === "node-change") {
-    const verb = change.dataTracked.operation === CHANGE_OPERATION.delete ? "Removing" : "Adding";
-    const text = blockText(change.node);
+    const verb = previewVerb(change.dataTracked.operation, !!change.dataTracked.moveNodeId);
+    const state = editor?.getState();
+    const pending = state ? findChanges(state).pending : [];
+    const text = state ? changePreviewText(state.doc, change, pending) : "";
     preview = (
       <div style={previewLine}>
-        <span style={prefixLabel}>{meta.unit ? `${verb} ${meta.unit}` : verb}</span>
+        {verb ? <span style={prefixLabel}>{decisionLabel(verb, meta)}</span> : null}
         {text ? <em>"{truncate(text)}"</em> : change.node.type.name}
       </div>
     );

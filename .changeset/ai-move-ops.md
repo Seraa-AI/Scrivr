@@ -6,102 +6,110 @@
 "@scrivr/export-semantic": patch
 ---
 
-Semantic move ops, and the tracking defects they exposed.
+An agent edits like a person: it moves blocks, list items, headings and images,
+its rewrites land as the phrases a person would change, and every edit is a
+tracked suggestion a reviewer decides in one click.
 
-`moveBlock` and `moveListItem` join `StructuralSemanticEditSchema`, so an agent
-can reorder a document by naming a node and an anchor. They apply as
-delete-at-old plus insert-at-new in one transaction and the track-changes engine
-pairs them into a single `CHANGE_OPERATION.move` on its own — accepting or
-rejecting it is one decision that resolves the shadow with it. No new tracked
-representation was needed. `moveListItem` takes an item id or a leaf inside it,
-and refuses a cross-list move before writing any steps.
+**Agents — what they can do**
 
-A pending move leaves a deleted shadow and a live copy carrying the same
-`nodeId`, so neither "first match" nor "last match" is a correct rule: document
-order puts the shadow first for a move down the document and last for a move up
-it. `findLiveNodeById` in `@scrivr/plugins` is the one place that decides, and
-every consumer that resolves an id against a tracked document now uses it —
-rich edits, structural edits, drift detection, suggestion overlays and popovers,
-ghost text, streamed insertion, block markers, and citation reveal. Citation
-reveal still reaches a block proposed for deletion, since it is on screen until
-decided. Writing into a shadow used to succeed, report success, and then
-evaporate when the deletion was accepted.
+- `moveBlock` and `moveListItem` join `StructuralSemanticEditSchema`: an agent
+  reorders a document by naming a node and an anchor. `moveListItem` takes an
+  item id or a leaf inside it, and refuses a cross-list move before writing any
+  steps. The engine pairs the delete-at-old and insert-at-new into one
+  `CHANGE_OPERATION.move`, accepted or rejected as one decision.
+- A heading's level is set with `richText` `attrs.level`: 1–6 on a heading
+  changes its level and on a paragraph makes it a heading; 0 makes a heading a
+  paragraph. It is tracked with the old type, so rejecting it restores the block.
+- Images go through the protocol an agent already has. A paragraph holding one
+  image is an `image` unit carrying `image` (`src`, `alt`, `width`, `height`,
+  `wrap`, `align`); `insertBlock` adds one with `block.type: "image"` (`src`
+  must pass `safeImageUrl`); `richText` `attrs`, or the unit handed back with its
+  `image` edited, change `wrap`, `align`, size or `alt`; `deleteBlock` removes
+  it. Only the fields that change are checked, so an image placed by drag
+  (`align: "custom"`) can be handed back untouched. A new `src`, paragraph
+  styling on an image unit, and invalid values are rejected. Setting `wrap` or
+  `align` on an image laid out by the legacy `wrappingMode` takes effect.
+- Every edit an agent makes is its suggestion: `applySemanticEdits` tracks text,
+  image and structural edits as `authorID`'s (default "AI Assistant") whether or
+  not the person is suggesting.
+- The result says what happened. An edit that changes nothing — the level a
+  heading already has, attrs an agent may not set, an image layout it already
+  has, a move to where the block already is — is `rejected`, never `changed`
+  and never silently dropped.
+- A batch touches content once. A move or delete overlapping content the batch
+  already moved or added to, or adding an item or row inside content it moved,
+  is refused; so is a list or table op named by a node holding several of what
+  it acts on, such as a nested list.
+- `getRichBlocks(from, to)` keeps image units inside the range.
 
-A node is a shadow when a pending deletion covers its whole range, which is how
-an empty node and the children of a deleted container are recognised — neither
-carries a tracked mark of its own. `shadowRanges`, `isShadowNode` and the
-`ShadowRange` type are exported for a host resolving ids itself, and
-`@scrivr/ai` re-exports `findLiveNodeById` beside `findNodeById`. The ranges are
-memoised on the document node, so a structural batch resolving many ids walks
-it once, and a document whose schema has no `trackedDelete` mark skips the walk
-entirely. An agent reading rich blocks sees one unit per id — the live copy —
-and a rich edit to a block held only by a pending deletion is rejected, not
-reported as both changed and missing.
+**Rewrites read as a person's edit**
 
-`findNodeById` in `@scrivr/core` gained an optional `accept` predicate and now
-returns the first match that satisfies it, stopping there — previously it
-returned the *last* match regardless, despite a comment claiming it stopped at
-the first. Core still knows nothing about tracking; the predicate is what lets
-the plugins layer own that rule.
+- `applyDiffAsSuggestion` and `applyRichDiffAsSuggestion`, for any caller, turn
+  a rewrite into phrase replacements: each run of changes is one deletion and
+  one insertion, a short unchanged gap inside a replacement is taken in, and no
+  change is made inside a word. A gap holding a line break, an inline image or
+  another author's suggestion is never taken in, and words added near each
+  other stay additions.
+- A replacement is decided as one. Its two halves share a `groupId` unique to
+  the call, and accepting or rejecting either half — through a card,
+  `setChangeStatuses`, `reviewChanges` or accept-at-caret — decides both.
+- The AI suggestion overlay groups the same way, so a proposal reads the same
+  before it is applied as after. `phraseReplacements` and `bridgeable` are
+  exported from `@scrivr/plugins` for hosts that build their own diffs;
+  `pairReplacements` stays for word-pair grouping.
 
-A batch touches content once. A move or delete overlapping content the batch
-already moved or added to — the same node by another of its ids, something
-inside it, or something holding it — is refused, and so is adding an item or
-row inside content the batch moved; tracking replays a batch as one gesture, so
-overlapping work would duplicate a block or cancel the batch. A list or table op
-named by a node that holds several of what it acts on, such as a nested list, is
-refused too.
+**Resolving ids in a tracked document**
 
-Tracking pairs a deletion with an insertion as a move only when they match, and
-a deleted block carrying an id only with a copy carrying the same id. An
-insertion earlier in a batch no longer claims a move's deletion; a new block,
-or another, that only reads the same as a deleted one — two empty paragraphs, a
-`deleteBlock` beside an `insertBlock` of the same text — is a deletion and an
-insertion, not a move. Block markers stay on a block proposed for deletion,
-which is on screen until decided.
+- A pending move leaves a deleted shadow and a live copy with the same `nodeId`.
+  `findLiveNodeById` in `@scrivr/plugins` decides which is live, and every
+  consumer uses it — rich and structural edits, drift detection, suggestion
+  overlays and popovers, ghost text, streamed insertion, block markers and
+  citation reveal. Writing into a shadow used to succeed and then vanish when
+  the deletion was accepted. `@scrivr/ai` re-exports it beside `findNodeById`.
+- `findNodeById` in `@scrivr/core` takes an optional `accept` predicate and
+  returns the first match that satisfies it. It used to return the last match.
+- `shadowRanges`, `isShadowNode` and `ShadowRange` are exported for a host
+  resolving ids itself. The ranges are memoised per document.
+- **Hosts:** a helper that takes the first node with a `nodeId`
+  reads the shadow of a block moved down. Switch it to `findLiveNodeById`.
 
-Two review defects the move work surfaced in the tracking engine: rejecting a
-block added right after a list or table, together with a move made since, no
-longer deletes the list's text and fails; and deleting a paragraph while typing
-its words elsewhere in one transaction is a deletion and an insertion rather
-than an error.
+**Tracking**
 
-A document with pending changes serializes to markdown: `getMarkdown()` writes a
-proposed insertion as `{++text++}` and a deletion as `{--text--}` (CriticMarkup)
-instead of throwing.
+- A deletion pairs with an insertion as a move only when they match, by content
+  and by id. Two blocks that only read the same — two empty paragraphs, a
+  `deleteBlock` beside an `insertBlock` of the same text — are a deletion and an
+  insertion.
+- Rejecting a block added after a list or table, together with a later move, no
+  longer deletes the list's text; deleting a paragraph while typing its words
+  elsewhere in one transaction no longer errors.
 
-An agent's rewrite reads as a person's edit: each changed phrase is one deletion
-and one insertion, changes a few words apart are one replacement, and no change
-is made inside a word.
+**Review surfaces**
 
-An agent's structural edits are proposals like its rewrites: `applySemanticEdits`
-tracks a structural batch as a suggestion by `authorID` (default "AI
-Assistant") whether or not the person is suggesting, so a move, insert or
-delete is never applied to the document directly.
+- Moves read as moves: double-underlined where the content went and
+  double-struck where it was, in one move colour (`renderTrackedMove`).
+- A table row added or removed is washed and framed as a row, dashed when
+  removed (`renderTrackedRow`). With the caret anywhere in it, the popover
+  offers the row: "Accept row", "Reject row", previewed as "Adding row:
+  Headset · On request · Yes".
+- `changePreviewText(doc, change, pending)` previews a block change as it will
+  read, and a move once, by where it went; the popover and the panel both use
+  it. A move's card reads "Moving".
 
-Pasting a markdown table, or loading markdown content that holds one, makes a
-table: the Table extension reads markdown tables, with the header row as header
-cells.
+**Semantic view**
 
-Moves read as moves: moved content is double-underlined where it went and
-double-struck where it was, in one move colour as Word marks it, with edits
-inside a moved block drawn over it (`renderTrackedMove`). A card previews a
-block change as the block will read, and a move once, by where it went.
+- A semantic contribution can name what the proposed view leaves out
+  (`isRemoved`). Track changes supplies `proposedForDeletion`, exported, so an
+  image proposed for deletion is not read as present, and a paragraph whose
+  other text is proposed for deletion reads as its image.
+- An image unit's rich hash covers its `image`, so an edited image is seen as
+  changed. Other units' hashes are unchanged.
+- Core names the image values: `ImageWrap`, `ImageAlign`, `IMAGE_WRAPS`,
+  `IMAGE_ALIGNS` and `IMAGE_NODE_ATTRS`, with `SemanticImage`;
+  `SemanticImageAttrsSchema` in `@scrivr/ai` is built from them.
 
-A table row added or removed reads as a row: it is washed and framed across
-the whole row, dashed when removed (`renderTrackedRow`), and its card is named
-"Row added" or "Row removed". With the caret anywhere in the row, the popover
-offers the row — its words are part of adding or removing it — so one Accept
-or Reject decides the whole row. Those words carry no marks of their own under
-the row's, the buttons read "Accept row" and "Reject row", and the preview reads
-"Adding row: Headset · On request · Yes".
+**Markdown**
 
-An agent works with images through the protocol it already has: a paragraph
-holding one image is an `image` unit with `image` (`src`, `alt`, `width`,
-`height`, `wrap`, `align`); `insertBlock` adds one with `block.type: "image"`
-(`src` must pass `safeImageUrl`); `richText` `attrs` on an image unit change its
-`wrap`, `align`, size or `alt`; `deleteBlock` removes it — each the agent's
-tracked suggestion. `SemanticImage` and `SemanticImageAttrsSchema` are exported.
-A semantic contribution can name nodes the proposed view leaves out
-(`removes`); track changes uses it so an image proposed for deletion is not read
-as present.
+- `getMarkdown()` writes pending changes as CriticMarkup — `{++added++}`,
+  `{--removed--}` — instead of throwing.
+- Pasting a markdown table, or loading markdown that holds one, makes a table,
+  with the header row as header cells.

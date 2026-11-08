@@ -348,8 +348,14 @@ describe("phraseReplacements", () => {
   it("replaces a changed word whole", () => {
     expect(phrases("liability", "liabilities")).toEqual([
       { type: "delete", text: "liability", groupId: expect.any(String) },
-      { type: "insert", text: "liabilities", groupId: expect.any(String) },
+      { type: "insert", text: "liabilities", groupId: expect.any(String), proposedOffset: 0 },
     ]);
+  });
+
+  it("starts each insertion where its text starts in the proposal", () => {
+    const proposed = "All staff; contractors are covered.";
+    const inserts = phrases("All staff, contractors is covered.", proposed).filter(o => o.type === "insert");
+    expect(inserts.map(o => o.type === "insert" && proposed.startsWith(o.text, o.proposedOffset))).toEqual([true]);
   });
 
   it("takes a short unchanged gap into one replacement", () => {

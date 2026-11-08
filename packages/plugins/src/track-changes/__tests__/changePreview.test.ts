@@ -10,7 +10,7 @@ import { TrackChanges } from "../TrackChanges";
 import { TrackChangesStatus } from "../types";
 import { findChanges } from "../findChanges";
 import { applyRichDiffAsSuggestion } from "../lib/applyRichDiffAsSuggestion";
-import { blockPreviewText, changeAtCaret } from "../createChangePopover";
+import { changeAtCaret, changePreviewText } from "../createChangePopover";
 
 function movedAndRewritten() {
   const editor = new ServerEditor({
@@ -33,9 +33,12 @@ function movedAndRewritten() {
 describe("the preview of a block change", () => {
   it("reads as the block will, where it went", () => {
     const editor = movedAndRewritten();
-    const move = findChanges(editor.getState()).pending.find((c) => c.dataTracked.operation === "move");
-    if (!move) throw new Error("no move");
-    expect(blockPreviewText(editor.getState().doc, move.from, move.to, false)).toBe("This policy is fair.");
+    const { pending } = findChanges(editor.getState());
+    const halves = pending.filter((c) => c.type === "node-change" && c.dataTracked.moveNodeId);
+    expect(halves).toHaveLength(2);
+    for (const half of halves) {
+      expect(changePreviewText(editor.getState().doc, half, pending)).toBe("This policy is fair.");
+    }
   });
 
   it("reads as the block did, for a block proposed for deletion", () => {
@@ -52,9 +55,10 @@ describe("the preview of a block change", () => {
     });
     editor.applyTransaction(editor.getState().tr.delete(0, editor.getState().doc.child(0).nodeSize));
 
-    const deleted = findChanges(editor.getState()).pending.find((c) => c.type === "node-change" && c.dataTracked.operation === "delete");
+    const { pending } = findChanges(editor.getState());
+    const deleted = pending.find((c) => c.type === "node-change" && c.dataTracked.operation === "delete");
     if (!deleted) throw new Error("no block deletion");
-    expect(blockPreviewText(editor.getState().doc, deleted.from, deleted.to, true)).toBe("In conclusion, this policy is fair.");
+    expect(changePreviewText(editor.getState().doc, deleted, pending)).toBe("In conclusion, this policy is fair.");
   });
 });
 

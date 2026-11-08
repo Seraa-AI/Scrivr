@@ -25,3 +25,21 @@ describe("an image proposed for deletion", () => {
     expect(unit?.image).toBeUndefined();
   });
 });
+
+describe("a paragraph whose text is proposed for deletion around an image", () => {
+  it("reads as the image alone", () => {
+    const editor = new ServerEditor({
+      extensions: [StarterKit, TrackChanges.configure({ userID: "u", initialStatus: TrackChangesStatus.enabled })],
+      content: { type: "doc", content: [
+        { type: "paragraph", attrs: { nodeId: "fig" }, content: [
+          { type: "text", text: "Figure:" },
+          { type: "image", attrs: { src: "https://example.com/a.png" } },
+        ] },
+      ] },
+    });
+    expect(toSemanticUnits(editor, { groupBlocks: false })[0]?.type).toBe("paragraph");
+
+    editor.applyTransaction(editor.getState().tr.delete(1, 8));
+    expect(toSemanticUnits(editor, { groupBlocks: false })[0]?.type).toBe("image");
+  });
+});

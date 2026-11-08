@@ -12,6 +12,7 @@
  */
 
 import type { Node as PmNode, Mark as PmMark, Schema } from "prosemirror-model";
+import type { WrapMode, XAlign } from "../layout/AnchoredObjects";
 
 // ── The unit ──────────────────────────────────────────────────────────────
 
@@ -130,19 +131,36 @@ export interface SemanticUnit {
 }
 
 /**
- * An image as an agent reads and writes it. An image has no id of its own; the
- * unit that carries it is addressed by its paragraph's id.
+ * An image as an agent reads it; it sets one through `SemanticImageAttrs`. An
+ * image has no id of its own; the unit that carries it is addressed by its
+ * paragraph's id.
  */
 export interface SemanticImage {
   src: string;
   alt: string;
   width: number;
   height: number;
-  /** How text flows around it: `inline | square | top-bottom | behind | front`. */
-  wrap: string;
-  /** Where it sits across the line: `left | center | right`, or `custom`. */
-  align: string;
+  wrap: ImageWrap;
+  /** `custom` when it was dragged to a position of its own; an agent sets only an `ImageAlign`. */
+  align: ImageAlign | "custom";
 }
+
+/** How text flows around an image. */
+export type ImageWrap = WrapMode;
+/** Where an image sits across the line. */
+export type ImageAlign = Exclude<XAlign, "custom">;
+export const IMAGE_WRAPS: readonly ImageWrap[] = ["inline", "square", "top-bottom", "behind", "front"];
+export const IMAGE_ALIGNS: readonly ImageAlign[] = ["left", "center", "right"];
+
+/** The image node attr each `SemanticImage` field reads from and writes to. */
+export const IMAGE_NODE_ATTRS: Record<keyof SemanticImage, string> = {
+  src: "src",
+  alt: "alt",
+  width: "width",
+  height: "height",
+  wrap: "wrapMode",
+  align: "xAlign",
+};
 
 /** One inline run of a unit's text and the formatting marks around it. */
 export interface InlineSpan {
@@ -251,9 +269,9 @@ export interface SemanticHandlers {
   marks?: Record<string, SemanticMarkHandler>;
   /**
    * Whether the proposed view leaves a node out — an object proposed for
-   * deletion, which carries no text for a mark handler to drop.
+   * deletion, which carries no text for a mark handler to drop, or text that is.
    */
-  removes?: (node: PmNode) => boolean;
+  isRemoved?: (node: PmNode) => boolean;
 }
 
 // ── Producer context ─────────────────────────────────────────────────────────
@@ -275,7 +293,7 @@ export interface UnitCtx {
   toChanges(nodes: PmNode | readonly PmNode[]): SemanticChange[];
   /** A block's non-default styling attrs (align/indent/font/…), or undefined. */
   attrsOf(node: PmNode): Record<string, unknown> | undefined;
-  /** Whether the proposed view leaves this node out (see `SemanticHandlers.removes`). */
+  /** Whether the proposed view leaves this node out (see `SemanticHandlers.isRemoved`). */
   isRemoved(node: PmNode): boolean;
   /** Physical column count = max over rows of Σ gridSpan (never TableMap.width). */
   physicalColumns(table: PmNode): number;

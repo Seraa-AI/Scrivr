@@ -167,3 +167,20 @@ describe("diffSemanticUnits", () => {
     expect(d.unchanged).toHaveLength(4);
   });
 });
+
+describe("unitRichHash of an image unit", () => {
+  const figure = (wrapMode: string) => ({
+    type: "paragraph",
+    attrs: { nodeId: "fig" },
+    content: [{ type: "image", attrs: { src: "https://example.com/a.png", wrapMode } }],
+  });
+  const only = (content: unknown[]) => {
+    const [unit] = emit(content);
+    if (!unit) throw new Error("no unit");
+    return unit;
+  };
+
+  it("changes when the image's layout changes", () => {
+    expect(unitRichHash(only([figure("square")]))).not.toBe(unitRichHash(only([figure("inline")])));
+  });
+});

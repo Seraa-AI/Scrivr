@@ -140,14 +140,17 @@ describe("tracked moves", () => {
     expect(editor.getState().doc).toBe(before);
   });
 
-  it("treats self and already-adjacent moves as no-ops", () => {
+  it("reports a move to where the block already is as rejected, changing nothing", () => {
     const { editor, ai } = build([para("a", "alpha"), para("b", "beta")]);
     const before = editor.getState().doc;
     const result = ai.applySemanticEdits([
       { kind: "structural", op: "moveBlock", nodeId: "a", anchorNodeId: "a", position: "after" },
       { kind: "structural", op: "moveBlock", nodeId: "a", anchorNodeId: "b", position: "before" },
+      { kind: "structural", op: "moveBlock", nodeId: "b", anchorNodeId: "a", position: "after" },
     ]);
     expect(result.changed).toEqual([]);
+    // Told, so an agent never reports a move that did not happen.
+    expect(result.rejected).toEqual(["a", "a", "b"]);
     expect(result.applied).toBe(false);
     expect(editor.getState().doc).toBe(before);
   });

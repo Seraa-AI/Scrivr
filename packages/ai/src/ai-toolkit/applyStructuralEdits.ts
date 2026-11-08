@@ -16,7 +16,7 @@ import { findLiveNodeById, pickAgentAttrs, shadowRanges } from "@scrivr/plugins"
 import type { ShadowRange } from "@scrivr/plugins";
 import type { Node as PmNode, Schema, Transaction } from "@scrivr/core/pm";
 
-import type { SemanticBlockInput, SemanticCellInput, StructuralSemanticEdit } from "../schema/edit";
+import { SemanticImageAttrsSchema, type SemanticBlockInput, type SemanticCellInput, type StructuralSemanticEdit } from "../schema/edit";
 import { toCoreSpans } from "./spans";
 
 export interface StructuralEditResult {
@@ -103,8 +103,9 @@ function buildImageParagraph(schema: Schema, block: Extract<SemanticBlockInput, 
   const src = safeImageUrl(block.src);
   const image = schema.nodes["image"];
   const paragraph = schema.nodes["paragraph"];
-  if (!src || !image || !paragraph) return null;
-  return paragraph.create({}, image.create({ ...imageNodeAttrs(block), src }));
+  const attrs = SemanticImageAttrsSchema.safeParse(block);
+  if (!src || !image || !paragraph || !attrs.success) return null;
+  return paragraph.create({}, image.create({ ...imageNodeAttrs(attrs.data), src }));
 }
 
 function buildCell(schema: Schema, cell: SemanticCellInput | undefined): PmNode | null {
@@ -184,8 +185,11 @@ function applyOne(
         }
       }
       const at = edit.position === "before" ? anchor.pos : anchor.pos + anchor.node.nodeSize;
-      // Moving beside oneself or to the current boundary is already satisfied.
-      if (target.pos === anchor.pos || at === target.pos || at === target.pos + target.node.nodeSize) return;
+      // Already there: nothing moves, and the caller hears so rather than
+      // reporting a move that never happened.
+      if (target.pos === anchor.pos || at === target.pos || at === target.pos + target.node.nodeSize) {
+        return void result.rejected.push(edit.nodeId);
+      }
       tr.delete(target.pos, target.pos + target.node.nodeSize);
       const placed = at > target.pos ? at - target.node.nodeSize : at;
       tr.insert(placed, target.node);

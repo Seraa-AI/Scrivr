@@ -255,7 +255,6 @@ export function Playground() {
       console.log("[ProseMirror doc]", doc.toJSON());
       return doc.toJSON();
     };
-    // `scrivrEditor`, `scrivrAi` and `scrivrDebug` in the console.
     installAgentDebug(editor);
 
   }

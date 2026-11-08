@@ -232,15 +232,16 @@ describe("a span measured against a stale snapshot", () => {
     const editor = threeEditor();
     editor.apply({ blockId: "b1", range: { from: 0, to: 10, acceptedText: THREE }, mode: "direct" });
 
+    // Re-read, the last two sentences' changes sit close enough to be one phrase.
     const live = editor.suggestionState!.suggestion!.blocks[0]!.acceptedText;
     const wrote = editor.apply({
       blockId: "b1",
-      range: { from: live.indexOf("Three"), to: live.length, acceptedText: live },
+      range: { from: live.indexOf("Two"), to: live.length, acceptedText: live },
       mode: "direct",
     });
 
     expect(wrote).toBe(true);
-    expect(editor.text).toBe("One held. Two changes. Three shifts.");
+    expect(editor.text).toBe("One held. Two moved. Three shifts.");
   });
 });
 

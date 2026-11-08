@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ServerEditor, StarterKit } from "@scrivr/core";
-import { findChanges, TrackChanges, TrackChangesStatus } from "@scrivr/plugins";
-import { blockText, decisionLabel, getChangeMeta } from "./changeMeta";
+import { CHANGE_OPERATION, changePreviewText, findChanges, TrackChanges, TrackChangesStatus } from "@scrivr/plugins";
+import { decisionLabel, getChangeMeta, previewVerb } from "./changeMeta";
 
 const cell = (text: string) => ({ type: "tableCell", content: [{ type: "paragraph", content: [{ type: "text", text }] }] });
 const row = (...texts: string[]) => ({ type: "tableRow", content: texts.map(cell) });
@@ -44,7 +44,18 @@ describe("a table row change is named as a row", () => {
     const meta = getChangeMeta(added);
 
     expect([decisionLabel("Accept", meta), decisionLabel("Reject", meta)]).toEqual(["Accept row", "Reject row"]);
-    expect(blockText(added.node)).toBe("Headset · Yes");
+    expect(decisionLabel("Adding", meta)).toBe("Adding row");
+    expect(changePreviewText(editor.getState().doc, added, findChanges(editor.getState()).pending)).toBe("Headset · Yes");
+  });
+});
+
+describe("previewVerb", () => {
+  it("names what a change does to the words it shows", () => {
+    expect(previewVerb(CHANGE_OPERATION.insert, false)).toBe("Adding");
+    expect(previewVerb(CHANGE_OPERATION.delete, false)).toBe("Removing");
+    expect(previewVerb(CHANGE_OPERATION.delete, true)).toBe("Moving");
+    expect(previewVerb(CHANGE_OPERATION.move, false)).toBe("Moving");
+    expect(previewVerb(CHANGE_OPERATION.node_split, false)).toBeUndefined();
   });
 });
 

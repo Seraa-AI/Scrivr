@@ -1,10 +1,9 @@
-import { Extension } from "@scrivr/core";
-import type { IBaseEditor, IEditor, SemanticPart, SemanticUnit } from "@scrivr/core";
+import { Extension, IMAGE_NODE_ATTRS, stableStringify } from "@scrivr/core";
+import type { IBaseEditor, IEditor, SemanticImage, SemanticPart, SemanticUnit } from "@scrivr/core";
 import { semanticPartRichHash, toSemanticUnits, unitRichHash } from "@scrivr/export-semantic";
-import type { SemanticEdit, StructuralSemanticEdit } from "../schema/edit";
+import { SemanticImageAttrsSchema, type SemanticEdit, type StructuralSemanticEdit } from "../schema/edit";
 import { applyStructuralEdits } from "./applyStructuralEdits";
 import { applyImageLayout, type ImageLayoutEdit } from "./imageAttrs";
-import { SemanticImageAttrsSchema } from "../schema/edit";
 import { toCoreSpans } from "./spans";
 import { UniqueId } from "./UniqueId";
 import { GhostText, ghostTextPluginKey } from "./GhostText";
@@ -125,6 +124,16 @@ function liveUnits(units: SemanticUnit[], doc: PmNode): SemanticUnit[] {
     if (!unitIsLive) return [];
     return parts ? [{ ...unit, parts }] : [unit];
   });
+}
+
+/** The image fields `proposed` sets to something other than what `current` has. */
+function changedImageFields(current: SemanticImage | undefined, proposed: unknown): Record<string, unknown> {
+  if (typeof proposed !== "object" || proposed === null) return {};
+  const changed: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(proposed)) {
+    if (key in IMAGE_NODE_ATTRS && value !== Reflect.get(current ?? {}, key)) changed[key] = value;
+  }
+  return changed;
 }
 
 /** Distinguish a whole `SemanticUnit` (has `nodeIds[]`) from a `RichBlockEdit` (has `nodeId`). */
@@ -356,7 +365,11 @@ export class AiToolkitAPI {
   getRichBlocks(from?: number, to?: number): SemanticUnit[] {
     const units = liveUnits(toSemanticUnits(this.editor, { groupBlocks: false }), this.editor.getState().doc);
     if (from === undefined || to === undefined) return units;
-    const allowed = new Set(this.getBlocks(from, to).map((b) => b.nodeId));
+    const allowed = new Set<string>();
+    this.editor.getState().doc.forEach((node, offset) => {
+      const nodeId = node.attrs["nodeId"];
+      if (typeof nodeId === "string" && offset < to && offset + node.nodeSize > from) allowed.add(nodeId);
+    });
     return units.filter((u) => allowed.has(u.id));
   }
 
@@ -372,7 +385,7 @@ export class AiToolkitAPI {
    * block's current rich hash differs, the edit is skipped as `stale` rather
    * than clobbering newer content.
    *
-   * Applies as tracked suggestions wherever TrackChanges is active — an agent's
+   * When TrackChanges is installed, applies as tracked suggestions — an agent's
    * edit is a proposal, and a reviewer accepts or rejects it. Applying agent
    * output straight into the document is `applyAiSuggestion({ mode: "direct" })`.
    */
@@ -401,9 +414,12 @@ export class AiToolkitAPI {
     // An image unit has no words to diff; its layout is set as image attrs.
     const imageLayouts: ImageLayoutEdit[] = [];
     const rejected: string[] = [];
-    const layoutOf = (nodeId: string, attrs: unknown) => {
-      const parsed = SemanticImageAttrsSchema.safeParse(attrs ?? {});
-      if (parsed.success) imageLayouts.push({ nodeId, attrs: parsed.data });
+    // Only the fields that change are checked: an image placed by drag reads
+    // `align: "custom"`, which an agent cannot set but may hand back untouched.
+    const queueImageLayout = (nodeId: string, proposed: unknown) => {
+      const changes = changedImageFields(currentUnits.get(nodeId)?.image, proposed);
+      const parsed = SemanticImageAttrsSchema.strict().safeParse(changes);
+      if (parsed.success && Object.keys(parsed.data).length > 0) imageLayouts.push({ nodeId, attrs: parsed.data });
       else rejected.push(nodeId);
     };
 
@@ -424,7 +440,8 @@ export class AiToolkitAPI {
         }
         if (unitRichHash(item) === current) continue; // unchanged — skip
         if (currentUnit.type === "image") {
-          layoutOf(nodeId, item.image);
+          if (stableStringify(item.attrs ?? {}) === stableStringify(currentUnit.attrs ?? {})) queueImageLayout(nodeId, item.image);
+          else rejected.push(nodeId);
           continue;
         }
 
@@ -461,9 +478,8 @@ export class AiToolkitAPI {
           continue;
         }
         if (currentUnits.get(item.nodeId)?.type === "image") {
-          // An image unit holds no words: spans are refused, attrs set its layout.
           if (item.spans) rejected.push(item.nodeId);
-          else layoutOf(item.nodeId, item.attrs);
+          else queueImageLayout(item.nodeId, item.attrs);
           continue;
         }
         resolved.push(item);
@@ -472,6 +488,7 @@ export class AiToolkitAPI {
     }
 
     const laidOut = imageLayouts.length > 0 ? applyImageLayout(this.editor, imageLayouts, authorID) : [];
+    rejected.push(...imageLayouts.map((edit) => edit.nodeId).filter((nodeId) => !laidOut.includes(nodeId)));
     if (resolved.length === 0) {
       return { applied: laidOut.length > 0, changed: [...changed, ...laidOut], stale, notFound, rejected };
     }
@@ -499,9 +516,11 @@ export class AiToolkitAPI {
    * `applyStructuralEdits`. Both report into one result; `stale` comes only from
    * the rich half, which is the only one with a hash to check against.
    *
-   * Both halves are proposals by `authorID` (default "AI Assistant"), tracked
-   * whether or not the person is suggesting: an agent's edit is never applied
-   * to the document directly.
+   * When TrackChanges is installed, every edit is a proposal by `authorID`
+   * (default "AI Assistant"), tracked whether or not the person is suggesting.
+   *
+   * A batch lands in up to three transactions, so up to three undo steps: text
+   * edits, image layouts, then structural ops.
    */
   applySemanticEdits(
     edits: SemanticEdit[],

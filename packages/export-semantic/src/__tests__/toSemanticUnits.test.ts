@@ -314,7 +314,7 @@ describe("toSemanticUnits — an image unit", () => {
 
   it("leaves out an image an extension says the view removes", () => {
     const units = toSemanticUnits(edit({ type: "doc", content: [imageParagraph({ alt: "gone" })] }), {
-      overrides: { removes: (node) => node.attrs["alt"] === "gone" },
+      overrides: { isRemoved: (node) => node.attrs["alt"] === "gone" },
     });
     expect(units[0]?.type).toBe("paragraph");
     expect(units[0]?.image).toBeUndefined();

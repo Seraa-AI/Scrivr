@@ -236,8 +236,7 @@ export function renderTrackedAttrChange(
 
 /**
  * Marks a whole table row a change added or removed: a wash across the row and
- * a frame around it, dashed when the row is removed. The text in its cells
- * keeps its own marks, so the row reads as one change, not as loose words.
+ * a frame around it, dashed when the row is removed.
  */
 export function renderTrackedRow(
   ctx: CanvasRenderingContext2D,

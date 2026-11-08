@@ -134,7 +134,7 @@ function extractSemantic(
 export function createUnitCtx(
   editor: IBaseEditor,
   markHandlers: Record<string, SemanticMarkHandler>,
-  removes: ReadonlyArray<(node: PmNode) => boolean> = [],
+  removers: ReadonlyArray<(node: PmNode) => boolean> = [],
 ): UnitCtx {
   const schema = editor.getState().doc.type.schema;
   const serializer = editor.getMarkdownSerializer();
@@ -150,7 +150,7 @@ export function createUnitCtx(
         return serializer.serialize(wrapper).replace(/\n+$/, "");
       } catch {
         // markdown is best-effort: a node or mark without a serializer rule
-        // (pageBreak, tracked marks, custom nodes) yields no markdown rather
+        // (pageBreak, custom nodes) yields no markdown rather
         // than crashing the whole emit. `text`/`spans`/`attrs` are the source
         // of truth for styling and are produced independently.
         return "";
@@ -171,7 +171,7 @@ export function createUnitCtx(
       return describeAttrs(node);
     },
     isRemoved(node) {
-      return removes.some((removed) => removed(node));
+      return removers.some((removed) => removed(node));
     },
     physicalColumns,
   };

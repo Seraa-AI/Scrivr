@@ -8,7 +8,7 @@
  *   tokenise → diffText → pairReplacements / phraseReplacements
  *
  * Convention:
- *   wdiff(a, b)    — word-level only (diffText + pairReplacements, NO char expansion)
+ *   wdiff(a, b)    — word pairs (diffText + pairReplacements), as the AI overlay groups them.
  *                    Use when asserting specific word tokens in deletes/inserts.
  *   fullDiff(a, b) — the pipeline that writes tracked changes: phrase replacements.
  *                    Use for round-trip accuracy.
@@ -27,7 +27,7 @@ import {
 
 // ── Pipeline helpers ──────────────────────────────────────────────────────────
 
-/** Word-level only: no char expansion. Use for checking which WORDS changed. */
+/** Word pairs, as the AI overlay groups them. Use for checking which words changed. */
 function wdiff(a: string, b: string): PairedDiffOp[] {
   return pairReplacements(diffText(a, b));
 }
@@ -127,7 +127,7 @@ describe("stress #2 — section number + clause ref changed together", () => {
   });
 });
 
-// ── Case 3: Long legal word → shorter word (char-level) ──────────────────────
+// ── Case 3: Long legal word → shorter word ──────────────────────────────────
 
 describe("stress #3 — long legal word rewritten into shorter word", () => {
   const a = "indemnification obligation";
@@ -376,7 +376,7 @@ describe("stress #12 — 'shall' → 'must' surgical swap in long sentence", () 
   });
 });
 
-// ── Case 13: Legal pluralisation (char-level) ─────────────────────────────────
+// ── Case 13: Legal pluralisation ─────────────────────────────────────────────
 
 describe("stress #13 — legal pluralisation: 'third party' → 'third parties'", () => {
   const a = "third party";
@@ -391,7 +391,7 @@ describe("stress #13 — legal pluralisation: 'third party' → 'third parties'"
     expect(inserts(ops)).toEqual(["parties"]);
   });
 
-  it("word-level shows 'party' → 'parties' as paired token", () => {
+  it("word pairs show 'party' → 'parties' as one paired token", () => {
     const ops = wdiff(a, b);
     expect(deletes(ops)).toContain("party");
     expect(inserts(ops)).toContain("parties");

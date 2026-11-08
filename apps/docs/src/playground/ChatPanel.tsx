@@ -16,7 +16,6 @@ interface ChatPanelProps {
 }
 
 function getDocContext(editor: Editor | null): {
-  blocks?: Array<{ nodeId: string; text: string }>;
   units?: DocUnit[];
   context?: string;
 } {
@@ -38,6 +37,7 @@ function getDocContext(editor: Editor | null): {
     id: unit.id,
     type: unit.type,
     text: unit.text,
+    ...(unit.headingLevel ? { headingLevel: unit.headingLevel } : {}),
     ...(unit.parts ? { parts: unit.parts.map((part) => ({ nodeId: part.nodeId, text: part.text })) } : {}),
     ...(unit.image ? { image: unit.image } : {}),
   }));
@@ -138,7 +138,6 @@ export function ChatPanel({ editor, hideBorder }: ChatPanelProps) {
         invalid: parsed.rejected,
         result: { applied: result.applied, changed: result.changed, rejected: result.rejected, notFound: result.notFound, stale: result.stale },
       });
-      console.info("[edit_document]", { edits: parsed.edits, result, invalid: parsed.rejected });
       return;
     }
 

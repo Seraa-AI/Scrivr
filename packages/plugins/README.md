@@ -60,7 +60,7 @@ api.acceptSuggestion();
 
 ### AI Suggestions (diff-based)
 
-Display AI-generated document diffs as tracked suggestions with accept/reject controls. Supports character-level, multi-block, and semantic diffs.
+Display AI-generated document diffs as tracked suggestions with accept/reject controls. Supports word-level phrase replacements, multi-block, and semantic diffs.
 
 ```ts
 import { AiSuggestion } from '@scrivr/plugins';

@@ -11,6 +11,7 @@ import {
   sha256Hex,
   stableStringify,
   type InlineSpan,
+  type SemanticImage,
   type SemanticPart,
   type SemanticUnit,
   type TableCells,
@@ -92,6 +93,8 @@ export interface UnitRichInput {
   attrs: Record<string, unknown>;
   parts: SemanticPartRichInput[] | null;
   cells: TableCells | null;
+  /** An image unit's image; absent on every other unit, so their hashes stay as they were. */
+  image?: SemanticImage;
 }
 
 /**
@@ -111,6 +114,7 @@ export function unitRichInput(unit: SemanticUnit): UnitRichInput {
     // Table rich state lives in cells, not top-level text/spans/attrs — a cell
     // alignment/merge/header edit is invisible without this.
     cells: unit.cells ?? null,
+    ...(unit.image ? { image: unit.image } : {}),
   };
 }
 

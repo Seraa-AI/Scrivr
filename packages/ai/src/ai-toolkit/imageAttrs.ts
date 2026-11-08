@@ -1,23 +1,13 @@
-import type { IBaseEditor } from "@scrivr/core";
-import type { Node as PmNode } from "@scrivr/core/pm";
-import { findLiveNodeById, trackAsSuggestion } from "@scrivr/plugins";
+import { IMAGE_NODE_ATTRS, normalizeImageAttrs, type IBaseEditor } from "@scrivr/core";
+import { findLiveNodeById, proposedForDeletion, trackAsSuggestion } from "@scrivr/plugins";
 import type { SemanticImageAttrs } from "../schema/edit";
-
-/** The image node's attribute for each layout attr an agent sets. */
-const IMAGE_NODE_ATTR: Record<keyof SemanticImageAttrs, string> = {
-  alt: "alt",
-  width: "width",
-  height: "height",
-  wrap: "wrapMode",
-  align: "xAlign",
-};
 
 /** An agent's image layout as image node attrs: only what it set. */
 export function imageNodeAttrs(attrs: SemanticImageAttrs): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  for (const [key, nodeAttr] of Object.entries(IMAGE_NODE_ATTR)) {
-    const value: unknown = Reflect.get(attrs, key);
-    if (value !== undefined) out[nodeAttr] = value;
+  for (const [key, value] of Object.entries(attrs)) {
+    const nodeAttr: unknown = Reflect.get(IMAGE_NODE_ATTRS, key);
+    if (value !== undefined && typeof nodeAttr === "string") out[nodeAttr] = value;
   }
   return out;
 }
@@ -26,14 +16,6 @@ export function imageNodeAttrs(attrs: SemanticImageAttrs): Record<string, unknow
 export interface ImageLayoutEdit {
   nodeId: string;
   attrs: SemanticImageAttrs;
-}
-
-/** Whether an image's own records propose deleting it. */
-function proposedForDeletion(image: PmNode): boolean {
-  const records: unknown = image.attrs["dataTracked"];
-  return Array.isArray(records) && records.some((record: unknown) =>
-    typeof record === "object" && record !== null && "operation" in record && record.operation === "delete" &&
-    "status" in record && record.status === "pending");
 }
 
 /**
@@ -52,7 +34,15 @@ export function applyImageLayout(editor: IBaseEditor, edits: ImageLayoutEdit[], 
     });
     const image = at < 0 ? null : tr.doc.nodeAt(at);
     if (!image) continue;
-    tr.setNodeMarkup(at, undefined, { ...image.attrs, ...imageNodeAttrs(attrs) }, image.marks);
+    // A legacy `wrappingMode` outranks `wrapMode`/`xAlign`: write out what it
+    // meant and retire it, so the layout the agent sets is the one that shows.
+    const placed = normalizeImageAttrs(image);
+    const legacy = image.attrs["wrappingMode"] !== "inline"
+      ? { wrapMode: placed.wrapMode, xAlign: placed.xAlign, wrappingMode: "inline" }
+      : {};
+    const next = { ...image.attrs, ...legacy, ...imageNodeAttrs(attrs) };
+    if (Object.entries(next).every(([key, value]) => value === image.attrs[key])) continue;
+    tr.setNodeMarkup(at, undefined, next, image.marks);
     changed.push(nodeId);
   }
   if (tr.docChanged) editor.applyTransaction(tr);

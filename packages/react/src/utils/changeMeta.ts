@@ -1,7 +1,6 @@
 import { IMAGE_PLACEMENT_ATTRS } from "@scrivr/core";
 import { CHANGE_OPERATION } from "@scrivr/plugins";
 import type { NodeAttrChange, TrackedChange } from "@scrivr/plugins";
-import type { Node as PmNode } from "@scrivr/core/pm";
 
 export interface ChangeMeta {
   icon: string;
@@ -106,16 +105,16 @@ export function getChangeMeta(change: TrackedChange): ChangeMeta {
   return changeName(change.type, op, !!change.dataTracked.moveId);
 }
 
-/** "Accept" or, for a change decided whole, "Accept row". */
-export const decisionLabel = (verb: "Accept" | "Reject", meta: ChangeMeta) =>
+/** "Accept", "Adding" or, for a change decided whole, "Accept row", "Adding row". */
+export const decisionLabel = (verb: string, meta: ChangeMeta) =>
   meta.unit ? `${verb} ${meta.unit}` : verb;
 
-/** The words a block holds, one block — such as a cell — per " · ". */
-export function blockText(node: PmNode): string {
-  const blocks: string[] = [];
-  node.descendants((child) => {
-    if (child.isTextblock) blocks.push(child.textContent);
-    return !child.isTextblock;
-  });
-  return blocks.filter(Boolean).join(" · ");
-}
+const PREVIEW_VERB: Partial<Record<CHANGE_OPERATION, string>> = {
+  [CHANGE_OPERATION.insert]: "Adding",
+  [CHANGE_OPERATION.delete]: "Removing",
+  [CHANGE_OPERATION.move]: "Moving",
+};
+
+/** What a change does to the words it previews; a split, a list change and the like show them as they are. */
+export const previewVerb = (operation: CHANGE_OPERATION, moved: boolean) =>
+  moved ? "Moving" : PREVIEW_VERB[operation];
