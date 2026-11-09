@@ -96,24 +96,35 @@ export class AiSuggestionsAPI {
 
 /**
  * The units an agent reads: one per block. A pending move leaves a copy of the
- * moved block where it was, under the same ids; that copy — proposed for
- * deletion, inside a move's left-behind range — is left out with its parts.
- * Any other unit stays, a block proposed for deletion included.
+ * moved block where it was, under the same ids; that copy — inside a move's
+ * left-behind range — is left out with its parts. Any other unit stays, a
+ * block proposed for deletion included, whatever id it carries.
+ *
+ * Read with `groupBlocks: false`, unit i is the document's top-level block i,
+ * and a unit's parts are its block's id-carrying textblocks in order; a copy is
+ * judged by where that block is.
  */
 function unitsToRead(units: SemanticUnit[], doc: PmNode): SemanticUnit[] {
   const moved = moveShadowRanges(doc);
   if (moved.length === 0) return units;
-  const leftBehind = new Set<string>();
-  doc.descendants((node, pos) => {
-    const id = node.attrs["nodeId"];
-    if (typeof id === "string" && isShadowNode(node, pos, moved)) leftBehind.add(id);
-    return true;
-  });
-  const isKept = (id: string, proposedForDeletion: boolean) => !(proposedForDeletion && leftBehind.has(id));
-  return units.flatMap((unit) => {
-    if (!isKept(unit.id, !!unit.proposedForDeletion)) return [];
-    const parts = unit.parts?.filter((part) => isKept(part.nodeId, !!part.proposedForDeletion));
-    return parts ? [{ ...unit, parts }] : [unit];
+  const blocks: Array<{ node: PmNode; pos: number }> = [];
+  doc.forEach((node, pos) => blocks.push({ node, pos }));
+  return units.flatMap((unit, i) => {
+    const block = blocks[i];
+    if (!block || block.node.attrs["nodeId"] !== unit.id) return [unit];
+    if (isShadowNode(block.node, block.pos, moved)) return [];
+    if (!unit.parts) return [unit];
+    const leaves: Array<{ node: PmNode; pos: number }> = [];
+    block.node.descendants((node, offset) => {
+      if (node.isTextblock && typeof node.attrs["nodeId"] === "string") leaves.push({ node, pos: block.pos + 1 + offset });
+      return !node.isTextblock;
+    });
+    const aligned = leaves.length === unit.parts.length && leaves.every((leaf, j) => leaf.node.attrs["nodeId"] === unit.parts?.[j]?.nodeId);
+    if (!aligned) return [unit];
+    return [{ ...unit, parts: unit.parts.filter((_part, j) => {
+      const leaf = leaves[j];
+      return !leaf || !isShadowNode(leaf.node, leaf.pos, moved);
+    }) }];
   });
 }
 
@@ -567,7 +578,6 @@ export class AiToolkitAPI {
         changed.push(item.nodeId);
       }
     }
-
 
     const laidOut = imageLayouts.length > 0 ? applyImageLayout(this.editor, imageLayouts, authorID) : [];
     rejected.push(...imageLayouts.map((edit) => edit.nodeId).filter((nodeId) => !laidOut.includes(nodeId)));

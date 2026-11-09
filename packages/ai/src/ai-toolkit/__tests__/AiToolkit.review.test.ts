@@ -214,18 +214,49 @@ describe("an agent's edit lands on the block it read", () => {
     expect(ai.getRichBlocks().map((u) => u.text)).toEqual(["", "Gamma"]);
   });
 
-  it("in a document saved with two live copies of one id, an edit by that id is refused, not guessed", () => {
+  it("in a document saved with two live copies of one id, a rich edit by that id is refused, not guessed", () => {
     const { editor, ai } = build([para("p", "Alpha"), para("p", "Beta"), para("z", "z")]);
     const read = ai.getRichBlocks();
     const [first] = read;
     if (!first) throw new Error("units");
-    ai.applySemanticEdits([{ kind: "structural", op: "moveBlock", nodeId: "p", position: "after", anchorNodeId: "z" }], { authorID: "bob" });
     const before = editor.getState().doc;
     expect(ai.applyRichEdit(read)).toMatchObject({ applied: false, changed: [] });
     expect(editor.getState().doc.eq(before)).toBe(true);
     const result = ai.applyRichEdit([rewrite(first, "Alpha2"), ...read.slice(1)]);
     expect(result).toMatchObject({ applied: false, changed: [], rejected: ["p"] });
     expect(editor.getState().doc.eq(before)).toBe(true);
+  });
+
+  it("…and so is every structural op that names or anchors on that id", () => {
+    const ops = [
+      { kind: "structural", op: "moveBlock", nodeId: "p", position: "after", anchorNodeId: "z" },
+      { kind: "structural", op: "moveBlock", nodeId: "z", position: "before", anchorNodeId: "p" },
+      { kind: "structural", op: "deleteBlock", nodeId: "p" },
+      { kind: "structural", op: "insertBlock", anchorNodeId: "p", position: "after", block: { type: "paragraph", spans: [{ text: "New", marks: [] }] } },
+    ] satisfies Parameters<ReturnType<typeof build>["ai"]["applySemanticEdits"]>[0];
+    for (const op of ops) {
+      const { editor, ai } = build([para("p", "Alpha"), para("p", "Beta"), para("z", "z")]);
+      const before = editor.getState().doc;
+      const result = ai.applySemanticEdits([op], { authorID: "bob" });
+      expect(result.rejected).toEqual(["p"]);
+      expect(editor.getState().doc.eq(before)).toBe(true);
+    }
+  });
+});
+
+describe("the copy a move leaves behind", () => {
+  it("is left out by where it is, not by its id: a deleted block sharing the id stays", () => {
+    const { editor, ai } = build([para("p", "Alpha"), para("p", "Beta"), para("z", "z")]);
+    editor.applyTransaction(editor.getState().tr.delete(0, editor.getState().doc.child(0).nodeSize));
+    const doc = editor.getState().doc;
+    const betaAt = doc.child(0).nodeSize;
+    const beta = doc.child(1);
+    editor.applyTransaction(editor.getState().tr.insert(doc.content.size, beta).delete(betaAt, betaAt + beta.nodeSize));
+    expect(ai.getRichBlocks().map((u) => [u.text, u.proposedForDeletion ?? false])).toEqual([
+      ["", true],
+      ["z", false],
+      ["Beta", false],
+    ]);
   });
 });
 
