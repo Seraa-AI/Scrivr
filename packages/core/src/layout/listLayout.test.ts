@@ -154,8 +154,10 @@ describe("a number too wide for its hanging indent (Word: the tab after it goes 
 
   // BLOCKS THE L1 MERGE. Beside a float, reflowFlowsAgainstExclusions re-lays
   // the item without its first-line offset, so the text starts under the
-  // number. Fixed, after W1 lands on main, by forwarding a block's first-line
-  // settings on every re-break path; this test then passes and `.fails` comes off.
+  // number. Fixed, after W1 lands on main, by giving the
+  // first-line settings resolved at measurement one owner on the measured
+  // entry and forwarding them on every re-break path; this test then passes
+  // and `.fails` comes off.
   it.fails("moves the first line past a wide number beside a float too", () => {
     const text = "wide ".repeat(40).trim();
     const float: Json = {
@@ -518,9 +520,10 @@ describe("an item that opens with a floating image", () => {
 
   // BLOCKS THE L1 MERGE. The float's own exclusion pass
   // (reflowFlowsAgainstExclusions) re-lays the paragraph without
-  // keepAnchorLine, so its line collapses again. Fixed, after W1 lands on
-  // main, by forwarding a block's first-line settings on every re-break path;
-  // this test then passes and `.fails` comes off.
+  // keepAnchorLine, so its line collapses again. Fixed, after W1 lands on main, by giving the
+  // first-line settings resolved at measurement one owner on the measured
+  // entry and forwarding them on every re-break path; this test then passes
+  // and `.fails` comes off.
   it.fails("keeps the image's paragraph a line for its number", () => {
     const blocks = laidOut([ol(li(floating), item("next"))]);
     const anchor = anchorOf(blocks);

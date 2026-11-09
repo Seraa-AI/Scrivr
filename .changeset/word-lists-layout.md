@@ -73,6 +73,12 @@ Lists lay out, print and export like Word's.
   node type (`paragraph`, …) instead.
 - `isListType` holds only for a node whose content allows list items and
   nothing else.
+- `nodeLayout` now defaults an undeclared node whose content is blocks to
+  `{ kind: "transparent" }`: its blocks lay out in its place.
+  `DEFAULT_NODE_LAYOUT` (`{ kind: "block" }`) is the default for undeclared
+  nodes that hold inline content or nothing. **Migration:** a container node
+  that holds blocks must declare `layout: { kind: "block" }` to keep its
+  registered painter; left undeclared, its painter is never called.
 - `LayoutBlock.listMarkerX` is now the marker's **left** edge (it was the
   right edge of a right-aligned marker).
 - `BlockLayoutOptions.firstLineOffset` (new) adds to a node's own

@@ -607,7 +607,10 @@ section is what is true.
   so wide leaves no room for a list's indent, so the indent shrinks to fit;
   the marker's hanging shrinks with it, so the number never sits over the
   previous column's grid line, and a number that then reaches the text pushes
-  it to the next stop as anywhere else. Our DOCX keeps the number inside the
+  it on. A tab stop is taken only when it leaves an inch of the line for the
+  text (`MIN_TEXT_AFTER_NUMBER`); otherwise the text follows the number after a
+  space, so in a narrow cell the first word stays inside the cell. A word wider
+  than the whole cell still runs over it, as it does without a number. Our DOCX keeps the number inside the
   cell too. How Word places a number whose hanging indent does not fit a
   cell is not documented and could not be checked here; this keeps it inside
   the box Word draws for the cell.
@@ -619,10 +622,12 @@ section is what is true.
   that is neither a list nor a table — such as a custom `(listItem |
   paragraph)+` node, no longer a list since `isListType` tightened — has no
   lines of its own, so its blocks are laid out in its place, as a transparent
-  node's are; before, it painted as one empty line. A node that declares
+  node's are; before, it painted as one empty line. `nodeLayout` gives this
+  answer itself: an undeclared node whose content is blocks is `transparent`,
+  and `DEFAULT_NODE_LAYOUT` (`block`) is the default only for undeclared nodes
+  that hold inline content or nothing. A node that declares
   `layout: { kind: "block" }` explicitly keeps its own box and the painter it
-  registered, as the `NodeLayout` contract promises; only an undeclared
-  container is laid out in place. A transparent or container first block of
+  registered. A transparent or container first block of
   an item passes the item's number to its own first block only.
 - **DOCX paragraph and table properties are written in schema order.** One
   ordered insert per properties element (`CT_PPrBase` / `CT_PPr`,
@@ -646,12 +651,16 @@ section is what is true.
   for its number", and the PDF position test in `listFloatMarkers.test.ts`).
   `rebreakWrappedLinesWithoutExclusions` drops the same settings when a wrapped
   block moves page; probing could not reach it with a list item, because the
-  float travels with its anchor onto the item's page. The fix is a single
-  `layoutBlockWithMarker` call in place of `layoutBlock` in
-  `reflowFlowsAgainstExclusions` (which keeps it through W1's rewrite), and
-  the same settings forwarded in `rebreakWrappedLinesWithoutExclusions`; it
-  gives these
-  settings one owner on the measured entry and forwards them on every
-  re-break path. It waits for W1, which rewrites
-  `reflowFlowsAgainstExclusions`, to land on `main`. **L1 does not merge until
-  that fix is in and the three `it.fails` tests pass.**
+  float travels with its anchor onto the item's page.
+
+  The fix: the first-line settings resolved when a block is measured — the
+  marker's push (`firstLineOffset`) and `keepAnchorLine` — get one owner on
+  the measured entry and its `FlowBlock`, and every re-break path forwards
+  them to `layoutBlock` as they were resolved, rather than measuring the
+  marker again. Recomputing the push beside a float would measure against the
+  float-narrowed segment rather than the line the number was placed on, and a
+  `FlowBlock` does not carry the marker's hanging, so a bare
+  `layoutBlockWithMarker` call there cannot give the right answer. The fix
+  waits for W1, which rewrites `reflowFlowsAgainstExclusions`, to land on
+  `main`. **L1 does not merge until that fix is in and the three `it.fails`
+  tests pass.**

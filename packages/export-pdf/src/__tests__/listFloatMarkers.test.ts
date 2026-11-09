@@ -68,9 +68,10 @@ describe("an item that opens with a floating image, in the PDF", () => {
 describe("where the PDF draws a floating-image paragraph's number", () => {
   // BLOCKS THE L1 MERGE. The float's exclusion pass re-lays the paragraph
   // without keepAnchorLine, so its line collapses and the number is drawn at
-  // the line's top edge, in the margin when it is first on the page. Fixed,
-  // after W1 lands on main, by forwarding a block's first-line settings on
-  // every re-break path; this test then passes and `.fails` comes off.
+  // the line's top edge, in the margin when it is first on the page. Fixed, after W1 lands on main, by giving the
+  // first-line settings resolved at measurement one owner on the measured
+  // entry and forwarding them on every re-break path; this test then passes
+  // and `.fails` comes off.
   it.fails("draws it on its own line, inside the page, a line above the next item's", async () => {
     const layout = layoutOf([ordered(item(floating), item(p("next")))]);
     const ops = await recordDrawOps(() => buildPdf(layout, exportEditor));
