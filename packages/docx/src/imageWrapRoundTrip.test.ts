@@ -133,6 +133,22 @@ describe("image wrap modes — document chain round-trip", () => {
     expect(wrapModes(doc)).toEqual(EXPECTED_MODES);
   });
 
+  it("a square image keeps the user's offset through a DOCX export and import", async () => {
+    const editor = new ServerEditor();
+    editor.setContent({
+      type: "doc",
+      content: [{
+        type: "paragraph",
+        content: [{ type: "image", attrs: { src: PNG_URL, width: 100, height: 50, wrapMode: "square", yOffset: 10 } }],
+      }],
+    });
+
+    const bytes = await exportDocxBytes(editor);
+    const { doc } = await importDocx(new ServerEditor(), bytes);
+
+    expect(images(doc).map((n) => [n.attrs["wrapMode"], n.attrs["yOffset"]])).toEqual([["square", 10]]);
+  });
+
   it("survives a clipboard copy and paste", () => {
     const editor = new ServerEditor();
     editor.setContent(docWithWrappedImages());
