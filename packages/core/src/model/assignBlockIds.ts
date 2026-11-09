@@ -161,8 +161,13 @@ export function planDuplicateIdAssignments(
   return out;
 }
 
-/** A block's id, or null when it has none or its schema declares none. */
-function blockIdOf(node: Node): string | null {
+/**
+ * A block's id, or null when it has none or its schema declares none — the one
+ * answer to "which nodes carry a block id, and what counts as one", leaves
+ * (a rule, a page break) included. Anything that writes or checks block ids
+ * asks this.
+ */
+export function blockIdOf(node: Node): string | null {
   if (!node.isBlock || !("nodeId" in (node.type.spec.attrs ?? {}))) return null;
   const id = node.attrs["nodeId"];
   return typeof id === "string" && id.length > 0 ? id : null;

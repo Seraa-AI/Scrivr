@@ -71,6 +71,19 @@ describe("a tracked Enter in a list", () => {
   });
 });
 
+describe("a tracked paste of a copy", () => {
+  it("gives a pasted copy of a horizontal rule or a page break its own id", () => {
+    for (const type of ["horizontalRule", "pageBreak"]) {
+      const editor = editorWith([para("a", "Alpha"), { type, attrs: { nodeId: "leaf" } }, para("b", "Beta")]);
+      const leaf = editor.getState().doc.child(1);
+      editor.applyTransaction(editor.getState().tr.insert(editor.getState().doc.content.size, leaf));
+      const ids = topIds(editor);
+      expect(ids.filter((id) => id === "leaf")).toHaveLength(1);
+      expect(new Set(ids).size).toBe(ids.length);
+    }
+  });
+});
+
 describe("a pending move through undo and redo", () => {
   const moved = () => {
     const editor = editorWith([para("a", "Alpha"), para("b", "Beta")]);

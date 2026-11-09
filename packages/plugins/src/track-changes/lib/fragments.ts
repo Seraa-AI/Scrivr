@@ -1,5 +1,6 @@
 import { Fragment, MarkType, Node as PMNode, NodeType, ResolvedPos, Schema } from "@scrivr/core/pm";
 import { Transaction } from "@scrivr/core/pm";
+import { blockIdOf } from "@scrivr/core";
 
 import {
   addTrackIdIfDoesntExist,
@@ -101,20 +102,24 @@ export function setFragmentAsNodeSplit(
 
 /**
  * Written content with any block id `doc` already carries cleared. A split or
- * a list Enter copies its source's id onto the new block; the id stays with the
- * block that had it, and `UniqueId` gives each new one its own.
+ * a list Enter copies its source's id onto the new block, and a paste copies
+ * the original's; the id stays with the block that had it, and `UniqueId` gives
+ * each new one its own. Which nodes carry an id is core's `blockIdOf`.
  */
 export function withoutTakenIds(fragment: Fragment, doc: PMNode): Fragment {
-  const taken = new Set<unknown>();
+  const taken = new Set<string>();
   doc.descendants((node) => {
-    if (node.isBlock && node.attrs["nodeId"]) taken.add(node.attrs["nodeId"]);
+    const id = blockIdOf(node);
+    if (id !== null) taken.add(id);
   });
   const clear = (node: PMNode): PMNode => {
-    if (node.isText || node.isLeaf) return node;
+    if (node.isText) return node;
+    const id = blockIdOf(node);
+    const attrs = id !== null && taken.has(id) ? { ...node.attrs, nodeId: null } : node.attrs;
+    if (node.isLeaf) return attrs === node.attrs ? node : node.type.create(attrs, null, node.marks);
     const content: PMNode[] = [];
     node.forEach((child) => content.push(clear(child)));
-    const takenId = node.isBlock && taken.has(node.attrs["nodeId"]);
-    return node.type.create(takenId ? { ...node.attrs, nodeId: null } : node.attrs, Fragment.from(content), node.marks);
+    return node.type.create(attrs, Fragment.from(content), node.marks);
   };
   const out: PMNode[] = [];
   fragment.forEach((node) => out.push(clear(node)));
