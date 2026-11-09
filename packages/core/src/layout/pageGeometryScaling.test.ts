@@ -1,12 +1,12 @@
 import { describe, it, expect } from "vitest";
 import type { Node } from "prosemirror-model";
 import {
-  assignGlobalY,
   buildBlockFlow,
   collectLayoutItems,
   defaultPageConfig,
   type MeasureCacheEntry,
 } from "./PageLayout";
+import { assignGlobalY } from "./FlowPlacement";
 import {
   createPageGeometry,
   EMPTY_RESOLVED_CHROME,

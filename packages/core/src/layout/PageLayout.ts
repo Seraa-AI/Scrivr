@@ -42,7 +42,7 @@ import {
   pageLocalYForGlobalY,
   targetPageNumber,
 } from "./FlowPlacement";
-export { assignGlobalY, collapseMargins, flowCursorAfter, type FlowCursor } from "./FlowPlacement";
+export { collapseMargins } from "./FlowPlacement";
 import { resolveAnchoredObjects } from "./AnchoredObjectSolver";
 import { runChromeLoop } from "./aggregateChrome";
 import { parseFont } from "./StyleResolver";

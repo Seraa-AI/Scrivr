@@ -171,7 +171,8 @@ export function resolveAnchoredObjects(
   // One ExclusionManager per page holds every float's rect on it, so a flow
   // beside two floats reflows against both.
   const exclusionsByPage = new Map<number, ExclusionManager>();
-  const exclusionsOn = (page: number): ExclusionsReader => exclusionsByPage.get(page) ?? new ExclusionManager();
+  const noExclusions: ExclusionsReader = new ExclusionManager();
+  const exclusionsOn = (page: number): ExclusionsReader => exclusionsByPage.get(page) ?? noExclusions;
   const carve = (float: PlacedFloat): void => {
     const page = float.placement.page;
     let exclusions = exclusionsByPage.get(page);

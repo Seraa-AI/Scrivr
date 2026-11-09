@@ -132,7 +132,7 @@ describe("image DOCX export", () => {
     const documentXml = readText(readZip(bytes), "word/document.xml");
 
     expect(documentXml).toContain('allowOverlap="0"');
-    // 40 px × 9525: the user's offset, never the stacked position.
+    // 40 px × 9525: the user's offset.
     expect(documentXml).toContain("<wp:posOffset>381000</wp:posOffset>");
   });
 
