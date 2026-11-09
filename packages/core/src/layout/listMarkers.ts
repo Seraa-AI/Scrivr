@@ -43,18 +43,17 @@ export interface ListMarker extends ListMarkerFont {
 
 /**
  * How a block's list marker is drawn: in the face layout measured it in, on
- * the baseline of its first line, past any gap a full-width float leaves
- * above it. Canvas and PDF both draw from this, so they never disagree.
- * Null for a block without a marker.
+ * the baseline of its first line with text height — past any gap a
+ * full-width float leaves above it, and past a floating image's anchor left
+ * alone on an empty line. Canvas and PDF both draw from this, so they never
+ * disagree. Null for a block without a marker.
  */
 export function listMarkerOf(block: LayoutBlock): ListMarker | null {
   if (block.listMarker === undefined || block.listMarkerX === undefined) return null;
-  let top = block.y;
-  const numberLine = block.lines.find((line) => {
-    if (!isSpacerLine(line)) return true;
-    top += line.lineHeight;
-    return false;
-  });
+  const firstWithHeight = block.lines.findIndex((line) => line.ascent > 0);
+  const index = firstWithHeight >= 0 ? firstWithHeight : block.lines.findIndex((line) => !isSpacerLine(line));
+  const numberLine = block.lines[index];
+  const top = block.y + block.lines.slice(0, index).reduce((sum, line) => sum + line.lineHeight, 0);
   if (!numberLine) return null;
   return { ...(block.listMarkerFace ?? markerFaceOf(block.lines)), baseline: top + numberLine.ascent };
 }
