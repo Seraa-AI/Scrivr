@@ -216,8 +216,17 @@ export interface WrapperLayout {
  *   editor tree, but its children are collected into the parent's layout flow
  *   as if the boundary weren't there. With `wrap`, it shapes them: indents
  *   them, restyles them, or hangs a marker before them.
+ * - `break` — the node has no box: a block that breaks the page starts the
+ *   next block on a new page, an inline node that breaks the line ends its
+ *   line. Only a leaf can break; a node that holds content ignores it.
  */
-export type NodeLayout = { kind: "block" } | { kind: "transparent"; wrap?: WrapperLayout };
+export type NodeLayout =
+  | { kind: "block" }
+  | { kind: "transparent"; wrap?: WrapperLayout }
+  | { kind: "break"; breaks: BreakKind };
+
+/** What a `break` node ends: the page its block is on, or the line it sits in. */
+export type BreakKind = "page" | "line";
 
 /**
  * Layout for a node that declares nothing and holds inline content or nothing:
@@ -239,6 +248,7 @@ function isNodeLayout(value: unknown): value is NodeLayout {
     return false;
   }
   if (value.kind === "block") return true;
+  if (value.kind === "break") return "breaks" in value && (value.breaks === "page" || value.breaks === "line");
   if (value.kind !== "transparent") return false;
   return !("wrap" in value) || value.wrap === undefined || isWrapperLayout(value.wrap);
 }
@@ -253,6 +263,13 @@ function isNodeLayout(value: unknown): value is NodeLayout {
  */
 export function nodeLayout(type: NodeType): NodeLayout {
   const declared: unknown = type.spec["layout"];
-  if (isNodeLayout(declared)) return declared;
+  // A break has no content to lay out, so a node that holds some ignores it.
+  if (isNodeLayout(declared) && (declared.kind !== "break" || type.isLeaf)) return declared;
   return !type.isLeaf && !type.inlineContent ? TRANSPARENT : DEFAULT_NODE_LAYOUT;
+}
+
+/** What a node type breaks, when its layout declares it a break. */
+export function breakOf(type: NodeType): BreakKind | null {
+  const layout = nodeLayout(type);
+  return layout.kind === "break" ? layout.breaks : null;
 }

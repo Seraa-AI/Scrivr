@@ -837,7 +837,6 @@ describe("SourcedBlock Extension", () => {
 
 			const transformer = new PasteTransformer(
 				schema,
-				manager.buildMarkdownRules(),
 				manager.buildMarkdownParserTokens(),
 				{ pasteTransforms: manager.buildPasteTransforms() },
 			);

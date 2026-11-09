@@ -3,7 +3,7 @@
  * styling markdown can't express). The lossless source of truth for formatting.
  */
 import { describe, expect, it } from "vitest";
-import { ServerEditor, StarterKit } from "@scrivr/core";
+import { Extension, ServerEditor, StarterKit } from "@scrivr/core";
 import { toSemanticUnits } from "../index";
 import type { SemanticUnit } from "@scrivr/core";
 
@@ -65,6 +65,22 @@ describe("spans — inline formatting", () => {
       { text: "two", marks: [] },
     ]);
     expect(u.spans!.map((s) => s.text).join("")).toBe(u.text);
+  });
+});
+
+describe("spans — a line break declared outside core", () => {
+  const Separator = Extension.create({
+    name: "lineSeparator",
+    addNodes() {
+      return { lineSeparator: { group: "inline", inline: true, layout: { kind: "break", breaks: "line" } } };
+    },
+  });
+
+  it("is a newline span, as the built-in one is", () => {
+    const editor = new ServerEditor({ extensions: [StarterKit, Separator], content: { type: "doc", content: [
+      { type: "paragraph", content: [mk("one"), { type: "lineSeparator" }, mk("two")] },
+    ] } });
+    expect(toSemanticUnits(editor)[0]?.text).toBe("one\ntwo");
   });
 });
 

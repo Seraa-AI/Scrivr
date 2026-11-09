@@ -1,7 +1,6 @@
 import {
   DOMParser as PMDOMParser,
   Fragment,
-  Mark,
   Slice,
 } from "prosemirror-model";
 import type { Schema, Node } from "prosemirror-model";
@@ -10,7 +9,6 @@ import { MarkdownParser } from "prosemirror-markdown";
 import type MarkdownIt from "markdown-it";
 import { createMarkdownIt } from "../model/parseMarkdown";
 import type {
-  MarkdownBlockRule,
   MarkdownParserTokenSpec,
   PasteTransform,
   PasteHtmlTransform,
@@ -24,12 +22,22 @@ import { safeImageUrl } from "../model/safeUrl";
 // Require intentional block-level structure — mid-sentence asterisks are NOT markdown.
 const MARKDOWN_PATTERN = /^(#{1,6} |[*-] |\d+\. |`{3}|---)/m;
 
-// Tokens that markdown-it emits but our schema has no equivalent for.
-// These are self-closing inline tokens — { ignore: true } silently skips them.
+// A "two spaces, newline" break with no line break node declared reads as a space.
 const IGNORE_TOKENS: Record<string, MarkdownParserTokenSpec> = {
   hardbreak: { ignore: true },
-  code_inline: { ignore: true },
-  image: { ignore: true },
+};
+
+/**
+ * Inline and block markdown-it rules, by the token they emit. A rule whose
+ * token no extension declares is turned off, so its syntax pastes as the text
+ * it was rather than failing the whole paste.
+ */
+const RULE_TOKENS: Record<string, string> = {
+  blockquote: "blockquote",
+  link: "link",
+  autolink: "link",
+  image: "image",
+  backticks: "code_inline",
 };
 
 export interface PasteOptions {
@@ -113,27 +121,24 @@ export function fitPastedImage(
  *
  * Priority:
  *   1. text/html  → ProseMirror DOMParser (handles bold, headings, lists, etc.)
- *   2. text/plain → prosemirror-markdown MarkdownParser (full CommonMark support)
- *   3. text/plain → legacy line-by-line parser (fallback for unsupported constructs)
- *   4. text/plain → plain text insertion
+ *   2. text/plain → prosemirror-markdown MarkdownParser, over the tokens extensions declare
+ *   3. text/plain → plain text insertion, when the markdown holds a token no extension declares
  */
 export class PasteTransformer {
   private readonly md: InstanceType<typeof MarkdownIt>;
 
   constructor(
     private readonly schema: Schema,
-    private readonly extraMarkdownRules: MarkdownBlockRule[] = [],
     private readonly markdownParserTokens: Record<
       string,
       MarkdownParserTokenSpec
     > = {},
     private readonly options: PasteTransformerOptions = {},
   ) {
-    // Disable rules that generate tokens our schema can't handle (blockquote, link, image).
-    // Their content still renders as plain text — no data loss, just no special formatting.
     this.md = createMarkdownIt();
-    //TODO: add these to the schema
-    this.md.disable(["blockquote", "image", "link"]);
+    this.md.disable(
+      Object.entries(RULE_TOKENS).flatMap(([rule, token]) => (token in markdownParserTokens ? [] : [rule])),
+    );
   }
 
   transform(
@@ -378,196 +383,16 @@ export class PasteTransformer {
   /** Markdown */
 
   private looksLikeMarkdown(text: string): boolean {
-    if (MARKDOWN_PATTERN.test(text)) return true;
-    for (const line of text.split("\n")) {
-      const trimmed = line.trimEnd();
-      for (const rule of this.extraMarkdownRules) {
-        if (rule.pattern.test(trimmed)) return true;
-      }
-    }
-    return false;
+    return MARKDOWN_PATTERN.test(text);
   }
 
-  private fromMarkdown(text: string, state: EditorState): Transaction | null {
-    // Try prosemirror-markdown's full parser when we have token handlers
-    if (Object.keys(this.markdownParserTokens).length > 0) {
-      try {
-        const tokens = { ...IGNORE_TOKENS, ...this.markdownParserTokens };
-        const parser = new MarkdownParser(this.schema, this.md, tokens);
-        const doc = parser.parse(text);
-        if (doc) {
-          return state.tr.replaceSelection(
-            this.applyPasteTransforms(new Slice(doc.content, 0, 0)),
-          );
-        }
-      } catch {
-        // Unknown token or schema mismatch — fall through to legacy parser
-      }
-    }
-
-    // Legacy line-by-line parser (handles extension addMarkdownRules + built-in patterns)
-    const nodes = this.parseMarkdownBlocks(text);
-    if (nodes.length === 0) return insertText(state, text);
+  /** Throws on a token no extension declares; the caller pastes plain text instead. */
+  private fromMarkdown(text: string, state: EditorState): Transaction {
+    const tokens = { ...IGNORE_TOKENS, ...this.markdownParserTokens };
+    const doc = new MarkdownParser(this.schema, this.md, tokens).parse(text);
     return state.tr.replaceSelection(
-      this.applyPasteTransforms(new Slice(Fragment.from(nodes), 0, 0)),
+      this.applyPasteTransforms(new Slice(doc.content, 0, 0)),
     );
-  }
-
-  /** Legacy line-by-line parser */
-
-  /**
-   * Line-by-line block parser. Produces paragraph, heading, bulletList,
-   * and orderedList nodes. Inline marks (bold, italic) are handled within
-   * paragraph and heading text content.
-   *
-   * Kept as a fallback for when the MarkdownParser encounters tokens our
-   * schema doesn't support (blockquotes, nested structures, etc.).
-   */
-  private parseMarkdownBlocks(text: string): Node[] {
-    const lines = text.split("\n");
-    const nodes: Node[] = [];
-
-    let paraLines: string[] = [];
-
-    type ListState = { type: "bullet" | "ordered"; items: string[] };
-    let list: ListState | null = null;
-
-    const flushPara = () => {
-      if (paraLines.length === 0) return;
-      const content = paraLines.join(" ").trim();
-      if (content) nodes.push(this.makeParagraph(content));
-      paraLines = [];
-    };
-
-    const flushList = () => {
-      if (!list) return;
-      const items = list.items.map((itemText) =>
-        this.schema.nodes["listItem"]!.create(
-          null,
-          this.schema.nodes["paragraph"]!.create(
-            null,
-            this.parseInline(itemText),
-          ),
-        ),
-      );
-      const listType = list.type === "bullet" ? "bulletList" : "orderedList";
-      const listNode = this.schema.nodes[listType];
-      if (listNode && items.length > 0) {
-        nodes.push(listNode.create(null, items));
-      }
-      list = null;
-    };
-
-    for (const raw of lines) {
-      const line = raw.trimEnd();
-
-      if (line.trim() === "") {
-        flushPara();
-        flushList();
-        continue;
-      }
-
-      // Extension-contributed rules — tried before built-in handlers
-      let customMatched = false;
-      for (const rule of this.extraMarkdownRules) {
-        const match = rule.pattern.exec(line);
-        if (match) {
-          const node = rule.createNode(
-            match,
-            this.schema,
-            this.parseInline.bind(this),
-          );
-          if (node) {
-            flushPara();
-            flushList();
-            nodes.push(node);
-            customMatched = true;
-            break;
-          }
-        }
-      }
-      if (customMatched) continue;
-
-      // ATX heading
-      const headingMatch = /^(#{1,6}) (.+)/.exec(line);
-      if (headingMatch) {
-        flushPara();
-        flushList();
-        const level = headingMatch[1]!.length;
-        const content = headingMatch[2]!.trim();
-        const headingNode = this.schema.nodes["heading"];
-        if (headingNode) {
-          nodes.push(headingNode.create({ level }, this.parseInline(content)));
-        } else {
-          nodes.push(this.makeParagraph(content));
-        }
-        continue;
-      }
-
-      // Bullet list item
-      const bulletMatch = /^[*-] (.+)/.exec(line);
-      if (bulletMatch) {
-        flushPara();
-        if (list && list.type !== "bullet") flushList();
-        if (!list) list = { type: "bullet", items: [] };
-        list.items.push(bulletMatch[1]!);
-        continue;
-      }
-
-      // Ordered list item
-      const orderedMatch = /^\d+\. (.+)/.exec(line);
-      if (orderedMatch) {
-        flushPara();
-        if (list && list.type !== "ordered") flushList();
-        if (!list) list = { type: "ordered", items: [] };
-        list.items.push(orderedMatch[1]!);
-        continue;
-      }
-
-      if (list) flushList();
-      paraLines.push(line);
-    }
-
-    flushPara();
-    flushList();
-
-    return nodes;
-  }
-
-  private makeParagraph(text: string): Node {
-    return this.schema.nodes["paragraph"]!.create(null, this.parseInline(text));
-  }
-
-  /**
-   * Inline mark parser — handles **bold**, *italic*, __bold__, _italic_.
-   */
-  private parseInline(text: string): Node[] {
-    const nodes: Node[] = [];
-    const tokens = text.split(/(\*\*|__|[*_])/);
-    const boldMark = this.schema.marks["bold"];
-    const italicMark = this.schema.marks["italic"];
-
-    let bold = false;
-    let italic = false;
-
-    for (const token of tokens) {
-      if (token === "**" || token === "__") {
-        if (boldMark) bold = !bold;
-        continue;
-      }
-      if (token === "*" || token === "_") {
-        if (italicMark) italic = !italic;
-        continue;
-      }
-      if (!token) continue;
-
-      const marks: Mark[] = [];
-      if (bold && boldMark) marks.push(boldMark.create());
-      if (italic && italicMark) marks.push(italicMark.create());
-      nodes.push(this.schema.text(token, marks));
-    }
-
-    return nodes.length > 0 ? nodes : [this.schema.text("\u200B")];
   }
 }
 

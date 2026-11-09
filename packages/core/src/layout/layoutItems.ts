@@ -7,7 +7,7 @@
 import type { Node } from "prosemirror-model";
 import { coerceSectionSettings, isSectionBreak, type SectionBreakType } from "../model/sections";
 import { layoutBlock, ownFirstLineIndent, type BlockLayoutOptions, type LayoutBlock, type MarkerLine } from "./BlockLayout";
-import { nodeLayout, type WrapperLayout, type WrapScope } from "./BlockRegistry";
+import { breakOf, nodeLayout, type WrapperLayout, type WrapScope } from "./BlockRegistry";
 import { getBlockStyle, type BlockStyle, type FontConfig } from "./FontConfig";
 import type { LayoutLine, LineSpaceProvider } from "./LineBreaker";
 import type { TextMeasurerLike } from "./TextMeasurer";
@@ -82,7 +82,7 @@ export function collectChildItems(parent: Node, base: number): LayoutItem[] {
   };
 
   const walkOne = (node: Node, offset: number, scope: WrapScope): void => {
-    if (node.type.name === "pageBreak") {
+    if (breakOf(node.type) === "page") {
       items.push({ isPageBreak: true, node, nodePos: offset, indentLeft: 0 });
       return;
     }

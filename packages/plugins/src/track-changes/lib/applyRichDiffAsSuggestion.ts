@@ -50,7 +50,7 @@ import {
 } from "../helpers";
 import { isMarkRemoved } from "../semanticChanges";
 import { CHANGE_STATUS } from "../types";
-import { findNodeById } from "@scrivr/core";
+import { breakOf, findNodeById } from "@scrivr/core";
 import { findLiveNodeById } from "../liveNode";
 import { acceptedRangeToDocRange, bridgeable, type PosMapEntry } from "./acceptedTextMap";
 import { clearAuthorPendingMarks } from "./applyDiffAsSuggestion";
@@ -457,7 +457,7 @@ interface AcceptedChar {
  *  - text node → its chars, minus tracked-change marks (trackedDelete text
  *    excluded entirely, matching the review view);
  *  - formatting → its marks, minus any a pending change proposes removing;
- *  - hard break → a newline, unless its deletion is pending;
+ *  - line break → a newline, unless its deletion is pending;
  *  - other inline leaf (e.g. image) → no intrinsic text.
  * Leaf-only by construction: containers are rejected upstream and their inner
  * leaves are edited by their own nodeId, so this never recurses across blocks.
@@ -473,7 +473,7 @@ function collectAccepted(node: PMNode, nodeStart: number, schema: Schema): Accep
     for (let i = 0; i < text.length; i++) out.push({ char: text[i]!, docPos: nodeStart + i, marks });
     return out;
   }
-  if (node.type.name === "hardBreak") return proposedForDeletion(node) ? [] : [{ char: "\n", docPos: nodeStart, marks: [] }];
+  if (breakOf(node.type) === "line") return proposedForDeletion(node) ? [] : [{ char: "\n", docPos: nodeStart, marks: [] }];
   if (node.isLeaf) return []; // other inline leaf (e.g. image) — no intrinsic text
 
   // A leaf textblock: concatenate its inline runs in document order.

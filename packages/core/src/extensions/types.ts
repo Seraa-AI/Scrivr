@@ -455,21 +455,6 @@ export type PasteTransform = (slice: Slice) => Slice;
  */
 export type PasteHtmlTransform = (root: HTMLElement) => void;
 
-export interface MarkdownBlockRule {
-  /** Tested against each trimmed line of pasted text. */
-  pattern: RegExp;
-  /**
-   * Called when pattern matches. Return a ProseMirror Node or null to fall through.
-   * parseInline is the paste transformer's inline parser — use it to support
-   * **bold** / *italic* inside custom block content.
-   */
-  createNode(
-    match: RegExpMatchArray,
-    schema: Schema,
-    parseInline: (text: string) => Node[],
-  ): Node | null;
-}
-
 /**
  * Describes a toolbar button declared by an extension.
  * Core data only — no React, no DOM.
@@ -1056,13 +1041,6 @@ export interface ExtensionConfig<Options = object> {
   addSelectionGesture?(this: Phase1Context<Options>): SelectionGestureProvider[];
 
   /**
-   * Custom markdown block rules for PasteTransformer.
-   * Tried before built-in heading/bullet/ordered rules on each pasted line.
-   * Phase 1 — no schema needed at definition time; schema is passed to createNode at runtime.
-   */
-  addMarkdownRules?(this: Phase1Context<Options>): MarkdownBlockRule[];
-
-  /**
    * Rewrite pasted content before it enters the document.
    *
    * Runs in `PasteTransformer` on the parsed slice, whatever the clipboard
@@ -1224,7 +1202,6 @@ export interface ResolvedExtension {
   hitTesters: HitTester[];
   selectionGestures: SelectionGestureProvider[];
   inputHandlers: Record<string, InputHandler>;
-  markdownRules: MarkdownBlockRule[];
   pasteTransforms: PasteTransform[];
   pasteHtmlTransforms: PasteHtmlTransform[];
   inputRules: InputRule[];

@@ -148,7 +148,6 @@ export class Extension<Options extends object = object> {
       hitTesters: config.addHitTester?.call(p1) ?? [],
       selectionGestures: config.addSelectionGesture?.call(p1) ?? [],
       inputHandlers: config.addInputHandlers?.call(p1) ?? {},
-      markdownRules: config.addMarkdownRules?.call(p1) ?? [],
       pasteTransforms: config.addPasteTransforms?.call(p1) ?? [],
       pasteHtmlTransforms: config.addPasteHtmlTransforms?.call(p1) ?? [],
       inputRules: schema ? (config.addInputRules?.call(p2) ?? []) : [],

@@ -1,5 +1,5 @@
 import { setBlockType } from "prosemirror-commands";
-import type { PdfNodeHandler } from "../../exports/pdf";
+import type { PdfNodeHandler, PdfOutlineLevel } from "../../exports/pdf";
 import { textblockTypeInputRule } from "prosemirror-inputrules";
 import { Extension } from "../Extension";
 import type {
@@ -184,11 +184,19 @@ export const Heading = Extension.create<HeadingOptions>({
       if (jc) pPr.push(xml("w:jc", { "w:val": jc }));
       return xml("w:p", undefined, [xml("w:pPr", undefined, pPr), ...children]);
     };
+    // The node's own level, so a heading deeper than `levels` still nests in order.
+    const outlineLevel: PdfOutlineLevel = (node) => {
+      const level = node.attrs["level"];
+      return typeof level === "number" ? level : readLevel(level);
+    };
     const semanticHandler: SemanticNodeHandler = () => ({ type: "heading" });
     return {
       docx: { nodes: { heading: headingHandler } },
       semantic: { nodes: { heading: semanticHandler } },
-      pdf: { nodes: { heading: headingPdf } },
+      pdf: {
+        nodes: { heading: headingPdf },
+        outline: { heading: outlineLevel },
+      },
     };
   },
 
@@ -238,14 +246,6 @@ export const Heading = Extension.create<HeadingOptions>({
         },
       },
     };
-  },
-
-  addMarkdownRules() {
-    // These back up the built-in heading handler in PasteTransformer.
-    // They're intentionally not registered since PasteTransformer already handles "# "
-    // natively — returning [] here avoids double-processing.
-    // Custom extensions that want heading-like behaviour can use this hook instead.
-    return [];
   },
 
   addInputRules() {
