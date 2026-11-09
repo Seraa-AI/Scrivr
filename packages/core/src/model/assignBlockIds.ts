@@ -139,12 +139,19 @@ export function planDuplicateIdAssignments(
   const shared = new Set([...copies].filter(([, at]) => at.length > 1).map(([id]) => id));
   if (shared.size === 0) return [];
 
+  // A block that was there before keeps its id on the copy holding its
+  // content: where its content's start went. So Enter at the start of a
+  // paragraph leaves the paragraph its id and the empty line before it is new,
+  // as in Word. A leaf has no content; its own position says where it went.
   const kept = new Set<number>();
   before.descendants((node, pos) => {
     const id = blockIdOf(node);
     if (id === null || !shared.has(id)) return true;
-    const mapped = mapping.mapResult(pos, 1);
-    if (!mapped.deleted) kept.add(mapped.pos);
+    const mapped = mapping.mapResult(node.isLeaf ? pos : pos + 1, 1);
+    if (mapped.deleted) return true;
+    const holder = copies.get(id)?.find((copy) =>
+      node.isLeaf ? copy.pos === mapped.pos : copy.pos < mapped.pos && mapped.pos < copy.pos + copy.node.nodeSize);
+    if (holder) kept.add(holder.pos);
     return true;
   });
 

@@ -53,6 +53,40 @@ describe("a tracked split", () => {
   });
 });
 
+describe("a tracked Enter at the start of a paragraph", () => {
+  const atStart = () => {
+    const editor = editorWith([para("p", "Hello")]);
+    editor.applyTransaction(editor.getState().tr.split(1));
+    return editor;
+  };
+  const idOfText = (editor: ServerEditor, text: string) => {
+    let id: unknown;
+    editor.getState().doc.forEach((node) => {
+      if (node.textContent === text) id = node.attrs["nodeId"];
+    });
+    return id;
+  };
+
+  it("leaves the paragraph its id; the empty line before it is new", () => {
+    const editor = atStart();
+    expect(idOfText(editor, "Hello")).toBe("p");
+    expect(new Set(topIds(editor)).size).toBe(2);
+  });
+
+  it("is accepted keeping the paragraph's id", () => {
+    const editor = atStart();
+    expect(reviewChanges(editor, { accepted: pendingActs(editor).map((a) => a.primary.id), rejected: [] }).status).toBe("applied");
+    expect(idOfText(editor, "Hello")).toBe("p");
+  });
+
+  it("is rejected back into the one paragraph, under its id", () => {
+    const editor = atStart();
+    expect(reviewChanges(editor, { accepted: [], rejected: pendingActs(editor).map((a) => a.primary.id) }).status).toBe("applied");
+    expect(editor.getState().doc.childCount).toBe(1);
+    expect(idOfText(editor, "Hello")).toBe("p");
+  });
+});
+
 describe("a tracked Enter in a list", () => {
   it("gives the new item and its paragraph ids of their own", () => {
     const editor = editorWith([{ type: "bulletList", attrs: { nodeId: "l" }, content: [

@@ -148,6 +148,23 @@ describe("UniqueId — no two blocks share an id an edit created", () => {
     expect(all.slice(0, 3)).toEqual(["l", "li", "p"]);
   });
 
+  it("keeps a paragraph's id when Enter at its start opens an empty line before it", () => {
+    const ed = editor();
+    ed.applyTransaction(ed.getState().tr.split(1));
+    const [empty, text] = [ed.getState().doc.child(0), ed.getState().doc.child(1)];
+    expect(text.textContent).toBe("hi");
+    expect(text.attrs["nodeId"]).toBe("p0");
+    expect(empty.textContent).toBe("");
+    expect(empty.attrs["nodeId"]).not.toBe("p0");
+  });
+
+  it("keeps a paragraph's id when Enter at its end opens an empty line after it", () => {
+    const ed = editor();
+    ed.applyTransaction(ed.getState().tr.split(3));
+    expect(ed.getState().doc.child(0).attrs["nodeId"]).toBe("p0");
+    expect(ed.getState().doc.child(1).attrs["nodeId"]).not.toBe("p0");
+  });
+
   it("gives a pasted copy of a block a fresh id, leaving the original", () => {
     const ed = editor();
     const original = ed.getState().doc.child(0);
