@@ -123,6 +123,19 @@ describe("a rejected Enter gives the paragraph back the id it had", () => {
     expect(onlyBlock(editor)).toEqual({ count: 1, text: "Hello", id: "p" });
   });
 
+  it.each([["StarterKit first", true], ["TrackChanges first", false]])("leaves the paragraph its id, %s", (_order, starterFirst) => {
+    const tracking = TrackChanges.configure({ userID: "alice", initialStatus: TrackChangesStatus.enabled, canAcceptReject: true });
+    const editor = new ServerEditor({
+      extensions: starterFirst ? [StarterKit, tracking] : [tracking, StarterKit],
+      content: { type: "doc", content: [para("p", "Hello")] },
+    });
+    enterAt(editor, 1);
+    const ids: Array<[unknown, string]> = [];
+    editor.getState().doc.forEach((node) => ids.push([node.attrs["nodeId"], node.textContent]));
+    expect(ids.find(([, text]) => text === "Hello")?.[0]).toBe("p");
+    expect(new Set(ids.map(([id]) => id)).size).toBe(ids.length);
+  });
+
   it("whichever order the extensions are registered in", () => {
     const editor = new ServerEditor({
       extensions: [TrackChanges.configure({ userID: "alice", initialStatus: TrackChangesStatus.enabled, canAcceptReject: true }), StarterKit],

@@ -544,11 +544,12 @@ the split is recorded (approved by the user, 2026-11-09). It is read from the
 block before the author's step, so neither later typing, nor emptying a half,
 nor the order extensions are registered in changes it. A document clone
 re-keys it with the block it names.
-*Known limit:* a tracked Enter inside a list item is recorded as an insertion
-of the second item, not as a split, so it carries no `originalNodeId`. With
-the item's ids now on the item holding its words, rejecting an Enter at an
-item's very start rejoins the text into the first, freshly keyed item, and
-the item's ids are lost. Waiting on a decision.
+A tracked Enter inside a list item is a split too (user decision,
+2026-11-09): `isSplitStep` takes halves that are the same nodes down to a text
+block, the records go on the item, and rejecting joins the item and its
+paragraph back, each under the id of the half that kept it. Which half keeps
+its ids is core's `planDuplicateIdAssignments`, which tracking asks too, so the
+answer holds whichever plugin runs first.
 
 ### PR B: DOCX revisions
 
@@ -915,6 +916,13 @@ Approved by the user on 2026-11-09:
 - `ReferenceAttrs.originalNodeId` — the id a block had when a tracked split
   was made, so rejecting the split restores it instead of guessing from what
   the halves hold at the time of the reject.
+- Recording a tracked Enter in a list item as a split, so rejecting it keeps
+  the item's ids.
+- **Awaiting approval:** the `planDuplicateIdAssignments` export from
+  `@scrivr/core` (seventh review round). It already decides which copy of a
+  duplicated id is new for `UniqueId`; track changes asks it when it records a
+  split, instead of deciding the same thing a second way that disagreed when
+  `TrackChanges` was registered before `UniqueId`.
 
 Added in the third review round, approved by the user on 2026-11-08:
 

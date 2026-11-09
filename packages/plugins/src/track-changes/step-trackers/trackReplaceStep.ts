@@ -1,7 +1,7 @@
-import { Fragment, Slice } from "@scrivr/core/pm";
+import { Fragment, Slice, type Node as PMNode } from "@scrivr/core/pm";
 import { EditorState, Transaction } from "@scrivr/core/pm";
 import { ReplaceStep } from "@scrivr/core/pm";
-import { blockIdOf } from "@scrivr/core";
+import { blockIdOf, planDuplicateIdAssignments } from "@scrivr/core";
 
 import { ChangeStep, TrTrackingContext } from "../types";
 import { getAction, TrackChangesAction } from "../actions";
@@ -92,6 +92,12 @@ export function trackReplaceStep(
       }
 
       if (!backSpacedText && newSliceContent.size > 0) {
+        const stepDoc = tr.docs[i];
+        const splits = !!stepDoc && !isStructuralChange(tr) && isSplitStep(step, stepDoc, tr.getMeta("uiEvent"));
+        // Which half of a split keeps the ids is core's rule: the half holding
+        // the block's first words. Enter at a block's start leaves them to the
+        // half written here, and the half already in place is the new one.
+        const writtenHalfKeepsIds = !!stepDoc && splits && splitKeepsSecondHalf(step, stepDoc, tr.docs[i + 1] ?? tr.doc);
         let fragment = setFragmentAsInserted(
           newSliceContent,
           createNewInsertAttrs(attrs),
@@ -106,9 +112,7 @@ export function trackReplaceStep(
             tr,
             newTr,
           );
-        } else if (
-          isSplitStep(step, tr.docs[i]!, tr.getMeta("uiEvent"))
-        ) {
+        } else if (splits) {
           // Pass newSliceContent (not fragment) so that text carried into the
           // new paragraph ("lo" from splitting "hel|lo") is NOT marked as a
           // new trackedInsert. Only the structural node_split/reference marks
@@ -142,7 +146,9 @@ export function trackReplaceStep(
         // deletion holds: a block the cut left live is still that block.
         // Anything else the step wrote under an id the document already has
         // is a new block.
-        if (!moveID && !isStructuralChange(tr)) {
+        if (writtenHalfKeepsIds) {
+          clearIdsAbove(newTr, newStep.from, step.slice.openStart);
+        } else if (!moveID && !isStructuralChange(tr)) {
           const movedFrom = trContext.pastedMove ? cutRanges(newTr.doc, trContext.pastedMove.cut) : [];
           fragment = withoutTakenIds(fragment, newTr.doc, movedFrom);
         }
@@ -199,4 +205,18 @@ function sameThingBackSpaced(
     return correspondingDeletion;
   }
   return undefined;
+}
+
+/** Does core's id rule give a split's ids to its second half, the one a step writes? */
+function splitKeepsSecondHalf(step: ReplaceStep, before: PMNode, after: PMNode): boolean {
+  return planDuplicateIdAssignments(before, after, step.getMap()).some(({ pos }) => pos < step.from);
+}
+
+/** Clears the ids of the `depth` blocks around `pos`, outermost first, for UniqueId to give fresh ones. */
+function clearIdsAbove(tr: Transaction, pos: number, depth: number) {
+  const $pos = tr.doc.resolve(pos);
+  for (let level = $pos.depth - depth + 1; level <= $pos.depth; level++) {
+    const node = $pos.node(level);
+    if (blockIdOf(node) !== null) tr.setNodeMarkup($pos.before(level), undefined, { ...node.attrs, nodeId: null }, node.marks);
+  }
 }
