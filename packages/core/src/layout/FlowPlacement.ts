@@ -91,12 +91,15 @@ export function advanceFlowGlobalY(
     let { fitted, rest, fittedHeight } = fitLinesInCapacity(remaining, available);
     if (fitted.length === 0) {
       const [first] = remaining;
-      if (cursor === top && first) {
-        // A line taller than the page — force one to avoid an infinite loop
-        // (mirrors paginateFlow's top-of-page guard).
+      // paginateFlow forces one line at a page top (a line taller than the
+      // page) and a first line within its sub-pixel tolerance of fitting.
+      const forced = first && (cursor === top || fitsWithoutGap(pageBottom(page), cursor, first.lineHeight));
+      if (forced) {
         fitted = [first];
         rest = remaining.slice(1);
-        fittedHeight = first.lineHeight;
+        // A line within tolerance overhangs the bottom by under half a pixel;
+        // its page still ends there, so what follows starts the next page.
+        fittedHeight = cursor === top ? first.lineHeight : pageBottom(page) - cursor;
       } else {
         cursor = pageStart(page + 1);
         continue;
@@ -144,8 +147,8 @@ export function fitsWithoutGap(pageBottom: number, prevEnd: number, lineHeight: 
  * gap before it is `gap` — where `paginateFlow` paints it:
  * - a gap that reaches the bottom of the page the predecessor ended on is
  *   dropped, and the flow starts the next page;
- * - a first line that does not fit gives up the gap if that is enough,
- *   and otherwise starts the next page.
+ * - a first line that does not fit gives up the gap if that brings it within
+ *   `fitsWithoutGap`, and otherwise starts the next page.
  * The first line is the flow's own, so a flow laid out again is landed again.
  */
 export function landingAfter(
@@ -167,7 +170,7 @@ export function landingAfter(
   const firstLine = flow.kind === "text" ? flow.lines[0] : undefined;
   if (!firstLine) return advanceFlowGlobalY(flow, start, pageConfig, geometry).startGlobalY;
   if (start === geometry.startOf(page) || start + firstLine.lineHeight <= bottom) return start;
-  if (gap > 0 && fitsWithoutGap(bottom, prevEnd, firstLine.lineHeight)) return prevEnd;
+  if (fitsWithoutGap(bottom, prevEnd, firstLine.lineHeight)) return prevEnd;
   return geometry.startOf(page + 1);
 }
 
