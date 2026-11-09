@@ -1,6 +1,8 @@
 # Engine declarations: sections, floats, marks and the rest
 
-Status: Draft (2026-11-09), for sign-off.
+Status: Approved (2026-11-09): all four decisions as proposed — sections as a
+boundary item read by the region cursor, spec-level fields, `addPasteFiles()`,
+and the phased order.
 
 ## Problem
 
