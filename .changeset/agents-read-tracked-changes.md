@@ -125,3 +125,6 @@ One-time changes to watch for:
   it back and leaves no change, as it already did for a paragraph. The caret
   stays in the line it was in. An image or horizontal line you added and then
   delete leaves no change either.
+- `editor.getMarkdown()` no longer throws on a document with formatting
+  Markdown cannot write — a colour, a font size, a tracked change. That text
+  keeps its words and drops only the formatting.

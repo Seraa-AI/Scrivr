@@ -533,7 +533,12 @@ export class BaseEditor implements IBaseEditor {
 
   getMarkdownSerializer(): MarkdownSerializer {
     const { nodes, marks } = this.manager.buildMarkdownSerializerRules();
-    return new MarkdownSerializer(nodes, marks);
+    // A mark Markdown cannot write, such as a colour or a tracked change,
+    // keeps its words and drops only the formatting.
+    const plain = Object.fromEntries(
+      Object.keys(this.manager.schema.marks).filter((name) => !(name in marks)).map((name) => [name, { open: "", close: "" }]),
+    );
+    return new MarkdownSerializer(nodes, { ...plain, ...marks });
   }
 
   /** Returns the merged markdown parser token map from all extensions. */
