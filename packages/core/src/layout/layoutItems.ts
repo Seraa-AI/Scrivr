@@ -94,19 +94,22 @@ export function collectChildItems(parent: Node, base: number): LayoutItem[] {
   };
 
   const walk = (container: Node, start: number, scope: WrapScope): void => {
-    container.forEach((node, relOffset) => walkOne(node, start + relOffset, scope));
+    container.forEach((node, relOffset) => walkOne(node, start + relOffset, scope, container));
   };
 
-  const walkOne = (node: Node, offset: number, scope: WrapScope): void => {
+  const walkOne = (node: Node, offset: number, scope: WrapScope, container: Node): void => {
     if (breakOf(node.type) === "page") {
       items.push({ boundary: { kind: "break", breaks: "page" }, node, nodePos: offset, indentLeft: 0 });
       return;
     }
 
-    // Every section boundary, a continuous one included: it is where the
-    // next section's settings take over, though only the other transitions
-    // move the flow today.
+    // Every section boundary between the document's own blocks, a continuous
+    // one included: it is where the next section's settings take over, though
+    // only the other transitions move the flow today. One nested in a wrapper
+    // ends no section (`deriveSections` reads the document's children), so it
+    // takes no place in the flow.
     if (isSectionBreak(node)) {
+      if (container.type !== container.type.schema.topNodeType) return;
       const transition = coerceSectionSettings(node.attrs["settings"]).breakType;
       items.push({ boundary: { kind: "section", transition }, node, nodePos: offset, indentLeft: 0 });
       return;

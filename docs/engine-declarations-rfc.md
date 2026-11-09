@@ -285,6 +285,15 @@ As designed, with these differences:
   (columns Phase 1) replaces. The item stream already names every transition
   in one place; the region cursor turns the continuous one into a flow when it
   has a use for it.
+- **A section boundary is a leaf with a `settings` attr, between the
+  document's own blocks.** A node that holds content, or has no `settings` to
+  set, is not one, whatever it declares; one nested in a wrapper ends no
+  section and takes no place in the flow, as `deriveSections` already read it.
+  Headers and footers refuse section boundaries, as they refuse page breaks.
 - The vocabulary guard keeps `sectionBreak` out of `layout/` and the sections
   model.
+- **To check (older than this phase):** two next-page boundaries in a row lay
+  out as Word does (an empty page between), but the solver's position model
+  lands the block after them one page above where it is painted, so an image
+  anchored right after them is placed a page early.
 

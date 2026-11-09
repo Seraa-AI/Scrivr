@@ -19,6 +19,10 @@ const Chapters = Extension.create({
         attrs: { settings: { default: null } },
         toDOM: () => ["hr"],
       },
+      // Both declare the boundary, but one holds content and the other has no
+      // settings: neither is a section boundary.
+      chapterBox: { group: "block", content: "paragraph+", sectionBoundary: true, attrs: { settings: { default: null } }, toDOM: () => ["section", 0] },
+      bareEnd: { group: "block", atom: true, sectionBoundary: true, toDOM: () => ["hr"] },
     };
   },
 });
@@ -51,6 +55,13 @@ describe("a section boundary from outside core", () => {
   it("starts the next section on a new page unless it is continuous", () => {
     expect(placeOf(pagesOf([p("one"), chapterEnd("nextPage"), p("two")]), "two").page).toBe(2);
     expect(placeOf(pagesOf([p("one"), chapterEnd("oddPage"), p("two")]), "two").page).toBe(3);
+  });
+
+  it("is a leaf that carries settings: a node that holds content or has no settings is not one", () => {
+    const boxed = pagesOf([p("one"), { type: "chapterBox", attrs: { settings: { breakType: "nextPage", columns: { count: 1, gap: 24 } } }, content: [p("inside")] }, p("two")]);
+    expect([placeOf(boxed, "inside").page, placeOf(boxed, "two").page]).toEqual([1, 1]);
+    expect(placeOf(pagesOf([p("one"), { type: "bareEnd" }, p("two")]), "two").page).toBe(1);
+    expect(deriveSections(docOf([p("one"), { type: "bareEnd" }, p("two")]))).toHaveLength(1);
   });
 
   it("does not move the flow when the next section is continuous", () => {

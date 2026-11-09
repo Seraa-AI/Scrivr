@@ -171,11 +171,13 @@ export function applySectionSettingsPatch(
 }
 
 /**
- * Whether a node is a section boundary: its spec declares `sectionBoundary`,
- * and its `settings` attr holds the settings of the section it ends.
+ * Whether a node is a section boundary: a leaf whose spec declares
+ * `sectionBoundary` and a `settings` attr, which holds the settings of the
+ * section it ends. Without that attr its settings could never be set.
  */
 export function isSectionBreak(node: Node): boolean {
-  return node.type.spec["sectionBoundary"] === true;
+  const { spec } = node.type;
+  return spec["sectionBoundary"] === true && node.isLeaf && spec.attrs !== undefined && "settings" in spec.attrs;
 }
 
 /**
