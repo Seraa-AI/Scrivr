@@ -147,7 +147,7 @@ interface PlacedFloat {
   /** Square and top-bottom floats carve a wrap zone; behind and front do not. */
   wraps: boolean;
   placement: AnchoredObjectPlacement;
-  /** Set when the float's own wrap kept moving its anchor (Decision 6). */
+  /** Set when the float's own wrap kept moving its anchor, so it has no fixed point. */
   locked: boolean;
   /**
    * Where the float goes, and where its anchor flow must start, given where
@@ -240,7 +240,7 @@ export function resolveAnchoredObjects(
   // moved, or that stacks on a page where a float moved.
   //
   // A float whose own wrap keeps moving its anchor has no layout where text,
-  // float and anchor all agree, and is locked (Decision 6): when one of its
+  // float and anchor all agree, and is locked as Word does: when one of its
   // placements repeats (an oscillation, as LibreOffice's SwOszControl
   // detects it) or after MAX_PLACEMENTS_BEFORE_LOCK placements that never
   // settle. A placement counts toward that only when the float's own zone
@@ -426,7 +426,7 @@ export function resolveAnchoredObjects(
       return Math.min(Math.max(painted, pageStart), pageEnd);
     };
 
-    // Square stacking (Decision 5): a square float that would overlap one
+    // Square stacking: a square float that would overlap one
     // placed before it on the page, or a locked one, moves down below it;
     // its anchor paragraph stays where it is.
     const stackBelowOthers = (painted: number, page: number): number => {
@@ -770,7 +770,7 @@ function moveTableClearOfFloats(
   // Floats anchored before the table stay put while it moves. One anchored
   // after it moves with it, so it blocks the table only where it reaches back
   // over the table's own band — and a locked one never does: it is a float
-  // anchored after the table, which overlaps it (Decision 3).
+  // anchored after the table, and those overlap it.
   // The table is cleared on the page its natural position is on, which is
   // not the page being scanned when an earlier move carried it over.
   const clearPage = geometry.pageAt(natural);
@@ -801,7 +801,7 @@ function moveTableClearOfFloats(
 
   // Clear every float if the floats the move drags let it; otherwise clear
   // only the floats that stay put and let the dragged ones overlap
-  // (Decision 3); otherwise stay.
+  // when they would chase it; otherwise stay.
   const candidates = [
     { target: clearOf(blocking), reachBackMustClear: true },
     { target: clearOf(stayingPut), reachBackMustClear: false },
