@@ -71,15 +71,16 @@ One-time changes to watch for:
   carries its id. The copy holding the original content keeps it: Enter at a
   paragraph's start makes the empty line before it the new block. Only the
   author's client assigns it; a change arriving through sync is never
-  re-keyed, and undo and redo never rename. A pending move's two copies — a
-  tracked cut pasted elsewhere included — still share their id. Documents
-  saved with duplicates keep them; edits never repair them.
+  re-keyed, and undo and redo never rename. A pending move's two copies still
+  share their id. A tracked cut pasted elsewhere is a move, as Word tracks it,
+  so the pasted block keeps its id (approved by the user, 2026-11-09).
+  Documents saved with duplicates keep them; edits never repair them.
 - **An agent's edit to a block proposed for deletion is rejected**, and every
   agent write path — `applyRichEdit` and the structural ops — rejects an id
   two live blocks carry rather than acting on the first. That can happen in a
   document saved with duplicates, or after concurrent cut-and-paste of one
   block in collaboration.
-- `blockIdOf(node)` is exported from `@scrivr/core`: the one answer to which
-  nodes carry a block id.
+- `blockIdOf(node)` is exported from `@scrivr/core` (approved by the user,
+  2026-11-09): the one answer to which nodes carry a block id.
 - **Track changes marks its own recording transaction `NORMALIZATION_META`,**
   as bookkeeping nobody authored.

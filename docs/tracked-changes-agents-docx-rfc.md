@@ -879,6 +879,13 @@ The user also approved, on 2026-11-08, two added in the second review round:
   duplicated ids, say what is a move's left-behind copy. It shares one cached
   walk with `shadowRanges`.
 
+Approved by the user on 2026-11-09:
+
+- The `blockIdOf` export from `@scrivr/core` — the one answer to which nodes
+  carry a block id, which track changes' write-back shares with `UniqueId`.
+- A tracked cut-and-paste keeps the block's id as a move, matching Word, which
+  tracks cut and paste as a move.
+
 Added in the third review round, approved by the user on 2026-11-08:
 
 - **`SemanticUnit.proposedForDeletion` and `SemanticPart.proposedForDeletion`**
