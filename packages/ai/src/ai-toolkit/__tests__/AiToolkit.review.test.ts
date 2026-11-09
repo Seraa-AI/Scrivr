@@ -303,3 +303,38 @@ describe("ai.reviewChanges", () => {
     expect(ai.reviewChanges({ accepted: ["nope"], rejected: [] })).toMatchObject({ status: "blocked", reason: "missing-changes" });
   });
 });
+
+describe("an agent's edit beside a reviewer's pending change", () => {
+  const pendingBy = (editor: ServerEditor) => (trackChangesPluginKey.getState(editor.getState())?.changeSet.pending ?? [])
+    .map((change) => `${change.dataTracked.operation}:${change.dataTracked.authorID}`);
+
+  it("leaves another author's pending removal of bold as theirs", () => {
+    const { editor, ai } = build([{ type: "paragraph", attrs: { nodeId: "p" }, content: [
+      { type: "text", text: "Hello " }, { type: "text", text: "world", marks: [{ type: "bold" }] },
+    ] }]);
+    const bold = editor.getState().schema.marks["bold"];
+    if (!bold) throw new Error("no bold");
+    editor.applyTransaction(editor.getState().tr.removeMark(7, 12, bold));
+    const removal = pendingBy(editor);
+    const unit = unitOf(ai.getRichBlocks(), "p");
+    const text = unit.text.replace("Hello", "Hi");
+    expect(ai.applyRichEdit([{ ...unit, text, spans: [{ text, marks: [] }] }]).applied).toBe(true);
+    expect(pendingBy(editor)).toEqual(expect.arrayContaining(removal));
+    expect(pendingBy(editor).filter((change) => !removal.includes(change)).every((change) => change.startsWith("insert") || change.startsWith("delete"))).toBe(true);
+  });
+
+  it("edits only the words it changed when a line break is pending deletion", () => {
+    const { editor, ai } = build([{ type: "paragraph", attrs: { nodeId: "p" }, content: [
+      { type: "text", text: "Hello there" }, { type: "hardBreak" }, { type: "text", text: "world" },
+    ] }]);
+    editor.applyTransaction(editor.getState().tr.delete(12, 13));
+    const unit = unitOf(ai.getRichBlocks(), "p");
+    const text = unit.text.replace("Hello", "Hi");
+    expect(ai.applyRichEdit([{ ...unit, text, spans: [{ text, marks: [] }] }]).applied).toBe(true);
+    const deleted: string[] = [];
+    editor.getState().doc.descendants((node) => {
+      if (node.isText && node.marks.some((mark) => mark.type.name === "trackedDelete")) deleted.push(node.text ?? "");
+    });
+    expect(deleted.join("")).toBe("Hello");
+  });
+});
