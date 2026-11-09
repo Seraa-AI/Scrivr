@@ -574,6 +574,7 @@ export function layoutBlock(
       defaultFontFamily: parsedBase.family,
       defaultFontSize: parseFloat(parsedBase.size),
       ...(indentAwareLineSpace ? { lineSpaceProvider: indentAwareLineSpace, startY: y } : {}),
+      ...(firstLineIndent > 0 ? { firstLineIndent } : {}),
     },
   );
 

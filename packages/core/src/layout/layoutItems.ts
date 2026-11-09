@@ -140,7 +140,9 @@ export function collectChildItems(parent: Node, base: number): LayoutItem[] {
       return;
     }
 
-    if (nodeLayout(node.type).kind === "transparent") {
+    // A node laid out in place that holds nothing still takes its line, so an
+    // empty container does not vanish from the page.
+    if (nodeLayout(node.type).kind === "transparent" && node.childCount > 0) {
       walk(node, offset + 1, list);
       return;
     }

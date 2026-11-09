@@ -339,11 +339,18 @@ export class LineBreaker {
       pageContext?: { page: number; lineIndexOffset: number; lineY: number };
       lineSpaceProvider?: LineSpaceProvider;
       startY?: number;
+      /**
+       * How far the first line is indented (its segments already narrowed by
+       * it). A first word that does not fit what the indent leaves wraps to
+       * the next line, leaving the first line empty — as Word leaves a list
+       * number alone on its line — rather than running past the line's end.
+       */
+      firstLineIndent?: number;
     },
   ): LayoutLine[] {
     if (!spans.length) return [];
 
-    const { defaultFontFamily, defaultFontSize, map, pageContext, lineSpaceProvider, startY = 0 } = options;
+    const { defaultFontFamily, defaultFontSize, map, pageContext, lineSpaceProvider, startY = 0, firstLineIndent = 0 } = options;
 
     const lines: LayoutLine[] = [];
     let currentLine: LayoutSpan[] = [];
@@ -481,6 +488,29 @@ export class LineBreaker {
         word.kind === "object"
           ? word.width
           : this.measurer.measureWidth(word.text, word.font);
+
+      // An indented first line too short for its first word holds nothing:
+      // the word starts the next line. The empty line keeps the word's font,
+      // so whatever labels the line (a list number) has a baseline and a face.
+      if (
+        firstLineIndent > 0 &&
+        lines.length === 0 &&
+        currentLine.length === 0 &&
+        !findPlacement(currentLineSegments, currentSegmentIndex, currentSegmentUsed, wordWidth, false)
+      ) {
+        const font = word.kind === "text" ? word.font : lastSeenFont ?? `${defaultFontSize}px ${defaultFontFamily}`;
+        const emptyFirstLine = buildLine(
+          [{ kind: "text", text: "\u200B", font, x: currentLineSegments[0]?.x ?? 0, width: 0, docPos: word.docPos }],
+          this.measurer,
+        );
+        lines.push(emptyFirstLine);
+        cumulativeLineY += emptyFirstLine.lineHeight;
+        const nextLineSpace = resolveLineSpace(lineSpaceProvider, startY + cumulativeLineY, probeLineHeight(word), maxWidth);
+        currentLineSegments = nextLineSpace.segments;
+        currentSegmentIndex = 0;
+        currentSegmentUsed = 0;
+        currentLinePositioned = isPositionedLine(currentLineSegments, maxWidth);
+      }
 
       const lineIsEmpty = currentLine.length === 0;
       const placement = findPlacement(
