@@ -5,7 +5,7 @@
  * suggestion, whatever mode the person is in.
  */
 import { describe, expect, it } from "vitest";
-import { ServerEditor, StarterKit } from "@scrivr/core";
+import { Extension, ServerEditor, StarterKit, type AnchoredPlacement } from "@scrivr/core";
 import { TrackChanges, TrackChangesStatus, trackChangesPluginKey } from "@scrivr/plugins";
 import { AiToolkit } from "../AiToolkit";
 import { getAiToolkit } from "../aiToolkitRegistry";
@@ -206,5 +206,51 @@ describe("reading a selection", () => {
     const ids = ai.getRichBlocks(0, editor.getState().doc.content.size).map((unit) => unit.id);
 
     expect(ids).toEqual(["a", "fig", "b"]);
+  });
+});
+
+/** A floating clip from outside core: an image to an agent, placed through its own attrs. */
+const Clips = Extension.create({
+  name: "clips",
+  addNodes() {
+    return {
+      clip: {
+        group: "inline",
+        inline: true,
+        atom: true,
+        attrs: { src: { default: "" }, alt: { default: "" }, w: { default: 100 }, h: { default: 100 }, mode: { default: "inline" } },
+        anchored: {
+          read: (node): AnchoredPlacement => ({
+            width: Number(node.attrs["w"]), height: Number(node.attrs["h"]),
+            wrapMode: node.attrs["mode"] === "square" ? "square" : "inline",
+            positionMode: "move-with-text", xAlign: "left", x: null, yOffset: 0, zIndex: 0, margin: 8,
+          }),
+          write: (patch) => ({
+            ...(patch.width !== undefined ? { w: patch.width } : {}),
+            ...(patch.height !== undefined ? { h: patch.height } : {}),
+            ...(patch.wrapMode !== undefined ? { mode: patch.wrapMode } : {}),
+          }),
+        },
+        toDOM: () => ["span"],
+      },
+    };
+  },
+});
+
+describe("an image from outside core, laid out by the agent", () => {
+  it("takes the layout through its own attrs", () => {
+    const editor = new ServerEditor({
+      extensions: [StarterKit, Clips, TrackChanges.configure({ userID: "person", initialStatus: TrackChangesStatus.disabled, canAcceptReject: true }), AiToolkit],
+      content: { type: "doc", content: [{ type: "paragraph", attrs: { nodeId: "c" }, content: [{ type: "clip", attrs: { src: SRC, alt: "Clip" } }] }] },
+    });
+    const ai = getAiToolkit(editor);
+    if (!ai) throw new Error("no toolkit");
+    ai.applySemanticEdits([{ kind: "richText", nodeId: "c", attrs: { wrap: "square", width: 300 } }]);
+
+    let clip: Record<string, unknown> | null = null;
+    editor.getState().doc.descendants((node) => {
+      if (node.type.name === "clip") clip = node.attrs;
+    });
+    expect(clip).toMatchObject({ mode: "square", w: 300, h: 100 });
   });
 });

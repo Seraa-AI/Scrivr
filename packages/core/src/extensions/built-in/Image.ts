@@ -1,5 +1,5 @@
 import { Extension } from "../Extension";
-import { imagePlacementOf } from "./imagePlacement";
+import { imagePlacementAttrs, imagePlacementOf } from "./imagePlacement";
 import type { PdfEmbedSource, PdfNodeHandler } from "../../exports/pdf";
 import { NodeSelection, type Command } from "prosemirror-state";
 import type { InlineStrategy } from "../../layout/BlockRegistry";
@@ -622,15 +622,7 @@ const imageEmbed: PdfEmbedSource = (node) => {
   return typeof src === "string" && src !== "" ? src : null;
 };
 
-/** The attrs that put an image back in its line, legacy placement cleared. */
-export const INLINE_IMAGE_ATTRS: Readonly<Record<string, unknown>> = {
-  wrapMode: "inline",
-  wrappingMode: "inline",
-  xAlign: "left",
-  x: null,
-  yOffset: 0,
-  floatOffset: { x: 0, y: 0 },
-};
+
 
 export const Image = Extension.create({
   name: "image",
@@ -642,7 +634,7 @@ export const Image = Extension.create({
   addNodes() {
     return {
       image: {
-        anchored: imagePlacementOf,
+        anchored: { read: imagePlacementOf, write: imagePlacementAttrs },
         inline: true,
         group: "inline",
         attrs: {

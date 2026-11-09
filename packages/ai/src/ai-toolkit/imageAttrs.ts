@@ -1,4 +1,4 @@
-import { IMAGE_NODE_ATTRS, anchoredOf, type IBaseEditor } from "@scrivr/core";
+import { IMAGE_NODE_ATTRS, anchoredOf, placementAttrs, semanticImage, type IBaseEditor, type PlacementPatch } from "@scrivr/core";
 import { findLiveNodeById, proposedForDeletion, trackAsSuggestion } from "@scrivr/plugins";
 import type { SemanticImageAttrs } from "../schema/edit";
 
@@ -30,18 +30,25 @@ export function applyImageLayout(editor: IBaseEditor, edits: ImageLayoutEdit[], 
     if (!found) continue;
     let at = -1;
     found.node.forEach((child, offset) => {
-      if (at < 0 && child.type.name === "image" && !proposedForDeletion(child)) at = found.pos + 1 + offset;
+      if (at < 0 && semanticImage(child) && !proposedForDeletion(child)) at = found.pos + 1 + offset;
     });
     const image = at < 0 ? null : tr.doc.nodeAt(at);
     if (!image) continue;
-    // A legacy `wrappingMode` outranks `wrapMode`/`xAlign`: write out what it
-    // meant and retire it, so the layout the agent sets is the one that shows.
+    // The layout goes through the node's own declaration. A new wrap, alignment
+    // or size is written with the resolved wrap and alignment, so a layout the
+    // node holds from older attrs cannot outrank the one the agent sets.
     const placed = anchoredOf(image);
     if (!placed) continue;
-    const legacy = image.attrs["wrappingMode"] !== "inline"
-      ? { wrapMode: placed.wrapMode, xAlign: placed.xAlign, wrappingMode: "inline" }
+    const patch: PlacementPatch = {
+      ...(attrs.wrap !== undefined ? { wrapMode: attrs.wrap } : {}),
+      ...(attrs.align !== undefined ? { xAlign: attrs.align } : {}),
+      ...(attrs.width !== undefined ? { width: attrs.width } : {}),
+      ...(attrs.height !== undefined ? { height: attrs.height } : {}),
+    };
+    const placing = Object.keys(patch).length > 0
+      ? placementAttrs(image, { wrapMode: placed.wrapMode, xAlign: placed.xAlign, ...patch }) ?? {}
       : {};
-    const next = { ...image.attrs, ...legacy, ...imageNodeAttrs(attrs) };
+    const next = { ...image.attrs, ...placing, ...(attrs.alt !== undefined ? { alt: attrs.alt } : {}) };
     if (Object.entries(next).every(([key, value]) => value === image.attrs[key])) continue;
     tr.setNodeMarkup(at, undefined, next, image.marks);
     changed.push(nodeId);

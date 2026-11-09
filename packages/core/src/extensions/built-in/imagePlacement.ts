@@ -9,6 +9,7 @@ import {
   isWrapModeValue,
   isXAlignValue,
   type AnchoredPlacement,
+  type PlacementPatch,
   type WrapMode,
   type XAlign,
 } from "../../layout/AnchoredObjects";
@@ -134,4 +135,17 @@ function resolveCustomX(a: RawImageAttrs): number | null {
 
 function numberOrDefault(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+/**
+ * The image attrs that store a placement patch. A new wrap mode retires the
+ * legacy `wrappingMode`, and a return to the line clears the legacy
+ * `floatOffset` too, so the placement written is the one that shows.
+ */
+export function imagePlacementAttrs(patch: PlacementPatch): Record<string, unknown> {
+  return {
+    ...patch,
+    ...(patch.wrapMode !== undefined ? { wrappingMode: "inline" } : {}),
+    ...(patch.wrapMode === "inline" ? { floatOffset: { x: 0, y: 0 } } : {}),
+  };
 }

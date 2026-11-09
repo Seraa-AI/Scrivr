@@ -116,4 +116,10 @@ describe("an outline block from outside core", () => {
       titled("heading", "Two", { level: 2 }),
     ])).toEqual([{ title: "One", children: [{ title: "Two", children: [] }] }]);
   });
+
+  it("titles a bookmark as the semantic outline does: a line break as a space, trimmed", async () => {
+    expect(await outlineOf([StarterKit], [
+      { type: "heading", attrs: { level: 1 }, content: [{ type: "text", text: "  Terms" }, { type: "hardBreak" }, { type: "text", text: "and Conditions " }] },
+    ])).toEqual([{ title: "Terms and Conditions", children: [] }]);
+  });
 });

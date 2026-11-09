@@ -346,25 +346,38 @@ heading heads nothing.
   whose text is all proposed for deletion is no bookmark and no section.
 - **A section is titled by its heading**, not by the unit's text, which with
   grouping on includes the lede.
+- **One title rule in core** (user, 2026-11-10): `outlineTitleOf(node,
+  isRemoved)`: the proposed text, a line break as a space, whitespace runs as
+  one, trimmed. The bookmarks pass the semantic lane's `isRemoved`; the
+  semantic walker passes its own rule (`isRemoved`, or a run its mark handlers
+  drop). Sections opened by headings in one unit keep document order.
 
 **Floats and images.** As designed (items 4 and 5), with these differences:
 
-- **`anchored(node)` on the spec, read through `anchoredOf` and `floats`.**
+- **`anchored` is a read/write pair** (user, 2026-11-10), `AnchoredSpec`:
+  `read(node)` gives the placement, `write(patch)` the attrs that store a
+  `PlacementPatch`. Read through `anchoredOf` and `floats`, written through
+  `placementAttrs` by drag, drop into or out of a cell, re-anchor, resize, a
+  return to the line and the agent's image layout, so a custom floating node
+  keeps what a gesture gives it. A node that declares a placement is the size
+  it declares, in its line too. The guard rejects a non-positive size.
   `AnchoredPlacement` is `NormalizedImageAttrs` renamed. Image declares it
   with `imagePlacementOf` (its own module), which owns the legacy attr mapping
   `normalizeImageAttrs` held; core no longer exports either. Span building,
   page layout, anchor collection, selection, pointer drag, the debug overlay,
   `semanticImage` (an anchored object with a `src`) and Paragraph read it.
-- **Inline conversion stays on `Editor`, generic**: `placeInlineAtVisualPosition(docPos,
-  inlineAttrs)` for any anchored node, with Image's `INLINE_IMAGE_ATTRS`. A
-  command cannot reach the painted rect and hit-testing it needs, so only the
-  attrs moved to Image.
+- **Inline conversion stays on `Editor`, generic**:
+  `placeInlineAtVisualPosition(docPos)` for any anchored node, writing the
+  inline placement through its declaration. A command cannot reach the painted
+  rect and hit-testing it needs.
 - **A horizontal drag clamps with the width snapshotted at pointerdown**, as
   the rest of the drag reads its geometry, not by re-reading the node.
 - **`addPasteFiles()`** returns `PasteFileSpec`s keyed by node type:
   `accepts(file)`, the placeholder's attrs and how to recognise it, and the
   resolved attrs. Core keeps reading or uploading the bytes, the URL gate and
-  measuring; Image declares the image's.
+  measuring; Image declares the image's. A later-registered extension takes a
+  file first. The load-time sweep of orphaned placeholders asks the same
+  declarations (`normalizeDocument`'s `pasteFiles`).
 - **`pdf.embeds`** (`PdfEmbedSource`) says where a node's embedded file lives;
   the exporter fetches every declared source, anchored objects included.
 - The vocabulary guards keep `image` read by name out of `layout/`,
@@ -372,4 +385,10 @@ heading heads nothing.
   `export-pdf/src`.
 - Still naming nodes, for later passes: `sanitizeDocUrls`' per-node URL gates,
   the semantic lane's part types and container labels, and tables.
+- **To check (older than this phase):** DOCX export reads an image's raw
+  wrap attrs, so a legacy `wrappingMode: "square-right"` image exports inline;
+  the React image menu can make a legacy right-aligned image jump left; a
+  `trackedDelete` run with no records is dropped from semantic titles but kept
+  by `isRemoved`; parts after a nested heading inside a unit miss it in their
+  breadcrumb.
 

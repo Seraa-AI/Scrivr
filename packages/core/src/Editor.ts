@@ -9,7 +9,7 @@ import {
 	type Selection,
 } from "prosemirror-state";
 import { SelectionController } from "./SelectionController";
-import { anchoredOf } from "./layout/AnchoredObjects";
+import { anchoredOf, placementAttrs } from "./layout/AnchoredObjects";
 import type {
 	FontModifier,
 	MarkDecorator,
@@ -912,15 +912,18 @@ export class Editor extends BaseEditor implements IEditor {
 
 	/**
 	 * Put a floating object back into its text, at its current painted
-	 * location, with `inlineAttrs` — the attrs its extension writes to make it
-	 * inline (Image's `INLINE_IMAGE_ATTRS`). Floating modes treat docPos as
-	 * ownership and attrs as geometry; inline mode is the opposite, so this is
-	 * the one place where visual X/Y is resolved back to a document position.
+	 * location, its placement written through its own declaration. Floating
+	 * modes treat docPos as ownership and attrs as geometry; inline mode is the
+	 * opposite, so this is the one place where visual X/Y is resolved back to a
+	 * document position.
 	 */
-	placeInlineAtVisualPosition(docPos: number, inlineAttrs: Readonly<Record<string, unknown>>): boolean {
+	placeInlineAtVisualPosition(docPos: number): boolean {
 		const state = this.getActiveState();
 		const node = state.doc.nodeAt(docPos);
-		if (!node || !anchoredOf(node)) return false;
+		const inlineAttrs = node && anchoredOf(node)
+			? placementAttrs(node, { wrapMode: "inline", xAlign: "left", x: null, yOffset: 0 })
+			: null;
+		if (!node || !inlineAttrs) return false;
 
 		const rect = this.getNodeRect(docPos);
 		if (!rect) {

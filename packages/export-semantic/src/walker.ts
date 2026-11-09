@@ -1,5 +1,5 @@
 import type { Node as PmNode } from "@scrivr/core/pm";
-import { outlineLevelOf, type SemanticChange, type SemanticHeading, type SemanticNodeResult, type SemanticPart, type SemanticUnit, type UnitCtx } from "@scrivr/core";
+import { outlineLevelOf, outlineTitleOf, type SemanticChange, type SemanticHeading, type SemanticNodeResult, type SemanticPart, type SemanticUnit, type UnitCtx } from "@scrivr/core";
 import type { ResolvedHandlers } from "./collectHandlers";
 import { groupBlocks } from "./grouping";
 import { resolveNodeId, type BlockEntry } from "./id";
@@ -48,15 +48,17 @@ export function walkSemantic(
   const stack: { level: number; title: string }[] = [];
   let order = 0;
 
+  // What the proposed view leaves out of a title: what the lane reports
+  // removed, and a text run its mark handlers drop (a tracked deletion).
+  const removed = (node: PmNode): boolean =>
+    ctx.isRemoved(node) || (node.isText && (node.text ?? "") !== "" && ctx.toText(node) === "");
   // A block heads a section when its spec declares an outline level and its
-  // proposed text is not empty, as the PDF bookmarks read it. Titles use the
-  // same mark-aware extraction as unit text (tracked deletes left out), since
-  // breadcrumbs are embedding input too.
+  // title is not empty, titled by the rule the PDF bookmarks use.
   const headingOf = (node: PmNode): { level: number; title: string } | null => {
     const level = outlineLevelOf(node);
     if (level === null) return null;
-    const title = ctx.toText(node);
-    return title.trim() === "" ? null : { level, title };
+    const title = outlineTitleOf(node, removed);
+    return title === "" ? null : { level, title };
   };
   // A heading sits under the open headings shallower than it, then heads
   // what follows it.

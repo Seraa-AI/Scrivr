@@ -6,7 +6,7 @@ import {
   type PDFDocument,
   type PDFRef,
 } from "pdf-lib";
-import { outlineLevelOf, type DocumentLayout, type LayoutBlock } from "@scrivr/core";
+import { outlineLevelOf, outlineTitleOf, type DocumentLayout, type LayoutBlock } from "@scrivr/core";
 import type { Node } from "@scrivr/core/pm";
 import { PT_PER_PX } from "./context";
 
@@ -147,24 +147,9 @@ function collectEntries(layout: DocumentLayout, isRemoved: (node: Node) => boole
   return entries;
 }
 
-/**
- * A block's text as the proposed view reads it, without what it removes: a
- * block whose text is all proposed for deletion has no title, so it is no
- * bookmark, as it opens no section in the semantic outline.
- */
-function proposedText(node: Node, isRemoved: (node: Node) => boolean): string {
-  let text = "";
-  node.descendants((child) => {
-    if (isRemoved(child)) return false;
-    if (child.isText) text += child.text ?? "";
-    return true;
-  });
-  return text;
-}
-
 function entryOf(block: LayoutBlock, isRemoved: (node: Node) => boolean): { title: string; level: number } | null {
   const level = outlineLevelOf(block.node);
   if (level === null) return null;
-  const title = proposedText(block.node, isRemoved).trim();
+  const title = outlineTitleOf(block.node, isRemoved);
   return title ? { title, level } : null;
 }

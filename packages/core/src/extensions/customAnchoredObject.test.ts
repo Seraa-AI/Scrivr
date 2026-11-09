@@ -10,6 +10,7 @@ import {
   ExtensionManager,
   StarterKit,
   anchoredOf,
+  placementAttrs,
   defaultPageConfig,
   runPipeline,
   type AnchoredPlacement,
@@ -18,9 +19,9 @@ import { createMeasurer } from "../test-utils";
 
 const BADGE = 60;
 
-const badgePlacement = (wrapMode: AnchoredPlacement["wrapMode"]): AnchoredPlacement => ({
+const badgePlacement = (wrapMode: AnchoredPlacement["wrapMode"], x: number | null = null, yOffset = 0): AnchoredPlacement => ({
   width: BADGE, height: BADGE, wrapMode, positionMode: "move-with-text",
-  xAlign: "right", x: null, yOffset: 0, zIndex: 0, margin: 8,
+  xAlign: x === null ? "right" : "custom", x, yOffset, zIndex: 0, margin: 8,
 });
 
 const Badges = Extension.create({
@@ -31,8 +32,23 @@ const Badges = Extension.create({
         group: "inline",
         inline: true,
         atom: true,
-        attrs: { floating: { default: true } },
-        anchored: (node) => badgePlacement(node.attrs["floating"] === true ? "square" : "inline"),
+        attrs: { floating: { default: true }, left: { default: null }, drop: { default: 0 } },
+        anchored: {
+          read: (node) => {
+            const left = node.attrs["left"];
+            const drop = node.attrs["drop"];
+            return badgePlacement(
+              node.attrs["floating"] === true ? "square" : "inline",
+              typeof left === "number" ? left : null,
+              typeof drop === "number" ? drop : 0,
+            );
+          },
+          write: (patch) => ({
+            ...(patch.wrapMode !== undefined ? { floating: patch.wrapMode !== "inline" } : {}),
+            ...(patch.x !== undefined ? { left: patch.x } : {}),
+            ...(patch.yOffset !== undefined ? { drop: patch.yOffset } : {}),
+          }),
+        },
         toDOM: () => ["span", { class: "badge" }],
       },
     };
@@ -67,7 +83,19 @@ describe("a floating object from outside core", () => {
     expect(firstLine?.width).toBeLessThan(contentRight - defaultPageConfig.margins.left - BADGE);
   });
 
-  it("sits in the line when it declares an inline placement", () => {
-    expect(layoutOf(false).anchoredObjects ?? []).toEqual([]);
+  it("sits in the line, at the size it declares, when it declares an inline placement", () => {
+    const layout = layoutOf(false);
+    expect(layout.anchoredObjects ?? []).toEqual([]);
+    const span = layout.pages[0]?.blocks[0]?.lines[0]?.spans[0];
+    expect(span && [span.width, span.kind === "object" ? span.height : 0]).toEqual([BADGE, BADGE]);
+  });
+
+  it("stores a placement a gesture writes in its own attrs", () => {
+    const badge = manager.schema.nodes["badge"]?.create({ floating: true });
+    if (!badge) throw new Error("no badge");
+    const attrs = placementAttrs(badge, { xAlign: "custom", x: 40, yOffset: 12 });
+    expect(attrs).toEqual({ left: 40, drop: 12 });
+    expect(anchoredOf(badge.type.create({ ...badge.attrs, ...attrs }))).toEqual(badgePlacement("square", 40, 12));
+    expect(placementAttrs(manager.schema.text("x"), { x: 1 })).toBeNull();
   });
 });

@@ -132,7 +132,7 @@ describe("TrackChanges — semantic mark seam", () => {
     });
 
     const units = toSemanticUnits(editor);
-    expect(units[1]!.breadcrumb).toEqual(["Current "]);
+    expect(units[1]!.breadcrumb).toEqual(["Current"]);
     expect(units[0]!.changes).toEqual([{
       type: "suggestedDelete",
       text: "obsolete",

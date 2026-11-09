@@ -37,10 +37,12 @@ export function toDocumentOutline(
 ): OutlineSection[] {
   if (units.length === 0) return [];
 
-  const closed: OutlineSection[] = [];
-  const open: OpenSection[] = [];
-  const close = (section: OpenSection, endUnit: number): void => {
-    closed.push({ ...section, endUnit });
+  // Each section with the order its heading comes in, so sections opened by
+  // headings in the same unit keep document order.
+  const closed: { section: OutlineSection; order: number }[] = [];
+  const open: { section: OpenSection; order: number }[] = [];
+  const close = ({ section, order }: { section: OpenSection; order: number }, endUnit: number): void => {
+    closed.push({ section: { ...section, endUnit }, order });
   };
 
   // A section opened by a heading nested inside a unit shares that unit with
@@ -56,8 +58,7 @@ export function toDocumentOutline(
   if (!(firstIndex === 0 && firstUnit?.headingLevel !== undefined)) {
     // Content before the first heading is a section the reader navigates to,
     // so it gets one — with a supplied name, because the document gives none.
-    close(
-      {
+    close({ order: -1, section: {
         id: first.id,
         parentId: null,
         heading: options.untitledHeading ?? DEFAULT_UNTITLED,
@@ -65,11 +66,12 @@ export function toDocumentOutline(
         level: 1,
         path: [options.untitledHeading ?? DEFAULT_UNTITLED],
         startUnit: 0,
-      },
+      } },
       firstHeading && firstUnit ? endBefore(firstIndex, firstHeading, firstUnit) : units.length,
     );
   }
 
+  let order = 0;
   units.forEach((unit, index) => {
     for (const heading of unit.headings ?? []) {
       // Depth comes from the breadcrumb the walker already threaded, not from
@@ -78,21 +80,20 @@ export function toDocumentOutline(
       const depth = heading.breadcrumb.length;
       while (open.length > depth) close(open.pop()!, endBefore(index, heading, unit));
 
-      open.push({
+      open.push({ order: order++, section: {
         id: heading.nodeId,
-        parentId: open[depth - 1]?.id ?? null,
+        parentId: open[depth - 1]?.section.id ?? null,
         heading: heading.title,
         headingNodeId: heading.nodeId,
         level: heading.level,
         path: [...heading.breadcrumb, heading.title],
         startUnit: index,
-      });
+      } });
     }
   });
 
   while (open.length > 0) close(open.pop()!, units.length);
 
-  // Sections close innermost-first. Document order is what a reader navigates,
-  // and a section that opens where its parent does follows it.
-  return closed.sort((a, b) => a.startUnit - b.startUnit || a.level - b.level);
+  // Sections close innermost-first. Document order is what a reader navigates.
+  return closed.sort((a, b) => a.order - b.order).map(({ section }) => section);
 }

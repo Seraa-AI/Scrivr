@@ -39,26 +39,30 @@ export type SemanticRole = "body" | "header" | "footer";
  */
 export type SemanticTextView = "proposed";
 
-/**
- * One section of the document's outline — the tree the headings imply, which a
- * flat unit list states only implicitly.
- *
- * Derived from the same units, so the same JSON always yields the same
- * outline: ids come from unit anchors, never from fresh identity.
- */
 /** A block that heads a section, as a unit holds it. */
 export interface SemanticHeading {
-  /** The heading block's anchor id. */
+  /**
+   * The heading block's own id, or, for a nested heading with none, its
+   * position in the unit (`<unit id>/h<n>`): stable for the same tree, but it
+   * names no node, so a citation cannot resolve it.
+   */
   nodeId: string;
   level: number;
-  /** Its proposed text. */
+  /** Its title (`outlineTitleOf`): the proposed text, a line break as a space, trimmed. */
   title: string;
   /** The headings it sits under, outermost first. */
   breadcrumb: string[];
 }
 
+/**
+ * One section of the document's outline — the tree the headings imply, which a
+ * flat unit list states only implicitly.
+ *
+ * Derived from the same units, so the same JSON always yields the same
+ * outline: ids come from unit anchors and heading ids, never from fresh identity.
+ */
 export interface OutlineSection {
-  /** The anchor id of the section's first unit. Stable across reads. */
+  /** Its heading's id (`SemanticHeading.nodeId`), or the first unit's for content before any heading. Stable across reads. */
   id: string;
   /** The enclosing section's `id`, or null at the top level. */
   parentId: string | null;
@@ -76,7 +80,10 @@ export interface OutlineSection {
   level: number;
   /** Ancestor headings outermost-first, ending with this section's own. */
   path: string[];
-  /** Index of the section's first unit — the heading itself. */
+  /**
+   * Index of the section's first unit: its heading's own unit, or the unit
+   * holding a nested heading, which it shares with the section before.
+   */
   startUnit: number;
   /**
    * Index one past the section's last unit. The range is heading-inclusive and

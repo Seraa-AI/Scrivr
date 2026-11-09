@@ -291,17 +291,51 @@ export function isXAlignValue(value: unknown): value is XAlign {
 
 const isFiniteNumber = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
 
+const isPositionMode = (value: unknown): value is PositionMode => value === "move-with-text";
+
 function isAnchoredPlacement(value: unknown): value is AnchoredPlacement {
   return typeof value === "object" && value !== null
-    && "width" in value && isFiniteNumber(value.width)
-    && "height" in value && isFiniteNumber(value.height)
+    && "width" in value && isFiniteNumber(value.width) && value.width > 0
+    && "height" in value && isFiniteNumber(value.height) && value.height > 0
     && "wrapMode" in value && isWrapMode(value.wrapMode)
-    && "positionMode" in value && value.positionMode === "move-with-text"
+    && "positionMode" in value && isPositionMode(value.positionMode)
     && "xAlign" in value && isXAlign(value.xAlign)
     && "x" in value && (value.x === null || isFiniteNumber(value.x))
     && "yOffset" in value && isFiniteNumber(value.yOffset)
     && "zIndex" in value && isFiniteNumber(value.zIndex)
     && "margin" in value && isFiniteNumber(value.margin);
+}
+
+/** The placement fields a gesture changes: a drag, a resize, a return to the line. */
+export type PlacementPatch = Partial<Pick<AnchoredPlacement, "width" | "height" | "wrapMode" | "xAlign" | "x" | "yOffset">>;
+
+/**
+ * How a node is placed as an anchored object, both ways: what a node spec's
+ * `anchored` declares. `read` resolves its attrs into a placement; `write`
+ * turns a placement patch into the attrs that store it. Both must be pure and
+ * must not throw: layout, hit-testing and every gesture call them.
+ */
+export interface AnchoredSpec {
+  read(node: Node): AnchoredPlacement | null;
+  write(patch: PlacementPatch): Record<string, unknown>;
+}
+
+function anchoredSpecOf(node: Node): AnchoredSpec | null {
+  const declared: unknown = node.type.spec["anchored"];
+  if (typeof declared !== "object" || declared === null) return null;
+  if (!("read" in declared) || typeof declared.read !== "function") return null;
+  if (!("write" in declared) || typeof declared.write !== "function") return null;
+  const { read, write } = declared;
+  return {
+    read: (n) => {
+      const placement: unknown = read(n);
+      return isAnchoredPlacement(placement) ? placement : null;
+    },
+    write: (patch) => {
+      const attrs: unknown = write(patch);
+      return typeof attrs === "object" && attrs !== null ? { ...attrs } : {};
+    },
+  };
 }
 
 /**
@@ -310,10 +344,12 @@ function isAnchoredPlacement(value: unknown): value is AnchoredPlacement {
  * not hold up. A placement whose `wrapMode` is `inline` sits in its line.
  */
 export function anchoredOf(node: Node): AnchoredPlacement | null {
-  const declared: unknown = node.type.spec["anchored"];
-  if (typeof declared !== "function") return null;
-  const placement: unknown = declared(node);
-  return isAnchoredPlacement(placement) ? placement : null;
+  return anchoredSpecOf(node)?.read(node) ?? null;
+}
+
+/** The attrs that store `patch` on `node`, through its declaration; null for a node that declares none. */
+export function placementAttrs(node: Node, patch: PlacementPatch): Record<string, unknown> | null {
+  return anchoredSpecOf(node)?.write(patch) ?? null;
 }
 
 /** Whether a node floats: it declares a placement, and not an inline one. */

@@ -58,4 +58,23 @@ describe("the semantic outline, beside the PDF bookmarks", () => {
     const outline = toDocumentOutline(unitsOf([h(1, text("Title")), p("Lede")], true));
     expect(outline.map((section) => [section.heading, section.path])).toEqual([["Title", ["Title"]]]);
   });
+
+  it("titles a heading as the PDF bookmark does: a line break as a space, trimmed", () => {
+    const units = unitsOf([h(1, text("  Terms"), { type: "hardBreak" }, text("and Conditions ")), p("body")]);
+    expect(units.at(-1)?.breadcrumb).toEqual(["Terms and Conditions"]);
+    expect(toDocumentOutline(units).map((section) => section.heading)).toEqual(["Terms and Conditions"]);
+  });
+
+  it("keeps sections in document order when one unit holds a deeper heading before a shallower one", () => {
+    const units = unitsOf([
+      h(1, text("Top")),
+      { type: "bulletList", content: [{ type: "listItem", content: [p("a"), h(2, text("Background")), p("b"), h(1, text("Part II")), p("c")] }] },
+      p("after"),
+    ]);
+    expect(toDocumentOutline(units).map((section) => [section.heading, section.parentId === null])).toEqual([
+      ["Top", true],
+      ["Background", false],
+      ["Part II", true],
+    ]);
+  });
 });
