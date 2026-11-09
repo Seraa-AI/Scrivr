@@ -17,6 +17,13 @@ const addedBy = (node: PMNode, authorID: string, operations: CHANGE_OPERATION[])
   );
 
 /**
+ * Did this author add the block that starts at a break, so that deleting the
+ * break takes their proposal back out rather than proposing a join?
+ */
+export const addedBreakBy = (next: PMNode, authorID: string) =>
+  addedBy(next, authorID, [CHANGE_OPERATION.insert, CHANGE_OPERATION.node_split]);
+
+/**
  * Where the block a deleted break joins onto starts: the next block with text
  * after `blockEnd`, past whatever closes and opens between them, as list items do.
  */
@@ -61,7 +68,7 @@ export function deleteBreak(pos: number, joinsNext: boolean, newTr: Transaction,
   if (!node) return;
   const boundary = pos + node.nodeSize;
   const next = newTr.doc.nodeAt(boundary);
-  const addedNext = !!next && addedBy(next, attrs.authorID, [CHANGE_OPERATION.insert, CHANGE_OPERATION.node_split]);
+  const addedNext = !!next && addedBreakBy(next, attrs.authorID);
   const addedThis = addedBy(node, attrs.authorID, [CHANGE_OPERATION.insert]);
 
   if (joinsNext && next && (addedNext || addedThis) && canJoin(newTr.doc, boundary)) {

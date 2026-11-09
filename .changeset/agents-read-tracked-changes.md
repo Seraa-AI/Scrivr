@@ -120,3 +120,8 @@ One-time changes to watch for:
   by the popover and the panel. An image whose older `floatOffset` changed
   with its `yOffset` reads as moved: `IMAGE_PLACEMENT_ATTRS` includes
   `floatOffset`.
+- Deleting what you added yourself takes it back out, as Word does: Backspace
+  on a list item you added with Enter, or Delete from the item above it, joins
+  it back and leaves no change, as it already did for a paragraph. The caret
+  stays in the line it was in. An image or horizontal line you added and then
+  delete leaves no change either.
