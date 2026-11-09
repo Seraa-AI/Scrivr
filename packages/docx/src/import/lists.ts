@@ -98,7 +98,7 @@ function findListEnd(
  * Build a nested list from a slice of consecutive list paragraphs.
  *
  * The list opens at its first paragraph's `ilvl`; `expectedIlvl` is the level
- * its place puts it at, and a list Word starts deeper sits that many levels
+ * its place puts it at, and items Word starts deeper sit that many levels
  * further in (`levelOffset`), rather than under empty items. Paragraphs
  * deeper than the list's level are nested inside the previous item.
  */
@@ -147,7 +147,7 @@ function buildList(
       continue;
     }
     // ilvl === targetIlvl — new item.
-    items.push({ content: [stripNumberingMarker(b)] });
+    items.push({ content: [stripNumberingMarker(b)], ...(levelOffset > 0 ? { levelOffset } : {}) });
     i++;
   }
 
@@ -156,7 +156,6 @@ function buildList(
     type: "list",
     listType,
     items,
-    ...(levelOffset > 0 ? { levelOffset } : {}),
     ...(start !== 1 ? { start } : {}),
   };
 }

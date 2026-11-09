@@ -91,20 +91,35 @@ export function listKind(node: Node): ListKind | null {
   return node.type.name === "orderedList" ? "ordered" : "bullet";
 }
 
-/** How many levels deeper a list sits than its place puts it: Tab on its first item adds one, as Word indents a list. */
-export function listLevelOffset(node: Node): number {
-  const offset = node.attrs["levelOffset"];
+/** How many levels deeper a list item sits than its list: Tab adds one, as in Word. */
+export function itemLevelOffset(item: Node): number {
+  const offset = item.attrs["levelOffset"];
   return typeof offset === "number" && Number.isInteger(offset) && offset > 0 ? offset : 0;
 }
 
 /**
- * The level a list's items are drawn at (0 = top): one past the list it is
- * nested in, or the top, plus its own `levelOffset`, never past the ninth.
- * `parentLevel` is the enclosing list's level, or null at the top.
+ * The level an item is drawn at (0 = top): its list's level plus its own
+ * `levelOffset`, never past the ninth. A list nested in an item sits one
+ * level below it; `parentItemLevel` is that item's level, or null at the top.
  */
-export function nestedListLevel(list: Node, parentLevel: number | null): number {
-  const level = (parentLevel === null ? 0 : parentLevel + 1) + listLevelOffset(list);
-  return Math.min(level, LIST_LEVEL_COUNT - 1);
+export function itemLevel(item: Node, parentItemLevel: number | null): number {
+  const listLevel = parentItemLevel === null ? 0 : parentItemLevel + 1;
+  return Math.min(listLevel + itemLevelOffset(item), LIST_LEVEL_COUNT - 1);
+}
+
+/**
+ * Numbers an ordered list's items by level, as Word counts: an item follows
+ * the last item at its level, and a shallower item restarts every deeper one.
+ * The list's `start` is its own level's first number; deeper levels start at 1.
+ */
+export function levelCounter(listLevel: number, start: number): (level: number) => number {
+  const counts = new Map<number, number>();
+  return (level) => {
+    const next = (counts.get(level) ?? (level === listLevel ? start - 1 : 0)) + 1;
+    counts.set(level, next);
+    for (const deeper of [...counts.keys()]) if (deeper > level) counts.delete(deeper);
+    return next;
+  };
 }
 
 /** The number an ordered list starts at, kept within MIN_START–MAX_START. */

@@ -642,47 +642,56 @@ describe("Tab and Shift-Tab are visible", () => {
   });
 });
 
-describe("Tab keeps going deeper, as in Word", () => {
-  const twoItems = { type: "doc", content: [ul(item("one"), item("two")), { type: "paragraph" }] };
+describe("Tab takes only that item deeper, as in Word", () => {
+  const threeItems = { type: "doc", content: [ul(item("one"), item("two"), item("three")), { type: "paragraph" }] };
+  const xs = (editor: KeyEditor) => {
+    const blocks = laidOut(editor.getState().doc);
+    const one = blockOf(blocks, "one").x;
+    return ["one", "two", "three"].map((text) => (blockOf(blocks, text).x - one) / HALF_INCH);
+  };
+  const marker = (editor: KeyEditor, text: string) => blockOf(laidOut(editor.getState().doc), text).listMarker;
 
-  it("takes an item a level further on each Tab, past the item above", () => {
-    const editor = new KeyEditor({ extensions: [StarterKit], content: twoItems });
+  it("takes an item a level further on each Tab, and leaves the items after it", () => {
+    const editor = new KeyEditor({ extensions: [StarterKit], content: threeItems });
     editor.caretAt("two");
     editor.press("Tab");
     expect(editor.press("Tab")).toBe(true);
-
-    const blocks = laidOut(editor.getState().doc);
-    const [one, two] = [blockOf(blocks, "one"), blockOf(blocks, "two")];
-    expect(two.listMarker).toBe("▪");
-    expect(two.x - one.x).toBe(2 * HALF_INCH);
+    expect(xs(editor)).toEqual([0, 2, 0]);
+    expect(marker(editor, "two")).toBe("▪");
+    expect(marker(editor, "three")).toBe("•");
   });
 
-  it("brings it back a level on each Shift-Tab", () => {
-    const editor = new KeyEditor({ extensions: [StarterKit], content: twoItems });
+  it("brings only that item back a level on each Shift-Tab", () => {
+    const editor = new KeyEditor({ extensions: [StarterKit], content: threeItems });
     editor.caretAt("two");
     editor.press("Tab");
     editor.press("Tab");
     editor.press("Shift-Tab");
-
-    const blocks = laidOut(editor.getState().doc);
-    const [one, two] = [blockOf(blocks, "one"), blockOf(blocks, "two")];
-    expect(two.listMarker).toBe("◦");
-    expect(two.x - one.x).toBe(HALF_INCH);
+    expect(xs(editor)).toEqual([0, 1, 0]);
+    expect(marker(editor, "two")).toBe("◦");
   });
 
-  it("takes an item back a level on each Backspace at its start, never into the item above", () => {
-    const editor = new KeyEditor({ extensions: [StarterKit], content: twoItems });
+  it("takes a list's first item in alone", () => {
+    const editor = new KeyEditor({ extensions: [StarterKit], content: threeItems });
+    const before = blockOf(laidOut(editor.getState().doc), "two").x;
+    editor.caretAt("one");
+    expect(editor.press("Tab")).toBe(true);
+    const blocks = laidOut(editor.getState().doc);
+    expect(blockOf(blocks, "one").x - before).toBe(HALF_INCH);
+    expect(blockOf(blocks, "two").x).toBe(before);
+  });
+
+  it("takes an item back a level on each Backspace at its start, leaving the items after it", () => {
+    const editor = new KeyEditor({ extensions: [StarterKit], content: threeItems });
     editor.caretAt("two");
     for (let i = 0; i < 3; i++) editor.press("Tab");
     for (let level = 2; level >= 0; level--) {
       editor.caretAt("two");
       editor.press("Backspace");
-      const blocks = laidOut(editor.getState().doc);
-      const [one, two] = [blockOf(blocks, "one"), blockOf(blocks, "two")];
-      expect(two.x - one.x).toBe(level * HALF_INCH);
-      expect(two.listMarker).toBe(["•", "◦", "▪"][level]);
+      expect(xs(editor)).toEqual([0, level, 0]);
+      expect(marker(editor, "two")).toBe(["•", "◦", "▪"][level]);
     }
-    expect(editor.getState().doc.child(0).childCount).toBe(2);
+    expect(editor.getState().doc.child(0).childCount).toBe(3);
   });
 
   it("joins a line below a nested list onto the text above it on Backspace, as Word does", () => {
@@ -698,28 +707,20 @@ describe("Tab keeps going deeper, as in Word", () => {
     expect(texts).toEqual(["one", "twomore", ""]);
   });
 
-  it("moves a whole list a level in from its first item", () => {
-    const editor = new KeyEditor({ extensions: [StarterKit], content: twoItems });
-    const before = blockOf(laidOut(editor.getState().doc), "one").x;
-    editor.caretAt("one");
-    expect(editor.press("Tab")).toBe(true);
-
-    const blocks = laidOut(editor.getState().doc);
-    expect(blockOf(blocks, "one").x - before).toBe(HALF_INCH);
-    expect(blockOf(blocks, "two").x - before).toBe(HALF_INCH);
-    expect(blockOf(blocks, "one").listMarker).toBe("◦");
-  });
-
   it("stops at the ninth level", () => {
-    const editor = new KeyEditor({ extensions: [StarterKit], content: twoItems });
+    const editor = new KeyEditor({ extensions: [StarterKit], content: threeItems });
     editor.caretAt("one");
     for (let i = 0; i < 8; i++) editor.press("Tab");
     const deepest = editor.getState().doc;
     expect(editor.press("Tab")).toBe(true);
     expect(editor.getState().doc.eq(deepest)).toBe(true);
-    const blocks = laidOut(editor.getState().doc);
-    const top = defaultPageConfig.margins.left + HALF_INCH;
-    expect(blockOf(blocks, "one").x - top).toBe(8 * HALF_INCH);
+    expect(blockOf(laidOut(editor.getState().doc), "one").x - blockOf(laidOut(editor.getState().doc), "two").x).toBe(8 * HALF_INCH);
+  });
+
+  it("numbers by level, as Word does: an item follows the last at its level, and a shallower one restarts the deeper", () => {
+    const deeper = (text: string) => ({ type: "listItem", attrs: { levelOffset: 1 }, content: [p(text)] });
+    const blocks = laidOut([ol(item("a1"), deeper("b1"), deeper("b2"), item("a2"), deeper("c1"))]);
+    expect(markers(blocks)).toEqual(["1.", "a.", "b.", "2.", "a."]);
   });
 });
 

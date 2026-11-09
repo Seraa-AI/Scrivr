@@ -64,26 +64,25 @@ describe("list import", () => {
     expect(doc.child(0).textContent).toBe("first");
   });
 
-  it("round-trips a list that skips levels, as Tab past the item above makes", async () => {
+  it("round-trips items Tab took past the item above, each at its own level", async () => {
     const para = (text: string) => ({ type: "paragraph", content: [{ type: "text", text }] });
+    const deeper = (text: string, levelOffset: number) => ({ type: "listItem", attrs: { levelOffset }, content: [para(text)] });
     const skipping = {
       type: "doc",
-      content: [{
-        type: "bulletList",
-        attrs: { levelOffset: 1 },
-        content: [{
-          type: "listItem",
-          content: [para("one"), { type: "bulletList", attrs: { levelOffset: 2 }, content: [{ type: "listItem", content: [para("deep")] }] }],
-        }],
-      }],
+      content: [{ type: "bulletList", content: [
+        { type: "listItem", content: [para("one")] },
+        deeper("deep", 2),
+        { type: "listItem", content: [para("back")] },
+      ] }],
     };
     const { doc } = await importDocx(new ServerEditor(), await bytesOf(skipping));
-    const outer = doc.child(0);
-    const inner = outer.child(0).child(1);
-    expect(outer.attrs["levelOffset"]).toBe(1);
-    expect(inner.type.name).toBe("bulletList");
-    expect(inner.attrs["levelOffset"]).toBe(2);
-    expect(inner.child(0).textContent).toBe("deep");
+    const levels: Array<[string, number]> = [];
+    doc.descendants((node) => {
+      if (node.type.name === "listItem") levels.push([node.textContent, Number(node.attrs["levelOffset"])]);
+    });
+    // Word reads "deep" two levels below "one"; "back" is at the top level again.
+    expect(levels.map(([text]) => text)).toEqual(["onedeep", "deep", "back"]);
+    expect(levels.find(([text]) => text === "deep")?.[1]).toBe(1);
   });
 
   it("round-trips where an ordered list starts", async () => {

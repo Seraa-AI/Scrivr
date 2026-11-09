@@ -486,6 +486,8 @@ export interface DocxParagraphAttrs {
  */
 export interface DocxListItem {
   content: DocxBlock[];
+  /** Levels deeper than its list, where Word's levels skip one. */
+  levelOffset?: number;
 }
 
 /** One reconstructed `<w:tc>`. Cell content is `DocxBlock[]` (cells hold block content). */
@@ -516,8 +518,6 @@ export type DocxBlock =
       type: "list";
       listType: "bullet" | "ordered";
       items: DocxListItem[];
-      /** Levels deeper than its place puts it, where Word's levels skip one. */
-      levelOffset?: number;
       /** The number an ordered list starts at, when not 1. */
       start?: number;
     }

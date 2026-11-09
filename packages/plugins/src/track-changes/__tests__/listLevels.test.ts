@@ -1,4 +1,4 @@
-/** A list level suggested with Tab is a list change, reviewed as one. */
+/** A list level suggested with Tab is one change on that item. */
 import { describe, expect, it } from "vitest";
 import { ServerEditor, StarterKit } from "@scrivr/core";
 import { TextSelection } from "@scrivr/core/pm";
@@ -29,17 +29,17 @@ function suggesting(content: DocNode[]) {
   });
 }
 
-describe("Tab on a list's first item, suggested", () => {
-  it("is recorded as a list change on its items, which rejecting takes back", () => {
+describe("Tab on a list item, suggested", () => {
+  it("is one change on that item, which rejecting takes back", () => {
     const editor = suggesting([{ type: "bulletList", content: [item("one"), item("two")] }]);
     editor.caretAt(3);
     editor.press("Tab");
-    expect(editor.getState().doc.child(0).attrs["levelOffset"]).toBe(1);
+    expect(editor.getState().doc.child(0).child(0).attrs["levelOffset"]).toBe(1);
     const operations = trackChangesPluginKey.getState(editor.getState())?.changeSet.pending.map((change) => change.dataTracked.operation);
-    expect(operations).toEqual(["list_change", "list_change"]);
+    expect(operations).toEqual(["set_attrs"]);
     const ids = trackChangesPluginKey.getState(editor.getState())?.changeSet.pending.map((change) => change.id) ?? [];
     editor.commands.setChangeStatuses("rejected", ids);
-    expect(editor.getState().doc.child(0).attrs["levelOffset"]).toBe(0);
+    expect(editor.getState().doc.child(0).child(0).attrs["levelOffset"]).toBe(0);
     expect(editor.pending()).toBe(0);
   });
 });
