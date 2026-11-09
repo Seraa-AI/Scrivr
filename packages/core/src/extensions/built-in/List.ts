@@ -234,6 +234,44 @@ function shallowerListItem(itemType: NodeType): Command {
   };
 }
 
+/**
+ * Backspace at the start of an item deeper than the top level takes it back a
+ * level, as Word does, so repeated presses walk it out to the top level
+ * rather than joining it into the item above.
+ */
+function outdentAtItemStart(itemType: NodeType): Command {
+  return (state, dispatch) => {
+    const { $from, empty } = state.selection;
+    if (!empty || $from.parentOffset !== 0) return false;
+    const itemDepth = $from.depth - 1;
+    if (itemDepth < 1 || $from.node(itemDepth).type !== itemType || $from.index(itemDepth) !== 0) return false;
+    const at = listAtSelection(state);
+    if (!at || at.level === 0) return false;
+    return shallowerListItem(itemType)(state, dispatch);
+  };
+}
+
+/**
+ * Backspace at the start of a line just below a list joins it onto the end of
+ * that list's last text, as Word does. Left to the default join, the line
+ * would be wrapped into the list as a new item instead.
+ */
+const joinOntoListAbove: Command = (state, dispatch) => {
+  const { $from, empty } = state.selection;
+  if (!empty || $from.parentOffset !== 0 || !$from.parent.isTextblock || $from.depth < 1) return false;
+  const index = $from.index($from.depth - 1);
+  const above = index > 0 ? $from.node($from.depth - 1).child(index - 1) : null;
+  if (!above || !isListType(above.type)) return false;
+  const aboveEnd = $from.before($from.depth);
+  let lastTextEnd = -1;
+  above.descendants((node, pos) => {
+    if (node.isTextblock) lastTextEnd = aboveEnd - above.nodeSize + 1 + pos + 1 + node.content.size;
+  });
+  if (lastTextEnd < 0) return false;
+  if (dispatch) dispatch(state.tr.delete(lastTextEnd, $from.pos).scrollIntoView());
+  return true;
+};
+
 const listPdf: PdfNodeHandler = (block, ctx) => ctx.draw.lines(block, ctx);
 
 /**
@@ -324,6 +362,7 @@ export const List = Extension.create({
       Enter: chainCommands(liftEmptyBlock, splitListItem(listItem!), splitBlockInheritAttrs),
       Tab: deeperListItem(listItem!),
       "Shift-Tab": shallowerListItem(listItem!),
+      Backspace: chainCommands(outdentAtItemStart(listItem!), joinOntoListAbove),
       // Mod-Shift-8: toggle bullet list (⌘⇧8 = • on most keyboards)
       "Mod-Shift-8": makeToggleList(bulletList!, listItem!),
       // Mod-Shift-9: toggle ordered list (⌘⇧9 = ( )
@@ -434,32 +473,39 @@ export const List = Extension.create({
     // walker visits children before the parent handler runs, so the
     // bulletList/orderedList type isn't visible when each listItem is
     // walked. Pre-compute the per-listItem (numId, ilvl) in
-    // onBeforeExport by walking the doc with a list-type stack, then
-    // the listItem handler reads from that map. The levels come from
-    // listLevel, as layout's do, so each level's format, glyph and indent
-    // match the screen. Every list of a kind still shares one numId, so in
-    // Word separate ordered lists continue each other's numbering.
+    // onBeforeExport by walking the doc, then the listItem handler reads
+    // from that map. The levels come from listLevel, as layout's do, so each
+    // level's format, glyph and indent match the screen.
     const onBeforeExport = (ctx: DocxContext) => {
       const itemMap = ctx.shared.getOrInit<Map<PmNode, ListItemDocxInfo>>(
         LIST_ITEMS_KEY,
         () => new Map(),
       );
 
-      const numIds = new Map<ListKind, number>();
-      const numIdFor = (kind: ListKind): number => {
-        const known = numIds.get(kind);
-        if (known !== undefined) return known;
-        const { numId } = ctx.numbering.getOrCreate({ type: kind, levels: docxLevels(kind) });
-        numIds.set(kind, numId);
-        return numId;
-      };
+      // Each top-level list counts on its own, as on screen. A nested list of
+      // the same kind numbers at its level in its top list's numbering, which
+      // Word restarts under each parent item; one of another kind has its own.
+      const numIdFor = (list: PmNode, kind: ListKind, top: { kind: ListKind; numId: number } | null): number =>
+        top && top.kind === kind
+          ? top.numId
+          : ctx.numbering.getOrCreate({
+              type: kind,
+              levels: docxLevels(kind),
+              instance: list,
+              ...(kind === "ordered" && !top ? { start: listStart(list) } : {}),
+            }).numId;
 
-      const walk = (node: PmNode, enclosing: { kind: ListKind; level: number } | null) => {
+      type Enclosing = { numId: number; level: number; top: { kind: ListKind; numId: number } };
+      const walk = (node: PmNode, enclosing: Enclosing | null) => {
         const kind = listKind(node);
         if (enclosing && node.type.name === "listItem") {
-          itemMap.set(node, { numId: numIdFor(enclosing.kind), ilvl: enclosing.level });
+          itemMap.set(node, { numId: enclosing.numId, ilvl: enclosing.level });
         }
-        const inside = kind ? { kind, level: nestedListLevel(node, enclosing ? enclosing.level : null) } : enclosing;
+        let inside = enclosing;
+        if (kind) {
+          const numId = numIdFor(node, kind, enclosing ? enclosing.top : null);
+          inside = { numId, level: nestedListLevel(node, enclosing ? enclosing.level : null), top: enclosing ? enclosing.top : { kind, numId } };
+        }
         node.forEach((child) => walk(child, inside));
       };
       walk(ctx.editor.getState().doc, null);

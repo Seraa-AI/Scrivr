@@ -109,7 +109,8 @@ describe("a node you added", () => {
     });
     editor.caretAt(end);
     editor.press("Enter");
-    pressUntilClean(editor, "Backspace", 2);
+    // As in Word: back a level, then off the list, then onto the text above.
+    pressUntilClean(editor, "Backspace", 3);
     expect(editor.pending()).toBe(0);
     expect(editor.blocks()).toEqual(["one", "two", "after"]);
   });

@@ -629,6 +629,39 @@ describe("list levels match what the editor draws", () => {
     expect(paragraphWith(document, "child more")).toContain('<w:ind w:left="1440"/>');
   });
 
+  /** The `numId` a paragraph is numbered under. */
+  const numIdOf = (paragraph: string) => /<w:numId w:val="(\d+)"\/>/.exec(paragraph)?.[1];
+
+  it("restarts each list in Word, as it does on screen", async () => {
+    const { document, numbering } = await exported([
+      list("orderedList", item("a1"), item("a2")),
+      p("between"),
+      list("orderedList", item("b1")),
+    ]);
+    const [first, second] = [numIdOf(paragraphWith(document, "a1")), numIdOf(paragraphWith(document, "b1"))];
+    expect(numIdOf(paragraphWith(document, "a2"))).toBe(first);
+    expect(second).not.toBe(first);
+    for (const numId of [first, second]) {
+      const num = new RegExp(`<w:num w:numId="${numId}">.*?</w:num>`).exec(numbering)?.[0] ?? "";
+      expect(num).toContain('<w:startOverride w:val="1"/>');
+    }
+    // One definition serves both lists.
+    expect(numbering.match(/<w:abstractNum /g)).toHaveLength(1);
+  });
+
+  it("starts an ordered list at its order", async () => {
+    const { document, numbering } = await exported([{ type: "orderedList", attrs: { order: 3 }, content: [item("c")] }]);
+    const numId = numIdOf(paragraphWith(document, "c"));
+    const num = new RegExp(`<w:num w:numId="${numId}">.*?</w:num>`).exec(numbering)?.[0] ?? "";
+    expect(num).toContain('<w:lvlOverride w:ilvl="0"><w:startOverride w:val="3"/></w:lvlOverride>');
+  });
+
+  it("numbers a nested list in its top list's numbering, at its level", async () => {
+    const { document } = await exported([list("orderedList", item("top", list("orderedList", item("nested"))))]);
+    expect(numIdOf(paragraphWith(document, "nested"))).toBe(numIdOf(paragraphWith(document, "top")));
+    expect(paragraphWith(document, "nested")).toContain('<w:ilvl w:val="1"/>');
+  });
+
   /** The order paragraph properties appear in, which the schema fixes (CT_PPrBase). */
   const propertyOrder = (paragraph: string) =>
     [...paragraph.matchAll(/<w:(pStyle|numPr|spacing|ind|jc)\b/g)].map((match) => match[1]);

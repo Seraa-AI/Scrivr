@@ -670,6 +670,34 @@ describe("Tab keeps going deeper, as in Word", () => {
     expect(two.x - one.x).toBe(HALF_INCH);
   });
 
+  it("takes an item back a level on each Backspace at its start, never into the item above", () => {
+    const editor = new KeyEditor({ extensions: [StarterKit], content: twoItems });
+    editor.caretAt("two");
+    for (let i = 0; i < 3; i++) editor.press("Tab");
+    for (let level = 2; level >= 0; level--) {
+      editor.caretAt("two");
+      editor.press("Backspace");
+      const blocks = laidOut(editor.getState().doc);
+      const [one, two] = [blockOf(blocks, "one"), blockOf(blocks, "two")];
+      expect(two.x - one.x).toBe(level * HALF_INCH);
+      expect(two.listMarker).toBe(["•", "◦", "▪"][level]);
+    }
+    expect(editor.getState().doc.child(0).childCount).toBe(2);
+  });
+
+  it("joins a line below a nested list onto the text above it on Backspace, as Word does", () => {
+    const editor = new KeyEditor({ extensions: [StarterKit], content: { type: "doc", content: [
+      ul(li(p("one"), ul(item("two")), p("more"))), { type: "paragraph" },
+    ] } });
+    editor.caretAt("more");
+    editor.press("Backspace");
+    const texts: string[] = [];
+    editor.getState().doc.descendants((node) => {
+      if (node.isTextblock) texts.push(node.textContent);
+    });
+    expect(texts).toEqual(["one", "twomore", ""]);
+  });
+
   it("moves a whole list a level in from its first item", () => {
     const editor = new KeyEditor({ extensions: [StarterKit], content: twoItems });
     const before = blockOf(laidOut(editor.getState().doc), "one").x;

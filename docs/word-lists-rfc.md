@@ -261,7 +261,8 @@ which #228 already records for wraps and lifts.
 | Shift-Tab, first item of a list with `levelOffset` > 0 | `liftListItem` | The list comes back one level (`levelOffset` − 1) |
 | Shift-Tab, nested item | `liftListItem` to the parent list | Same |
 | Shift-Tab, top-level item | `liftListItem` to a paragraph | Same (decision D1) |
-| Backspace at start, item 2+ | `joinBackward`: becomes a continuation block of the item above (invisible) | Same, now drawn: unnumbered, at the item's indent. Numbering below renumbers. This is Word's first Backspace |
+| Backspace at start, item deeper than level 0 | `joinBackward` into the item above | Back one level, as Shift-Tab (user, 2026-11-09: Word walks it out to level 0 and never into the item above) |
+| Backspace at start, item 2+ at level 0 | `joinBackward`: becomes a continuation block of the item above (invisible) | Same, now drawn: unnumbered, at the item's indent. Numbering below renumbers. This is Word's first Backspace |
 | Backspace at start, first item | `joinBackward` lifts it to a paragraph | Same |
 | Backspace at start of a continuation block | Joins it into the block above | Same. Word would first outdent it; noted, not copied |
 
@@ -491,8 +492,8 @@ section is what is true.
 | PR | Landed | What it changed |
 |---|---|---|
 | **L1** | `feat/word-lists` (not yet merged) | `model/lists.ts` owns what a list is (`isListType`, `listKind`, `listStart`), the nine levels (`listLevel`) and markers (`listMarker`, `bulletShape`, `bulletBox`); `layout/listMarkers.ts` owns the marker's face (`listMarkerFont`) and its painting (`drawListMarker`); `renderer/paintBlock.ts` paints every block with its marker. The six call sites ask them. `collectLayoutItems` lays out every block of an item at its level's indent, with the number on the item's first block. D5 geometry, with Word's tab rule for a number that reaches its text. Bullets drawn as shapes on canvas and in PDF, in the face of the item's first text. DOCX export brought forward from L3: nine levels with the drawn formats, glyphs and indents, continuation paragraphs, tables and sourced blocks indented to the item's text, and properties in schema order. Scenarios 1, 2 (drawn), 4, 6 and 7 (screen), 8, 9 green; scenario 5's continuation block is drawn |
-| **L2** | `feat/list-levels` (not yet merged) | `levelOffset` on lists (D9): Tab keeps going deeper, as in Word, up to level 8; Shift-Tab comes back |
-| **L3** | — | Not built. Its export half is a `numId` per list and `start` (`w:startOverride`): until then every ordered list shares one `numId`, so separate lists — including short lists in separate table cells, where independent lists are most common — continue each other's numbering in Word, and `order` is not exported |
+| **L2** | `feat/list-levels` (not yet merged) | `levelOffset` on lists (D9): Tab keeps going deeper, as in Word, up to level 8; Shift-Tab, and Backspace at an item's start, come back a level; DOCX import opens a list that skips a level at its level |
+| **L3** | `feat/list-levels` (not yet merged), base only | Export: a `numId` per top-level list over one shared `w:abstractNum`, each with level 0's `startOverride` (`order`, else 1), so separate lists restart in Word; a nested list of the same kind numbers in its top list's `numId`. `numbering.getOrCreate` gains `instance` and `start`. Import: `w:start` / `startOverride` → `order`; `numId` 0 is a plain paragraph. Not built: resumed numbering (D3), continuation paragraphs and per-level kind on import, paste nesting |
 
 ### Decisions taken while building L1
 

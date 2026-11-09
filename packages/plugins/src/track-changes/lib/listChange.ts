@@ -4,6 +4,7 @@ import { Node as PMNode, ReplaceAroundStep, Transaction } from "@scrivr/core/pm"
 import { addTrackIdIfDoesntExist, getBlockInlineTrackedData, NewEmptyAttrs } from "../helpers";
 import { CHANGE_OPERATION, CHANGE_STATUS, ListLevel } from "../types";
 import { buildLists, listLeaves, sameList, topLevelRange } from "./listStructure";
+import { addedBy } from "./deleteBreak";
 
 /** A former place names lists, not the changes recorded on them then. */
 const withoutRecords = (level: ListLevel): ListLevel => ({
@@ -47,13 +48,14 @@ export function listMovesOnly(tr: Transaction): ListMove[] | null {
  * Records each moved block's place before the edit, as Word records a
  * paragraph's former numbering. The blocks one edit moved are one change. A
  * block its author already moved keeps its first place, and one moved back
- * there has nothing left to record.
+ * there has nothing left to record. A block its author added is still their
+ * proposal, so where it sits is part of that proposal and not a change of its own.
  */
 export function recordListChange(moves: ListMove[], tr: Transaction, attrs: NewEmptyAttrs) {
   let first: string | undefined;
   for (const { pos, oldList, newList, relisted } of moves) {
     const node = tr.doc.nodeAt(pos);
-    if (!node) continue;
+    if (!node || addedBy(node, attrs.authorID, [CHANGE_OPERATION.insert])) continue;
     const records = getBlockInlineTrackedData(node) ?? [];
     const earlier = records.find(record =>
       record.operation === CHANGE_OPERATION.list_change &&

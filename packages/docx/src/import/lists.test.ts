@@ -86,6 +86,24 @@ describe("list import", () => {
     expect(inner.child(0).textContent).toBe("deep");
   });
 
+  it("round-trips where an ordered list starts", async () => {
+    const from = { type: "doc", content: [{ type: "orderedList", attrs: { order: 7 }, content: [
+      { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "seventh" }] }] },
+    ] }] };
+    const { doc } = await importDocx(new ServerEditor(), await bytesOf(from));
+    expect(doc.child(0).attrs["order"]).toBe(7);
+  });
+
+  it("reads numId 0, Word's \"no numbering\", as a plain paragraph", async () => {
+    const { unzipSync, zipSync, strFromU8, strToU8 } = await import("fflate");
+    const entries = unzipSync(await bytesOf(listDoc));
+    const document = strFromU8(entries["word/document.xml"] ?? new Uint8Array());
+    const unnumbered = document.replace(/<w:numId w:val="\d+"\/>/g, '<w:numId w:val="0"/>');
+    const { doc } = await importDocx(new ServerEditor(), zipSync({ ...entries, "word/document.xml": strToU8(unnumbered) }));
+    expect(doc.child(0).type.name).toBe("paragraph");
+    expect(doc.child(0).textContent).toBe("one");
+  });
+
   it("reports a list it cannot model, rather than dropping it quietly", async () => {
     // Moving the handler onto the extension changed which diagnostic this
     // produces: a kit that cannot model a list now says the block is

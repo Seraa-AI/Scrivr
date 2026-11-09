@@ -221,9 +221,17 @@ export interface DocxContext {
   };
 
   numbering: {
+    /**
+     * A numbering for these levels. Without `instance`, equal configs share
+     * one. With it, each instance (a list) gets its own `numId`, so separate
+     * lists restart in Word, over one shared definition; its count starts at
+     * `start` (default 1), written as level 0's `startOverride`.
+     */
     getOrCreate(config: {
       type: "bullet" | "ordered" | "task";
       levels: DocxNumberingLevel[];
+      instance?: object;
+      start?: number;
     }): { numId: number };
   };
 

@@ -151,7 +151,14 @@ function buildList(
     i++;
   }
 
-  return { type: "list", listType, items, ...(levelOffset > 0 ? { levelOffset } : {}) };
+  const start = listType === "ordered" ? numbering.start(numId, targetIlvl) : 1;
+  return {
+    type: "list",
+    listType,
+    items,
+    ...(levelOffset > 0 ? { levelOffset } : {}),
+    ...(start !== 1 ? { start } : {}),
+  };
 }
 
 /**

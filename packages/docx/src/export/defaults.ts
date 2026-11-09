@@ -263,14 +263,21 @@ function buildNumberingRoot(entries: NumberingEntry[]): XmlNode {
     return xml("w:numbering", { "xmlns:w": W_NS });
   }
   const children: XmlNode[] = [];
+  const defined = new Set<number>();
   for (const entry of entries) {
-    const abstractId = entry.numId; // 1:1 mapping for v1
-    children.push(buildAbstractNum(abstractId, entry));
+    if (defined.has(entry.abstractId)) continue;
+    defined.add(entry.abstractId);
+    children.push(buildAbstractNum(entry.abstractId, entry));
   }
   for (const entry of entries) {
+    // A list's own numbering says where it starts, so it never continues another.
+    const override = entry.start === undefined ? [] : [
+      xml("w:lvlOverride", { "w:ilvl": "0" }, [xml("w:startOverride", { "w:val": String(entry.start) })]),
+    ];
     children.push(
       xml("w:num", { "w:numId": String(entry.numId) }, [
-        xml("w:abstractNumId", { "w:val": String(entry.numId) }),
+        xml("w:abstractNumId", { "w:val": String(entry.abstractId) }),
+        ...override,
       ]),
     );
   }

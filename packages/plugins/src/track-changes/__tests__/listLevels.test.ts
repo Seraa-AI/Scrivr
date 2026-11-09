@@ -43,3 +43,18 @@ describe("Tab on a list's first item, suggested", () => {
     expect(editor.pending()).toBe(0);
   });
 });
+
+describe("moving a list item you added, suggested", () => {
+  it("records no list change: where it sits is part of your proposal", () => {
+    const editor = suggesting([{ type: "bulletList", content: [{ type: "listItem", content: [para("one"), { type: "bulletList", content: [item("two")] }] }] }]);
+    let end = -1;
+    editor.getState().doc.descendants((node, pos) => {
+      if (node.isTextblock && node.textContent === "two") end = pos + 1 + node.content.size;
+    });
+    editor.caretAt(end);
+    editor.press("Enter");
+    editor.press("Shift-Tab");
+    const operations = trackChangesPluginKey.getState(editor.getState())?.changeSet.pending.map((change) => change.dataTracked.operation);
+    expect(operations).not.toContain("list_change");
+  });
+});
