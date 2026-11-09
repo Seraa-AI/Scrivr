@@ -96,7 +96,7 @@ One-time changes to watch for:
   Rejecting it joins both levels back under the ids they had (user decision,
   2026-11-09). Which half of a split keeps its ids is core's rule in either
   order of registering `UniqueId` and `TrackChanges`: `planDuplicateIdAssignments`
-  is exported from `@scrivr/core` for it (new API, 2026-11-09).
+  is exported from `@scrivr/core` for it (approved by the user, 2026-11-09).
 - Deleting the moved copy of a pending move proposes its deletion and drops
   its move record. Before, the move record was stripped from whatever block
   then sat at the copy's old place: the block after it lost its id, level and

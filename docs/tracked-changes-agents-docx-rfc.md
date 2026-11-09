@@ -918,8 +918,8 @@ Approved by the user on 2026-11-09:
   the halves hold at the time of the reject.
 - Recording a tracked Enter in a list item as a split, so rejecting it keeps
   the item's ids.
-- **Awaiting approval:** the `planDuplicateIdAssignments` export from
-  `@scrivr/core` (seventh review round). It already decides which copy of a
+- The `planDuplicateIdAssignments` export from `@scrivr/core` (seventh review
+  round). It already decides which copy of a
   duplicated id is new for `UniqueId`; track changes asks it when it records a
   split, instead of deciding the same thing a second way that disagreed when
   `TrackChanges` was registered before `UniqueId`.
