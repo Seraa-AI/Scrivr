@@ -1,6 +1,6 @@
 # Wrapper layout: lists owned by their extension
 
-Status: Draft (2026-11-09). Needs the user's approval before any code.
+Status: Approved (2026-11-09), with the three decisions below.
 
 ## Problem
 
@@ -147,16 +147,14 @@ Breaking, during beta (patch changesets):
 - A grep check in the review: no file under `layout/`, `renderer/` or
   `export-pdf/` names a list.
 
-## Open questions for the user
+## Decisions
 
-1. **`wrap` on `transparent`, or a third kind `wrapper`?** Recommended: `wrap`
-   on `transparent`. A wrapper that shapes nothing is today's transparent node.
-2. **Where the painters are registered.** Recommended: one hook,
-   `addMarkerPainters()`, with canvas and PDF side by side, so a marker cannot
-   ship on one surface only. The alternative is the PDF painter in `addExports`.
-3. **Should table rows inside a list item take the wrapper's indent through
-   the same `place`?** Today `layoutItems.ts` indents them separately.
-   Recommended: yes, one path.
+1. **`wrap` on `transparent`** (user, 2026-11-09). A wrapper that shapes
+   nothing is today's transparent node; no third kind.
+2. **One hook, `addMarkerPainters()`, with canvas and PDF side by side**
+   (user, 2026-11-09), so a marker cannot ship on one surface only.
+3. **Table rows in a list item take the indent through `place`** (user,
+   2026-11-09): one path; the walk's separate table-row indent goes.
 
 ## What shipped
 
