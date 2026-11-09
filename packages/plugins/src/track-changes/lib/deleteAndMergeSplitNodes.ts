@@ -4,6 +4,7 @@ import { createNewInsertAttrs, NewEmptyAttrs } from "../helpers";
 import { setFragmentAsInserted } from "./fragments";
 import { splitSliceIntoMergedParts } from "./splitSliceIntoMergedParts";
 import { isLiftStepForGap } from "../step-trackers/qualifiers";
+import { addedBreakBy } from "./deleteBreak";
 import { ChangeStep } from "../types";
 
 /**
@@ -68,9 +69,14 @@ export function deleteAndMergeSplitNodes(
         const mergeEndNode = startTokenDeleted && openEnd > 0 && depth === openEnd && mergeContent;
         const mergeEndNodeNotEmpty = mergeEndNode && mergeContent.size;
 
-        if (!gap && !bringsBlocks && node.isTextblock && endTokenDeleted && !startTokenDeleted) {
+        if (!gap && !bringsBlocks && endTokenDeleted && !startTokenDeleted) {
           const next = startDoc.nodeAt(nodeEnd);
-          steps.push({ type: "join-node", pos, node, joinsNext: !!next && nodeEnd + next.nodeSize > to });
+          // A list item's break is the boundary between two items. It is
+          // taken back out when the author added the item after it; any other
+          // is read at the paragraphs inside.
+          if (node.isTextblock || (next && next.type === node.type && addedBreakBy(next, trackAttrs.authorID))) {
+            steps.push({ type: "join-node", pos, node, joinsNext: !!next && nodeEnd + next.nodeSize > to });
+          }
         }
 
         if (mergeEndNode && !mergeEndNodeNotEmpty && gap) {

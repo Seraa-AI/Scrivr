@@ -1,5 +1,6 @@
-import { Extension, IMAGE_NODE_ATTRS, stableStringify } from "@scrivr/core";
-import type { IBaseEditor, IEditor, SemanticImage, SemanticPart, SemanticUnit } from "@scrivr/core";
+import { blockIdOf, Extension, IMAGE_NODE_ATTRS, stableStringify } from "@scrivr/core";
+import type { IBaseEditor, IEditor, SemanticChange, SemanticImage, SemanticPart, SemanticUnit } from "@scrivr/core";
+import type { ReviewDecisions, ReviewOutcome } from "@scrivr/plugins";
 import { semanticPartRichHash, toSemanticUnits, unitRichHash } from "@scrivr/export-semantic";
 import { SemanticImageAttrsSchema, type SemanticEdit, type StructuralSemanticEdit } from "../schema/edit";
 import { applyStructuralEdits } from "./applyStructuralEdits";
@@ -8,7 +9,7 @@ import { toCoreSpans } from "./spans";
 import { UniqueId } from "./UniqueId";
 import { GhostText, ghostTextPluginKey } from "./GhostText";
 import { AiCaret, aiCaretPluginKey } from "./AiCaret";
-import { findLiveNodeById, isShadowNode, shadowRanges, trackAsSuggestion } from "@scrivr/plugins";
+import { findLiveNodeById, isShadowNode, moveShadowRanges, reviewChanges, trackAsSuggestion } from "@scrivr/plugins";
 import { aiToolkitRegistry } from "./aiToolkitRegistry";
 import { applyRichDiffAsSuggestion, buildAcceptedTextMap, type RichBlockEdit } from "@scrivr/plugins";
 
@@ -93,36 +94,55 @@ export class AiSuggestionsAPI {
   }
 }
 
+type Placed = { node: PmNode; pos: number };
+
 /**
- * The units of the live document. A pending move leaves a shadow carrying the
- * same ids, which the export walks like any block; an agent reads and edits the
- * live copy, so the shadow's unit and parts are left out. Units come in
- * document order, so the nth unit or part for an id is the nth copy of it —
- * which is why a shadow's parts are counted even though they are dropped.
+ * Pairs each item with the node it was read from: the k-th item under an id
+ * with the k-th node carrying it, in document order. A pending move's two
+ * copies share their ids, so the id alone cannot tell them apart.
  */
-function liveUnits(units: SemanticUnit[], doc: PmNode): SemanticUnit[] {
-  const shadows = shadowRanges(doc);
-  if (shadows.length === 0) return units;
-  const live = new Map<string, boolean[]>();
-  doc.descendants((node, pos) => {
-    const id = node.attrs["nodeId"];
-    if (typeof id !== "string") return true;
-    const copies = live.get(id) ?? [];
-    copies.push(!isShadowNode(node, pos, shadows));
-    live.set(id, copies);
-    return true;
-  });
+function placeById<T>(items: readonly T[], idOf: (item: T) => string, nodes: readonly Placed[]): Array<Placed | undefined> {
+  const byId = new Map<string, Placed[]>();
+  for (const placed of nodes) {
+    const id = blockIdOf(placed.node);
+    if (id !== null) byId.set(id, [...(byId.get(id) ?? []), placed]);
+  }
   const seen = new Map<string, number>();
-  const isLive = (id: string) => {
-    const nth = seen.get(id) ?? 0;
-    seen.set(id, nth + 1);
-    return live.get(id)?.[nth] ?? true;
-  };
-  return units.flatMap((unit) => {
-    const unitIsLive = isLive(unit.id);
-    const parts = unit.parts?.filter((part) => isLive(part.nodeId));
-    if (!unitIsLive) return [];
-    return parts ? [{ ...unit, parts }] : [unit];
+  return items.map((item) => {
+    const id = idOf(item);
+    const k = seen.get(id) ?? 0;
+    seen.set(id, k + 1);
+    return byId.get(id)?.[k];
+  });
+}
+
+/**
+ * The units an agent reads: one per block. A pending move leaves a copy of the
+ * moved block where it was, under the same ids; that copy — inside a move's
+ * left-behind range — is left out with its parts. Any other unit stays, a
+ * block proposed for deletion included, whatever id it carries.
+ */
+function unitsToRead(units: SemanticUnit[], doc: PmNode): SemanticUnit[] {
+  const moved = moveShadowRanges(doc);
+  if (moved.length === 0) return units;
+  const blocks: Placed[] = [];
+  doc.forEach((node, pos) => blocks.push({ node, pos }));
+  const unitBlocks = placeById(units, (unit) => unit.id, blocks);
+  return units.flatMap((unit, i) => {
+    const block = unitBlocks[i];
+    if (!block) return [unit];
+    if (isShadowNode(block.node, block.pos, moved)) return [];
+    if (!unit.parts) return [unit];
+    const leaves: Placed[] = [];
+    block.node.descendants((node, offset) => {
+      if (node.isTextblock) leaves.push({ node, pos: block.pos + 1 + offset });
+      return !node.isTextblock;
+    });
+    const partLeaves = placeById(unit.parts, (part) => part.nodeId, leaves);
+    return [{ ...unit, parts: unit.parts.filter((_part, j) => {
+      const leaf = partLeaves[j];
+      return !leaf || !isShadowNode(leaf.node, leaf.pos, moved);
+    }) }];
   });
 }
 
@@ -139,6 +159,60 @@ function changedImageFields(current: SemanticImage | undefined, proposed: unknow
 /** Distinguish a whole `SemanticUnit` (has `nodeIds[]`) from a `RichBlockEdit` (has `nodeId`). */
 function isSemanticUnit(item: RichBlockEdit | SemanticUnit): item is SemanticUnit {
   return "nodeIds" in item && Array.isArray(item.nodeIds);
+}
+
+/** The blocks one id names as read: those still there, and those proposed for deletion. */
+interface Named<T> {
+  live: T[];
+  deleted: T[];
+}
+
+function blocksById<T extends { proposedForDeletion?: true }>(items: readonly T[], idOf: (item: T) => string): Map<string, Named<T>> {
+  const out = new Map<string, Named<T>>();
+  for (const item of items) {
+    const named = out.get(idOf(item)) ?? { live: [], deleted: [] };
+    (item.proposedForDeletion ? named.deleted : named.live).push(item);
+    out.set(idOf(item), named);
+  }
+  return out;
+}
+
+/** The blocks a handed-back unit can mean: those read as it was — live or proposed for deletion — else any. */
+function meant<T>(named: Named<T> | undefined, deleted: boolean): T[] {
+  if (!named) return [];
+  const same = deleted ? named.deleted : named.live;
+  return same.length > 0 ? same : [...named.live, ...named.deleted];
+}
+
+interface ChangeHolder {
+  changes?: SemanticChange[];
+}
+
+/**
+ * `item` with `current`'s review changes in place of its own. An agent cannot
+ * edit `changes`, so whatever it hands back there must not read as an edit.
+ */
+function withCurrentChanges<T extends ChangeHolder>(item: T, current: ChangeHolder | undefined): T {
+  const copy = { ...item };
+  delete copy.changes;
+  if (current?.changes) copy.changes = current.changes;
+  return copy;
+}
+
+/** `withCurrentChanges` on a unit and on each of its parts and cells, all of which its hash covers. */
+function unitWithCurrentChanges(unit: SemanticUnit, current: SemanticUnit): SemanticUnit {
+  const copy = withCurrentChanges(unit, current);
+  if (unit.parts) {
+    copy.parts = unit.parts.map((part) => withCurrentChanges(part, current.parts?.find((p) => p.nodeId === part.nodeId)));
+  }
+  if (unit.cells) {
+    copy.cells = {
+      rows: unit.cells.rows.map((row, r) => ({
+        cells: row.cells.map((cell, c) => withCurrentChanges(cell, current.cells?.rows[r]?.cells[c])),
+      })),
+    };
+  }
+  return copy;
 }
 
 /** A caller-pinned source hash on a unit (optional stale-edit guard). */
@@ -355,6 +429,11 @@ export class AiToolkitAPI {
    * block (grouping bypassed) so the edit round-trips mechanically; container
    * units still expose their inner leaves via `parts`.
    *
+   * With TrackChanges, `text` is the proposed version and each unit, part and
+   * cell lists its pending `changes`, each with the id `reviewChanges` takes.
+   * A block proposed for deletion is included, reading `text: ""` with its
+   * deletion; the copy a pending move leaves behind is not.
+   *
    * Pass `from` / `to` to restrict to blocks overlapping a position range.
    *
    * @example
@@ -363,7 +442,7 @@ export class AiToolkitAPI {
    * ai.applyRichEdit(edited);
    */
   getRichBlocks(from?: number, to?: number): SemanticUnit[] {
-    const units = liveUnits(toSemanticUnits(this.editor, { groupBlocks: false }), this.editor.getState().doc);
+    const units = unitsToRead(toSemanticUnits(this.editor, { groupBlocks: false }), this.editor.getState().doc);
     if (from === undefined || to === undefined) return units;
     const allowed = new Set<string>();
     this.editor.getState().doc.forEach((node, offset) => {
@@ -371,6 +450,20 @@ export class AiToolkitAPI {
       if (typeof nodeId === "string" && offset < to && offset + node.nodeSize > from) allowed.add(nodeId);
     });
     return units.filter((u) => allowed.has(u.id));
+  }
+
+  /**
+   * Accept or reject pending changes by the ids `getRichBlocks` reports. The
+   * id decides the whole act — both halves of a replacement or a move, a block
+   * and its text. Whether an agent may review at all is the host's call
+   * (`TrackChanges.configure({ canAcceptReject })`); a refusal says why.
+   *
+   * @example
+   * const change = ai.getRichBlocks()[0]?.changes?.[0];
+   * if (change?.id) ai.reviewChanges({ accepted: [change.id], rejected: [] });
+   */
+  reviewChanges(decisions: ReviewDecisions): ReviewOutcome {
+    return reviewChanges(this.editor, decisions);
   }
 
   /**
@@ -395,17 +488,13 @@ export class AiToolkitAPI {
   ): { applied: boolean; changed: string[]; stale: string[]; notFound: string[]; rejected: string[] } {
     const authorID = options.authorID ?? "AI Assistant";
 
-    // Current rich hash per block — the freshness base for both auto-diff
-    // (which units changed) and the stale guard (did the doc move under us).
-    const currentUnits = new Map<string, SemanticUnit>();
-    const currentHashByNodeId = new Map<string, string>();
-    for (const u of liveUnits(toSemanticUnits(this.editor, { groupBlocks: false }), this.editor.getState().doc)) {
-      currentUnits.set(u.id, u);
-      currentHashByNodeId.set(u.id, unitRichHash(u));
-      for (const part of u.parts ?? []) {
-        currentHashByNodeId.set(part.nodeId, semanticPartRichHash(part));
-      }
-    }
+    // The units as they stand — the freshness base for both auto-diff (which
+    // units changed) and the stale guard (did the doc move under us). Ids are
+    // unique at the source, so an id names one block; a document saved before
+    // that held may name two, and an edit to such an id is refused, not guessed.
+    const read = unitsToRead(toSemanticUnits(this.editor, { groupBlocks: false }), this.editor.getState().doc);
+    const unitsById = blocksById(read, (u) => u.id);
+    const partsById = blocksById(read.flatMap((u) => u.parts ?? []), (part) => part.nodeId);
 
     const resolved: RichBlockEdit[] = [];
     const changed: string[] = [];
@@ -416,8 +505,8 @@ export class AiToolkitAPI {
     const rejected: string[] = [];
     // Only the fields that change are checked: an image placed by drag reads
     // `align: "custom"`, which an agent cannot set but may hand back untouched.
-    const queueImageLayout = (nodeId: string, proposed: unknown) => {
-      const changes = changedImageFields(currentUnits.get(nodeId)?.image, proposed);
+    const queueImageLayout = (nodeId: string, current: SemanticUnit, proposed: unknown) => {
+      const changes = changedImageFields(current.image, proposed);
       const parsed = SemanticImageAttrsSchema.strict().safeParse(changes);
       if (parsed.success && Object.keys(parsed.data).length > 0) imageLayouts.push({ nodeId, attrs: parsed.data });
       else rejected.push(nodeId);
@@ -427,20 +516,28 @@ export class AiToolkitAPI {
       if (isSemanticUnit(item)) {
         const nodeId = item.nodeIds[0];
         if (!nodeId) continue;
-        const currentUnit = currentUnits.get(nodeId);
-        if (currentUnit === undefined) {
+        const named = unitsById.get(nodeId);
+        const candidates = meant(named, !!item.proposedForDeletion);
+        if (candidates.length === 0) {
           notFound.push(nodeId);
           continue;
         }
-        const current = unitRichHash(currentUnit);
         const sourceHash = sourceHashOf(item);
-        if (sourceHash !== undefined && sourceHash !== current) {
+        const pinned = sourceHash === undefined ? candidates : candidates.filter((c) => unitRichHash(c) === sourceHash);
+        if (pinned.length === 0) {
           stale.push(nodeId);
           continue;
         }
-        if (unitRichHash(item) === current) continue; // unchanged — skip
+        if (pinned.some((c) => unitRichHash(unitWithCurrentChanges(item, c)) === unitRichHash(c))) continue; // unchanged — skip
+        const [currentUnit] = pinned;
+        // A block proposed for deletion is not there to edit, and an id two
+        // live blocks carry does not say which one.
+        if (!currentUnit || currentUnit.proposedForDeletion || (named?.live.length ?? 0) > 1) {
+          rejected.push(nodeId);
+          continue;
+        }
         if (currentUnit.type === "image") {
-          if (stableStringify(item.attrs ?? {}) === stableStringify(currentUnit.attrs ?? {})) queueImageLayout(nodeId, item.image);
+          if (stableStringify(item.attrs ?? {}) === stableStringify(currentUnit.attrs ?? {})) queueImageLayout(nodeId, currentUnit, item.image);
           else rejected.push(nodeId);
           continue;
         }
@@ -449,14 +546,18 @@ export class AiToolkitAPI {
         // parts are the edit surface. Diff those leaves and never send the
         // container itself to the leaf-only merge engine.
         if (item.parts || currentUnit.parts) {
-          const currentParts = new Map((currentUnit.parts ?? []).map((part) => [part.nodeId, part]));
           for (const part of item.parts ?? []) {
-            const currentPart = currentParts.get(part.nodeId);
-            if (!currentPart) {
+            const partNamed = partsById.get(part.nodeId);
+            const partCandidates = meant(partNamed, !!part.proposedForDeletion);
+            if (partCandidates.length === 0) {
               notFound.push(part.nodeId);
               continue;
             }
-            if (semanticPartRichHash(part) === semanticPartRichHash(currentPart)) continue;
+            if (partCandidates.some((c) => semanticPartRichHash(withCurrentChanges(part, c)) === semanticPartRichHash(c))) continue;
+            if (partCandidates[0]?.proposedForDeletion || (partNamed?.live.length ?? 0) > 1) {
+              rejected.push(part.nodeId);
+              continue;
+            }
             resolved.push(editForPart(part));
             changed.push(part.nodeId);
           }
@@ -470,16 +571,20 @@ export class AiToolkitAPI {
           nodeId,
           spans: item.spans ?? [{ text: item.text, marks: [] }],
           ...(item.attrs ? { attrs: item.attrs } : {}),
-          expectedContentHash: sourceHash ?? current,
+          expectedContentHash: sourceHash ?? unitRichHash(currentUnit),
         });
       } else {
-        if (item.expectedContentHash !== undefined && currentHashByNodeId.get(item.nodeId) !== item.expectedContentHash) {
+        // An edit named only by id lands on the live block it names.
+        const unit = unitsById.get(item.nodeId)?.live;
+        const part = partsById.get(item.nodeId)?.live;
+        const currentHash = unit?.[0] ? unitRichHash(unit[0]) : part?.[0] ? semanticPartRichHash(part[0]) : undefined;
+        if (item.expectedContentHash !== undefined && currentHash !== item.expectedContentHash) {
           stale.push(item.nodeId);
           continue;
         }
-        if (currentUnits.get(item.nodeId)?.type === "image") {
+        if (unit?.[0]?.type === "image") {
           if (item.spans) rejected.push(item.nodeId);
-          else queueImageLayout(item.nodeId, item.attrs);
+          else queueImageLayout(item.nodeId, unit[0], item.attrs);
           continue;
         }
         resolved.push(item);

@@ -172,15 +172,25 @@ moved block carries the same id. Two lookups answer two different questions:
 
 | Lookup | From | Returns | Use it to |
 |--------|------|---------|-----------|
-| `findLiveNodeById(doc, nodeId)` | `@scrivr/plugins` (also `@scrivr/ai`) | The block a person sees, skipping a copy left by a pending deletion. `null` if only such a copy has the id. | Read or write the block an agent's edit or a suggestion means. |
+| `findLiveNodeById(doc, nodeId)` | `@scrivr/plugins` (also `@scrivr/ai`) | The block a person sees, skipping a copy left by a pending deletion. `null` if only such a copy has the id, or if two live blocks carry it. | Read or write the block an agent's edit or a suggestion means. |
 | `findNodeById(doc, nodeId, accept?)` | `@scrivr/core` (also `@scrivr/ai`) | The first node with the id, in document order, copy or not. `accept` skips nodes it refuses. | Ask whether an id is in the document at all, or look up a block in a document without track changes. |
 
 Without track changes the two return the same node.
 
-The AI toolkit reads with `findLiveNodeById`, so a block proposed for deletion
-is left out of `getRichBlocks` and cannot be edited (an edit to it comes back
-`rejected`). Block markers and citations still reach it, since it is on screen,
-struck through, until someone decides it.
+`getRichBlocks` leaves out the copy a pending drag-move leaves behind, so an
+agent reads that block once, where it went. The block a tracked cut leaves
+behind when it is pasted elsewhere is not left out: it reads as a block
+proposed for deletion. Any block proposed for deletion stays in
+`getRichBlocks`. It reads `text: ""` and `proposedForDeletion: true`, with its
+deletion in `changes`, and it cannot be edited (an edit to it comes back
+`rejected`). An edit creates no duplicate ids: a split, a list Enter or a paste
+gives the new block its own id. A document saved with duplicates keeps them,
+and collaboration can still make one: two people cutting and pasting the same
+block at once. `findLiveNodeById` names no block for an id two live blocks
+carry, so every agent write by that id is refused rather than guessed.
+Block markers and
+citations still reach it, since it is on screen, struck through, until someone
+decides it.
 
 ```ts
 import { findLiveNodeById } from "@scrivr/plugins";
@@ -192,6 +202,38 @@ if (!live && findNodeById(doc, "intro")) {
   // only a copy proposed for deletion holds "intro"
 }
 ```
+
+### What an agent reads of pending changes
+
+Each unit from `getRichBlocks` lists its pending changes in `changes`. A part
+of a list or table lists the changes inside it too. `text` is the proposed
+version: pending insertions are in it, pending deletions are not. Each change
+says where it sits:
+
+| Field | Meaning |
+|-------|---------|
+| `type` | `suggestedInsert`, `suggestedDelete`, or `suggestedAttrs` (a heading, list or formatting change) |
+| `text` | What it adds or removes. `"\n"` for a paragraph or line break; text across blocks keeps the break between them |
+| `at`, `length` | Its extent in the owning `text`, from its first piece to its last. For an insertion with nothing else inside it, `text.slice(at, at + length)` is the change's `text`; another author's change inside it is in the slice but not in the change's `text`. A deletion sits where its first piece stood and has `length: 0`, as does an inserted paragraph break. A hard break counts as one character |
+| `id` | The act's id: the one to pass to `reviewChanges`. Every piece of one act shares it, including both halves of a replacement or a move |
+| `authorId`, `createdAt` | Whose, and when |
+| `groupId` / `moveId` | Which kind of pair it belongs to: a replacement (`groupId`) or a move (`moveId`) |
+| `oldAttrs` | For `suggestedAttrs`, what it was: a block's former styling (`{ nodeType: "paragraph" }`, `{ level: 1 }`), a list change's lists (`{ list: ["bulletList"] }`, `[]` for none), or a formatting change's marks (`{ marks: [{ type: "italic" }] }`) |
+| `image` | The image an inserted or deleted image is; an act that adds or removes several images lists one change per image, under its id |
+
+An agent decides changes by those ids. A replacement or a move lists two
+changes with one id; that id decides both:
+
+```ts
+const ai = getAiToolkit(editor);
+const change = ai?.getRichBlocks()[0]?.changes?.[0];
+if (change?.id) ai?.reviewChanges({ accepted: [change.id], rejected: [] });
+```
+
+`ai.reviewChanges` passes straight to `reviewChanges`, so it is refused with
+`not-permitted` unless the host configured `canAcceptReject: true`. A unit's
+`unitRichHash` covers its changes, so accepting or rejecting one makes an edit
+pinned to the old hash read `stale`.
 
 ---
 

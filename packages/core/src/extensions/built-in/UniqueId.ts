@@ -1,7 +1,9 @@
-import { Plugin } from "prosemirror-state";
+import { Plugin, type Transaction } from "prosemirror-state";
 import type { Node } from "prosemirror-model";
+import { Mapping } from "prosemirror-transform";
+import { isHistoryTransaction } from "prosemirror-history";
 import { Extension } from "../Extension";
-import { planBlockIdAssignments } from "../../model/assignBlockIds";
+import { planBlockIdAssignments, planDuplicateIdAssignments, type BlockIdAssignment } from "../../model/assignBlockIds";
 
 /**
  * Transaction meta set by the collaboration binding when it applies a REMOTE
@@ -49,6 +51,32 @@ export function findNodeById(
 }
 
 /**
+ * Copies of an id that the authored transactions of this batch created — a
+ * split's second half, a pasted copy — each with a fresh id, placed in the
+ * batch's final document. Judged on the document right after the last authored
+ * transaction, so a copy that bookkeeping puts back afterwards (track changes
+ * restoring a pending move's left-behind copy, marked `NORMALIZATION_META`)
+ * keeps the id it shares by design. Undo and redo are not authored either: they
+ * restore a state where the rule already held, and redo replays the re-key.
+ */
+function duplicatesAnEditCreated(transactions: readonly Transaction[], before: Node, after: Node): BlockIdAssignment[] {
+  const lastAuthored = transactions.findLastIndex(
+    (tr) => tr.docChanged && !tr.getMeta(NORMALIZATION_META) && !isHistoryTransaction(tr),
+  );
+  const authored = transactions[lastAuthored];
+  if (!authored) return [];
+  const toAuthored = new Mapping();
+  const toEnd = new Mapping();
+  transactions.forEach((tr, i) => (i <= lastAuthored ? toAuthored : toEnd).appendMapping(tr.mapping));
+  return planDuplicateIdAssignments(before, authored.doc, toAuthored).flatMap(({ pos, attrs }) => {
+    const mapped = toEnd.mapResult(pos, 1);
+    const node = after.nodeAt(mapped.pos);
+    if (mapped.deleted || !node || node.attrs["nodeId"] !== authored.doc.nodeAt(pos)?.attrs["nodeId"]) return [];
+    return [{ pos: mapped.pos, attrs: { ...node.attrs, nodeId: attrs["nodeId"] } }];
+  });
+}
+
+/**
  * UniqueId — stamps every new block node with a stable `nodeId` attribute.
  *
  * Uses appendTransaction to detect newly created nodes (nodeId === null) and
@@ -72,7 +100,7 @@ export const UniqueId = Extension.create({
   addProseMirrorPlugins() {
     return [
       new Plugin({
-        appendTransaction(transactions, _oldState, newState) {
+        appendTransaction(transactions, oldState, newState) {
           // Only stamp for a LOCAL doc change. A remote collab apply can also
           // cause earlier plugins to append bookkeeping transactions (e.g. a
           // trailing paragraph). Those appended transactions usually do not
@@ -86,7 +114,10 @@ export const UniqueId = Extension.create({
           const hasLocalDocChange = transactions.some((tr) => tr.docChanged);
           if (!hasLocalDocChange) return null;
 
-          const assignments = planBlockIdAssignments(newState.doc);
+          const assignments = [
+            ...planBlockIdAssignments(newState.doc),
+            ...duplicatesAnEditCreated(transactions, oldState.doc, newState.doc),
+          ];
           if (assignments.length === 0) return null;
 
           const tr = newState.tr;

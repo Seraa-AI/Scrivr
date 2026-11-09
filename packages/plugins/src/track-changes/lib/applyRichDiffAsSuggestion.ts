@@ -45,8 +45,10 @@ import {
   createNewPendingAttrs,
   createNewUpdateAttrs,
   getBlockInlineTrackedData,
+  proposedForDeletion,
   type NewEmptyAttrs,
 } from "../helpers";
+import { isMarkRemoved } from "../semanticChanges";
 import { CHANGE_STATUS } from "../types";
 import { findNodeById } from "@scrivr/core";
 import { findLiveNodeById } from "../liveNode";
@@ -454,7 +456,8 @@ interface AcceptedChar {
  * a verbatim echo diffs as a full rewrite (whole-block churn):
  *  - text node → its chars, minus tracked-change marks (trackedDelete text
  *    excluded entirely, matching the review view);
- *  - hard break → a newline;
+ *  - formatting → its marks, minus any a pending change proposes removing;
+ *  - hard break → a newline, unless its deletion is pending;
  *  - other inline leaf (e.g. image) → no intrinsic text.
  * Leaf-only by construction: containers are rejected upstream and their inner
  * leaves are edited by their own nodeId, so this never recurses across blocks.
@@ -470,7 +473,7 @@ function collectAccepted(node: PMNode, nodeStart: number, schema: Schema): Accep
     for (let i = 0; i < text.length; i++) out.push({ char: text[i]!, docPos: nodeStart + i, marks });
     return out;
   }
-  if (node.type.name === "hardBreak") return [{ char: "\n", docPos: nodeStart, marks: [] }];
+  if (node.type.name === "hardBreak") return proposedForDeletion(node) ? [] : [{ char: "\n", docPos: nodeStart, marks: [] }];
   if (node.isLeaf) return []; // other inline leaf (e.g. image) — no intrinsic text
 
   // A leaf textblock: concatenate its inline runs in document order.
@@ -496,9 +499,9 @@ function buildAcceptedRichMap(node: PMNode, nodeStartPos: number, schema: Schema
   return { acceptedText: chars.join(""), map, charMarks };
 }
 
-/** PM marks → formatting `InlineMark`s: drop tracked-change marks + `dataTracked`/null attrs. */
+/** PM marks → formatting `InlineMark`s: drop tracked-change marks, marks proposed removed, and `dataTracked`/null attrs. */
 function formattingMarksOf(marks: readonly Mark[]): InlineMark[] {
-  return marks.filter((mark) => !isTrackedMark(mark.type.name)).map(describeInlineMark);
+  return marks.filter((mark) => !isTrackedMark(mark.type.name) && !isMarkRemoved(mark)).map(describeInlineMark);
 }
 
 /** Merge consecutive `keep` ops into one so a retained region isn't split per token. */

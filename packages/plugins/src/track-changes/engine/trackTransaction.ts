@@ -154,8 +154,10 @@ function trackOneStep(
       const stepCaret = newSelectionPos === undefined ? undefined : newTr.mapping.slice(recordedFrom).map(newSelectionPos);
       const end = updatedSelectionPos ?? stepCaret ?? tr.selection.head;
       // An end already inside text is where the caret was; one between blocks
-      // is past the content the caret was left in.
-      placeCaret(newTr.doc.resolve(end).parent.inlineContent ? end : end - fromEnd);
+      // is past the content the caret was left in, or, when the step only
+      // removed a boundary there, before the text the caret went on into.
+      const $end = newTr.doc.resolve(end);
+      placeCaret($end.parent.inlineContent ? end : fromEnd === 0 ? Selection.near($end).head : end - fromEnd);
     }
   } else if (step instanceof ReplaceAroundStep) {
     if (isSetNodeMarkupStep(step)) {

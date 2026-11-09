@@ -75,11 +75,15 @@ const nodeChange: ChangeBuilder = (node, pos, id, dataTracked, doc) => {
   };
 };
 
-/** Block changes whose shape depends on the operation; any other operation is a node-change. */
-const BUILD: Partial<Record<CHANGE_OPERATION, ChangeBuilder>> = {
-  [CHANGE_OPERATION.set_node_attributes]: nodeAttrChange,
-  [CHANGE_OPERATION.reference]: referenceChange,
-};
+/**
+ * Block changes whose shape depends on the operation; any other operation is a
+ * node-change. A map, not an object: a synced record may name any operation,
+ * "toString" included, which an object lookup finds on its prototype.
+ */
+const BUILD = new Map<string, ChangeBuilder>([
+  [CHANGE_OPERATION.set_node_attributes, nodeAttrChange],
+  [CHANGE_OPERATION.reference, referenceChange],
+]);
 
 /**
  * Finds all tracked changes (text marks or node attributes) in the document.
@@ -183,7 +187,7 @@ export function findChanges(state: EditorState): ChangeSet {
       }
 
       const op = dataTracked.operation;
-      const build = node.isText ? textChange : (op && BUILD[op]) ?? nodeChange;
+      const build = node.isText ? textChange : (typeof op === "string" ? BUILD.get(op) : undefined) ?? nodeChange;
       const change = build(node, pos, id, dataTracked, state.doc);
 
       currentMap.set(id, { change, node });

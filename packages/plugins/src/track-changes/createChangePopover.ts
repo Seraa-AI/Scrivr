@@ -3,6 +3,7 @@ import { subscribeViewUpdates, subscribeEditorFocusOutside, isAnchorInsideContai
 import type { Node as PMNode } from "@scrivr/core/pm";
 
 import { trackChangesPluginKey } from "./engine/trackChangesPlugin";
+import { describeAttrChanges } from "./attrChanges";
 import { changeActs } from "./reviewPlan";
 import {
   CHANGE_OPERATION,
@@ -91,6 +92,12 @@ export interface ChangePopoverInfo {
    *   "reference" — reference annotation
    */
   changeKind: "text" | "mark" | "node-attr" | "node" | "wrap" | "reference";
+  /**
+   * The block a "node" or "node-attr" change is on — "listItem", "paragraph",
+   * "image", "tableRow" — so a UI can say what was added, removed or changed,
+   * not only that a block was.
+   */
+  nodeTypeName?: string;
 }
 
 export interface ChangePopoverCallbacks {
@@ -289,15 +296,6 @@ export function createChangePopover(
       }
     }
 
-    const ATTR_LABELS: Record<string, string> = {
-      level: "Heading level",
-      align: "Alignment",
-      fontFamily: "Font",
-      fontSize: "Font size",
-      indent: "Indent",
-      order: "Start number",
-    };
-
     const NODE_TYPE_LABELS: Record<string, string> = {
       bulletList: "Bullet list",
       orderedList: "Ordered list",
@@ -305,25 +303,6 @@ export function createChangePopover(
       heading: "Heading",
       blockquote: "Blockquote",
       codeBlock: "Code block",
-    };
-
-    /** Human-readable value for a known attribute key. */
-    const attrValueLabel = (key: string, val: unknown): string => {
-      if (val == null) {
-        if (key === "level") return "Paragraph";
-        return "default";
-      }
-      if (key === "level") return `Heading ${val}`;
-      if (key === "align") {
-        const MAP: Record<string, string> = {
-          left: "Left",
-          center: "Center",
-          right: "Right",
-          justify: "Justify",
-        };
-        return MAP[String(val)] ?? String(val);
-      }
-      return String(val);
     };
 
     const toInfo = (c: typeof primary): ChangePopoverInfo => {
@@ -380,23 +359,9 @@ export function createChangePopover(
         const toLabel   = NODE_TYPE_LABELS[newNodeTypeName] ?? newNodeTypeName;
         text = `${fromLabel} → ${toLabel}`;
       } else if (changeKind === "node-attr" && oldAttrs && newAttrs) {
-        const parts: string[] = [];
-        const keys = new Set([
-          ...Object.keys(oldAttrs),
-          ...Object.keys(newAttrs),
-        ]);
-        for (const key of keys) {
-          if (key === "nodeId" || key === "dataTracked") continue;
-          if (oldAttrs[key] !== newAttrs[key]) {
-            const label = ATTR_LABELS[key] ?? key;
-            const from = attrValueLabel(key, oldAttrs[key]);
-            const to = attrValueLabel(key, newAttrs[key]);
-            parts.push(`${label}: ${from} → ${to}`);
-          }
-        }
         // Empty string when no meaningful attrs differ — the popover will show
         // the "Style changed" badge without a misleading preview row.
-        text = parts.join(" · ");
+        text = describeAttrChanges(oldAttrs, newAttrs);
       } else if (c.type === "node-change") {
         text = changePreviewText(state.doc, c, pending);
       } else {
@@ -425,6 +390,7 @@ export function createChangePopover(
         ...(c.dataTracked.moveId !== undefined ? { moveId: c.dataTracked.moveId } : {}),
         ...(moveRole !== undefined ? { moveRole } : {}),
         ...(markName !== undefined ? { markName } : {}),
+        ...(c.type === "node-change" || c.type === "node-attr-change" ? { nodeTypeName: c.node.type.name } : {}),
       };
     };
 

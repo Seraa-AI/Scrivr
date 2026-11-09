@@ -9,11 +9,10 @@
  */
 
 import type { IBaseEditor } from "@scrivr/core";
-import { CHANGE_OPERATION, changePreviewText } from "@scrivr/plugins";
+import { CHANGE_OPERATION, changePreviewText, describeAttrChanges } from "@scrivr/plugins";
 import type {
   TrackedChange,
   MarkChange,
-  NodeAttrChange,
 } from "@scrivr/plugins";
 import { cx } from "../utils/classNames";
 import { shortName } from "../utils/authorName";
@@ -26,34 +25,6 @@ import { ReviewRefusalNotice } from "./ReviewRefusalNotice";
 
 function truncate(text: string, max = 60): string {
   return text.length > max ? text.slice(0, max) + "…" : text;
-}
-
-const ATTR_LABELS: Record<string, string> = {
-  align: "Alignment",
-  level: "Heading level",
-  fontFamily: "Font",
-  fontSize: "Font size",
-  indent: "Indent",
-};
-
-/** Describe what changed in a NodeAttrChange. */
-function describeAttrChange(change: NodeAttrChange): string {
-  const old = change.oldAttrs
-  const next = change.newAttrs
-  const parts: string[] = [];
-  const allKeys = new Set([...Object.keys(old), ...Object.keys(next)]);
-
-  for (const key of allKeys) {
-    if (key === "nodeId" || key === "dataTracked") continue;
-    if (old[key] !== next[key]) {
-      const label = ATTR_LABELS[key] ?? key;
-      const from = old[key] == null ? "none" : String(old[key]);
-      const to = next[key] == null ? "none" : String(next[key]);
-      parts.push(`${label}: ${from} → ${to}`);
-    }
-  }
-
-  return parts.join(" · ");
 }
 
 /** Describe a MarkChange for display. */
@@ -268,7 +239,7 @@ function SingleRow({
       preview = <div style={previewLine}>{desc}</div>;
     }
   } else if (change.type === "node-attr-change") {
-    const desc = describeAttrChange(change);
+    const desc = describeAttrChanges(change.oldAttrs, change.newAttrs);
     preview = <div style={previewLine}>{desc}</div>;
   } else if (change.type === "wrap-change") {
     const wc = change
@@ -281,12 +252,13 @@ function SingleRow({
     const verb = previewVerb(change.dataTracked.operation, !!change.dataTracked.moveNodeId);
     const doc = editor?.getState().doc;
     const text = doc ? changePreviewText(doc, change, pending) : "";
-    preview = (
+    // A block with no words is named by its label alone: "List item added".
+    preview = text ? (
       <div style={previewLine}>
         {verb ? <span style={prefixLabel}>{decisionLabel(verb, meta)}</span> : null}
-        {text ? <em>"{truncate(text)}"</em> : change.node.type.name}
+        <em>"{truncate(text)}"</em>
       </div>
-    );
+    ) : null;
   }
 
   return (

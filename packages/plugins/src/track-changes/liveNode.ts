@@ -17,16 +17,38 @@ import type { Node as PMNode } from "@scrivr/core/pm";
 import { findNodeById } from "@scrivr/core";
 
 import { findChanges } from "./findChanges";
-import { CHANGE_OPERATION, CHANGE_STATUS } from "./types";
+import { isMoveShadow } from "./helpers";
+import { CHANGE_OPERATION, type TrackedChange } from "./types";
 
 /** Document ranges holding content a pending deletion covers. */
 export type ShadowRange = readonly [from: number, to: number];
+
+/** A document's pending deletions, and those that are a move's left-behind copy. */
+interface Shadows {
+  all: readonly ShadowRange[];
+  moves: readonly ShadowRange[];
+}
 
 /**
  * Keyed on the document node: a ProseMirror node is immutable, so an edit
  * produces a different object and the cache misses on its own.
  */
-const shadowCache = new WeakMap<PMNode, readonly ShadowRange[]>();
+const shadowCache = new WeakMap<PMNode, Shadows>();
+
+/** One walk of the document's pending deletions, read both ways below. */
+function shadowsOf(doc: PMNode): Shadows {
+  const cached = shadowCache.get(doc);
+  if (cached) return cached;
+  // No tracked-delete mark means the TrackChanges extension is not installed,
+  // so nothing in this document can be a shadow and the walk is waste.
+  const deletions = doc.type.schema.marks["trackedDelete"]
+    ? findChanges(EditorState.create({ doc })).pending.filter((change) => change.dataTracked.operation === CHANGE_OPERATION.delete)
+    : [];
+  const range = (change: TrackedChange): ShadowRange => [change.from, change.to];
+  const shadows = { all: deletions.map(range), moves: deletions.filter(isMoveShadow).map(range) };
+  shadowCache.set(doc, shadows);
+  return shadows;
+}
 
 /**
  * The ranges a pending deletion covers in this document.
@@ -38,23 +60,16 @@ const shadowCache = new WeakMap<PMNode, readonly ShadowRange[]>();
  * are all struck through stays live, which is correct: it is still there.
  */
 export function shadowRanges(doc: PMNode): readonly ShadowRange[] {
-  const cached = shadowCache.get(doc);
-  if (cached) return cached;
+  return shadowsOf(doc).all;
+}
 
-  // No tracked-delete mark means the TrackChanges extension is not installed,
-  // so nothing in this document can be a shadow and the walk is waste.
-  const ranges: ShadowRange[] = doc.type.schema.marks["trackedDelete"]
-    ? findChanges(EditorState.create({ doc }))
-        .changes.filter(
-          (change) =>
-            change.dataTracked.operation === CHANGE_OPERATION.delete &&
-            change.dataTracked.status === CHANGE_STATUS.pending,
-        )
-        .map((change): ShadowRange => [change.from, change.to])
-    : [];
-
-  shadowCache.set(doc, ranges);
-  return ranges;
+/**
+ * The ranges a pending move left behind: where a moved block was, a copy of
+ * the one now live at its new place. Unlike any other deletion, such a copy is
+ * not content of its own.
+ */
+export function moveShadowRanges(doc: PMNode): readonly ShadowRange[] {
+  return shadowsOf(doc).moves;
 }
 
 /** Whether a pending deletion covers this node whole. */
@@ -71,6 +86,9 @@ export function isShadowNode(node: PMNode, pos: number, ranges: readonly ShadowR
  * or to reach a block that is struck through but not yet decided, use core's
  * `findNodeById`. Without track changes the two agree.
  *
+ * An id two live blocks carry — only in a document saved before block ids were
+ * unique — names neither, and this returns null rather than guess.
+ *
  * Pass `ranges`, mapped through your own steps, when resolving many ids against
  * a document you are still editing: each intermediate document misses the
  * cache and would cost a full walk.
@@ -81,5 +99,9 @@ export function findLiveNodeById(
   ranges?: readonly ShadowRange[],
 ): { node: PMNode; pos: number } | null {
   const shadows = ranges ?? shadowRanges(doc);
-  return findNodeById(doc, nodeId, (node, pos) => !isShadowNode(node, pos, shadows));
+  const isLive = (node: PMNode, pos: number) => !isShadowNode(node, pos, shadows);
+  const first = findNodeById(doc, nodeId, isLive);
+  if (!first) return null;
+  const second = findNodeById(doc, nodeId, (node, pos) => pos !== first.pos && isLive(node, pos));
+  return second ? null : first;
 }

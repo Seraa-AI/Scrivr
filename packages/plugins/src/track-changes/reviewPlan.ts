@@ -1,6 +1,7 @@
 import type { Mark } from "@scrivr/core/pm";
 
 import type { ChangeSet } from "./ChangeSet";
+import { isMoveShadow } from "./helpers";
 import type { TrackedChange } from "./types";
 
 /** What deciding a change does to the document, which settles what it can take with it. */
@@ -194,9 +195,6 @@ export function changeActs(changes: readonly TrackedChange[]): ChangeAct[] {
   }
   return acts;
 }
-
-const isMoveShadow = ({ dataTracked }: TrackedChange) =>
-  dataTracked.operation === "delete" && !!dataTracked.moveNodeId;
 
 /**
  * Would carrying out this decision take the content away? A move's shadow is

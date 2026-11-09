@@ -38,7 +38,10 @@ describe("TrackChanges — semantic mark seam", () => {
     const units = toSemanticUnits(editor);
     expect(units[0]!.view).toBe("proposed");
     expect(units[0]!.text).toBe("Keep inserted tail");
-    expect(units[0]!.changes).toEqual([{ type: "suggestedDelete", text: "deleted " }]);
+    expect(units[0]?.changes).toEqual([
+      { type: "suggestedInsert", text: "inserted ", at: 5, length: 9 },
+      { type: "suggestedDelete", text: "deleted ", at: 14, length: 0 },
+    ]);
     expect(units[0]!.markdown).toBeUndefined();
   });
 
@@ -91,7 +94,7 @@ describe("TrackChanges — semantic mark seam", () => {
 
     const units = toSemanticUnits(editor);
     expect(units[0]!.text).toBe("keep ");
-    expect(units[0]!.changes).toEqual([{ type: "suggestedDelete", text: "deleted" }]);
+    expect(units[0]?.changes).toEqual([{ type: "suggestedDelete", text: "deleted", at: 5, length: 0 }]);
   });
 
   it("excludes suggested-deletion text from heading breadcrumbs", () => {
@@ -133,6 +136,8 @@ describe("TrackChanges — semantic mark seam", () => {
     expect(units[0]!.changes).toEqual([{
       type: "suggestedDelete",
       text: "obsolete",
+      at: 8,
+      length: 0,
       id: "change-1",
       authorId: "u1",
       status: "pending",
@@ -171,7 +176,7 @@ describe("TrackChanges — semantic mark seam", () => {
     expect(units).toHaveLength(1);
     expect(units[0]!.nodeIds).toHaveLength(2);
     expect(units[0]!.text).toBe("Intro\nshort");
-    expect(units[0]!.changes).toEqual([{ type: "suggestedDelete", text: "x".repeat(250) }]);
+    expect(units[0]?.changes).toEqual([{ type: "suggestedDelete", text: "x".repeat(250), at: 11, length: 0 }]);
   });
 
   it("excludes suggested-deletion text from structured table cells", () => {
@@ -216,10 +221,10 @@ describe("TrackChanges — semantic mark seam", () => {
 
     expect(toSemanticUnits(editor)[0]!.cells!.rows[0]!.cells[0]!.text).toBe("keep ");
     expect(toSemanticUnits(editor)[0]!.cells!.rows[0]!.cells[0]!.changes).toEqual([
-      { type: "suggestedDelete", text: "deleted" },
+      { type: "suggestedDelete", text: "deleted", at: 5, length: 0 },
     ]);
     expect(toSemanticUnits(editor)[0]!.changes).toEqual([
-      { type: "suggestedDelete", text: "deleted" },
+      { type: "suggestedDelete", text: "deleted", at: 5, length: 0 },
     ]);
   });
 });

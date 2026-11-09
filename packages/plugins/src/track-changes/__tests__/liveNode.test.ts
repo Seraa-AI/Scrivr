@@ -19,7 +19,7 @@ const content = (...texts: string[]) => ({
   type: "doc",
   content: texts.map((text) => ({
     type: "paragraph",
-    attrs: { nodeId: text },
+    attrs: { nodeId: text || "empty" },
     content: text ? [{ type: "text", text }] : undefined,
   })),
 });
@@ -69,7 +69,7 @@ describe("findLiveNodeById", () => {
   it("finds a moved empty node, which carries no marks to test", () => {
     const editor = build(true, "", "mid");
     move(editor, 0, true);
-    const found = findLiveNodeById(editor.getState().doc, "");
+    const found = findLiveNodeById(editor.getState().doc, "empty");
     expect(found).not.toBeNull();
     expect(found?.pos).toBeGreaterThan(0);
   });
@@ -95,6 +95,13 @@ describe("findLiveNodeById", () => {
     const editor = build(false, "alpha", "beta");
     expect(shadowRanges(editor.getState().doc)).toEqual([]);
     expect(findLiveNodeById(editor.getState().doc, "beta")?.pos).toBe(7);
+  });
+
+  it("names no block for an id two live blocks carry, so no caller guesses between them", () => {
+    // Only a document saved before block ids were unique holds such a pair.
+    const editor = build(true, "same", "other", "same");
+    expect(findLiveNodeById(editor.getState().doc, "same")).toBeNull();
+    expect(findLiveNodeById(editor.getState().doc, "other")?.pos).toBe(6);
   });
 
   it("returns null for an id the document does not hold", () => {

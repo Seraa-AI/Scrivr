@@ -16,12 +16,6 @@ import {
 import { isIndentationAction, TrackChangesAction } from "../actions";
 import { genId } from "../helpers";
 import {
-  isDirectPendingMoveDeletion,
-} from "../step-trackers/qualifiers";
-import {
-  CHANGE_OPERATION,
-  CHANGE_STATUS,
-  TrackedAttrs,
   TrackingRefusal,
   TrackingResult,
   TrTrackingContext,
@@ -299,30 +293,3 @@ export const groupMoveSteps = (
 };
 
 export const trFromHistory = (tr: Transaction): boolean => isHistoryTransaction(tr);
-export const changeMovedToInsertsOnSourceDeletion = (
-  tr: Transaction,
-  newTr: Transaction,
-  trContext: TrTrackingContext,
-) => {
-  for (let i = 0; i < tr.steps.length; i++) {
-    const step = tr.steps[i];
-    if (step instanceof ReplaceStep) {
-      const doc = tr.docs[tr.steps.indexOf(step)]!;
-      if (isDirectPendingMoveDeletion(step, doc, trContext.stepsByGroupIDMap)) {
-        const node = doc.nodeAt(step.from);
-        if (node?.attrs.dataTracked) {
-          newTr.setNodeMarkup(step.from, undefined, {
-            ...node.attrs,
-            dataTracked: node.attrs.dataTracked.filter(
-              (t: TrackedAttrs) =>
-                !(
-                  t.operation === CHANGE_OPERATION.move &&
-                  t.status === CHANGE_STATUS.pending
-                ),
-            ),
-          });
-        }
-      }
-    }
-  }
-};

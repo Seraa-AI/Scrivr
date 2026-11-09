@@ -1,5 +1,6 @@
 import { Fragment, MarkType, Node as PMNode, NodeType, ResolvedPos, Schema } from "@scrivr/core/pm";
 import { Transaction } from "@scrivr/core/pm";
+import { blockIdOf } from "@scrivr/core";
 
 import {
   addTrackIdIfDoesntExist,
@@ -17,6 +18,7 @@ import {
   NewTrackedAttrs,
 } from "../helpers";
 import { CHANGE_OPERATION, CHANGE_STATUS } from "../types";
+import { isShadowNode, type ShadowRange } from "../liveNode";
 
 export function setFragmentAsInserted(inserted: Fragment, insertAttrs: NewInsertAttrs, schema: Schema) {
   const updatedInserted = loopContentAndMergeText(inserted, insertAttrs, schema);
@@ -65,24 +67,31 @@ export function setFragmentAsMoveChange(fragment: Fragment, moveAttrs: NewMoveAt
   return Fragment.from(content);
 }
 
-/** Add split change to the source node parent, and to the last child which is the split content. */
+/**
+ * Add split change to the source node parent, and to the last child which is
+ * the split content. `depth` is how many levels the break splits: one for a
+ * paragraph, two for a list item and its paragraph; the records go on the
+ * outermost. `originalNodeId` is the id that block had before the split.
+ */
 export function setFragmentAsNodeSplit(
   $pos: ResolvedPos,
+  depth: number,
   newTr: Transaction,
   inserted: Fragment,
   attrs: NewEmptyAttrs,
+  originalNodeId: string | null,
 ) {
   const lastChild = inserted.lastChild!;
   const referenceId = genId();
 
-  const parentPos = $pos.before($pos.depth);
-  const parent = $pos.node($pos.depth);
+  const parentPos = $pos.before($pos.depth - depth + 1);
+  const parent = $pos.node($pos.depth - depth + 1);
   const oldDataTracked = getBlockInlineTrackedData(parent) || [];
   newTr.setNodeMarkup(parentPos, undefined, {
     ...parent.attrs,
     dataTracked: [
       ...oldDataTracked.filter(c => c.operation !== "reference"),
-      { ...addTrackIdIfDoesntExist(createNewReferenceAttrs({ ...attrs, status: CHANGE_STATUS.pending }, referenceId)) },
+      { ...addTrackIdIfDoesntExist(createNewReferenceAttrs({ ...attrs, status: CHANGE_STATUS.pending }, referenceId, originalNodeId)) },
     ],
   });
 
@@ -97,6 +106,32 @@ export function setFragmentAsNodeSplit(
     ),
   );
   return inserted;
+}
+
+/**
+ * Written content with any block id `doc` already carries cleared. A split or
+ * a list Enter copies its source's id onto the new block, and a paste copies
+ * the original's; the id stays with the block that had it, and `UniqueId` gives
+ * each new one its own. Which nodes carry an id is core's `blockIdOf`.
+ */
+export function withoutTakenIds(fragment: Fragment, doc: PMNode, movedFrom: readonly ShadowRange[] = []): Fragment {
+  const taken = new Set<string>();
+  doc.descendants((node, pos) => {
+    const id = blockIdOf(node);
+    if (id !== null && !isShadowNode(node, pos, movedFrom)) taken.add(id);
+  });
+  const clear = (node: PMNode): PMNode => {
+    if (node.isText) return node;
+    const id = blockIdOf(node);
+    const attrs = id !== null && taken.has(id) ? { ...node.attrs, nodeId: null } : node.attrs;
+    if (node.isLeaf) return attrs === node.attrs ? node : node.type.create(attrs, null, node.marks);
+    const content: PMNode[] = [];
+    node.forEach((child) => content.push(clear(child)));
+    return node.type.create(attrs, Fragment.from(content), node.marks);
+  };
+  const out: PMNode[] = [];
+  fragment.forEach((node) => out.push(clear(node)));
+  return Fragment.from(out);
 }
 
 /** The mark standing in for this operation on text. */

@@ -15,8 +15,6 @@ import type {
   IEditor,
   LineEntry,
   OverlayRenderHandler,
-  SemanticChange,
-  SemanticMarkHandler,
 } from "@scrivr/core";
 import type { EditorState, Node, Transaction } from "@scrivr/core/pm";
 
@@ -29,6 +27,7 @@ import { planReviewIn } from "./reviewChanges";
 import { changeActs } from "./reviewPlan";
 import type { ChangeSet } from "./ChangeSet";
 import { cloneTrackedChanges } from "./cloneTrackedChanges";
+import { dropDeleted, isMarkRemoved, keepInserted, nodeChanges } from "./semanticChanges";
 
 declare module "@scrivr/core" {
   interface Commands<ReturnType> {
@@ -135,13 +134,20 @@ function recordsInsideRowChanges(changeSet: ChangeSet): ReadonlySet<string> {
   return ids;
 }
 
-/** How a change to an object is coloured, by what it did. */
-const OBJECT_COLOR: Partial<Record<CHANGE_OPERATION, (author: string) => string>> = {
-  [CHANGE_OPERATION.insert]: author => insertColor(author),
-  [CHANGE_OPERATION.move]: author => insertColor(author),
-  [CHANGE_OPERATION.delete]: author => deleteColor(author),
-  [CHANGE_OPERATION.set_node_attributes]: () => ATTR_CHANGE_COLOR,
-};
+/**
+ * How a change to an object is coloured, by what it did. A map, as every
+ * operation table here is: a synced record may name `__proto__` or `toString`.
+ */
+const OBJECT_COLOR = new Map<string, (author: string) => string>([
+  [CHANGE_OPERATION.insert, author => insertColor(author)],
+  [CHANGE_OPERATION.move, author => insertColor(author)],
+  [CHANGE_OPERATION.delete, author => deleteColor(author)],
+  [CHANGE_OPERATION.set_node_attributes, () => ATTR_CHANGE_COLOR],
+]);
+
+/** The colour an object's change is framed in, or none when the operation frames nothing. */
+export const objectColor = (operation: string, author: string): string | undefined =>
+  OBJECT_COLOR.get(operation)?.(author);
 
 /**
  * Changes to a block rather than its text — its attributes, the break that ends
@@ -240,35 +246,12 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
   },
 
   addExports() {
-    // Keep suggested-deletion text out of embeddings while preserving it as
-    // structured review metadata. Inserted text is proposed content, kept in
-    // the semantic text — the identity handler exists only so the seam knows
-    // trackedInsert is a review mark (excluded from formatting spans), not a
-    // styling mark like bold/color.
-    const keepInserted: SemanticMarkHandler = (run) => run;
-    const dropDeleted: SemanticMarkHandler = (run, mark) => {
-      const raw = mark.attrs.dataTracked;
-      const entries = Array.isArray(raw) ? (raw.length > 0 ? raw : [{}]) : raw ? [raw] : [{}];
-      return {
-        text: "",
-        changes: [
-          ...(run.changes ?? []),
-          ...entries.map((entry: Record<string, unknown>): SemanticChange => ({
-            type: "suggestedDelete",
-            text: run.text,
-            ...(typeof entry.id === "string" ? { id: entry.id } : {}),
-            ...(typeof entry.authorID === "string" ? { authorId: entry.authorID } : {}),
-            ...(typeof entry.status === "string" ? { status: entry.status } : {}),
-            ...(typeof entry.createdAt === "number" ? { createdAt: entry.createdAt } : {}),
-            ...(typeof entry.groupId === "string" ? { groupId: entry.groupId } : {}),
-          })),
-        ],
-      };
-    };
     return {
       semantic: {
         marks: { trackedDelete: dropDeleted, trackedInsert: keepInserted },
         isRemoved: proposedForDeletion,
+        nodeChanges,
+        isMarkRemoved,
       },
     };
   },
@@ -458,11 +441,11 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
 
         // An object has no text to underline or strike, so it is framed where it
         // is drawn: added or moved in, removed or moved out, or only changed.
-        const objectColor = OBJECT_COLOR[operation]?.(author);
+        const framed = objectColor(operation, author);
         const node = change.type === "node-change" || change.type === "node-attr-change" ? change.node : null;
-        const box = objectColor && node?.isLeaf ? objectBox(change.from, node, placements, charMap, pageNumber, lines) : null;
-        if (objectColor && box) {
-          objects.push({ box, color: objectColor, removed: operation === CHANGE_OPERATION.delete });
+        const box = framed && node?.isLeaf ? objectBox(change.from, node, placements, charMap, pageNumber, lines) : null;
+        if (framed && box) {
+          objects.push({ box, color: framed, removed: operation === CHANGE_OPERATION.delete });
           continue;
         }
         if (change.type === "mark-change") {

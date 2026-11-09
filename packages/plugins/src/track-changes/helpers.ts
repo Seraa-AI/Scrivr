@@ -22,6 +22,10 @@ export function isValidTrackableMark(mark: Mark) {
   return false;
 }
 
+/** The copy a pending move leaves where the moved content was: its deletion, paired by `moveNodeId`. */
+export const isMoveShadow = ({ dataTracked }: { dataTracked: Partial<TrackedAttrs> }) =>
+  dataTracked.operation === CHANGE_OPERATION.delete && !!dataTracked.moveNodeId;
+
 export function equalMarks(n1: PMNode, n2: PMNode) {
   return (
     n1.marks.length === n2.marks.length &&
@@ -63,6 +67,7 @@ export type NewMoveAttrs = Omit<TrackedAttrs, "id" | "operation"> & {
 export type NewReferenceAttrs = Omit<TrackedAttrs, "id" | "operation"> & {
   operation: CHANGE_OPERATION.reference;
   referenceId: string;
+  originalNodeId?: string;
 };
 
 export type NewTrackedAttrs = NewInsertAttrs | NewDeleteAttrs | NewUpdateAttrs | NewMoveAttrs;
@@ -83,8 +88,13 @@ export function createNewJoinAttrs(attrs: NewEmptyAttrs): NewJoinAttrs {
   return { ...attrs, operation: CHANGE_OPERATION.node_join };
 }
 
-export function createNewReferenceAttrs(attrs: NewEmptyAttrs, id: string): NewReferenceAttrs {
-  return { ...attrs, operation: CHANGE_OPERATION.reference, referenceId: id };
+export function createNewReferenceAttrs(attrs: NewEmptyAttrs, id: string, originalNodeId: string | null): NewReferenceAttrs {
+  return {
+    ...attrs,
+    operation: CHANGE_OPERATION.reference,
+    referenceId: id,
+    ...(originalNodeId !== null ? { originalNodeId } : {}),
+  };
 }
 
 export function createNewDeleteAttrs(attrs: NewEmptyAttrs): NewDeleteAttrs {
@@ -252,7 +262,7 @@ export const updateBlockNodesAttrs = (
   return Fragment.fromArray(updatedNodes);
 };
 
-const isTrackedRecord = (value: unknown): value is Partial<TrackedAttrs> =>
+export const isTrackedRecord = (value: unknown): value is Partial<TrackedAttrs> =>
   typeof value === "object" && value !== null;
 
 /**

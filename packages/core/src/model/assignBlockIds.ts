@@ -19,6 +19,7 @@
  *   const state = EditorState.create({ schema, doc: safe });
  */
 import { Fragment, type Node, type Mark, type Attrs } from "prosemirror-model";
+import type { Mappable } from "prosemirror-transform";
 
 export interface AssignBlockIdsOptions {
   /** Override the ID source. Defaults to `crypto.randomUUID()`. */
@@ -72,12 +73,12 @@ function walk(node: Node, generate: () => string): Node {
   return node.type.create(attrs, content, node.marks);
 }
 
+/** A block whose schema declares an id, without one `blockIdOf` would read. */
 function needsBlockId(node: Node): boolean {
-  if (!node.isBlock) return false;
-  const attrs = node.type.spec.attrs;
-  if (!attrs || !("nodeId" in attrs)) return false;
-  return node.attrs["nodeId"] === null;
+  return declaresBlockId(node) && blockIdOf(node) === null;
 }
+
+const declaresBlockId = (node: Node) => node.isBlock && "nodeId" in (node.type.spec.attrs ?? {});
 
 /**
  * A single block waiting for an ID, returned by `planBlockIdAssignments`.
@@ -94,9 +95,6 @@ export interface BlockIdAssignment {
  * `UniqueId` plugin). Returns one entry per block that needs an ID, so
  * the caller can emit one `setNodeMarkup` step per block instead of a
  * single whole-doc replace — better grain for history and collab.
- *
- * Both functions share the same `needsBlockId` predicate, so the rule
- * for "which blocks get IDs?" lives in exactly one place.
  */
 export function planBlockIdAssignments(
   doc: Node,
@@ -111,6 +109,84 @@ export function planBlockIdAssignments(
     return true;
   });
   return out;
+}
+
+/**
+ * The blocks an edit created that carry an id another block already carries,
+ * each with a fresh id to take instead. `before` is the document the edit
+ * started from, `after` the one it produced, and `mapping` maps the first onto
+ * the second. A copy of an id that was already there — its old position mapped
+ * through the edit — keeps it; any other copy is new and is re-keyed. So a
+ * split's second half and a pasted copy get fresh ids, while copies that were
+ * all there before the edit (a pending move's pair) are left alone.
+ */
+export function planDuplicateIdAssignments(
+  before: Node,
+  after: Node,
+  mapping: Mappable,
+  options: AssignBlockIdsOptions = {},
+): BlockIdAssignment[] {
+  const generate = options.generate ?? defaultGenerate;
+  const copies = new Map<string, Array<{ pos: number; node: Node }>>();
+  after.descendants((node, pos) => {
+    const id = blockIdOf(node);
+    if (id !== null) copies.set(id, [...(copies.get(id) ?? []), { pos, node }]);
+    return true;
+  });
+  const shared = new Set([...copies].filter(([, at]) => at.length > 1).map(([id]) => id));
+  if (shared.size === 0) return [];
+
+  // A block that was there before keeps its id on the copy holding its
+  // content: where its first words went, whatever before them the edit
+  // replaced. So Enter at the start of a paragraph, or of a list item, leaves
+  // it its ids and the empty one before it is new, as in Word. A leaf has no
+  // content; its own position says where it went.
+  const kept = new Set<number>();
+  before.descendants((node, pos) => {
+    const id = blockIdOf(node);
+    if (id === null || !shared.has(id)) return true;
+    if (mapping.mapResult(pos, 1).pos >= mapping.mapResult(pos + node.nodeSize, -1).pos) return true;
+    const mapped = mapping.map(node.isLeaf ? pos : firstWordsAt(node, pos), 1);
+    const holder = copies.get(id)?.find((copy) =>
+      node.isLeaf ? copy.pos === mapped : copy.pos < mapped && mapped < copy.pos + copy.node.nodeSize);
+    if (holder) kept.add(holder.pos);
+    return true;
+  });
+
+  const out: BlockIdAssignment[] = [];
+  for (const id of shared) {
+    const at = copies.get(id) ?? [];
+    // Copies the edit made all of keep the first, as the one written first.
+    const keeper = at.find(({ pos }) => kept.has(pos)) ?? at[0];
+    for (const copy of at) {
+      if (copy === keeper || kept.has(copy.pos)) continue;
+      out.push({ pos: copy.pos, attrs: { ...copy.node.attrs, nodeId: generate() } });
+    }
+  }
+  return out;
+}
+
+/** Where a block's first words sit: the start of its first textblock's content. */
+function firstWordsAt(node: Node, pos: number): number {
+  let at = pos + 1;
+  let inner = node;
+  while (!inner.isTextblock && inner.firstChild && !inner.firstChild.isLeaf) {
+    inner = inner.firstChild;
+    at += 1;
+  }
+  return at;
+}
+
+/**
+ * A block's id, or null when it has none or its schema declares none — the one
+ * answer to "which nodes carry a block id, and what counts as one", leaves
+ * (a rule, a page break) included. Anything that writes or checks block ids
+ * asks this.
+ */
+export function blockIdOf(node: Node): string | null {
+  if (!declaresBlockId(node)) return null;
+  const id = node.attrs["nodeId"];
+  return typeof id === "string" && id.length > 0 ? id : null;
 }
 
 /** Result of `recloneDocumentIds`: the fresh-id doc plus the old→new mapping. */

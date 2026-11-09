@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ServerEditor, StarterKit } from "@scrivr/core";
-import { CHANGE_OPERATION, changePreviewText, findChanges, TrackChanges, TrackChangesStatus } from "@scrivr/plugins";
+import { CHANGE_OPERATION, changeActs, changePreviewText, findChanges, TrackChanges, TrackChangesStatus } from "@scrivr/plugins";
+import { splitBlock, splitListItem, TextSelection } from "@scrivr/core/pm";
 import { decisionLabel, getChangeMeta, previewVerb } from "./changeMeta";
 
 const cell = (text: string) => ({ type: "tableCell", content: [{ type: "paragraph", content: [{ type: "text", text }] }] });
@@ -77,7 +78,37 @@ describe("an image's layout change is named by what changed", () => {
     expect(relabel({ xAlign: "center" })).toEqual(["Image moved"]);
   });
 
+  it("as moved, when only its older offset changed with it", () => {
+    expect(relabel({ yOffset: 48, floatOffset: { x: 0, y: 48 } })).toEqual(["Image moved"]);
+  });
+
   it("as a style change, when how text wraps it changed", () => {
     expect(relabel({ wrapMode: "top-bottom" })).toEqual(["Style changed"]);
+  });
+});
+
+describe("an added or removed block is named by what it is", () => {
+  const suggesting = (content: Record<string, unknown>[]) => new ServerEditor({
+    extensions: [StarterKit, TrackChanges.configure({ userID: "u", initialStatus: TrackChangesStatus.enabled })],
+    content: { type: "doc", content },
+  });
+  const actLabels = (editor: ServerEditor) =>
+    changeActs(findChanges(editor.getState()).pending).map((act) => getChangeMeta(act.primary).label);
+  const para = (text: string) => ({ type: "paragraph", content: [{ type: "text", text }] });
+
+  it("as a list item, when Enter at an item's end adds one", () => {
+    const editor = suggesting([{ type: "bulletList", content: [{ type: "listItem", content: [para("one")] }] }]);
+    const listItem = editor.getState().schema.nodes["listItem"];
+    if (!listItem) throw new Error("no listItem");
+    editor.applyTransaction(editor.getState().tr.setSelection(TextSelection.create(editor.getState().doc, 6)));
+    splitListItem(listItem)(editor.getState(), (tr) => editor.applyTransaction(tr));
+    expect(actLabels(editor)).toEqual(["List item added"]);
+  });
+
+  it("as a paragraph, when Enter at a paragraph's end adds one", () => {
+    const editor = suggesting([para("one")]);
+    editor.applyTransaction(editor.getState().tr.setSelection(TextSelection.create(editor.getState().doc, 4)));
+    splitBlock(editor.getState(), (tr) => editor.applyTransaction(tr));
+    expect(actLabels(editor)).toEqual(["Paragraph added"]);
   });
 });

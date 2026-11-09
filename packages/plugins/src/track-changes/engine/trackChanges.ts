@@ -3,7 +3,6 @@ import { EditorState, Mapping, PluginKey, Transaction } from "@scrivr/core/pm";
 
 import { getAction, TrackChangesAction } from "../actions";
 import {
-  changeMovedToInsertsOnSourceDeletion,
   contentSteps,
   groupIndentationSteps,
   groupMoveSteps,
@@ -15,6 +14,7 @@ import { createNewPendingAttrs } from "../helpers";
 import { listMovesOnly, recordListChange } from "../lib/listChange";
 import { composeGesture, splitAtInsertionEdges } from "./composeGesture";
 import type { ReplayedSelection } from "./fixAndSetSelectionAfterTracking";
+import type { PastedMove } from "../lib/cutAndPaste";
 import { TrackingRefusal, TrackingResult, TrTrackingContext } from "../types";
 import { trackTransaction } from "./trackTransaction";
 
@@ -94,7 +94,7 @@ export function trackChanges(
   userID: string,
   skipTrsWithMetas: (PluginKey | string)[],
   replayedSelection: ReplayedSelection,
-  pastedMove?: string,
+  pastedMove?: PastedMove,
 ): TrackingOutcome {
   if (untracked(tx, skipTrsWithMetas)) return { kind: "skipped" };
 
@@ -131,7 +131,6 @@ export function trackChanges(
   if (refusal) return { kind: "refused", result: { status: "refused", ...refusal, steps } };
 
   const startedAt = Date.now();
-  changeMovedToInsertsOnSourceDeletion(gesture, createdTr, trContext);
   const tr = trackTransaction(gesture, oldState, createdTr, userID, trContext);
   return {
     kind: "tracked",

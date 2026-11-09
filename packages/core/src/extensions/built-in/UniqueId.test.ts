@@ -7,6 +7,8 @@
 import { describe, expect, it } from "vitest";
 import { ServerEditor } from "../../ServerEditor";
 import { StarterKit } from "../StarterKit";
+import { TextSelection } from "prosemirror-state";
+import { splitListItem } from "prosemirror-schema-list";
 import { COLLAB_SYNC_META, NORMALIZATION_META, findNodeById } from "./UniqueId";
 
 describe("findNodeById", () => {
@@ -109,5 +111,113 @@ describe("UniqueId — collab-safe stamping", () => {
     const ed = editor();
     appendNullIdParagraph(ed, "local", false);
     expect(ed.getState().doc.firstChild!.attrs["nodeId"]).toBe("p0");
+  });
+});
+
+describe("UniqueId — no two blocks share an id an edit created", () => {
+  const ids = (ed: ServerEditor) => {
+    const out: unknown[] = [];
+    ed.getState().doc.descendants((node) => {
+      if (node.isBlock && "nodeId" in node.attrs) out.push(node.attrs["nodeId"]);
+    });
+    return out;
+  };
+
+  it("gives the split-off half of a paragraph a fresh id; the first keeps its own", () => {
+    const ed = editor();
+    ed.applyTransaction(ed.getState().tr.split(2));
+    const [first, second] = ids(ed);
+    expect(first).toBe("p0");
+    expect(typeof second).toBe("string");
+    expect(second).not.toBe("p0");
+  });
+
+  it("gives the item an Enter splits off a list a fresh id", () => {
+    const ed = new ServerEditor({
+      extensions: [StarterKit],
+      content: { type: "doc", content: [{ type: "bulletList", attrs: { nodeId: "l" }, content: [
+        { type: "listItem", attrs: { nodeId: "li" }, content: [{ type: "paragraph", attrs: { nodeId: "p" }, content: [{ type: "text", text: "onetwo" }] }] },
+      ] }] },
+    });
+    const listItem = ed.schema.nodes["listItem"];
+    if (!listItem) throw new Error("no listItem");
+    ed.applyTransaction(ed.getState().tr.setSelection(TextSelection.create(ed.getState().doc, 6)));
+    splitListItem(listItem)(ed.getState(), (tr) => ed.applyTransaction(tr));
+    const all = ids(ed);
+    expect(new Set(all).size).toBe(all.length);
+    expect(all.slice(0, 3)).toEqual(["l", "li", "p"]);
+  });
+
+  it("keeps a paragraph's id when Enter at its start opens an empty line before it", () => {
+    const ed = editor();
+    ed.applyTransaction(ed.getState().tr.split(1));
+    const [empty, text] = [ed.getState().doc.child(0), ed.getState().doc.child(1)];
+    expect(text.textContent).toBe("hi");
+    expect(text.attrs["nodeId"]).toBe("p0");
+    expect(empty.textContent).toBe("");
+    expect(empty.attrs["nodeId"]).not.toBe("p0");
+  });
+
+  it("keeps a paragraph's id on what is left of its words when Enter replaces a selection at its start", () => {
+    const ed = new ServerEditor({
+      extensions: [StarterKit],
+      content: { type: "doc", content: [{ type: "paragraph", attrs: { nodeId: "p" }, content: [{ type: "text", text: "Hello" }] }] },
+    });
+    ed.applyTransaction(ed.getState().tr.delete(1, 3).split(1));
+    const [empty, rest] = [ed.getState().doc.child(0), ed.getState().doc.child(1)];
+    expect(rest.textContent).toBe("llo");
+    expect(rest.attrs["nodeId"]).toBe("p");
+    expect(empty.attrs["nodeId"]).not.toBe("p");
+  });
+
+  it("keeps a list item's ids on the item after the empty one Enter at its start opens", () => {
+    const ed = new ServerEditor({
+      extensions: [StarterKit],
+      content: { type: "doc", content: [{ type: "bulletList", attrs: { nodeId: "l" }, content: [
+        { type: "listItem", attrs: { nodeId: "li" }, content: [{ type: "paragraph", attrs: { nodeId: "p" }, content: [{ type: "text", text: "Item" }] }] },
+      ] }] },
+    });
+    const listItem = ed.schema.nodes["listItem"];
+    if (!listItem) throw new Error("no listItem");
+    ed.applyTransaction(ed.getState().tr.setSelection(TextSelection.create(ed.getState().doc, 3)));
+    splitListItem(listItem)(ed.getState(), (tr) => ed.applyTransaction(tr));
+    const list = ed.getState().doc.child(0);
+    const [empty, item] = [list.child(0), list.child(1)];
+    expect(item.textContent).toBe("Item");
+    expect([item.attrs["nodeId"], item.child(0).attrs["nodeId"]]).toEqual(["li", "p"]);
+    expect([empty.attrs["nodeId"], empty.child(0).attrs["nodeId"]]).not.toContain("li");
+    expect(empty.child(0).attrs["nodeId"]).not.toBe("p");
+  });
+
+  it("keeps a paragraph's id when Enter at its end opens an empty line after it", () => {
+    const ed = editor();
+    ed.applyTransaction(ed.getState().tr.split(3));
+    expect(ed.getState().doc.child(0).attrs["nodeId"]).toBe("p0");
+    expect(ed.getState().doc.child(1).attrs["nodeId"]).not.toBe("p0");
+  });
+
+  it("gives a pasted copy of a block a fresh id, leaving the original", () => {
+    const ed = editor();
+    const original = ed.getState().doc.child(0);
+    ed.applyTransaction(ed.getState().tr.insert(ed.getState().doc.content.size, original));
+    const [first, second] = ids(ed);
+    expect(first).toBe("p0");
+    expect(second).not.toBe("p0");
+  });
+
+  it("leaves a copy that bookkeeping puts back, as a pending move does", () => {
+    const ed = editor();
+    const original = ed.getState().doc.child(0);
+    ed.applyTransaction(ed.getState().tr.insert(0, original).setMeta(NORMALIZATION_META, true));
+    expect(ids(ed)).toEqual(["p0", "p0"]);
+    ed.applyTransaction(ed.getState().tr.insertText("!", 1));
+    expect(ids(ed)).toEqual(["p0", "p0"]);
+  });
+
+  it("does not re-key a copy that arrives through collaboration", () => {
+    const ed = editor();
+    const original = ed.getState().doc.child(0);
+    ed.applyTransaction(ed.getState().tr.insert(ed.getState().doc.content.size, original).setMeta(COLLAB_SYNC_META, true));
+    expect(ids(ed)).toEqual(["p0", "p0"]);
   });
 });

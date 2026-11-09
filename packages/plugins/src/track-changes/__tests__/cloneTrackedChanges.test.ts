@@ -43,4 +43,21 @@ describe("TrackChanges document clone", () => {
     expect(firstMark.id).toBe("custom:trackChange:change-b:clone");
     expect(content.content[0]!.attrs.dataTracked[0]!.id).toBe("change-a");
   });
+
+  it("points a pending split's record of the block's id at the clone's id for that block", () => {
+    const editor = new ServerEditor({
+      extensions: [StarterKit, TrackChanges],
+      content: {
+        type: "doc",
+        content: [
+          { type: "paragraph", attrs: { nodeId: "fresh", dataTracked: [{ id: "ref", operation: "reference", referenceId: "split", originalNodeId: "p" }] } },
+          { type: "paragraph", attrs: { nodeId: "p", dataTracked: [{ id: "split", operation: "node_split" }] }, content: [{ type: "text", text: "Hello" }] },
+        ],
+      },
+      clone: true,
+    });
+    const reference = editor.getState().doc.child(0).attrs["dataTracked"][0];
+    expect(reference.originalNodeId).toBe(editor.cloneIdMap?.get("p"));
+    expect(reference.originalNodeId).toBe(editor.getState().doc.child(1).attrs["nodeId"]);
+  });
 });
