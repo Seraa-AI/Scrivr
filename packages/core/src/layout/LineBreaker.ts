@@ -393,27 +393,28 @@ export class LineBreaker {
     // A line holding only zero-width anchors has no text yet, so the anchors
     // move down with the word. Runs wherever a word starts a line.
     const stepBelowNarrowGaps = (word: Token, wordWidth: number): void => {
-      for (
-        let step = 0;
-        currentLine.every(isAnchorSpan) && currentLinePositioned && wordWidth <= maxWidth &&
-          !currentLineSegments.some((segment) => wordWidth <= segment.width) && step < MAX_STEPS_PAST_FLOAT;
-        step++
-      ) {
-        const stepHeight = probeLineHeight(word);
-        const here = startY + cumulativeLineY;
-        const space = resolveLineSpace(lineSpaceProvider, here, stepHeight, maxWidth);
-        // Where the provider already knows the next free y (a full-width band,
-        // a page end), jump there; otherwise step one line.
-        const gap = space.skipToY !== undefined && space.skipToY > here ? space.skipToY - here : stepHeight;
-        lines.push({ spans: [], width: 0, ascent: 0, descent: 0, lineHeight: gap, textAscent: 0, cursorHeight: 0, xHeight: 0 });
-        cumulativeLineY += gap;
-        const below = resolveLineSpace(lineSpaceProvider, startY + cumulativeLineY, stepHeight, maxWidth);
+      const fits = (segments: AvailableSegment[]) => segments.some((segment) => wordWidth <= segment.width);
+      if (!currentLine.every(isAnchorSpan) || !currentLinePositioned || wordWidth > maxWidth || fits(currentLineSegments)) return;
+      // Look ahead for the first line with room, then jump there in one
+      // spacer. Space that never opens (a fixed narrow column) leaves the
+      // word where it is, to overflow as before.
+      const stepHeight = probeLineHeight(word);
+      const from = startY + cumulativeLineY;
+      let y = from;
+      for (let step = 0; step < MAX_STEPS_PAST_FLOAT; step++) {
+        const space = resolveLineSpace(lineSpaceProvider, y, stepHeight, maxWidth);
+        y = space.skipToY !== undefined && space.skipToY > y ? space.skipToY : y + stepHeight;
+        const below = resolveLineSpace(lineSpaceProvider, y, stepHeight, maxWidth);
+        if (below.segments.length === 0 || !fits(below.segments)) continue;
+        lines.push({ spans: [], width: 0, ascent: 0, descent: 0, lineHeight: y - from, textAscent: 0, cursorHeight: 0, xHeight: 0 });
+        cumulativeLineY += y - from;
         currentLineSegments = below.segments;
         currentLinePositioned = isPositionedLine(currentLineSegments, maxWidth);
         currentSegmentIndex = 0;
         currentSegmentUsed = 0;
         const lineStart = currentLineSegments[0]?.x ?? 0;
         currentLine = currentLine.map((span) => ({ ...span, x: lineStart }));
+        return;
       }
     };
 
@@ -842,8 +843,8 @@ function isAnchorSpan(span: LayoutSpan): boolean {
   return span.kind === "object" && span.width === 0;
 }
 
-/** Bounds the walk below a float for a word no gap beside it can hold. */
-const MAX_STEPS_PAST_FLOAT = 500;
+/** How many lines to look below a float for room before letting a word overflow. */
+const MAX_STEPS_PAST_FLOAT = 200;
 
 function isPositionedLine(segments: AvailableSegment[], maxWidth: number): boolean {
   return segments.length !== 1 || segments[0]?.x !== 0 || segments[0]?.width !== maxWidth;

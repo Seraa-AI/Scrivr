@@ -591,3 +591,15 @@ describe("LineBreaker — a word too wide for the gap beside a float", () => {
   });
 });
 
+describe("LineBreaker — narrow gaps that never open", () => {
+  it("leaves a word that fits no gap where it is, adding no empty lines", () => {
+    const lb = new LineBreaker(makeMeasurer());
+    const lines = lb.breakIntoLines(
+      [{ kind: "text" as const, text: "extraordinarily", font: "14px serif", docPos: 1 }],
+      300,
+      { defaultFontFamily: "serif", defaultFontSize: 14, lineSpaceProvider: () => ({ segments: [{ x: 0, width: 20 }, { x: 200, width: 20 }] }) },
+    );
+    expect(lines.every((line) => line.spans.length > 0)).toBe(true);
+  });
+});
+
