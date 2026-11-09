@@ -69,10 +69,13 @@ export function setFragmentAsMoveChange(fragment: Fragment, moveAttrs: NewMoveAt
 
 /**
  * Add split change to the source node parent, and to the last child which is
- * the split content. `originalNodeId` is the id the block had before the split.
+ * the split content. `depth` is how many levels the break splits: one for a
+ * paragraph, two for a list item and its paragraph; the records go on the
+ * outermost. `originalNodeId` is the id that block had before the split.
  */
 export function setFragmentAsNodeSplit(
   $pos: ResolvedPos,
+  depth: number,
   newTr: Transaction,
   inserted: Fragment,
   attrs: NewEmptyAttrs,
@@ -81,8 +84,8 @@ export function setFragmentAsNodeSplit(
   const lastChild = inserted.lastChild!;
   const referenceId = genId();
 
-  const parentPos = $pos.before($pos.depth);
-  const parent = $pos.node($pos.depth);
+  const parentPos = $pos.before($pos.depth - depth + 1);
+  const parent = $pos.node($pos.depth - depth + 1);
   const oldDataTracked = getBlockInlineTrackedData(parent) || [];
   newTr.setNodeMarkup(parentPos, undefined, {
     ...parent.attrs,

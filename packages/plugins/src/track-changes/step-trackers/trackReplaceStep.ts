@@ -113,9 +113,13 @@ export function trackReplaceStep(
           // new paragraph ("lo" from splitting "hel|lo") is NOT marked as a
           // new trackedInsert. Only the structural node_split/reference marks
           // are added; the carried text stays untracked, matching Google Docs.
-          const splitBlock = tr.docs[i]?.resolve(step.from).parent;
+          // A list item breaks with its paragraph: the item is the block split.
+          const depth = step.slice.openStart;
+          const $at = tr.docs[i]?.resolve(step.from);
+          const splitBlock = $at?.node($at.depth - depth + 1);
           fragment = setFragmentAsNodeSplit(
             newTr.doc.resolve(step.from),
+            depth,
             newTr,
             newSliceContent,
             attrs,

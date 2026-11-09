@@ -150,6 +150,40 @@ describe("a tracked Enter in a list", () => {
     expect(ids.every((id) => typeof id === "string")).toBe(true);
     expect(new Set(ids).size).toBe(ids.length);
   });
+
+  it("is accepted with each half under ids of its own, the text before the break keeping the item's", () => {
+    const editor = editorWith([{ type: "bulletList", attrs: { nodeId: "l" }, content: [
+      { type: "listItem", attrs: { nodeId: "li" }, content: [para("p", "onetwo")] },
+    ] }]);
+    const listItem = editor.getState().schema.nodes["listItem"];
+    if (!listItem) throw new Error("no listItem");
+    editor.applyTransaction(editor.getState().tr.setSelection(TextSelection.create(editor.getState().doc, 6)));
+    splitListItem(listItem)(editor.getState(), (tr) => editor.applyTransaction(tr));
+    expect(reviewChanges(editor, { accepted: pendingActs(editor).map((a) => a.primary.id), rejected: [] }).status).toBe("applied");
+    const items: Array<[unknown, string]> = [];
+    editor.getState().doc.child(0).forEach((item) => items.push([item.attrs["nodeId"], item.textContent]));
+    expect(items[0]).toEqual(["li", "one"]);
+    expect(items[1]?.[1]).toBe("two");
+    expect(items[1]?.[0]).not.toBe("li");
+    expect(pendingActs(editor)).toHaveLength(0);
+  });
+
+  it.each([["at the item's start", 3], ["in the item's text", 6]])("is rejected %s back into the one item, under its ids", (_where, at) => {
+    const editor = editorWith([{ type: "bulletList", attrs: { nodeId: "l" }, content: [
+      { type: "listItem", attrs: { nodeId: "li" }, content: [para("p", "onetwo")] },
+    ] }]);
+    const listItem = editor.getState().schema.nodes["listItem"];
+    if (!listItem) throw new Error("no listItem");
+    editor.applyTransaction(editor.getState().tr.setSelection(TextSelection.create(editor.getState().doc, at)));
+    splitListItem(listItem)(editor.getState(), (tr) => editor.applyTransaction(tr));
+    expect(reviewChanges(editor, { accepted: [], rejected: pendingActs(editor).map((a) => a.primary.id) }).status).toBe("applied");
+    const list = editor.getState().doc.child(0);
+    const blocks: Array<[string, unknown, string]> = [[list.type.name, list.attrs["nodeId"], list.textContent]];
+    list.descendants((node) => {
+      if (node.isBlock) blocks.push([node.type.name, node.attrs["nodeId"], node.textContent]);
+    });
+    expect(blocks).toEqual([["bulletList", "l", "onetwo"], ["listItem", "li", "onetwo"], ["paragraph", "p", "onetwo"]]);
+  });
 });
 
 describe("a tracked paste of a copy", () => {
