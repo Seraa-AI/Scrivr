@@ -256,11 +256,12 @@ which #228 already records for wraps and lifts.
 
 | Key, where | Today | After |
 |---|---|---|
-| Tab, item 2+ | `sinkListItem` nests it (invisible) | Same; drawn at the next level. Refused (consumed, no change) at level 8 |
-| Tab, first item of a list | `sinkListItem` returns `false`, so the key is not consumed | Consumed, no change. See decision D4 |
+| Tab, any item | `sinkListItem`, or nothing on a list's first item | That item one level deeper (`levelOffset` + 1); the items after it stay. Consumed, no change at level 8. See decision D9, which replaces D4 |
+| Shift-Tab, item with `levelOffset` > 0 | `liftListItem` | That item one level back (`levelOffset` − 1) |
 | Shift-Tab, nested item | `liftListItem` to the parent list | Same |
 | Shift-Tab, top-level item | `liftListItem` to a paragraph | Same (decision D1) |
-| Backspace at start, item 2+ | `joinBackward`: becomes a continuation block of the item above (invisible) | Same, now drawn: unnumbered, at the item's indent. Numbering below renumbers. This is Word's first Backspace |
+| Backspace at start, item deeper than level 0 | `joinBackward` into the item above | Back one level, as Shift-Tab (user, 2026-11-09: Word walks it out to level 0 and never into the item above) |
+| Backspace at start, item 2+ at level 0 | `joinBackward`: becomes a continuation block of the item above (invisible) | Same, now drawn: unnumbered, at the item's indent. Numbering below renumbers. This is Word's first Backspace |
 | Backspace at start, first item | `joinBackward` lifts it to a paragraph | Same |
 | Backspace at start of a continuation block | Joins it into the block above | Same. Word would first outdent it; noted, not copied |
 
@@ -371,6 +372,7 @@ numbering through paragraph styles (4 fixtures), formats beyond
 - **D4 — Tab on a list's first item is consumed and changes nothing.** Word
   instead moves the whole list's indent, which our lists have no attribute for.
   Revisit if a list-level indent is added. Approved by the user on 2026-11-08.
+  **Replaced by D9.**
 - **D5 — Word geometry for the level table** (0.5in per level, 0.25in hanging,
   left-aligned marker). It is the most visible change here. Approved by the
   user on 2026-11-08.
@@ -489,8 +491,8 @@ section is what is true.
 | PR | Landed | What it changed |
 |---|---|---|
 | **L1** | `feat/word-lists` (not yet merged) | `model/lists.ts` owns what a list is (`isListType`, `listKind`, `listStart`), the nine levels (`listLevel`) and markers (`listMarker`, `bulletShape`, `bulletBox`); `layout/listMarkers.ts` owns the marker's face (`listMarkerFont`) and its painting (`drawListMarker`); `renderer/paintBlock.ts` paints every block with its marker. The six call sites ask them. `collectLayoutItems` lays out every block of an item at its level's indent, with the number on the item's first block. D5 geometry, with Word's tab rule for a number that reaches its text. Bullets drawn as shapes on canvas and in PDF, in the face of the item's first text. DOCX export brought forward from L3: nine levels with the drawn formats, glyphs and indents, continuation paragraphs, tables and sourced blocks indented to the item's text, and properties in schema order. Scenarios 1, 2 (drawn), 4, 6 and 7 (screen), 8, 9 green; scenario 5's continuation block is drawn |
-| **L2** | — | Not built |
-| **L3** | — | Not built. Its export half is a `numId` per list and `start` (`w:startOverride`): until then every ordered list shares one `numId`, so separate lists — including short lists in separate table cells, where independent lists are most common — continue each other's numbering in Word, and `order` is not exported |
+| **L2** | `feat/list-levels` (not yet merged) | `levelOffset` on list items (D9): Tab takes that item deeper, as in Word, up to level 8; Shift-Tab, and Backspace at an item's start, bring it back a level; numbering counts per level; DOCX import keeps an item that skips a level at its level |
+| **L3** | `feat/list-levels` (not yet merged), base only | Export: a `numId` per top-level list over one shared `w:abstractNum`, each with level 0's `startOverride` (`order`, else 1), so separate lists restart in Word; a nested list of the same kind numbers in its top list's `numId`. `numbering.getOrCreate` gains `instance` and `start`. Import: `w:start` / `startOverride` → `order`; `numId` 0 is a plain paragraph. Not built: resumed numbering (D3), continuation paragraphs and per-level kind on import, paste nesting |
 
 ### Decisions taken while building L1
 
@@ -517,6 +519,23 @@ section is what is true.
   segment records where it started (`AvailableSegment.indentFrom`), and
   `listMarkerOf` gives the number's `x` from it, for canvas and PDF alike.
   Wrapped lines beside the float start at its edge, as Word wraps them.
+
+- **D9 — An item can sit levels deeper than its place puts it** (user
+  decisions, 2026-11-09: "follow Word", then "we should only affect that list
+  item"). In Word, Tab keeps pushing an item deeper, and only that item; ours
+  stopped after one level, because a nested list hangs off the item above.
+  Each list item now has `levelOffset` (default 0): its level is its list's
+  level plus its own offset, never past level 8, and a list nested in it sits
+  one level below the item's list, not the item, so moving an item never moves
+  what is nested in it. Tab raises the item's offset; Shift-Tab, and
+  Backspace at the start of an item below level 0, lower it, then lift as
+  before. Items after it keep their levels. An ordered list counts per level,
+  as Word does: an item's number follows the last item at its level, and a
+  shallower item restarts the deeper levels. Layout, markers and DOCX `ilvl`
+  read the one level. Kept containers (not Word's flat model, see
+  "Alternatives rejected"); the change is one attribute on the item. A first
+  try put the offset on the list, which moved every item with the one tabbed;
+  the live test showed it.
 
 ### Where the code differs from the design above
 

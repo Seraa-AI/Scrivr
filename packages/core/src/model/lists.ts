@@ -91,6 +91,41 @@ export function listKind(node: Node): ListKind | null {
   return node.type.name === "orderedList" ? "ordered" : "bullet";
 }
 
+/** How many levels deeper a list item sits than its list: Tab adds one, as in Word. */
+export function itemLevelOffset(item: Node): number {
+  const offset = item.attrs["levelOffset"];
+  return typeof offset === "number" && Number.isInteger(offset) && offset > 0 ? offset : 0;
+}
+
+/**
+ * A list's own level (0 = top): one below the list it is nested in, whatever
+ * level the item holding it was moved to, so moving an item moves only that
+ * item, as each paragraph keeps its own level in Word.
+ */
+export function nestedListLevel(parentListLevel: number | null): number {
+  return parentListLevel === null ? 0 : parentListLevel + 1;
+}
+
+/** The level an item is drawn at: its list's level plus its own `levelOffset`, never past the ninth. */
+export function itemLevel(item: Node, listLevel: number): number {
+  return Math.min(listLevel + itemLevelOffset(item), LIST_LEVEL_COUNT - 1);
+}
+
+/**
+ * Numbers an ordered list's items by level, as Word counts: an item follows
+ * the last item at its level, and a shallower item restarts every deeper one.
+ * The list's `start` is its own level's first number; deeper levels start at 1.
+ */
+export function levelCounter(listLevel: number, start: number): (level: number) => number {
+  const counts = new Map<number, number>();
+  return (level) => {
+    const next = (counts.get(level) ?? (level === listLevel ? start - 1 : 0)) + 1;
+    counts.set(level, next);
+    for (const deeper of [...counts.keys()]) if (deeper > level) counts.delete(deeper);
+    return next;
+  };
+}
+
 /** The number an ordered list starts at, kept within MIN_START–MAX_START. */
 export function listStart(node: Node): number {
   const order = node.attrs["order"];

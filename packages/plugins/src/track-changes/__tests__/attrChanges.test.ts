@@ -18,6 +18,10 @@ describe("how an attribute change reads", () => {
       .toBe("Heading level: Heading 1 → Heading 2");
   });
 
+  it("names a list item's indent", () => {
+    expect(describeAttrChanges({ levelOffset: 0 }, { levelOffset: 1 })).toBe("List indent: 0 → 1");
+  });
+
   it("leaves out ids and tracking records", () => {
     expect(describeAttrChanges({ nodeId: "a", dataTracked: [] }, { nodeId: "b", dataTracked: [{}] })).toBe("");
   });

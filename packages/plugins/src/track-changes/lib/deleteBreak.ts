@@ -10,7 +10,8 @@ import { CHANGE_OPERATION, CHANGE_STATUS } from "../types";
 
 const recordsOf = (node: PMNode) => getBlockInlineTrackedData(node) ?? [];
 
-const addedBy = (node: PMNode, authorID: string, operations: CHANGE_OPERATION[]) =>
+/** Does this node carry a pending record of one of `operations` by this author? */
+export const addedBy = (node: PMNode, authorID: string, operations: CHANGE_OPERATION[]) =>
   recordsOf(node).some(record =>
     record.status === CHANGE_STATUS.pending && record.authorID === authorID && !record.foldingClosed &&
     record.operation !== undefined && operations.includes(record.operation),

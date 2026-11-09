@@ -52,7 +52,13 @@ export interface StyleEntry {
 
 export interface NumberingEntry {
   numId: number;
+  /** The definition (`w:abstractNum`) this numbering counts by; entries with equal levels share one. */
+  abstractId: number;
   config: { type: "bullet" | "ordered" | "task"; levels: DocxNumberingLevel[] };
+  /** The list this numbering is for, when it is one list's own. */
+  instance?: object;
+  /** Level 0's first number, written as its `startOverride`, when this is one list's own. */
+  start?: number;
 }
 
 export interface RelEntry {
@@ -142,14 +148,16 @@ export function createDocxContext(
       table: { getOrCreate: (n, s) => getOrCreateStyle("table", n, s) },
     },
     numbering: {
-      getOrCreate(config) {
+      getOrCreate({ instance, start, ...config }) {
         const key = numberingKey(config);
-        const existing = state.numbering.find((entry) =>
-          numberingKey(entry.config) === key
-        );
+        const sameLevels = state.numbering.find((entry) => numberingKey(entry.config) === key);
+        const existing = instance
+          ? state.numbering.find((entry) => entry.instance === instance)
+          : state.numbering.find((entry) => !entry.instance && numberingKey(entry.config) === key);
         if (existing) return { numId: existing.numId };
         const numId = state.numbering.length + 1;
-        state.numbering.push({ numId, config });
+        const abstractId = sameLevels?.abstractId ?? Math.max(0, ...state.numbering.map((entry) => entry.abstractId)) + 1;
+        state.numbering.push({ numId, abstractId, config, ...(instance ? { instance, start: start ?? 1 } : {}) });
         return { numId };
       },
     },

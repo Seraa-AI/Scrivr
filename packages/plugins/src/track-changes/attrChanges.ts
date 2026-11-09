@@ -7,6 +7,7 @@ const ATTR_LABELS: Record<string, string> = {
   indent: "Indent",
   textIndent: "First-line indent",
   order: "Start number",
+  levelOffset: "List indent",
   wrapMode: "Text wrapping",
   xAlign: "Horizontal alignment",
   x: "Horizontal position",
