@@ -799,10 +799,33 @@ describe("float beside a table — the table moves below the float", () => {
       expectFloatsOnAnchorPages(l);
     });
 
+    // The scenario-39 float has no fixed point, so everything after it moves
+    // back and forth with it. A float later on, at yOffset 0, cannot move its
+    // own anchor: it must follow its paragraph, not lock somewhere off it.
+    // A float that keeps pushing the paragraph before it down (its own zone
+    // covers that paragraph's last line) never repeats a position, so it runs
+    // until it is locked, carrying everything after it along. A float later on,
+    // at yOffset 0, cannot move its own anchor: it must follow its paragraph
+    // and never lock somewhere off it.
+    it("55: a float carried by another float's runaway stays on its anchor", () => {
+      const l = expectStable(docOf(
+        para(`P0 ${words(3)}`),
+        para("A2", image({ wrapMode: "top-bottom", xAlign: "left", width: 200, height: 250 })),
+        para(`A3 ${words(40)}`, image({ wrapMode: "top-bottom", xAlign: "left", width: 200, height: 150, yOffset: -120 })),
+        para(`Follower ${words(40)}`, image({ wrapMode: "square", xAlign: "left", width: 120, height: 40 })),
+      ));
+      const follower = floatOf(l, 2);
+      expect(follower.clamped).toBeUndefined();
+      expect(follower.stackOffset).toBeUndefined();
+      expect(follower.y).toBeCloseTo(blockWith(l, "Follower").y, 6);
+      expect(textUnderFloats(l)).toEqual([]);
+    });
+
     // Regression seeds from the reviewers' fuzz generator, written out with
     // macOS metrics. They pin the shape that failed; on another font set the
-    // trigger may not fire, and the measured scenarios (39, 47-51) are the
-    // ones that fire on any.
+    // trigger may not fire. Scenario 46 is the one that catches the lock
+    // attribution; the lock itself is caught on any font set by
+    // FloatSettleWork.test.ts.
     it("40: reach-back floats that chase each other leave no text under them (seed 21)", () => {
       const l = expectStable(docOf(
         sized("P0", 362, image({ wrapMode: "square", xAlign: "left", width: 199, height: 196 })),
@@ -884,9 +907,9 @@ describe("float beside a table — the table moves below the float", () => {
         sized("P4", 392), sized("P5", 197), table("T0", 2), table("T1", 2), sized("P8", 117),
       ));
       const steady = floatOf(l, 2);
-      if (!steady.clamped && steady.stackOffset === undefined) {
-        expect(steady.y).toBeCloseTo(blockWith(l, "P2 ").y, 6);
-      }
+      expect(steady.clamped).toBeUndefined();
+      expect(steady.stackOffset).toBeUndefined();
+      expect(steady.y).toBeCloseTo(blockWith(l, "P2 ").y, 6);
       expect(textUnderFloats(l)).toEqual([]);
     });
 
@@ -906,6 +929,11 @@ describe("float beside a table — the table moves below the float", () => {
       for (const a of placed) for (const b of placed) {
         if (a !== b && a.wrapMode === "square" && b.wrapMode === "square") expect(floatsOverlap(a, b)).toBe(false);
       }
+      // The page-flipping float at the end is the one with no fixed point;
+      // the reach-back float in P3 has a stable position and keeps it.
+      const reachBack = floatOf(l, 1);
+      expect(reachBack.clamped).toBeUndefined();
+      expectOnAnchor(l, reachBack, "P3 ", -100);
       expect(textUnderFloats(l)).toEqual([]);
     });
 

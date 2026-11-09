@@ -63,10 +63,7 @@ function restampGlobalYFrom(
     const natural = naturalStartOf(flows, i, pageConfig, geometry);
     const start = startOf(i, natural);
     const pushed = start !== natural;
-    if (start === flow.globalY) {
-      if ((flow.solverPushedThisFlow ?? false) !== pushed) flows[i] = { ...flow, solverPushedThisFlow: pushed };
-      break;
-    }
+    if (start === flow.globalY) break;
     flows[i] = { ...flow, globalY: start, solverPushedThisFlow: pushed };
     to = i + 1;
   }
@@ -253,14 +250,13 @@ export function resolveAnchoredObjects(
         : band);
     };
     // A page that holds a float's rect and had flows carried onto it needs a
-    // scan. The page just reflowed already scanned everything it moved below
-    // where the move began; a block straddling into it can still move flows
-    // on an earlier page, which do need one.
-    const markMoved = (moved: { from: number; to: number }, scanned?: number): void => {
+    // scan; the page just reflowed already scanned to its bottom.
+    const markMoved = (moved: { from: number; to: number }, scanned = 0): void => {
       for (let i = moved.from; i < moved.to; i++) {
         const page = geometry.pageAt(flows[i]?.globalY ?? 0);
-        if (page === scanned) continue;
-        if (exclusionsOn(page).hasExclusionsOnPage(page) && !dirty.has(page)) dirty.set(page, undefined);
+        if (page > scanned && exclusionsOn(page).hasExclusionsOnPage(page) && !dirty.has(page)) {
+          dirty.set(page, undefined);
+        }
       }
     };
 

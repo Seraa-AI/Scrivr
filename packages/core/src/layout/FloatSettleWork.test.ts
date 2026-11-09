@@ -53,3 +53,41 @@ describe("float settling work", () => {
     expect(large).toBeLessThan(small * 6);
   });
 });
+
+/** A paragraph, then an anchor whose top-bottom float sits `yOffset` from it. */
+function oscillatingDoc(yOffset: number): Node {
+  return schema.node("doc", null, [
+    schema.node("paragraph", null, [schema.text(`Above ${words}`)]),
+    schema.node("paragraph", null, [
+      schema.text(`Anchor ${words}`),
+      schema.node("image", { src: "", wrapMode: "top-bottom", width: 200, height: 60, yOffset }),
+    ]),
+  ]);
+}
+
+describe("a float with no fixed point", () => {
+  it("is locked instead of chasing its anchor until the backstop", () => {
+    // Pull the float up over the last line of the paragraph above: clearing
+    // that line moves the anchor, which moves the float back over it.
+    const plain = runPipeline(
+      schema.node("doc", null, [
+        schema.node("paragraph", null, [schema.text(`Above ${words}`)]),
+        schema.node("paragraph", null, [schema.text("Anchor")]),
+      ]),
+      { pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer() },
+    );
+    const [above, anchor] = plain.pages[0]?.blocks ?? [];
+    const lastLine = above?.lines.at(-1);
+    if (!above || !anchor || !lastLine) throw new Error("plain layout");
+    const reachBack = above.y + above.height - lastLine.lineHeight - anchor.y;
+
+    const settled = (yOffset: number): number => {
+      counter.calls = 0;
+      runPipeline(oscillatingDoc(yOffset), { pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer() });
+      return counter.calls;
+    };
+    // Without the lock the float is placed again on every pass up to the
+    // backstop, re-laying the text each time.
+    expect(settled(reachBack)).toBeLessThan(settled(0) * 4);
+  });
+});
