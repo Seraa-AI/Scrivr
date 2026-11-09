@@ -741,15 +741,11 @@ describe("float beside a table — the table moves below the float", () => {
       expectFloatsOnAnchorPages(l);
     });
 
-    // The scenario-39 float has no fixed point, so everything after it moves
-    // back and forth with it. A float later on, at yOffset 0, cannot move its
-    // own anchor: it must follow its paragraph, not lock somewhere off it.
-    // A float that keeps pushing the paragraph before it down (its own zone
-    // covers that paragraph's last line) never repeats a position, so it runs
-    // until it is locked, carrying everything after it along. A float later on,
-    // at yOffset 0, cannot move its own anchor: it must follow its paragraph
-    // and never lock somewhere off it.
-    it("55: a float carried by another float's runaway stays on its anchor", () => {
+    // Guard, never red (on main either). A float whose own zone covers the
+    // paragraph before it has no fixed point and locks; what follows moves
+    // with it while it settles. A float later on, at yOffset 0, cannot move
+    // its own anchor: it must follow its paragraph, never lock off it.
+    it("55: guard — a float after one that locks stays on its anchor", () => {
       const l = expectStable(docOf(
         para(`P0 ${words(3)}`),
         para("A2", image({ wrapMode: "top-bottom", xAlign: "left", width: 200, height: 250 })),
@@ -844,7 +840,7 @@ describe("float beside a table — the table moves below the float", () => {
         expect(textUnderFloats(l)).toEqual([]);
       });
 
-      it("34: a float follows its anchor when the anchor's first line lands on the next page", () => {
+      it("34: guard — a float follows its anchor when the anchor's first line lands on the next page", () => {
         const count = fillersOnPage1([]);
         for (let n = count - 2; n <= count; n++) {
           const l = expectStable(docOf(

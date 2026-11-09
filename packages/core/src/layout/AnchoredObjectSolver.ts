@@ -106,13 +106,6 @@ function createPageBarrierProvider(geometry: PageGeometry): PageBarrierProvider 
 }
 
 /**
- * How many placements one settle gives a wrapping float whose own wrap keeps
- * moving its anchor, if no placement repeats, before it is locked.
- * Convergence takes one extra placement; this catches a runaway.
- */
-const MAX_PLACEMENTS_BEFORE_LOCK = 4;
-
-/**
  * A backstop on passes in one settle. Locking normally ends a settle long
  * before; a settle that reaches it has just reflowed its dirty pages, so text
  * agrees with every rect, and stops there.
@@ -233,8 +226,7 @@ export function resolveAnchoredObjects(
   // A float whose own wrap keeps moving its anchor has no layout where text,
   // float and anchor all agree, and is locked as Word does: when one of its
   // placements repeats (an oscillation, as LibreOffice's SwOszControl
-  // detects it) or after MAX_PLACEMENTS_BEFORE_LOCK placements that never
-  // settle.
+  // detects it).
   const settleFrom = (first: PlacedFloat, carried: { from: number; to: number }): void => {
     const dirty = new Map<number, Band | undefined>();
     const markBand = (page: number, band: Band): void => {
@@ -294,9 +286,8 @@ export function resolveAnchoredObjects(
 
         if (float.wraps) {
           const seen = history.get(float) ?? [previous];
-          if (seen.some((p) => samePlacement(p, next)) || seen.length > MAX_PLACEMENTS_BEFORE_LOCK) {
-            // Lock at the state it is returning to: its fixed point, if it
-            // was converging.
+          if (seen.some((p) => samePlacement(p, next))) {
+            // Lock at the state it is returning to.
             float.locked = true;
           }
           history.set(float, [...seen, next]);
