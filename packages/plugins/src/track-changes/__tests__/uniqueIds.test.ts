@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { ServerEditor, StarterKit } from "@scrivr/core";
-import { redo, Slice, splitBlock, splitListItem, TextSelection, undo } from "@scrivr/core/pm";
+import { redo, Slice, splitBlock, splitListItem, TextSelection, undo, type Node as PMNode } from "@scrivr/core/pm";
 import { changeActs, reviewChanges, TrackChanges, TrackChangesStatus, trackChangesPluginKey } from "@scrivr/plugins";
 
 type DocNode = Record<string, unknown>;
@@ -295,5 +295,56 @@ describe("a pending move", () => {
     expect(topIds(editor).filter((id) => id === "a")).toHaveLength(2);
     editor.applyTransaction(editor.getState().tr.insertText("!", editor.getState().doc.child(0).nodeSize + 2));
     expect(topIds(editor).filter((id) => id === "a")).toHaveLength(2);
+  });
+});
+
+describe("deleting a pending move's moved copy", () => {
+  /** Moves the first block to just before the block at `before` (or the end), then deletes the moved copy. */
+  function moveThenDelete(content: DocNode[], before?: number) {
+    const editor = editorWith(content);
+    const state = editor.getState();
+    const first = state.doc.child(0);
+    let target = 0;
+    state.doc.forEach((node, offset, index) => {
+      if (index < (before ?? state.doc.childCount)) target = offset + node.nodeSize;
+    });
+    editor.applyTransaction(state.tr.insert(target, first).delete(0, first.nodeSize));
+    const doc = editor.getState().doc;
+    let copy = -1;
+    doc.forEach((node, offset) => {
+      if (node.attrs["nodeId"] === "a" && offset > 0) copy = offset;
+    });
+    const copyNode = doc.nodeAt(copy);
+    if (!copyNode) throw new Error("no moved copy");
+    editor.applyTransaction(editor.getState().tr.delete(copy, copy + copyNode.nodeSize).setMeta("uiEvent", "cut"));
+    return editor;
+  }
+
+  it("proposes deleting it, as a deletion and no longer a move, when it is the last block", () => {
+    const editor = moveThenDelete([para("a", "Alpha"), para("b", "Beta")]);
+    const operations: string[][] = [];
+    editor.getState().doc.forEach((node) => {
+      const records: Array<{ operation?: string; status?: string }> = Array.isArray(node.attrs["dataTracked"]) ? node.attrs["dataTracked"] : [];
+      if (node.attrs["nodeId"] === "a") operations.push(records.filter((r) => r.status === "pending").map((r) => r.operation ?? ""));
+    });
+    expect(operations.length).toBeGreaterThan(0);
+    for (const ops of operations) {
+      expect(ops).toContain("delete");
+      expect(ops).not.toContain("move");
+    }
+  });
+
+  it("leaves the block after it as it was", () => {
+    const editor = moveThenDelete([
+      para("a", "Alpha"),
+      para("b", "Beta"),
+      { type: "heading", attrs: { nodeId: "h", level: 2 }, content: [{ type: "text", text: "Head" }] },
+    ], 2);
+    let heading: PMNode | undefined;
+    editor.getState().doc.forEach((node) => {
+      if (node.type.name === "heading") heading = node;
+    });
+    expect(heading?.attrs["nodeId"]).toBe("h");
+    expect(heading?.attrs["level"]).toBe(2);
   });
 });

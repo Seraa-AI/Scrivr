@@ -1,8 +1,6 @@
 import { Node as PMNode, Slice } from "@scrivr/core/pm";
 import { ReplaceAroundStep, ReplaceStep } from "@scrivr/core/pm";
 
-import { ChangeSet } from "../ChangeSet";
-import { CHANGE_OPERATION, CHANGE_STATUS } from "../types";
 
 export const isDeleteStep = (step: ReplaceStep) =>
   step.from !== step.to && step.slice.content.size < step.to - step.from;
@@ -90,29 +88,4 @@ export function isLiftStepForGap(
     gap.start < gap.end && gap.insert === 0 && gap.end === to && !node.isText
   );
 }
-
-export const isDirectPendingMoveDeletion = (
-  step: ReplaceStep,
-  doc: PMNode,
-  movingSteps: Map<ReplaceStep, string>,
-): boolean => {
-  if (step.from === step.to || step.slice.content.size > 0) {
-    return false;
-  }
-
-  if (movingSteps.has(step)) {
-    return false;
-  }
-
-  const node = doc.nodeAt(step.from);
-  if (!node) {
-    return false;
-  }
-
-  return ChangeSet.isPendingChange(
-    node.attrs.dataTracked,
-    CHANGE_OPERATION.move,
-  );
-};
-
 

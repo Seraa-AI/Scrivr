@@ -3,7 +3,6 @@ import { EditorState, Mapping, PluginKey, Transaction } from "@scrivr/core/pm";
 
 import { getAction, TrackChangesAction } from "../actions";
 import {
-  changeMovedToInsertsOnSourceDeletion,
   contentSteps,
   groupIndentationSteps,
   groupMoveSteps,
@@ -132,7 +131,6 @@ export function trackChanges(
   if (refusal) return { kind: "refused", result: { status: "refused", ...refusal, steps } };
 
   const startedAt = Date.now();
-  changeMovedToInsertsOnSourceDeletion(gesture, createdTr, trContext);
   const tr = trackTransaction(gesture, oldState, createdTr, userID, trContext);
   return {
     kind: "tracked",

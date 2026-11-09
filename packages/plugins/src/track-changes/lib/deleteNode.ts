@@ -4,7 +4,7 @@ import { Transaction } from "@scrivr/core/pm";
 import { alreadyProposedForDeletion, canCancelInsertion } from "./deletionPolicy";
 import { dropStructuralChangeShadow } from "./structuralChange";
 import { addTrackIdIfDoesntExist, getBlockInlineTrackedData, NewDeleteAttrs } from "../helpers";
-import { CHANGE_OPERATION } from "../types";
+import { CHANGE_OPERATION, CHANGE_STATUS } from "../types";
 
 /**
  * Deletes node but tries to leave content intact by merging upward first. A
@@ -55,12 +55,17 @@ export function deleteOrSetNodeDeleted(
   }
 
   const newDeleted = addTrackIdIfDoesntExist(deleteAttrs);
+  // A pending move's moved copy, deleted, is a deletion of that content and no
+  // longer the move's destination.
+  const kept = deleteAttrs.moveNodeId
+    ? dataTracked ?? []
+    : (dataTracked ?? []).filter(c => !(c.operation === CHANGE_OPERATION.move && c.status === CHANGE_STATUS.pending));
   newTr.setNodeMarkup(
     pos,
     undefined,
     {
       ...node.attrs,
-      dataTracked: [...(dataTracked ?? []), newDeleted],
+      dataTracked: [...kept, newDeleted],
     },
     node.marks,
   );
