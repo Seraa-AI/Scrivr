@@ -13,10 +13,26 @@ import type { LayoutLine, LineSpaceProvider } from "./LineBreaker";
 import type { TextMeasurerLike } from "./TextMeasurer";
 import { markerFaceOf, type BlockMarker, type LaidMarker, type MarkerFace } from "./markers";
 
-/** A single item ready for layout: a block, or a page break between blocks. */
+/** The page the next block starts on past a boundary that moves the flow. */
+export type PageStart = Exclude<SectionBreakType, "continuous">;
+
+/**
+ * Where the flow may move on: past a node that breaks the page, or past a
+ * section boundary, into the next section by its transition.
+ */
+export type LayoutBoundary =
+  | { kind: "break"; breaks: "page" }
+  | { kind: "section"; transition: SectionBreakType };
+
+/** The page the next block starts on past `boundary`, or null when it does not move the flow. */
+export function pageStartPast(boundary: LayoutBoundary): PageStart | null {
+  if (boundary.kind === "break") return "nextPage";
+  return boundary.transition === "continuous" ? null : boundary.transition;
+}
+
+/** A single item ready for layout: a block, or a boundary between blocks. */
 export interface LayoutItem {
-  isPageBreak?: true;
-  pageBreakType?: Exclude<SectionBreakType, "continuous">;
+  boundary?: LayoutBoundary;
   node: Node;
   nodePos: number;
   /** Extra left indent in px: what the wrappers around the block add, plus its own `indent`. */
@@ -83,24 +99,16 @@ export function collectChildItems(parent: Node, base: number): LayoutItem[] {
 
   const walkOne = (node: Node, offset: number, scope: WrapScope): void => {
     if (breakOf(node.type) === "page") {
-      items.push({ isPageBreak: true, node, nodePos: offset, indentLeft: 0 });
+      items.push({ boundary: { kind: "break", breaks: "page" }, node, nodePos: offset, indentLeft: 0 });
       return;
     }
 
-    // A section boundary affects the flow only when the next section must
-    // start on a fresh page. A continuous break is a pure model marker, and
-    // column geometry is read from the derived sections, not from here.
+    // Every section boundary, a continuous one included: it is where the
+    // next section's settings take over, though only the other transitions
+    // move the flow today.
     if (isSectionBreak(node)) {
-      const breakType = coerceSectionSettings(node.attrs["settings"]).breakType;
-      if (breakType !== "continuous") {
-        items.push({
-          isPageBreak: true,
-          pageBreakType: breakType,
-          node,
-          nodePos: offset,
-          indentLeft: 0,
-        });
-      }
+      const transition = coerceSectionSettings(node.attrs["settings"]).breakType;
+      items.push({ boundary: { kind: "section", transition }, node, nodePos: offset, indentLeft: 0 });
       return;
     }
 

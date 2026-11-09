@@ -17,7 +17,7 @@ const FONT_MARKS = /(name ?[!=]==? ?|case |includes\(|marks\[)["'`](bold|italic|
 
 /** Nodes and marks that declare what they do, through their spec, tokens, styles or font modifiers. */
 const NODE_NAMES: Record<string, RegExp> = {
-  layout: new RegExp(`\\b(pageBreak|hardBreak)\\b|["'\`]heading(_\\d)?["'\`]|${FONT_MARKS.source}`),
+  layout: new RegExp(`\\b(pageBreak|hardBreak|sectionBreak)\\b|["'\`]heading(_\\d)?["'\`]|${FONT_MARKS.source}`),
   renderer: new RegExp(`\\b(pageBreak|hardBreak)\\b|${FONT_MARKS.source}`),
   fonts: FONT_MARKS,
   input: /["'`](paragraph|heading|bulletList|orderedList|listItem)["'`]/,
@@ -42,6 +42,11 @@ describe("the engine's vocabulary", () => {
 
   it.each(Object.entries(NODE_NAMES))("no source file under %s/ names a node or mark that declares itself", (dir, words) => {
     expect(linesMatching(dir, words)).toEqual([]);
+  });
+
+  it("the sections model finds a section boundary by its declaration, not its name", () => {
+    const named = readFileSync(join(__dirname, "..", "model", "sections.ts"), "utf8").split("\n").filter((line) => /["'`]sectionBreak["'`]/.test(line));
+    expect(named).toEqual([]);
   });
 
   it("the editor reads a run's font through the font modifiers, not the marks' names", () => {

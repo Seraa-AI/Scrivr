@@ -34,6 +34,7 @@ export const Sections = Extension.create({
         group: "block",
         atom: true,
         selectable: false,
+        sectionBoundary: true,
         attrs: {
           nodeId: { default: null },
           dataTracked: { default: [] },

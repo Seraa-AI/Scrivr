@@ -83,6 +83,11 @@ import type {
  */
 export type ScrivrNodeSpec = NodeSpec & {
   layout?: NodeLayout;
+  /**
+   * The node ends a section; its `settings` attr holds the settings of the
+   * section it ends (see `deriveSections`).
+   */
+  sectionBoundary?: boolean;
 };
 
 // ── Overlay render handler ─────────────────────────────────────────────────────

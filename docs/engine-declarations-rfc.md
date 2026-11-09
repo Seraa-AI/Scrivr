@@ -267,3 +267,24 @@ As designed, with these differences:
   `includes(`, `marks[`) under `layout/`, `renderer/`, `fonts/` or in
   `Editor.ts`; no `heading` style key under `layout/`; no `paragraph` literal
   under `input/`.
+
+### Phase 2 — sections
+
+As designed, with these differences:
+
+- **`sectionBoundary`** is typed on `ScrivrNodeSpec` beside `layout`;
+  `isSectionBreak` reads it, and `Sections` declares it.
+- **`LayoutItem.boundary: LayoutBoundary`** replaces `isPageBreak` and
+  `pageBreakType`; `pageStartPast(boundary)` says which page the next block
+  starts on, or null for a continuous transition.
+- **A continuous boundary is an item, not yet a flow.** On `FlowBlock`, the
+  two fields become one, `pageStart`, set only on a boundary that moves the
+  flow. Making a continuous boundary a zero-size flow would have meant teaching
+  three cursors (the solver's natural start, the flow cursor, `paginateFlow`)
+  to collapse margins through it — the cursors the region-cursor refactor
+  (columns Phase 1) replaces. The item stream already names every transition
+  in one place; the region cursor turns the continuous one into a flow when it
+  has a use for it.
+- The vocabulary guard keeps `sectionBreak` out of `layout/` and the sections
+  model.
+
