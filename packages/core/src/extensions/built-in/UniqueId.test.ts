@@ -158,6 +158,37 @@ describe("UniqueId — no two blocks share an id an edit created", () => {
     expect(empty.attrs["nodeId"]).not.toBe("p0");
   });
 
+  it("keeps a paragraph's id on what is left of its words when Enter replaces a selection at its start", () => {
+    const ed = new ServerEditor({
+      extensions: [StarterKit],
+      content: { type: "doc", content: [{ type: "paragraph", attrs: { nodeId: "p" }, content: [{ type: "text", text: "Hello" }] }] },
+    });
+    ed.applyTransaction(ed.getState().tr.delete(1, 3).split(1));
+    const [empty, rest] = [ed.getState().doc.child(0), ed.getState().doc.child(1)];
+    expect(rest.textContent).toBe("llo");
+    expect(rest.attrs["nodeId"]).toBe("p");
+    expect(empty.attrs["nodeId"]).not.toBe("p");
+  });
+
+  it("keeps a list item's ids on the item after the empty one Enter at its start opens", () => {
+    const ed = new ServerEditor({
+      extensions: [StarterKit],
+      content: { type: "doc", content: [{ type: "bulletList", attrs: { nodeId: "l" }, content: [
+        { type: "listItem", attrs: { nodeId: "li" }, content: [{ type: "paragraph", attrs: { nodeId: "p" }, content: [{ type: "text", text: "Item" }] }] },
+      ] }] },
+    });
+    const listItem = ed.schema.nodes["listItem"];
+    if (!listItem) throw new Error("no listItem");
+    ed.applyTransaction(ed.getState().tr.setSelection(TextSelection.create(ed.getState().doc, 3)));
+    splitListItem(listItem)(ed.getState(), (tr) => ed.applyTransaction(tr));
+    const list = ed.getState().doc.child(0);
+    const [empty, item] = [list.child(0), list.child(1)];
+    expect(item.textContent).toBe("Item");
+    expect([item.attrs["nodeId"], item.child(0).attrs["nodeId"]]).toEqual(["li", "p"]);
+    expect([empty.attrs["nodeId"], empty.child(0).attrs["nodeId"]]).not.toContain("li");
+    expect(empty.child(0).attrs["nodeId"]).not.toBe("p");
+  });
+
   it("keeps a paragraph's id when Enter at its end opens an empty line after it", () => {
     const ed = editor();
     ed.applyTransaction(ed.getState().tr.split(3));

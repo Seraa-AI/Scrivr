@@ -140,17 +140,18 @@ export function planDuplicateIdAssignments(
   if (shared.size === 0) return [];
 
   // A block that was there before keeps its id on the copy holding its
-  // content: where its content's start went. So Enter at the start of a
-  // paragraph leaves the paragraph its id and the empty line before it is new,
-  // as in Word. A leaf has no content; its own position says where it went.
+  // content: where its first words went, whatever before them the edit
+  // replaced. So Enter at the start of a paragraph, or of a list item, leaves
+  // it its ids and the empty one before it is new, as in Word. A leaf has no
+  // content; its own position says where it went.
   const kept = new Set<number>();
   before.descendants((node, pos) => {
     const id = blockIdOf(node);
     if (id === null || !shared.has(id)) return true;
-    const mapped = mapping.mapResult(node.isLeaf ? pos : pos + 1, 1);
-    if (mapped.deleted) return true;
+    if (mapping.mapResult(pos, 1).pos >= mapping.mapResult(pos + node.nodeSize, -1).pos) return true;
+    const mapped = mapping.map(node.isLeaf ? pos : firstWordsAt(node, pos), 1);
     const holder = copies.get(id)?.find((copy) =>
-      node.isLeaf ? copy.pos === mapped.pos : copy.pos < mapped.pos && mapped.pos < copy.pos + copy.node.nodeSize);
+      node.isLeaf ? copy.pos === mapped : copy.pos < mapped && mapped < copy.pos + copy.node.nodeSize);
     if (holder) kept.add(holder.pos);
     return true;
   });
@@ -166,6 +167,17 @@ export function planDuplicateIdAssignments(
     }
   }
   return out;
+}
+
+/** Where a block's first words sit: the start of its first textblock's content. */
+function firstWordsAt(node: Node, pos: number): number {
+  let at = pos + 1;
+  let inner = node;
+  while (!inner.isTextblock && inner.firstChild && !inner.firstChild.isLeaf) {
+    inner = inner.firstChild;
+    at += 1;
+  }
+  return at;
 }
 
 /**
