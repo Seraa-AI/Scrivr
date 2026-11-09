@@ -104,3 +104,6 @@ One-time changes to watch for:
 - An agent's reply is diffed against the proposed view it read: another
   author's pending formatting removal stays theirs, and a pending deleted line
   break no longer turns a small edit into a rewrite of the block.
+- An inserted, deleted or moved empty line — a new empty list item or
+  paragraph — is marked on the canvas again. The caret's zero-width glyph on
+  the line counted as text, so it was left unmarked.

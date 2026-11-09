@@ -118,12 +118,7 @@ export function renderTrackedInsert(
   }
 
   // Pass 2 — empty lines
-  const lineIndexesWithGlyphs = new Set(glyphs.map((g) => g.lineIndex));
-  for (const line of lines) {
-    if (!lineIndexesWithGlyphs.has(line.lineIndex)) {
-      snappedFillRect(ctx, line.x, line.y, line.height, line.height);
-    }
-  }
+  fillEmptyLines(ctx, glyphs, lines);
 
   // Underline
   ctx.strokeStyle = color.startsWith("#") ? hexToRgba(color, 0.8) : color;
@@ -158,12 +153,7 @@ export function renderTrackedDelete(
   }
 
   // Pass 2 — empty lines
-  const lineIndexesWithGlyphs = new Set(glyphs.map((g) => g.lineIndex));
-  for (const line of lines) {
-    if (!lineIndexesWithGlyphs.has(line.lineIndex)) {
-      snappedFillRect(ctx, line.x, line.y, line.height, line.height);
-    }
-  }
+  fillEmptyLines(ctx, glyphs, lines);
 
   // Strikethrough — one segment per contiguous docPos run on each line.
   // Sorting by docPos then checking adjacency ensures that non-deleted text
@@ -270,10 +260,7 @@ export function renderTrackedMove(
   ctx.save();
   ctx.fillStyle = color.startsWith("#") ? hexToRgba(color, 0.08) : color;
   for (const g of glyphs) snappedFillRect(ctx, g.x, g.y, g.width, g.height);
-  const lineIndexesWithGlyphs = new Set(glyphs.map((g) => g.lineIndex));
-  for (const line of lines) {
-    if (!lineIndexesWithGlyphs.has(line.lineIndex)) snappedFillRect(ctx, line.x, line.y, line.height, line.height);
-  }
+  fillEmptyLines(ctx, glyphs, lines);
   ctx.strokeStyle = color.startsWith("#") ? hexToRgba(color, 0.9) : color;
   ctx.lineWidth = 1;
   // One pair of lines per run of glyphs on a line, not per glyph.
@@ -365,12 +352,7 @@ export function renderTrackedConflict(
   for (const g of glyphs) {
     snappedFillRect(ctx, g.x, g.y, g.width, g.height);
   }
-  const lineIndexesWithGlyphs = new Set(glyphs.map((g) => g.lineIndex));
-  for (const line of lines) {
-    if (!lineIndexesWithGlyphs.has(line.lineIndex)) {
-      snappedFillRect(ctx, line.x, line.y, line.height, line.height);
-    }
-  }
+  fillEmptyLines(ctx, glyphs, lines);
 
   // Dashed amber underline — visually distinct from the solid insert underline
   ctx.strokeStyle = hexToRgba(AMBER, 0.9);
@@ -518,6 +500,18 @@ export function snapRect(
 }
 
 /** fillRect snapped to the device pixel grid. */
+/**
+ * Marks each line that holds no text with a line-high square at its start, so
+ * an empty paragraph still shows its change. The caret's zero-width glyph on
+ * an empty line is not text.
+ */
+function fillEmptyLines(ctx: CanvasRenderingContext2D, glyphs: GlyphEntry[], lines: LineEntry[]): void {
+  const linesWithText = new Set(glyphs.filter((g) => g.width > 0).map((g) => g.lineIndex));
+  for (const line of lines) {
+    if (!linesWithText.has(line.lineIndex)) snappedFillRect(ctx, line.x, line.y, line.height, line.height);
+  }
+}
+
 function snappedFillRect(
   ctx: CanvasRenderingContext2D,
   x: number,

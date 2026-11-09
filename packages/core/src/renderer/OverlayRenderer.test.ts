@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { snapRect, setActiveDpr, renderTrackedFormatting, renderTrackedMove, renderTrackedObject, renderTrackedRow } from "./OverlayRenderer";
-import type { GlyphEntry } from "../layout/CharacterMap";
+import { snapRect, setActiveDpr, renderTrackedFormatting, renderTrackedInsert, renderTrackedMove, renderTrackedObject, renderTrackedRow } from "./OverlayRenderer";
+import type { GlyphEntry, LineEntry } from "../layout/CharacterMap";
 
 describe("snapRect — pixel-grid snapping", () => {
   beforeEach(() => {
@@ -70,6 +70,20 @@ describe("a formatting change", () => {
     renderTrackedFormatting(ctx, [glyph(1), glyph(2)], "#d97706");
 
     expect(calls).toEqual(["fillRect", "fillRect"]);
+  });
+});
+
+describe("an inserted empty line", () => {
+  it("is marked, though the caret's zero-width glyph sits on it", () => {
+    const fills: number[][] = [];
+    const ctx = context();
+    ctx.fillRect = (x, y, w, h) => fills.push([x, y, w, h]);
+    const caret: GlyphEntry = { docPos: 5, x: 40, y: 0, lineY: 0, width: 0, height: 16, page: 1, lineIndex: 3 };
+    const line: LineEntry = { page: 1, lineIndex: 3, y: 0, height: 16, x: 40, contentWidth: 400, startDocPos: 5, endDocPos: 5 };
+
+    renderTrackedInsert(ctx, [caret], [line], "#16a34a");
+
+    expect(fills.some(([, , w]) => (w ?? 0) > 0)).toBe(true);
   });
 });
 
