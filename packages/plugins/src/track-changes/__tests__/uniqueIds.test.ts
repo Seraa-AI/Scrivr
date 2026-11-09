@@ -132,6 +132,35 @@ describe("a tracked cut and paste of a whole block", () => {
     const moves = pendingActs(editor).filter((act) => act.records.some((r) => r.dataTracked.moveId || r.dataTracked.moveNodeId));
     expect(moves).toHaveLength(1);
   });
+
+  it("is not the cut when what is pasted is a copy of another block that reads the same", () => {
+    const editor = editorWith([para("a", "Alpha"), para("b", "Alpha"), para("z", "z")]);
+    const doc = editor.getState().doc;
+    const first = doc.child(0);
+    const copyOfB = doc.slice(first.nodeSize, first.nodeSize + doc.child(1).nodeSize);
+    editor.applyTransaction(editor.getState().tr.delete(0, first.nodeSize).setMeta("uiEvent", "cut"));
+    const end = editor.getState().doc.content.size;
+    editor.applyTransaction(editor.getState().tr.replace(end, end, copyOfB).setMeta("uiEvent", "paste"));
+    const ids = topIds(editor);
+    expect(ids.slice(0, 3)).toEqual(["a", "b", "z"]);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(pendingActs(editor).filter((act) => act.records.some((r) => r.dataTracked.moveId))).toHaveLength(0);
+  });
+
+  it("keeps no id of a block the cut only took part of", () => {
+    const editor = editorWith([para("a", "Alpha"), para("b", "Beta"), para("z", "z")]);
+    const doc = editor.getState().doc;
+    // "pha" + break + "Be": both blocks stay, each missing some words.
+    const from = 3;
+    const to = doc.child(0).nodeSize + 3;
+    const cut = doc.slice(from, to);
+    editor.applyTransaction(editor.getState().tr.delete(from, to).setMeta("uiEvent", "cut"));
+    const end = editor.getState().doc.content.size;
+    editor.applyTransaction(editor.getState().tr.replace(end, end, new Slice(cut.content, 0, 0)).setMeta("uiEvent", "paste"));
+    const ids = topIds(editor);
+    expect(ids.slice(0, 2)).toEqual(["a", "b"]);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
 });
 
 describe("a pending move through undo and redo", () => {

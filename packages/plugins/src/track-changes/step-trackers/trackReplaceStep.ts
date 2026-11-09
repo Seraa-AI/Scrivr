@@ -15,6 +15,7 @@ import {
   joinStructureChanges,
 } from "../lib/structuralChange";
 import { deleteAndMergeSplitNodes } from "../lib/deleteAndMergeSplitNodes";
+import { cutRanges } from "../lib/cutAndPaste";
 import {
   setFragmentAsInserted,
   setFragmentAsMoveChange,
@@ -35,7 +36,7 @@ export function trackReplaceStep(
 ): [ChangeStep[], number | undefined] {
   const { replayBridge } = trContext;
   const moveID = trContext.stepsByGroupIDMap.get(step);
-  const textMove = trContext.textMoves.get(step) ?? trContext.pastedMove;
+  const textMove = trContext.textMoves.get(step) ?? trContext.pastedMove?.id;
 
   const invertedStep = step.invert(tr.docs[i]!);
 
@@ -130,9 +131,14 @@ export function trackReplaceStep(
         }
         // Only moved content keeps the id of the block it came from — its
         // left-behind copy shares it by design. A cut pasted elsewhere is a
-        // move too, as Word tracks it. Anything else the step wrote under an
-        // id the document already has is a new block.
-        if (!moveID && !textMove && !isStructuralChange(tr)) fragment = withoutTakenIds(fragment, newTr.doc);
+        // move too, as Word tracks it, but keeps only an id the cut's own
+        // deletion holds: a block the cut left live is still that block.
+        // Anything else the step wrote under an id the document already has
+        // is a new block.
+        if (!moveID && !isStructuralChange(tr)) {
+          const movedFrom = trContext.pastedMove ? cutRanges(newTr.doc, trContext.pastedMove.cut) : [];
+          fragment = withoutTakenIds(fragment, newTr.doc, movedFrom);
+        }
         const openStart =
           slice.openStart !== slice.openEnd ? 0 : slice.openStart;
         const openEnd = slice.openStart !== slice.openEnd ? 0 : slice.openEnd;

@@ -15,6 +15,7 @@ import { createNewPendingAttrs } from "../helpers";
 import { listMovesOnly, recordListChange } from "../lib/listChange";
 import { composeGesture, splitAtInsertionEdges } from "./composeGesture";
 import type { ReplayedSelection } from "./fixAndSetSelectionAfterTracking";
+import type { PastedMove } from "../lib/cutAndPaste";
 import { TrackingRefusal, TrackingResult, TrTrackingContext } from "../types";
 import { trackTransaction } from "./trackTransaction";
 
@@ -94,7 +95,7 @@ export function trackChanges(
   userID: string,
   skipTrsWithMetas: (PluginKey | string)[],
   replayedSelection: ReplayedSelection,
-  pastedMove?: string,
+  pastedMove?: PastedMove,
 ): TrackingOutcome {
   if (untracked(tx, skipTrsWithMetas)) return { kind: "skipped" };
 

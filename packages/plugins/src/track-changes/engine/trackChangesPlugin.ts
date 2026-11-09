@@ -128,7 +128,8 @@ export const trackChangesPlugin = (options: TrackChangesOptions) => {
           const authorID = suggestionIntent(tx)?.authorID ?? userID;
           const uiEvent = tx.getMeta("uiEvent");
           const lastCut = lastCutKey.getState(newState) ?? null;
-          const pastedMove = uiEvent === "paste" && lastCut ? moveIdForPaste(tx, lastCut, createdTr.doc, authorID) : null;
+          const pastedMoveId = uiEvent === "paste" && lastCut ? moveIdForPaste(tx, lastCut, createdTr.doc, authorID) : null;
+          const pastedMove = pastedMoveId && lastCut ? { id: pastedMoveId, cut: lastCut } : null;
           // Each transaction is recorded from where it started, as it was judged before it applied.
           const startState = i === 0 ? oldState : EditorState.create({ doc: tx.before, selection: trs[i - 1]!.selection });
           const outcome = trackChanges(
@@ -138,8 +139,8 @@ export const trackChangesPlugin = (options: TrackChangesOptions) => {
             createdTr = outcome.tr;
             if (uiEvent === "cut") {
               rememberCut(createdTr, cutOf(tx, changeSet, createdTr.doc, authorID));
-            } else if (pastedMove && lastCut) {
-              markCutMoved(createdTr, lastCut, pastedMove);
+            } else if (pastedMove) {
+              markCutMoved(createdTr, pastedMove.cut, pastedMove.id);
             }
           }
           // A refusal is the outcome a host has to act on, so it outranks a

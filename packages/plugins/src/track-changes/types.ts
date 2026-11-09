@@ -1,5 +1,6 @@
 import type { GestureComposition } from "./engine/composeGesture";
 import type { ReplayedSelection } from "./engine/fixAndSetSelectionAfterTracking";
+import type { PastedMove } from "./lib/cutAndPaste";
 import { Fragment, Mark, Node, NodeType, Slice } from "@scrivr/core/pm";
 import { PluginKey } from "@scrivr/core/pm";
 import { Mapping, ReplaceAroundStep, ReplaceStep } from "@scrivr/core/pm";
@@ -295,7 +296,7 @@ export type TrTrackingContext = {
   /** Steps moving text: the deletion and the insertion of one move share an id. */
   textMoves: Map<ReplaceStep, string>;
   /** The move a paste completes: what it inserts is that move's destination. */
-  pastedMove?: string;
+  pastedMove?: PastedMove;
   replayedSelection: ReplayedSelection;
   composition: GestureComposition;
   /**

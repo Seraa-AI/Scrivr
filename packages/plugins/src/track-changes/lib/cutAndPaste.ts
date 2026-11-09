@@ -1,10 +1,12 @@
-import { EditorState, Fragment, Node as PMNode, Plugin, PluginKey, ReplaceStep, Transaction } from "@scrivr/core/pm";
+import { EditorState, Fragment, Node as PMNode, Plugin, PluginKey, ReplaceStep, Slice, Transaction } from "@scrivr/core/pm";
+import { blockIdOf, findNodeById } from "@scrivr/core";
 
 import type { ChangeSet } from "../ChangeSet";
 import { findChanges } from "../findChanges";
 import { genId } from "../helpers";
 import { updateChangeAttrs } from "../engine/updateAttributes";
 import { CHANGE_OPERATION } from "../types";
+import { isShadowNode, type ShadowRange } from "../liveNode";
 
 /** What a cut took and the deletion it proposed. */
 export interface Cut {
@@ -63,6 +65,38 @@ const cutStillPending = (doc: PMNode, cut: Cut) => {
     (ids.has(change.id) || ids.has(change.dataTracked.continuesId ?? "")) && !change.dataTracked.moveId);
 };
 
+/** A paste recorded as the destination of the move its cut began. */
+export interface PastedMove {
+  id: string;
+  cut: Cut;
+}
+
+/**
+ * Where the cut's content still waits, proposed for deletion, to be moved. A
+ * block lies inside only when the cut took it whole; a deleted break leaves
+ * both blocks it joined in place.
+ */
+export const cutRanges = (doc: PMNode, cut: Cut): ShadowRange[] =>
+  cutStillPending(doc, cut)
+    .filter(change => change.dataTracked.operation === CHANGE_OPERATION.delete)
+    .map((change): ShadowRange => [change.from, change.to]);
+
+/** Ids of the blocks a slice holds whole. One cut open at its edge is joined to what is there, not written. */
+function wholeBlockIds(slice: Slice): string[] {
+  const ids: string[] = [];
+  const visit = (content: Fragment, openStart: number, openEnd: number) => {
+    content.forEach((node, _offset, index) => {
+      const startOpen = index === 0 ? openStart : 0;
+      const endOpen = index === content.childCount - 1 ? openEnd : 0;
+      const id = blockIdOf(node);
+      if (id !== null && startOpen === 0 && endOpen === 0) ids.push(id);
+      visit(node.content, Math.max(startOpen - 1, 0), Math.max(endOpen - 1, 0));
+    });
+  };
+  visit(slice.content, slice.openStart, slice.openEnd);
+  return ids;
+}
+
 /**
  * Pasting back what one cut is moving it. Decided before the paste is tracked,
  * so what it inserts is recorded as the move's destination from the start, and
@@ -72,7 +106,13 @@ const cutStillPending = (doc: PMNode, cut: Cut) => {
 export function moveIdForPaste(paste: Transaction, cut: Cut, doc: PMNode, authorID: string): string | null {
   if (cut.authorID !== authorID) return null;
   const pasted = paste.steps.map(step => step instanceof ReplaceStep ? contentKey(step.slice.content) : "").join("");
-  return pasted === cut.content && cutStillPending(doc, cut).length ? genId() : null;
+  if (pasted !== cut.content || cutStillPending(doc, cut).length === 0) return null;
+  // Text cannot tell the cut from a copy of another block that reads the same.
+  // A whole block pasted under the id of a block the cut left in place can.
+  const taken = cutRanges(paste.before, cut);
+  const copiesLiveBlock = paste.steps.some(step => step instanceof ReplaceStep &&
+    wholeBlockIds(step.slice).some(id => findNodeById(paste.before, id, (node, pos) => !isShadowNode(node, pos, taken))));
+  return copiesLiveBlock ? null : genId();
 }
 
 /** Links the cut's deletion to the move its paste was recorded as, once that paste recorded something. */

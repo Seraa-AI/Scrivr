@@ -18,6 +18,7 @@ import {
   NewTrackedAttrs,
 } from "../helpers";
 import { CHANGE_OPERATION, CHANGE_STATUS } from "../types";
+import { isShadowNode, type ShadowRange } from "../liveNode";
 
 export function setFragmentAsInserted(inserted: Fragment, insertAttrs: NewInsertAttrs, schema: Schema) {
   const updatedInserted = loopContentAndMergeText(inserted, insertAttrs, schema);
@@ -106,11 +107,11 @@ export function setFragmentAsNodeSplit(
  * the original's; the id stays with the block that had it, and `UniqueId` gives
  * each new one its own. Which nodes carry an id is core's `blockIdOf`.
  */
-export function withoutTakenIds(fragment: Fragment, doc: PMNode): Fragment {
+export function withoutTakenIds(fragment: Fragment, doc: PMNode, movedFrom: readonly ShadowRange[] = []): Fragment {
   const taken = new Set<string>();
-  doc.descendants((node) => {
+  doc.descendants((node, pos) => {
     const id = blockIdOf(node);
-    if (id !== null) taken.add(id);
+    if (id !== null && !isShadowNode(node, pos, movedFrom)) taken.add(id);
   });
   const clear = (node: PMNode): PMNode => {
     if (node.isText) return node;
