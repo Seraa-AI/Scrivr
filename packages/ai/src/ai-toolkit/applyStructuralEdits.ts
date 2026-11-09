@@ -12,7 +12,7 @@
  */
 import { findNodeById, safeImageUrl, spansToFragment, tableColumnCount } from "@scrivr/core";
 import { imageNodeAttrs } from "./imageAttrs";
-import { isShadowNode, pickAgentAttrs, shadowRanges } from "@scrivr/plugins";
+import { findLiveNodeById, pickAgentAttrs, shadowRanges } from "@scrivr/plugins";
 import type { ShadowRange } from "@scrivr/plugins";
 import type { Node as PmNode, Schema, Transaction } from "@scrivr/core/pm";
 
@@ -36,10 +36,6 @@ type ResolveNode = (nodeId: string) => { node: PmNode; pos: number } | null;
  * lookup because later ops keep appending steps. The tracking engine runs
  * after dispatch, so a node this batch moved still has only one copy; the
  * entry shadows are the ones resolution has to exclude.
- *
- * An id two live blocks carry — only in a document saved before block ids were
- * unique — names neither: the op is refused rather than guessed, as
- * `applyRichEdit` refuses it.
  */
 function createLiveResolver(tr: Transaction): ResolveNode {
   const start = tr.mapping.maps.length;
@@ -49,12 +45,7 @@ function createLiveResolver(tr: Transaction): ResolveNode {
     const mapped = entryShadows.map(
       ([from, to]): ShadowRange => [mapping.map(from, 1), mapping.map(to, -1)],
     );
-    const live: Array<{ node: PmNode; pos: number }> = [];
-    tr.doc.descendants((node, pos) => {
-      if (node.attrs["nodeId"] === nodeId && !isShadowNode(node, pos, mapped)) live.push({ node, pos });
-      return live.length < 2;
-    });
-    return live.length === 1 ? live[0] ?? null : null;
+    return findLiveNodeById(tr.doc, nodeId, mapped);
   };
 }
 

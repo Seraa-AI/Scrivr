@@ -97,6 +97,13 @@ describe("findLiveNodeById", () => {
     expect(findLiveNodeById(editor.getState().doc, "beta")?.pos).toBe(7);
   });
 
+  it("names no block for an id two live blocks carry, so no caller guesses between them", () => {
+    // Only a document saved before block ids were unique holds such a pair.
+    const editor = build(true, "same", "other", "same");
+    expect(findLiveNodeById(editor.getState().doc, "same")).toBeNull();
+    expect(findLiveNodeById(editor.getState().doc, "other")?.pos).toBe(6);
+  });
+
   it("returns null for an id the document does not hold", () => {
     const editor = build(true, "alpha");
     expect(findLiveNodeById(editor.getState().doc, "nope")).toBeNull();

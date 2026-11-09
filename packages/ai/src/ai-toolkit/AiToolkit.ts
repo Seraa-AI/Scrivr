@@ -559,11 +559,6 @@ export class AiToolkitAPI {
         // An edit named only by id lands on the live block it names.
         const unit = unitsById.get(item.nodeId)?.live;
         const part = partsById.get(item.nodeId)?.live;
-        const live = [...(unit ?? []), ...(part ?? [])];
-        if (live.length > 1) {
-          rejected.push(item.nodeId);
-          continue;
-        }
         const currentHash = unit?.[0] ? unitRichHash(unit[0]) : part?.[0] ? semanticPartRichHash(part[0]) : undefined;
         if (item.expectedContentHash !== undefined && currentHash !== item.expectedContentHash) {
           stale.push(item.nodeId);

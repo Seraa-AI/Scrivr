@@ -86,6 +86,9 @@ export function isShadowNode(node: PMNode, pos: number, ranges: readonly ShadowR
  * or to reach a block that is struck through but not yet decided, use core's
  * `findNodeById`. Without track changes the two agree.
  *
+ * An id two live blocks carry — only in a document saved before block ids were
+ * unique — names neither, and this returns null rather than guess.
+ *
  * Pass `ranges`, mapped through your own steps, when resolving many ids against
  * a document you are still editing: each intermediate document misses the
  * cache and would cost a full walk.
@@ -96,5 +99,9 @@ export function findLiveNodeById(
   ranges?: readonly ShadowRange[],
 ): { node: PMNode; pos: number } | null {
   const shadows = ranges ?? shadowRanges(doc);
-  return findNodeById(doc, nodeId, (node, pos) => !isShadowNode(node, pos, shadows));
+  const isLive = (node: PMNode, pos: number) => !isShadowNode(node, pos, shadows);
+  const first = findNodeById(doc, nodeId, isLive);
+  if (!first) return null;
+  const second = findNodeById(doc, nodeId, (node, pos) => pos !== first.pos && isLive(node, pos));
+  return second ? null : first;
 }
