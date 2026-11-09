@@ -7,6 +7,8 @@ import { runPipeline, defaultPageConfig } from "./PageLayout";
 import type { DocumentLayout } from "./PageLayout";
 import type { AnchoredObjectPlacement } from "./AnchoredObjects";
 import type { CellSubBlock, LayoutBlock } from "./BlockLayout";
+import { listMarkerOf } from "./listMarkers";
+import { ANCHORED_OBJECT_MARGIN } from "./AnchoredObjects";
 
 /**
  * An image anchored in a table cell is laid out in that cell, as Word does
@@ -220,4 +222,23 @@ describe("an image anchored in a table cell", () => {
     const { block } = rowBlock(l, "R");
     expect(floatIn(l).cellPos).toBe(cellOf(block, 0).cellPos);
   });
+
+  it("a list item in a cell with an image wraps in its own indented box, never past the cell", () => {
+    const listItem = schema.node("orderedList", null, [schema.node("listItem", null, [para("item ".repeat(60).trim())])]);
+    const l = layout(tableOf(row("R", [para("Lead", image({ width: 20, height: 20 })), listItem])));
+    const { block } = rowBlock(l, "R");
+    const cell = cellOf(block, 0);
+    for (const line of cellLines(block, cell)) {
+      if (line.hasText) expect(line.right).toBeLessThanOrEqual(cell.x + cell.width);
+    }
+  });
+
+  it("a list item beside an image on the cell's left draws its number past the image", () => {
+    const listItem = schema.node("orderedList", null, [schema.node("listItem", null, [para("item")])]);
+    const l = layout(tableOf(row("R", [para("Lead", image({ width: 120, height: 80 })), listItem])));
+    const f = floatIn(l);
+    const itemBlock = must(cellOf(rowBlock(l, "R").block, 0).blocks.find((b) => b.listMarker !== undefined), "item");
+    expect(listMarkerOf(itemBlock)?.x).toBeGreaterThanOrEqual(f.x + f.width + ANCHORED_OBJECT_MARGIN - 0.5);
+  });
 });
+

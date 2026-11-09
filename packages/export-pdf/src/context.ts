@@ -42,7 +42,7 @@ import {
   type LayoutLine,
   type ResolvedTheme,
 } from "@scrivr/core";
-import { SYNTHETIC_ITALIC_SHEAR, emboldenWidth, fontSizeOf } from "@scrivr/core";
+import { SYNTHETIC_ITALIC_SHEAR, bulletBox, bulletShape, emboldenWidth, fontSizeOf, listMarkerOf, type BulletBox, type BulletShape } from "@scrivr/core";
 import type { PdfNodeHandler } from "./augmentation";
 import { resolvePdfSpanStyle, type ResolvedPdfSpanStyle } from "./spanStyle";
 
@@ -101,6 +101,81 @@ export type PdfDrawHelpers = PdfBlockDrawSurface;
 /** Flip from top-left (layout) to bottom-left (PDF) coordinate space. */
 function flipY(yPx: number, pageHeightPt: number): number {
   return pageHeightPt - yPx * PT_PER_PX;
+}
+
+/** Where a bullet goes: its box's left edge and centre line, in PDF points. */
+interface BulletAt {
+  page: PDFPage;
+  left: number;
+  centerY: number;
+  /** The bullet's box from core, in px. */
+  box: BulletBox;
+  color: ReturnType<typeof rgb>;
+}
+
+/** Each of core's bullet shapes, drawn as the canvas draws it. */
+const BULLET_PAINTERS: Record<BulletShape, (at: BulletAt) => void> = {
+  disc: ({ page, left, centerY, box, color }) => {
+    const radius = (box.size / 2) * PT_PER_PX;
+    page.drawEllipse({ x: left + radius, y: centerY, xScale: radius, yScale: radius, color });
+  },
+  circle: ({ page, left, centerY, box, color }) => {
+    const radius = (box.size / 2) * PT_PER_PX;
+    const ring = radius - (box.stroke / 2) * PT_PER_PX;
+    page.drawEllipse({
+      x: left + radius,
+      y: centerY,
+      xScale: ring,
+      yScale: ring,
+      borderColor: color,
+      borderWidth: box.stroke * PT_PER_PX,
+    });
+  },
+  square: ({ page, left, centerY, box, color }) => {
+    const size = box.size * PT_PER_PX;
+    page.drawRectangle({ x: left, y: centerY - size / 2, width: size, height: size, color });
+  },
+};
+
+/**
+ * Draws a block's list marker on its first line: a bullet as core's shape for
+ * it, a number as text in the face and size core chose when layout measured
+ * it. Called once per block from the block dispatch, whichever handler paints
+ * the block — the PDF's counterpart of the canvas's `paintBlock`.
+ */
+export function drawListMarker(
+  page: PDFPage,
+  block: LayoutBlock,
+  pageHeightPt: number,
+  fontRegistry: PdfFontRegistry,
+  theme: ResolvedTheme,
+): void {
+  const marker = listMarkerOf(block);
+  if (!marker || !block.listMarker) return;
+  const baselinePx = marker.baseline;
+  const color = parseCssColor(theme.listMarker);
+  // A bullet takes only its line's size: it is drawn as the canvas's shape, so
+  // it never depends on whether the face can encode the glyph.
+  const shape = bulletShape(block.listMarker);
+  if (shape) {
+    const box = bulletBox(marker.size);
+    BULLET_PAINTERS[shape]({
+      page,
+      left: marker.x * PT_PER_PX,
+      centerY: flipY(baselinePx - box.centerAboveBaseline, pageHeightPt),
+      box,
+      color,
+    });
+    return;
+  }
+  const markerFont = fontRegistry.resolve(marker.font, marker.resolution);
+  page.drawText(fontRegistry.isUnicode(markerFont) ? stripInvisible(block.listMarker) : sanitizeForWinAnsi(block.listMarker), {
+    x: marker.x * PT_PER_PX,
+    y: flipY(baselinePx, pageHeightPt),
+    size: marker.size * PT_PER_PX,
+    font: markerFont,
+    color,
+  });
 }
 
 // ── Draw helpers implementation ──────────────────────────────────────────────
@@ -347,34 +422,7 @@ export function createDrawHelpers(
 
   function drawLines(block: LayoutBlock, ctx: PdfNodeContext): void {
     const page = getPage();
-    const themeListMarker = parseCssColor(theme.listMarker);
     const themeDefaultText = parseCssColor(theme.defaultText);
-
-    // Draw list marker if present.
-    const firstLine = block.lines[0];
-    if (block.listMarker && block.listMarkerX !== undefined && firstLine) {
-      // A marker labels its line, so it takes that line's face as well as its
-      // size. Pinning it to the fallback puts the number of a numbered clause
-      // in a different typeface from the clause.
-      const firstSpan = firstLine.spans[0];
-      const markerFont =
-        firstSpan?.kind === "text"
-          ? fontRegistry.resolve(firstSpan.font, firstSpan.resolution)
-          : fontRegistry.fallback;
-      const fontSize = extractFontSizePx(
-        (firstSpan?.kind === "text" ? firstSpan.font : undefined) ?? "12px sans-serif",
-      );
-      const markerText = fontRegistry.isUnicode(markerFont)
-        ? stripInvisible(block.listMarker)
-        : sanitizeForWinAnsi(block.listMarker);
-      page.drawText(markerText, {
-        x: block.listMarkerX * PT_PER_PX,
-        y: flipY(block.y + firstLine.ascent, pageHeightPt),
-        size: fontSize * PT_PER_PX,
-        font: markerFont,
-        color: themeListMarker,
-      });
-    }
 
     let lineY = block.y;
     for (let li = 0; li < block.lines.length; li++) {

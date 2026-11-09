@@ -48,7 +48,7 @@ import {
 import { createDefaultImageResolver } from "./fetchImage";
 import type { ImageResolver } from "./fetchImage";
 import type { PdfNodeHandler, PdfChromeHandler } from "./augmentation";
-import { PT_PER_PX, createDrawHelpers, parseCssColor } from "./context";
+import { PT_PER_PX, createDrawHelpers, drawListMarker, parseCssColor } from "./context";
 import type { PdfContext } from "./context";
 import {
   embedStandardFonts,
@@ -273,6 +273,7 @@ async function writePdf(
       ctx.width = block.width;
       try {
         handler(block, ctx);
+        drawListMarker(getPage(), block, pageHeightPt, fontRegistry, resolvedTheme);
       } finally {
         // Nested dispatch must return the caller's box, even if a child fails.
         ctx.x = x;

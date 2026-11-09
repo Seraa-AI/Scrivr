@@ -7,14 +7,13 @@ import {
   FontConfig,
   defaultFontConfig,
   DEFAULT_FONT_FAMILY,
-  getBlockStyle,
   BlockStyle,
   applyPageFont,
 } from "./FontConfig";
 import { layoutBlock, LayoutBlock, type LayoutBlockKind, type CellSubBlock } from "./BlockLayout";
 import type { InlineRegistry } from "./BlockRegistry";
-import { nodeLayout } from "./BlockRegistry";
-import { LineBreaker, type InputSpan, type LayoutLine } from "./LineBreaker";
+import { LineBreaker, isSpacerLine, type InputSpan, type LayoutLine } from "./LineBreaker";
+import type { ListMarkerFont } from "./listMarkers";
 import {
   normalizeImageAttrs,
   type AnchoredObjectPlacement,
@@ -31,7 +30,16 @@ import {
   type PageChromeContribution,
   type PageChromeMeasureInput,
 } from "./PageMetrics";
-import { coerceSectionSettings, isSectionBreak } from "../model/sections";
+import {
+  collectLayoutItems,
+  itemSpacing,
+  listMarkerXOf,
+  measureWithMarker,
+  resolveItem,
+  type FirstLineSettings,
+  type LayoutItem,
+  type MarkerPlacement,
+} from "./layoutItems";
 import type { SectionBreakType } from "../model/sections";
 import { fitLinesInCapacity } from "./splitLines";
 import {
@@ -263,6 +271,12 @@ export interface MeasureCacheEntry {
   spaceAfter: number;
   blockType: string;
   align: BlockStyle["align"];
+  /** The list marker the block was measured with, and its indent; a different one is a cache miss. */
+  listMarker?: { text: string; indentLeft: number };
+  /** The first-line settings its marker resolved to; every re-layout reuses them. */
+  firstLine?: FirstLineSettings;
+  /** The face its marker was measured in. */
+  listMarkerFace?: ListMarkerFont;
   /**
    * Phase 1b — early termination.
    *
@@ -299,6 +313,8 @@ export interface FlowConfig {
 export interface FlowBlock {
   /** Original ProseMirror node. */
   node: Node;
+  /** The first-line settings its list marker resolved to; every re-layout reuses them. */
+  firstLine?: FirstLineSettings;
   nodePos: number;
   /**
    * Mirrors `LayoutBlock.kind` so the pagination loop and exclusion reflow can
@@ -321,6 +337,7 @@ export interface FlowBlock {
   align: BlockStyle["align"];
   listMarker?: string;
   listMarkerX?: number;
+  listMarkerFace?: ListMarkerFont;
   indentLeft: number;
   /** True if any line span is a zero-width anchored-object anchor. */
   hasAnchoredObject: boolean;
@@ -644,7 +661,7 @@ export function runFlowPipeline(
     maxBlocks += snapshot.items.slice(0, snapshot.nextItemIndex)
       .filter((item) => !item.isPageBreak).length;
   }
-  const items = snapshot ? snapshot.items : collectLayoutItems(doc, fontConfig);
+  const items = snapshot ? snapshot.items : collectLayoutItems(doc);
   const startIndex = cursor ? cursor.nextItemIndex : 0;
   const pages: LayoutPage[] = cursor ? [...cursor.completedPages] : [];
   const currentPage: LayoutPage = cursor
@@ -1016,11 +1033,7 @@ export function paginateFlow(
       measurer,
     );
 
-    if (flow.listMarker !== undefined) {
-      block.listMarker = flow.listMarker;
-      block.listMarkerX = flow.listMarkerX!;
-      block.blockType = "list_item";
-    }
+    Object.assign(block, markerFields(flow));
 
     // ── Per-page geometry snapshot ───────────────────────────────────────────
     // Computed once per outer-loop iteration. `currentMetrics` is stable for
@@ -1088,11 +1101,7 @@ export function paginateFlow(
           currentPage.pageNumber,
           measurer,
         );
-        if (flow.listMarker !== undefined) {
-          reflow.listMarker = flow.listMarker;
-          reflow.listMarkerX = flow.listMarkerX!;
-          reflow.blockType = "list_item";
-        }
+        Object.assign(reflow, markerFields(flow));
 
         currentPage.blocks.push(reflow);
         y = newPageContentTop + reflow.height;
@@ -1105,6 +1114,7 @@ export function paginateFlow(
       }
       let remainingLines = flow.lines;
       let hasPlacedAnyPart = false;
+      let markerPlaced = false;
       let currentPartStartY = targetY;
       let fragmentIdx = 0;
       // Tracks whether gap-suppression has already been applied for this block.
@@ -1192,12 +1202,11 @@ export function paginateFlow(
           ...(isCont || !isLastPart ? { fragmentIndex: fragmentIdx, sourceNodePos: nodePos } : {}),
         };
 
-        if (flow.listMarker !== undefined) {
-          if (!isCont) {
-            partBlock.listMarker = flow.listMarker;
-            partBlock.listMarkerX = flow.listMarkerX!;
-          }
-          partBlock.blockType = "list_item";
+        // The marker goes on the first part with a line it can stand on: a
+        // part holding only a full-width image's gap passes it on.
+        if (!markerPlaced && partLines.some((line) => !isSpacerLine(line))) {
+          Object.assign(partBlock, markerFields(flow));
+          markerPlaced = true;
         }
 
         if ((globalThis as Record<string,unknown>).__LAYOUT_DEBUG__) {
@@ -1328,17 +1337,17 @@ function blockHasAnchoredObject(lines: LayoutLine[]): boolean {
   return false;
 }
 
-function isAnchorOnlyFlowEntry(entry: Pick<MeasureCacheEntry, "kind" | "height" | "lines">): boolean {
-  // Anchor-only flow is a text-kind paragraph whose only content is hidden
-  // anchor sentinels — leaf blocks can never qualify, even when their height
-  // happens to be zero.
-  if (entry.kind !== "text" || entry.height !== 0) return false;
-  return entry.lines.every((line) =>
-    line.lineHeight === 0 &&
-    line.cursorHeight === 0 &&
-    line.spans.length > 0 &&
-    line.spans.every((span) => span.kind === "object" && span.width === 0 && span.height === 0),
-  );
+
+/**
+ * Whether a cached measurement still describes a block: the same width, and
+ * the same list marker at the same indent — a marker draws on its block and
+ * can move its first line. A renumbered item is a miss, so a layout that
+ * reuses the tail of the previous one never shows its old number.
+ */
+function isCacheHitFor(entry: MeasureCacheEntry, blockWidth: number, marker: MarkerPlacement | undefined): boolean {
+  return entry.availableWidth === blockWidth
+    && entry.listMarker?.text === marker?.text
+    && entry.listMarker?.indentLeft === marker?.indentLeft;
 }
 
 export function buildBlockFlow(
@@ -1349,7 +1358,6 @@ export function buildBlockFlow(
   maxBlocks?: number,
 ): { flows: FlowBlock[]; reachedCutoff: boolean; cutoffIndex: number } {
   const { fontConfig, measurer, fontModifiers, measureCache, inlineRegistry } = ctx;
-  const { margins, contentWidth } = config;
   const flows: FlowBlock[] = [];
   let processedBlocks = 0;
 
@@ -1383,20 +1391,19 @@ export function buildBlockFlow(
       return { flows, reachedCutoff: true, cutoffIndex: itemIdx };
     }
 
-    const { node, nodePos, listMarker, indentLeft, styleKey } = item;
-    const level = node.attrs["level"] as number | undefined;
-    const blockStyle = getBlockStyle(fontConfig, styleKey ?? node.type.name, level);
-    const blockWidth = contentWidth - indentLeft;
-    const blockX = margins.left + indentLeft;
+    const { node, nodePos } = item;
+    const resolved = resolveItem(item, { x: config.margins.left, width: config.contentWidth }, fontConfig);
+    const { indentLeft, marker, x: blockX, width: blockWidth } = resolved;
+
     // Phase 1b: capture cache snapshot BEFORE resolveBlockEntry may update it.
     const preCached = measureCache?.get(node);
-    const isHit = preCached !== undefined && preCached.availableWidth === blockWidth;
+    const isHit = preCached !== undefined && isCacheHitFor(preCached, blockWidth, marker);
 
     // Measure — position-independent (targetY=0, page=1 are not stored in entry).
     const entry = resolveBlockEntry(
-      node, nodePos, blockX, 0, blockWidth, 1, ctx, item.tableColumns,
+      node, nodePos, blockX, 0, blockWidth, 1, ctx, item.tableColumns, marker,
     );
-    const anchorOnlyFlow = isAnchorOnlyFlowEntry(entry);
+    const spacing = itemSpacing(resolved, entry);
 
     flows.push({
       node,
@@ -1406,15 +1413,14 @@ export function buildBlockFlow(
       ...(entry.cells ? { cells: entry.cells } : {}),
       ...(item.isLastRow ? { isLastRow: true } : {}),
       height: entry.height,
-      spaceBefore: anchorOnlyFlow ? 0 : blockStyle.spaceBefore,
-      spaceAfter: anchorOnlyFlow ? 0 : blockStyle.spaceAfter,
+      spaceBefore: spacing.spaceBefore,
+      spaceAfter: spacing.spaceAfter,
       availableWidth: blockWidth,
       blockType: entry.blockType,
       align: entry.align,
-      ...(listMarker !== undefined ? {
-        listMarker,
-        listMarkerX: blockX - MARKER_RIGHT_GAP,
-      } : {}),
+      ...(marker ? { listMarker: marker.text, listMarkerX: listMarkerXOf(blockX, marker) } : {}),
+      ...(entry.firstLine ? { firstLine: entry.firstLine } : {}),
+      ...(entry.listMarkerFace ? { listMarkerFace: entry.listMarkerFace } : {}),
       indentLeft,
       hasAnchoredObject: blockHasAnchoredObject(entry.lines),
       inputHash: computeInputHash(nodePos, node, blockWidth),
@@ -1486,6 +1492,16 @@ function shiftBlock(
   }
 
   return shifted;
+}
+
+/** A flow's list marker, as the block that carries its first line takes it. */
+function markerFields(flow: FlowBlock): Pick<LayoutBlock, "listMarker" | "listMarkerX" | "listMarkerFace"> {
+  if (flow.listMarker === undefined || flow.listMarkerX === undefined) return {};
+  return {
+    listMarker: flow.listMarker,
+    listMarkerX: flow.listMarkerX,
+    ...(flow.listMarkerFace ? { listMarkerFace: flow.listMarkerFace } : {}),
+  };
 }
 
 function rebreakWrappedLinesWithoutExclusions(
@@ -1566,142 +1582,6 @@ function normalizeWrappedBlockForPage(
   };
 }
 
-/** A single item ready for layout — either a plain block or an expanded list item. */
-export interface LayoutItem {
-  isPageBreak?: true;
-  pageBreakType?: Exclude<SectionBreakType, "continuous">;
-  node: Node;
-  nodePos: number;
-  /** Extra left indent in px (0 for regular blocks, LIST_INDENT for list items). */
-  indentLeft: number;
-  /** Bullet character or ordered number, e.g. "•" or "1.". Undefined for non-list blocks. */
-  listMarker?: string;
-  /**
-   * Override the FontConfig key used for block-style lookup.
-   * List items lay out their inner `paragraph` node but should use the
-   * `list_item` spacing defined in addBlockStyles(), not the paragraph style.
-   */
-  styleKey?: string;
-  /** Column widths (from the parent table's `grid`) — set on table row items. */
-  tableColumns?: number[];
-  /** True for a table's last row — drives table bottom-border ownership. */
-  isLastRow?: boolean;
-}
-
-const LIST_INDENT = 24; // px — text starts this far right of the margin
-const MARKER_RIGHT_GAP = 6; // px — gap between the marker's right edge and the text
-
-/**
- * Walks the doc's block children and returns a flat array of layout items.
- *
- * Each node contributes according to the layout participation its spec
- * declares (see `NodeLayout`): a `block` node contributes one item, a
- * `transparent` node contributes none of its own and its children are
- * collected into the enclosing flow instead.
- *
- * Lists and tables are expanded by name ahead of that, because their
- * expansion is not merely transparent — they carry markers and column widths
- * down to the items they produce.
- */
-export function collectLayoutItems(doc: Node, _fontConfig: FontConfig): LayoutItem[] {
-  const items: LayoutItem[] = [];
-
-  // `base` is the document position of `parent`'s first child, so a child at
-  // relative `offset` sits at `base + offset`.
-  const walk = (parent: Node, base: number): void => {
-    parent.forEach((node, relOffset) => {
-      const offset = base + relOffset;
-
-      if (node.type.name === "pageBreak") {
-        items.push({ isPageBreak: true, node, nodePos: offset, indentLeft: 0 });
-        return;
-      }
-
-      // A section boundary affects the flow only when the next section must
-      // start on a fresh page. A continuous break is a pure model marker, and
-      // column geometry is read from the derived sections, not from here.
-      if (isSectionBreak(node)) {
-        const breakType = coerceSectionSettings(node.attrs["settings"]).breakType;
-        if (breakType !== "continuous") {
-          items.push({
-            isPageBreak: true,
-            pageBreakType: breakType,
-            node,
-            nodePos: offset,
-            indentLeft: 0,
-          });
-        }
-        return;
-      }
-
-      if (node.type.name === "bulletList" || node.type.name === "orderedList") {
-        const isBullet = node.type.name === "bulletList";
-        let itemIndex = (node.attrs["order"] as number) ?? 1;
-
-        node.forEach((listItem, liOffset) => {
-          // nodePos of the paragraph inside this listItem:
-          // offset (before bulletList) + 1 (into bulletList) + liOffset (before listItem) + 1 (into listItem)
-          const paraNodePos = offset + 1 + liOffset + 1;
-          const para = listItem.firstChild;
-          if (!para) return;
-
-          const marker = isBullet ? "•" : `${itemIndex}.`;
-
-          items.push({
-            node: para,
-            nodePos: paraNodePos,
-            indentLeft: LIST_INDENT,
-            listMarker: marker,
-            styleKey: "list_item",
-          });
-
-          itemIndex++;
-        });
-        return;
-      }
-
-      if (node.type.name === "table") {
-        // Tables expand into one item per row. Each row lays out as an atomic
-        // (leaf-like) block in v1 — whole row moves to the next page on
-        // overflow, no line-splitting across cells. Phase 4 replaces the
-        // stub row layout with sandboxed per-cell layout.
-        const gridAttr = node.attrs["grid"];
-        const tableColumns = Array.isArray(gridAttr)
-          ? gridAttr.filter((w): w is number => typeof w === "number" && Number.isFinite(w))
-          : [];
-        const lastRowIndex = node.childCount - 1;
-        node.forEach((rowNode, rowOffset, rowIndex) => {
-          const rowNodePos = offset + 1 + rowOffset;
-          items.push({
-            node: rowNode,
-            nodePos: rowNodePos,
-            indentLeft: 0,
-            tableColumns,
-            isLastRow: rowIndex === lastRowIndex,
-          });
-        });
-        return;
-      }
-
-      switch (nodeLayout(node.type).kind) {
-        case "transparent":
-          walk(node, offset + 1);
-          return;
-
-        case "block": {
-          const blockIndent = (node.attrs["indent"] as number) ?? 0;
-          items.push({ node, nodePos: offset, indentLeft: blockIndent * LIST_INDENT });
-          return;
-        }
-      }
-    });
-  };
-
-  walk(doc, 0);
-
-  return items;
-}
-
 /**
  * Returns a `MeasureCacheEntry` for the given node, either from the cache or
  * by calling `layoutBlock` once and writing the result back.
@@ -1724,6 +1604,7 @@ function resolveBlockEntry(
   pageNumber: number,
   ctx: MeasureContext,
   tableColumns?: number[],
+  marker?: MarkerPlacement,
 ): MeasureCacheEntry {
   const { measurer, fontConfig, fontModifiers, measureCache, inlineRegistry, fonts } = ctx;
   // Table rows bypass the measure cache: their `cells` carry child-block span
@@ -1759,7 +1640,7 @@ function resolveBlockEntry(
   }
 
   const cached = measureCache?.get(node);
-  if (cached && cached.availableWidth === blockWidth) {
+  if (cached && isCacheHitFor(cached, blockWidth, marker)) {
     const delta = nodePos - cached.nodePos;
     if (!delta) return cached;
 
@@ -1776,7 +1657,7 @@ function resolveBlockEntry(
 
   // Cache miss — measure and populate. map is intentionally omitted:
   // CharacterMap population is deferred to Editor.ensurePagePopulated().
-  const measured = layoutBlock(node, {
+  const { block: measured, firstLine } = measureWithMarker(node, {
     nodePos,
     x: blockX,
     y: targetY,
@@ -1787,7 +1668,7 @@ function resolveBlockEntry(
     ...(fontModifiers ? { fontModifiers } : {}),
     ...(inlineRegistry ? { inlineRegistry } : {}),
     ...(fonts ? { fonts } : {}),
-  });
+  }, marker);
 
   const entry: MeasureCacheEntry = {
     availableWidth: blockWidth,
@@ -1799,6 +1680,9 @@ function resolveBlockEntry(
     spaceAfter: measured.spaceAfter,
     blockType: measured.blockType,
     align: measured.align,
+    ...(marker ? { listMarker: { text: marker.text, indentLeft: marker.indentLeft } } : {}),
+    ...(firstLine ? { firstLine } : {}),
+    ...(measured.listMarkerFace ? { listMarkerFace: measured.listMarkerFace } : {}),
   };
   measureCache?.set(node, entry);
   return entry;

@@ -67,7 +67,13 @@ export function textLine(
 export function block(
   nodeType: string,
   lines: LayoutLine[],
-  opts: { y?: number; align?: LayoutBlock["align"]; listMarker?: string; attrs?: Record<string, unknown> } = {},
+  opts: {
+    y?: number;
+    align?: LayoutBlock["align"];
+    listMarker?: string;
+    listMarkerX?: number;
+    attrs?: Record<string, unknown>;
+  } = {},
 ): LayoutBlock {
   const type = schema.nodes[nodeType];
   if (!type) throw new Error(`fixture: schema has no \`${nodeType}\``);
@@ -86,6 +92,7 @@ export function block(
     align: opts.align ?? "left",
     availableWidth: AVAIL_W,
     ...(opts.listMarker ? { listMarker: opts.listMarker } : {}),
+    ...(opts.listMarkerX !== undefined ? { listMarkerX: opts.listMarkerX } : {}),
   } as unknown as LayoutBlock;
 }
 

@@ -87,7 +87,8 @@ describe("a float with no fixed point", () => {
       return counter.calls;
     };
     // Without the lock the float is placed again on every pass up to the
-    // backstop, re-laying the text each time.
-    expect(settled(reachBack)).toBeLessThan(settled(0) * 4);
+    // backstop (MAX_SETTLE_PASSES, 64), re-laying the text each time; locked,
+    // it costs a few re-layouts more than a float that settles at once.
+    expect(settled(reachBack)).toBeLessThan(settled(0) + 10);
   });
 });

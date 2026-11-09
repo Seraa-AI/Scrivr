@@ -5,8 +5,9 @@
  * carry per-cell rectangles and the laid-out child blocks of each cell. The
  * engine:
  *   1. Derives column x-offsets from the table's `grid` widths.
- *   2. Lays out every cell's child blocks (paragraphs, headings, …) inside the
- *      cell's content box (column width minus padding) by reusing `layoutBlock`.
+ *   2. Lays out every cell's child blocks (paragraphs, headings, lists, …)
+ *      inside the cell's content box (column width minus padding), collected
+ *      and measured as the page body's are, list markers and indents included.
  *   3. Sizes the row to its tallest cell; every cell fills that height.
  *
  * Position model (matches the line model so the measure cache can reuse a row
@@ -22,15 +23,16 @@
  */
 import type { Node } from "prosemirror-model";
 import { cellBackground, cellGridSpan, cellVMerge } from "../table/attrs";
-import { layoutBlock, type LayoutBlock, type CellSubBlock, type CellFloat } from "./BlockLayout";
+import type { LayoutBlock, CellSubBlock, CellFloat } from "./BlockLayout";
 import { ANCHORED_OBJECT_MARGIN, anchorsInLines, clearOfEarlier } from "./AnchoredObjects";
 import { ExclusionManager } from "./ExclusionManager";
 import type { LineSpaceProvider } from "./LineBreaker";
 import type { TextMeasurerLike } from "./TextMeasurer";
-import type { FontConfig } from "./FontConfig";
+import { defaultFontConfig, type FontConfig } from "./FontConfig";
 import type { FontModifier } from "../extensions/types";
-import { nodeLayout, type InlineRegistry } from "./BlockRegistry";
+import type { InlineRegistry } from "./BlockRegistry";
 import type { LayoutFontResolver } from "../fonts/layoutResolver";
+import { collectChildItems, layoutItem } from "./layoutItems";
 
 /** Horizontal cell padding (left + right) in CSS px. */
 export const CELL_PADDING_H = 6;
@@ -60,22 +62,6 @@ export interface TableRowLayoutContext {
 
 function columnWidth(columns: number[], index: number): number {
   return columns[index] ?? DEFAULT_COLUMN_WIDTH;
-}
-
-/**
- * Visit the blocks a cell lays out. A `transparent` node has no box of its own,
- * so its children take its place, as they do in the body flow.
- */
-function forEachFlowChild(
-  parent: Node,
-  base: number,
-  visit: (node: Node, nodePos: number) => void,
-): void {
-  parent.forEach((node, offset) => {
-    const nodePos = base + offset;
-    if (nodeLayout(node.type).kind === "transparent") forEachFlowChild(node, nodePos + 1, visit);
-    else visit(node, nodePos);
-  });
 }
 
 /**
@@ -192,29 +178,28 @@ function layoutCellBlocks(
   cellNode: Node,
   box: CellBox,
   ctx: TableRowLayoutContext,
-  lineSpaceProvider?: LineSpaceProvider,
+  lineSpaceIn?: (x: number, width: number) => LineSpaceProvider,
 ): { blocks: LayoutBlock[]; contentBottom: number } {
+  // Each block is resolved as the page body resolves it. A page break has no
+  // meaning inside a cell.
   const blocks: LayoutBlock[] = [];
   let relY = CELL_PADDING_V;
-  forEachFlowChild(cellNode, box.cellPos + 1, (childNode, childNodePos) => {
-    const childBlock = layoutBlock(childNode, {
-      nodePos: childNodePos,
-      x: box.contentX,
+  for (const item of collectChildItems(cellNode, box.cellPos + 1)) {
+    if (item.isPageBreak) continue;
+    const childBlock = layoutItem(item, { x: box.contentX, width: box.contentWidth }, {
       y: relY,
-      availableWidth: box.contentWidth,
       page: ctx.page,
       measurer: ctx.measurer,
       // No `map`: the CharacterMap is populated at paint time (TableRowStrategy),
       // matching the convention for cached, position-independent layouts.
-      ...(ctx.fontConfig ? { fontConfig: ctx.fontConfig } : {}),
+      fontConfig: ctx.fontConfig ?? defaultFontConfig,
       ...(ctx.fontModifiers ? { fontModifiers: ctx.fontModifiers } : {}),
       ...(ctx.inlineRegistry ? { inlineRegistry: ctx.inlineRegistry } : {}),
       ...(ctx.fonts ? { fonts: ctx.fonts } : {}),
-      ...(lineSpaceProvider ? { lineSpaceProvider } : {}),
-    });
+    }, lineSpaceIn);
     blocks.push(childBlock);
     relY += childBlock.spaceBefore + childBlock.height + childBlock.spaceAfter;
-  });
+  }
   return { blocks, contentBottom: relY };
 }
 
@@ -268,8 +253,11 @@ function placeCellFloats(blocks: readonly LayoutBlock[], box: CellBox): CellFloa
   return floats;
 }
 
-/** The cell's lines asked against its wrapping images, in the cell's own coordinates. */
-function wrapAround(floats: readonly CellFloat[], box: CellBox): LineSpaceProvider {
+/**
+ * The cell's lines asked against its wrapping images, answered for the box a
+ * block lays its text in (an indented list item's is narrower than the cell).
+ */
+function wrapAround(floats: readonly CellFloat[], box: CellBox): (x: number, width: number) => LineSpaceProvider {
   const exclusions = new ExclusionManager();
   for (const f of floats) {
     // As in the body, the margin band never reaches above the image's own
@@ -283,11 +271,11 @@ function wrapAround(floats: readonly CellFloat[], box: CellBox): LineSpaceProvid
       exclusions.addFullWidthRect({ page: 1, y: top, bottom, contentX: box.contentX, contentWidth: box.contentWidth, docPos: f.docPos });
     }
   }
-  return (lineY, lineHeight = 1) => {
-    const space = exclusions.getAvailableSegments(1, lineY, lineHeight, box.contentX, box.contentWidth);
-    const segments = space.segments.map((seg) => ({ x: seg.x - box.contentX, width: seg.width }));
+  return (x, width) => (lineY, lineHeight = 1) => {
+    const space = exclusions.getAvailableSegments(1, lineY, lineHeight, x, width);
+    const segments = space.segments.map((seg) => ({ x: seg.x - x, width: seg.width }));
     if (segments.length === 0 && space.skipToY === undefined) {
-      return { segments, skipToY: exclusions.getNextFreeY(1, lineY, lineHeight, box.contentX, box.contentWidth) };
+      return { segments, skipToY: exclusions.getNextFreeY(1, lineY, lineHeight, x, width) };
     }
     return space.skipToY !== undefined ? { segments, skipToY: space.skipToY } : { segments };
   };

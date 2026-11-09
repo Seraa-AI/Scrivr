@@ -4,13 +4,13 @@ import {
   runPipeline,
   buildBlockFlow,
   paginateFlow,
-  collectLayoutItems,
   defaultPageConfig,
   defaultPagelessConfig,
   collapseMargins,
   clampPlacementsToPages,
 } from "./PageLayout";
 import type { MeasureCacheEntry, LayoutFragment } from "./PageLayout";
+import { collectLayoutItems } from "./layoutItems";
 import type { AnchoredObjectPlacement } from "./AnchoredObjects";
 import { ANCHORED_OBJECT_MARGIN } from "./AnchoredObjects";
 import { computePageMetrics, createPageGeometry, EMPTY_RESOLVED_CHROME, type PageMetrics } from "./PageMetrics";
@@ -2612,7 +2612,7 @@ describe("buildBlockFlow — Stage 1", () => {
   it("returns one FlowBlock per top-level node", () => {
     const testDoc = doc(p("Hello"), p("World"));
     const measurer = createMeasurer();
-    const items = collectLayoutItems(testDoc, defaultFontConfig);
+    const items = collectLayoutItems(testDoc);
     const cfg = { margins: defaultPageConfig.margins, contentWidth: 650 };
     const { flows, reachedCutoff } = buildBlockFlow(items, 0, cfg, { measurer, fontConfig: defaultFontConfig });
     expect(flows).toHaveLength(2);
@@ -2622,7 +2622,7 @@ describe("buildBlockFlow — Stage 1", () => {
   it("every FlowBlock has height > 0 for non-empty paragraphs", () => {
     const testDoc = doc(p("Line one"), p("Line two"));
     const measurer = createMeasurer();
-    const items = collectLayoutItems(testDoc, defaultFontConfig);
+    const items = collectLayoutItems(testDoc);
     const cfg = { margins: defaultPageConfig.margins, contentWidth: 650 };
     const { flows } = buildBlockFlow(items, 0, cfg, { measurer, fontConfig: defaultFontConfig });
     for (const flow of flows) {
@@ -2633,7 +2633,7 @@ describe("buildBlockFlow — Stage 1", () => {
   it("respects maxBlocks and returns reachedCutoff: true", () => {
     const testDoc = doc(p("A"), p("B"), p("C"), p("D"), p("E"));
     const measurer = createMeasurer();
-    const items = collectLayoutItems(testDoc, defaultFontConfig);
+    const items = collectLayoutItems(testDoc);
     const cfg = { margins: defaultPageConfig.margins, contentWidth: 650 };
     const { flows, reachedCutoff, cutoffIndex } = buildBlockFlow(items, 0, cfg, { measurer, fontConfig: defaultFontConfig }, 3);
     expect(flows).toHaveLength(3);
@@ -2644,7 +2644,7 @@ describe("buildBlockFlow — Stage 1", () => {
   it("startIndex skips already-processed items", () => {
     const testDoc = doc(p("A"), p("B"), p("C"));
     const measurer = createMeasurer();
-    const items = collectLayoutItems(testDoc, defaultFontConfig);
+    const items = collectLayoutItems(testDoc);
     const cfg = { margins: defaultPageConfig.margins, contentWidth: 650 };
     const { flows } = buildBlockFlow(items, 2, cfg, { measurer, fontConfig: defaultFontConfig });
     expect(flows).toHaveLength(1);
@@ -2653,7 +2653,7 @@ describe("buildBlockFlow — Stage 1", () => {
   it("pageBreak item produces a zero-height isPageBreak FlowBlock", () => {
     const testDoc = doc(p("Before"), pageBreak(), p("After"));
     const measurer = createMeasurer();
-    const items = collectLayoutItems(testDoc, defaultFontConfig);
+    const items = collectLayoutItems(testDoc);
     const cfg = { margins: defaultPageConfig.margins, contentWidth: 650 };
     const { flows } = buildBlockFlow(items, 0, cfg, { measurer, fontConfig: defaultFontConfig });
     expect(flows).toHaveLength(3);
@@ -2674,7 +2674,7 @@ describe("paginateFlow — Stage 2", () => {
     const measurer = createMeasurer();
     const { margins } = defaultPageConfig;
     const contentWidth  = defaultPageConfig.pageWidth  - margins.left - margins.right;
-    const items = collectLayoutItems(testDoc, defaultFontConfig);
+    const items = collectLayoutItems(testDoc);
     const cfg = { margins, contentWidth };
     const { flows } = buildBlockFlow(items, 0, cfg, { measurer, fontConfig: defaultFontConfig });
     const initPage = { pageNumber: 1, blocks: [] };
@@ -2693,7 +2693,7 @@ describe("paginateFlow — Stage 2", () => {
     const measurer = createMeasurer();
     const { margins } = defaultPageConfig;
     const contentWidth  = defaultPageConfig.pageWidth  - margins.left - margins.right;
-    const items = collectLayoutItems(testDoc, defaultFontConfig);
+    const items = collectLayoutItems(testDoc);
     const cfg = { margins, contentWidth };
     const { flows } = buildBlockFlow(items, 0, cfg, { measurer, fontConfig: defaultFontConfig });
     const initPage = { pageNumber: 1, blocks: [] };
@@ -2712,7 +2712,7 @@ describe("paginateFlow — Stage 2", () => {
     const measurer = createMeasurer();
     const { margins } = defaultPageConfig;
     const contentWidth  = defaultPageConfig.pageWidth  - margins.left - margins.right;
-    const items = collectLayoutItems(testDoc, defaultFontConfig);
+    const items = collectLayoutItems(testDoc);
     const { flows } = buildBlockFlow(items, 0, { margins, contentWidth }, { measurer, fontConfig: defaultFontConfig });
     const geometry = makeGeometry();
     const pr = paginateFlow(
@@ -2740,7 +2740,7 @@ describe("paginateFlow — Stage 2", () => {
     const measurer = createMeasurer();
     const { margins } = defaultPageConfig;
     const contentWidth = defaultPageConfig.pageWidth - margins.left - margins.right;
-    const items = collectLayoutItems(testDoc, defaultFontConfig);
+    const items = collectLayoutItems(testDoc);
     const { flows } = buildBlockFlow(items, 0, { margins, contentWidth }, { measurer, fontConfig: defaultFontConfig });
     const geometry = makeGeometry();
     const pr = paginateFlow(

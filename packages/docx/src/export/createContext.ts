@@ -10,6 +10,7 @@ import type { IBaseEditor } from "@scrivr/core";
 import type { Node as PmNode } from "@scrivr/core/pm";
 import { xml, serializeXml } from "./xml";
 import { walkDocument, type WalkerHandlers } from "./walker";
+import { TEXT_WIDTH_TWIPS } from "./section";
 import type {
   DocxContext,
   DocxFidelity,
@@ -134,6 +135,7 @@ export function createDocxContext(
   const ctx: DocxContext = {
     editor: opts.editor,
     options,
+    textWidthTwips: TEXT_WIDTH_TWIPS,
     styles: {
       paragraph: { getOrCreate: (n, s) => getOrCreateStyle("paragraph", n, s) },
       character: { getOrCreate: (n, s) => getOrCreateStyle("character", n, s) },
@@ -270,6 +272,8 @@ function numberingKey(config: NumberingEntry["config"]): string {
       level: level.level,
       format: level.format,
       text: level.text,
+      left: level.left,
+      hanging: level.hanging,
     })),
   });
 }

@@ -2,8 +2,8 @@ import { describe, it } from "vitest";
 import { EditorState, TextSelection } from "prosemirror-state";
 import type { Node } from "prosemirror-model";
 import { LayoutCoordinator } from "./LayoutCoordinator";
+import { collectLayoutItems } from "./layoutItems";
 import {
-  collectLayoutItems,
   buildBlockFlow,
   runPipeline,
   paginateFlow,
@@ -167,8 +167,8 @@ function trace(blocks: number): Row {
   );
 
   // ── Stage attribution against the final document ──────────────────────────
-  const collectMs = median(() => void collectLayoutItems(doc, fontConfig), SAMPLES);
-  const items = collectLayoutItems(doc, fontConfig);
+  const collectMs = median(() => void collectLayoutItems(doc), SAMPLES);
+  const items = collectLayoutItems(doc);
   const flowConfig = {
     margins: defaultPageConfig.margins,
     contentWidth:
@@ -249,7 +249,7 @@ function pressurePagination(blocks: number): {
   fragmentsMs: number;
 } {
   const doc = buildDoc(blocks);
-  const items = collectLayoutItems(doc, fontConfig);
+  const items = collectLayoutItems(doc);
   const flowConfig = {
     margins: defaultPageConfig.margins,
     contentWidth:

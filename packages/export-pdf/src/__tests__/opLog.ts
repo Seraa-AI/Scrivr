@@ -36,7 +36,7 @@ import {
 
 /** One recorded op — a draw call or an annotation. Fields mirror pdf-lib's. */
 export interface DrawOp {
-  op: "text" | "line" | "rect" | "image" | "annot" | "state";
+  op: "text" | "line" | "rect" | "ellipse" | "image" | "annot" | "state";
   /** Which page received it — ops are recorded across pages in call order. */
   page: number;
   [field: string]: unknown;
@@ -54,11 +54,13 @@ export function normalizeDrawNumber(value: number): number {
   return Object.is(rounded, -0) ? 0 : rounded;
 }
 
-const PAGE_METHODS = ["drawText", "drawLine", "drawRectangle", "drawImage"] as const;
-const OP_NAMES: Record<(typeof PAGE_METHODS)[number], DrawOp["op"]> = {
+type PageMethod = "drawText" | "drawLine" | "drawRectangle" | "drawEllipse" | "drawImage";
+const PAGE_METHODS: readonly PageMethod[] = ["drawText", "drawLine", "drawRectangle", "drawEllipse", "drawImage"];
+const OP_NAMES: Record<PageMethod, DrawOp["op"]> = {
   drawText: "text",
   drawLine: "line",
   drawRectangle: "rect",
+  drawEllipse: "ellipse",
   drawImage: "image",
 };
 
@@ -121,7 +123,7 @@ export async function recordDrawOps(exportFn: () => Promise<unknown>): Promise<D
     Reflect.set(PDFPage.prototype, name, function (this: PDFPage, ...args: unknown[]) {
       const [first, second] = args;
       // `drawText` and `drawImage` take their subject first and options second;
-      // `drawLine` and `drawRectangle` take one options bag.
+      // `drawLine`, `drawRectangle` and `drawEllipse` take one options bag.
       const described =
         name === "drawText" || name === "drawImage"
           ? { value: describe(first), ...fields(describe(second) ?? {}) }
