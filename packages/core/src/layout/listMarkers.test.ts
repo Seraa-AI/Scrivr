@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LayoutLine } from "./LineBreaker";
-import { listMarkerFont } from "./listMarkers";
+import { markerFaceOf } from "./listMarkers";
 import { buildStarterKitContext } from "../test-utils";
 
 const { schema } = buildStarterKitContext();
@@ -12,7 +12,7 @@ const lineIn = (font: string, resolution?: number): LayoutLine => ({
 
 describe("the marker's font", () => {
   it("is the face of the line's first run, with how that face was resolved", () => {
-    expect(listMarkerFont([lineIn("bold 18px Georgia", 7)])).toEqual({ font: "bold 18px Georgia", size: 18, resolution: 7 });
+    expect(markerFaceOf([lineIn("bold 18px Georgia", 7)])).toEqual({ font: "bold 18px Georgia", size: 18, resolution: 7 });
   });
 
   it("skips an image or anchor at the start of the line and takes the first text run", () => {
@@ -23,17 +23,17 @@ describe("the marker's font", () => {
       ...text,
       spans: [{ kind: "object", node: image, x: 0, width: 0, height: 0, docPos: 1, verticalAlign: "baseline" }, ...text.spans],
     };
-    expect(listMarkerFont([line])).toMatchObject({ font: "bold 24px Georgia", size: 24 });
+    expect(markerFaceOf([line])).toMatchObject({ font: "bold 24px Georgia", size: 24 });
   });
 
   it("is the face of the item's first text, past a line that holds none", () => {
     const empty: LayoutLine = { ...lineIn("12px Arial"), spans: [] };
-    expect(listMarkerFont([empty, lineIn("bold 18px Georgia", 7)])).toEqual({ font: "bold 18px Georgia", size: 18, resolution: 7 });
+    expect(markerFaceOf([empty, lineIn("bold 18px Georgia", 7)])).toEqual({ font: "bold 18px Georgia", size: 18, resolution: 7 });
   });
 
   it("never has size 0, with no line or a font that names no size", () => {
-    expect(listMarkerFont([]).size).toBeGreaterThan(0);
-    expect(listMarkerFont([lineIn("Georgia")]).size).toBeGreaterThan(0);
-    expect(listMarkerFont([lineIn("0px Georgia")]).size).toBeGreaterThan(0);
+    expect(markerFaceOf([]).size).toBeGreaterThan(0);
+    expect(markerFaceOf([lineIn("Georgia")]).size).toBeGreaterThan(0);
+    expect(markerFaceOf([lineIn("0px Georgia")]).size).toBeGreaterThan(0);
   });
 });

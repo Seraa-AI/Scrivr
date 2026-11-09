@@ -1,4 +1,5 @@
 import { Node } from "prosemirror-model";
+import type { ListMarkerFont } from "./listMarkers";
 import { parseFontSizePx } from "../fonts/activeFontSize";
 import type { FontResolutionId, LayoutFontResolver } from "../fonts/layoutResolver";
 import type { FontModifier } from "../extensions/types";
@@ -156,6 +157,8 @@ export interface LayoutBlock {
   listMarker?: string;
   /** Absolute x of the marker's left edge — hanging before the indented text. */
   listMarkerX?: number;
+  /** The face the marker was measured in, from the item's text; every part of a split item keeps it. */
+  listMarkerFace?: ListMarkerFont;
   /**
    * True on the 2nd, 3rd, … visual parts of a block split across pages.
    * Suppresses the list marker and sets spaceBefore = 0 for continuation parts.
@@ -568,7 +571,9 @@ export function layoutBlock(
           // provider tests the line's true vertical extent (a 1px probe leaves a
           // straddling first line full-width under a float's top edge).
           const base = lineSpaceProvider?.(lineY, lineHeight) ?? { segments: [{ x: 0, width: availableWidth }] };
-          if (!firstLineConsumed) {
+          // A full-width float's gap is not the first line: the indent goes
+          // to the first line below it that holds text.
+          if (!firstLineConsumed && base.segments.length > 0) {
             firstLineConsumed = true;
             return {
               ...base,

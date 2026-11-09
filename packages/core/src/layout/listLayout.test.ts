@@ -5,7 +5,7 @@ import { runPipeline, defaultPageConfig, type MeasureCacheEntry } from "./PageLa
 import { layoutBlock, type BlockLayoutOptions, type LayoutBlock } from "./BlockLayout";
 import type { LayoutLine } from "./LineBreaker";
 import { rangeBandRects } from "../selection/behaviors";
-import { drawListMarker } from "./listMarkers";
+import { drawListMarker, listMarkerOf } from "./listMarkers";
 import { listMarker } from "../model/lists";
 import { CharacterMap } from "./CharacterMap";
 import { defaultEditorTheme } from "../model/theme";
@@ -339,6 +339,85 @@ describe("a first word that does not fit after its number (Word leaves the numbe
     const x = map.coordsAtPos(start + 3)?.x ?? 0;
     expect(map.posAbove(start + 3, x)).toBeLessThan(start);
     expect(map.posBelow(2, x)).toBeGreaterThanOrEqual(start);
+    editor.destroy();
+  });
+
+  it("moves Up past a number left alone at the bottom of a page, onto the line above it", () => {
+    const text = numberAloneText();
+    // Fill page 1 until the number's line is its last line and the word starts page 2.
+    for (let fillers = 1; fillers < 80; fillers++) {
+      const content = [...Array.from({ length: fillers }, (_, i) => p(`Filler ${i}`)), olFrom(32767, item(text))];
+      const editor = createTestEditor({ content: { type: "doc", content } });
+      const parts = editor.layout.pages.flatMap((page) => page.blocks.filter((b) => b.node.textContent === text).map((b) => ({ page: page.pageNumber, b })));
+      const [onFirst, onNext] = parts;
+      if (!onFirst || !onNext || onFirst.b.lines.some((line) => line.spans.length > 0)) { editor.destroy(); continue; }
+      editor.ensurePagePopulated(onFirst.page);
+      editor.ensurePagePopulated(onNext.page);
+      const start = onFirst.b.nodePos + 1;
+      const x = editor.charMap.coordsAtPos(start + 3)?.x ?? 0;
+      const above = editor.charMap.posAbove(start + 3, x);
+      expect(above).not.toBeNull();
+      expect(above ?? start).toBeLessThan(start);
+      editor.destroy();
+      return;
+    }
+    throw new Error("no layout leaves the number alone at a page bottom");
+  });
+
+  it("draws a number left alone at the bottom of a page in its text's face", () => {
+    for (let fillers = 1; fillers < 80; fillers++) {
+      for (let length = 8; length <= 60; length++) {
+        const text = `${"w".repeat(length)} tail`;
+        const content = [...Array.from({ length: fillers }, (_, i) => p(`Filler ${i}`)), olFrom(32767, li(sized(28, text)))];
+        const parts = laidOut(content).filter((block) => block.node.textContent === text);
+        const [numberPart, wordPart] = parts;
+        if (!numberPart || !wordPart || numberPart.lines.some((line) => line.spans.length > 0)) continue;
+        expect(listMarkerOf(numberPart)?.font).toBe(fontOf(wordPart));
+        return;
+      }
+    }
+    throw new Error("no layout leaves the number alone at a page bottom");
+  });
+
+  it("draws the number on the item's first text line when a full-width image covers its top", () => {
+    const text = "item text after the image";
+    // An image alone in the paragraph before the list takes no line, so its
+    // band starts where the item does.
+    const image: Json = { type: "paragraph", content: [
+      { type: "image", attrs: { src: "data:image/png;base64,AA==", width: 420, height: 100, wrapMode: "top-bottom", xAlign: "center", yOffset: 10 } },
+    ] };
+    const block = blockOf(laidOut([p("before"), image, olFrom(100, item(text))]), text);
+    const textLineIndex = block.lines.findIndex((line) => line.spans.some((span) => span.kind === "text"));
+    expect(textLineIndex).toBeGreaterThan(0);
+    const textTop = block.y + block.lines.slice(0, textLineIndex).reduce((sum, line) => sum + line.lineHeight, 0);
+    const textLine = block.lines[textLineIndex];
+    const marker = listMarkerOf(block);
+    expect(marker?.baseline).toBeCloseTo(textTop + (textLine?.ascent ?? 0), 6);
+    const firstSpan = textLine?.spans.find((span) => span.kind === "text");
+    expect(block.x + (firstSpan?.x ?? 0)).toBeGreaterThan((block.listMarkerX ?? 0) + measureTextWidth("100.", fontOf(block)));
+  });
+
+  it("moves Down and Up across a full-width image's gap in a plain paragraph", () => {
+    const text = "word ".repeat(80).trim();
+    const editor = createTestEditor({ content: { type: "doc", content: [
+      p("before"),
+      { type: "paragraph", content: [
+        { type: "text", text },
+        { type: "image", attrs: { src: "data:image/png;base64,AA==", width: 420, height: 100, wrapMode: "top-bottom", xAlign: "center", yOffset: 80 } },
+      ] },
+    ] } });
+    editor.ensurePagePopulated(1);
+    const map = editor.charMap;
+    const block = blockOf(editor.layout.pages.flatMap((page) => page.blocks), text);
+    const gapIndex = block.lines.findIndex((line) => line.spans.length === 0);
+    expect(gapIndex).toBeGreaterThan(0);
+    const before = block.lines.slice(0, gapIndex).flatMap((line) => line.spans).at(-1);
+    const after = block.lines.slice(gapIndex + 1).flatMap((line) => line.spans)[0];
+    if (!before || !after) throw new Error("no text on both sides of the gap");
+    const x = map.coordsAtPos(before.docPos)?.x ?? 0;
+    expect(map.posBelow(before.docPos, x)).toBeGreaterThanOrEqual(after.docPos);
+    expect(map.posAbove(after.docPos, x)).toBeLessThan(after.docPos);
+    expect(map.posAbove(after.docPos, x)).toBeGreaterThan(block.nodePos + 1);
     editor.destroy();
   });
 

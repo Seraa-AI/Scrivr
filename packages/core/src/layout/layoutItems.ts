@@ -21,7 +21,7 @@ import { nodeLayout } from "./BlockRegistry";
 import { getBlockStyle, type BlockStyle, type FontConfig } from "./FontConfig";
 import type { LayoutLine } from "./LineBreaker";
 import type { TextMeasurerLike } from "./TextMeasurer";
-import { listMarkerFont } from "./listMarkers";
+import { markerFaceOf } from "./listMarkers";
 
 /** A single item ready for layout — either a plain block or an expanded list item. */
 export interface LayoutItem {
@@ -264,7 +264,7 @@ function markerFirstLineOffset(
   ownIndent: number,
   blockWidth: number,
 ): number {
-  const { font, size } = listMarkerFont(lines);
+  const { font, size } = markerFaceOf(lines);
   const width = bulletShape(marker.text)
     ? bulletBox(size).size
     : measurer.measureWidth(marker.text, font);
@@ -306,7 +306,7 @@ export function measureWithMarker(
   const firstLine = settingsFor(offset);
   const measured = offset > 0 ? layoutBlock(node, { ...options, ...firstLine }) : first;
   return {
-    block: { ...measured, listMarker: marker.text, listMarkerX: listMarkerXOf(options.x, marker) },
+    block: { ...measured, listMarker: marker.text, listMarkerX: listMarkerXOf(options.x, marker), listMarkerFace: markerFaceOf(measured.lines) },
     firstLine,
   };
 }

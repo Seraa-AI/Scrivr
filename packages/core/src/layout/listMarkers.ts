@@ -21,10 +21,10 @@ const FALLBACK_MARKER_FONT = `${DEFAULT_FONT_SIZE_PX}px Arial, sans-serif`;
  * A marker takes the face and size of the text it labels: the item's first
  * text run, past any image or anchor that opens it and past a line the number
  * stands on alone — Word sizes the number from the paragraph's text, not from
- * a picture. Layout measures the marker, and canvas and PDF draw it, in what
- * this returns, so all three use one face.
+ * a picture. Layout measures the marker in what this returns and records it on
+ * the block as `listMarkerFace`.
  */
-export function listMarkerFont(lines: readonly LayoutLine[]): ListMarkerFont {
+export function markerFaceOf(lines: readonly LayoutLine[]): ListMarkerFont {
   const firstText = lines.flatMap((line) => line.spans).find((span) => span.kind === "text");
   if (firstText?.kind !== "text") return { font: FALLBACK_MARKER_FONT, size: DEFAULT_FONT_SIZE_PX };
   const parsed = parseFontSizePx(firstText.font);
@@ -33,6 +33,35 @@ export function listMarkerFont(lines: readonly LayoutLine[]): ListMarkerFont {
     size: parsed !== null && parsed > 0 ? parsed : DEFAULT_FONT_SIZE_PX,
     ...(firstText.resolution !== undefined ? { resolution: firstText.resolution } : {}),
   };
+}
+
+/** A block's marker as it is drawn: its face, and the baseline it sits on. */
+export interface ListMarker extends ListMarkerFont {
+  /** Page-local y of the baseline the marker is drawn on. */
+  baseline: number;
+}
+
+/** The gap a full-width float leaves in a block: no spans, no glyph metrics. */
+function isFloatGap(line: LayoutLine): boolean {
+  return line.spans.length === 0 && line.ascent === 0 && line.cursorHeight === 0;
+}
+
+/**
+ * How a block's list marker is drawn: in the face layout measured it in, on
+ * the baseline of its first line, past any gap a full-width float leaves
+ * above it. Canvas and PDF both draw from this, so they never disagree.
+ * Null for a block without a marker.
+ */
+export function listMarkerOf(block: LayoutBlock): ListMarker | null {
+  if (block.listMarker === undefined || block.listMarkerX === undefined) return null;
+  let top = block.y;
+  const numberLine = block.lines.find((line) => {
+    if (!isFloatGap(line)) return true;
+    top += line.lineHeight;
+    return false;
+  });
+  if (!numberLine) return null;
+  return { ...(block.listMarkerFace ?? markerFaceOf(block.lines)), baseline: top + numberLine.ascent };
 }
 
 type BulletPainter = (ctx: CanvasRenderingContext2D, left: number, centerY: number, fontSize: number) => void;
@@ -64,10 +93,9 @@ const BULLET_PAINTERS: Record<BulletShape, BulletPainter> = {
  * painter draws the block, the marker is drawn the same way.
  */
 export function drawListMarker(ctx: CanvasRenderingContext2D, block: LayoutBlock, theme: ResolvedTheme): void {
-  const firstLine = block.lines[0];
-  if (block.listMarker === undefined || block.listMarkerX === undefined || !firstLine) return;
-  const baseline = block.y + firstLine.ascent;
-  const { font, size } = listMarkerFont(block.lines);
+  const marker = listMarkerOf(block);
+  if (!marker || block.listMarker === undefined || block.listMarkerX === undefined) return;
+  const { font, size, baseline } = marker;
   ctx.save();
   ctx.fillStyle = theme.listMarker;
   ctx.strokeStyle = theme.listMarker;

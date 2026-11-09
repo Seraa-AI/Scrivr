@@ -13,6 +13,7 @@ import {
 import { layoutBlock, LayoutBlock, type LayoutBlockKind, type CellSubBlock } from "./BlockLayout";
 import type { InlineRegistry } from "./BlockRegistry";
 import { LineBreaker, type InputSpan, type LayoutLine } from "./LineBreaker";
+import type { ListMarkerFont } from "./listMarkers";
 import {
   normalizeImageAttrs,
   type AnchoredObjectPlacement,
@@ -274,6 +275,8 @@ export interface MeasureCacheEntry {
   listMarker?: { text: string; indentLeft: number };
   /** The first-line settings its marker resolved to; every re-layout reuses them. */
   firstLine?: FirstLineSettings;
+  /** The face its marker was measured in. */
+  listMarkerFace?: ListMarkerFont;
   /**
    * Phase 1b — early termination.
    *
@@ -334,6 +337,7 @@ export interface FlowBlock {
   align: BlockStyle["align"];
   listMarker?: string;
   listMarkerX?: number;
+  listMarkerFace?: ListMarkerFont;
   indentLeft: number;
   /** True if any line span is a zero-width anchored-object anchor. */
   hasAnchoredObject: boolean;
@@ -1029,10 +1033,7 @@ export function paginateFlow(
       measurer,
     );
 
-    if (flow.listMarker !== undefined) {
-      block.listMarker = flow.listMarker;
-      block.listMarkerX = flow.listMarkerX!;
-    }
+    Object.assign(block, markerFields(flow));
 
     // ── Per-page geometry snapshot ───────────────────────────────────────────
     // Computed once per outer-loop iteration. `currentMetrics` is stable for
@@ -1100,10 +1101,7 @@ export function paginateFlow(
           currentPage.pageNumber,
           measurer,
         );
-        if (flow.listMarker !== undefined) {
-          reflow.listMarker = flow.listMarker;
-          reflow.listMarkerX = flow.listMarkerX!;
-        }
+        Object.assign(reflow, markerFields(flow));
 
         currentPage.blocks.push(reflow);
         y = newPageContentTop + reflow.height;
@@ -1203,12 +1201,8 @@ export function paginateFlow(
           ...(isCont || !isLastPart ? { fragmentIndex: fragmentIdx, sourceNodePos: nodePos } : {}),
         };
 
-        if (flow.listMarker !== undefined) {
-          if (!isCont) {
-            partBlock.listMarker = flow.listMarker;
-            partBlock.listMarkerX = flow.listMarkerX!;
-          }
-        }
+        // The marker goes on the part that carries the item's first line.
+        if (!isCont) Object.assign(partBlock, markerFields(flow));
 
         if ((globalThis as Record<string,unknown>).__LAYOUT_DEBUG__) {
           console.log(
@@ -1421,6 +1415,7 @@ export function buildBlockFlow(
       align: entry.align,
       ...(marker ? { listMarker: marker.text, listMarkerX: listMarkerXOf(blockX, marker) } : {}),
       ...(entry.firstLine ? { firstLine: entry.firstLine } : {}),
+      ...(entry.listMarkerFace ? { listMarkerFace: entry.listMarkerFace } : {}),
       indentLeft,
       hasAnchoredObject: blockHasAnchoredObject(entry.lines),
       inputHash: computeInputHash(nodePos, node, blockWidth),
@@ -1492,6 +1487,16 @@ function shiftBlock(
   }
 
   return shifted;
+}
+
+/** A flow's list marker, as the block that carries its first line takes it. */
+function markerFields(flow: FlowBlock): Pick<LayoutBlock, "listMarker" | "listMarkerX" | "listMarkerFace"> {
+  if (flow.listMarker === undefined || flow.listMarkerX === undefined) return {};
+  return {
+    listMarker: flow.listMarker,
+    listMarkerX: flow.listMarkerX,
+    ...(flow.listMarkerFace ? { listMarkerFace: flow.listMarkerFace } : {}),
+  };
 }
 
 function rebreakWrappedLinesWithoutExclusions(
@@ -1672,6 +1677,7 @@ function resolveBlockEntry(
     align: measured.align,
     ...(marker ? { listMarker: { text: marker.text, indentLeft: marker.indentLeft } } : {}),
     ...(firstLine ? { firstLine } : {}),
+    ...(measured.listMarkerFace ? { listMarkerFace: measured.listMarkerFace } : {}),
   };
   measureCache?.set(node, entry);
   return entry;

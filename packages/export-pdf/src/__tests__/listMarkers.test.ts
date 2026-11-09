@@ -7,7 +7,7 @@
 import { describe, expect, it } from "vitest";
 import { buildPdf as buildPdfWithEditor } from "../index";
 import { PT_PER_PX } from "../context";
-import { Extension, ServerEditor, StarterKit, listMarkerFont, type LayoutLine } from "@scrivr/core";
+import { Extension, ServerEditor, StarterKit, listMarkerOf, type LayoutLine } from "@scrivr/core";
 import { exportEditor, textLine, block, onePage, schema } from "./fixtures";
 import { recordDrawOps, type DrawOp } from "./opLog";
 
@@ -72,12 +72,10 @@ describe("the marker's size", () => {
       spans: [{ kind: "object", node: image, x: 0, width: 10, height: 10, docPos: 1, verticalAlign: "baseline" }],
       width: 10, ascent: 10, descent: 2, lineHeight: 14, textAscent: 10, cursorHeight: 14, xHeight: 6,
     };
-    const ops = await recordDrawOps(() => buildPdfWithEditor(
-      onePage([block("paragraph", [line], { y: 100, listMarker: "1.", listMarkerX: MARKER_X })]),
-      exportEditor,
-    ));
+    const numbered = block("paragraph", [line], { y: 100, listMarker: "1.", listMarkerX: MARKER_X });
+    const ops = await recordDrawOps(() => buildPdfWithEditor(onePage([numbered]), exportEditor));
     const marker = ops.find((op) => op.op === "text" && op["value"] === "1.");
-    expect(marker?.["size"]).toBeCloseTo(listMarkerFont([line]).size * PT_PER_PX, 3);
+    expect(marker?.["size"]).toBeCloseTo((listMarkerOf(numbered)?.size ?? 0) * PT_PER_PX, 3);
   });
 });
 

@@ -42,7 +42,7 @@ import {
   type LayoutLine,
   type ResolvedTheme,
 } from "@scrivr/core";
-import { SYNTHETIC_ITALIC_SHEAR, bulletBox, bulletShape, emboldenWidth, fontSizeOf, listMarkerFont, type BulletBox, type BulletShape } from "@scrivr/core";
+import { SYNTHETIC_ITALIC_SHEAR, bulletBox, bulletShape, emboldenWidth, fontSizeOf, listMarkerOf, type BulletBox, type BulletShape } from "@scrivr/core";
 import type { PdfNodeHandler } from "./augmentation";
 import { resolvePdfSpanStyle, type ResolvedPdfSpanStyle } from "./spanStyle";
 
@@ -150,10 +150,9 @@ export function drawListMarker(
   fontRegistry: PdfFontRegistry,
   theme: ResolvedTheme,
 ): void {
-  const firstLine = block.lines[0];
-  if (!block.listMarker || block.listMarkerX === undefined || !firstLine) return;
-  const marker = listMarkerFont(block.lines);
-  const baselinePx = block.y + firstLine.ascent;
+  const marker = listMarkerOf(block);
+  if (!marker || !block.listMarker || block.listMarkerX === undefined) return;
+  const baselinePx = marker.baseline;
   const color = parseCssColor(theme.listMarker);
   // A bullet takes only its line's size: it is drawn as the canvas's shape, so
   // it never depends on whether the face can encode the glyph.

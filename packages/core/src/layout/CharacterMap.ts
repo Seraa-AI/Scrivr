@@ -337,7 +337,7 @@ export class CharacterMap {
 
     // First visual row on this page — jump to the last line of the previous page
     const prevPageLines = this.lines.filter(
-      (l) => l.page === currentLine.page - 1,
+      (l) => l.page === currentLine.page - 1 && !isEmptyLine(l),
     );
     if (!prevPageLines.length) return null;
     const lastOnPrev = prevPageLines.reduce((max, l) =>
@@ -380,7 +380,7 @@ export class CharacterMap {
 
     // Last visual row on this page — jump to the first line of the next page
     const nextPageLines = this.lines.filter(
-      (l) => l.page === currentLine.page + 1,
+      (l) => l.page === currentLine.page + 1 && !isEmptyLine(l),
     );
     if (!nextPageLines.length) return null;
     const firstOnNext = nextPageLines.reduce((min, l) =>

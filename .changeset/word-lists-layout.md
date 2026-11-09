@@ -69,9 +69,13 @@ Lists lay out, print and export like Word's.
 
 - `@scrivr/core` exports `isListType` (moved here from track changes, and
   now what the list extension, Clear formatting, the semantic exporter and
-  track changes ask), `bulletShape`, `bulletBox` and `listMarkerFont` (which
-  takes a block's lines and answers the face of its first text), with the
-  types `BulletShape`, `BulletBox` and `ListMarkerFont`.
+  track changes ask), `bulletShape`, `bulletBox` and `listMarkerOf` (which
+  answers how a block's marker is drawn: the face layout measured it in and
+  the baseline of its first line, past any gap a full-width image leaves),
+  with the types `BulletShape`, `BulletBox`, `ListMarker` and
+  `ListMarkerFont`. `LayoutBlock.listMarkerFace` (new) carries the marker's
+  face on every part of a split item, so a number left alone at a page
+  bottom keeps its text's face.
 - `ListItemStrategy` is removed, and blocks are no longer relabelled
   `blockType: "list_item"`. Core draws a block's list marker itself, over
   whatever painter draws the block, through the new `paintBlock` export —
@@ -91,6 +95,13 @@ Lists lay out, print and export like Word's.
 - `BlockLayoutOptions.firstLineOffset` (new) adds to a node's own
   `textIndent` on the first line; `BlockLayoutOptions.keepAnchorLine` (new)
   keeps a line for a paragraph holding only floating images' anchors.
+- `LineBreaker.breakIntoLines` takes `firstLineMayStayEmpty` (new: a first
+  word that fits only the next line leaves the first line empty, as a list
+  number's push does) and `firstLineIndent` (new: how far the provider's first
+  line is indented, so a float's narrowing is told apart from the indent's).
+- Up and Down step over a line that holds no text: a number left alone on
+  its line, and the gap a full-width image leaves in any paragraph, on the
+  same page or across one.
 - `DocxContext.textWidthTwips` (new, required): the width of the exported
   section's text column. Code that builds a `DocxContext` by hand must now
   set it; contexts from `@scrivr/docx` have it.

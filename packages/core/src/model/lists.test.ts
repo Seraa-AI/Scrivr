@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { buildStarterKitContext } from "../test-utils";
+import { buildStarterKitContext, createMeasurer } from "../test-utils";
 import { Extension } from "../extensions/Extension";
 import { ExtensionManager } from "../extensions/ExtensionManager";
 import { StarterKit } from "../extensions/StarterKit";
 import * as lists from "./lists";
 import * as core from "../index";
-import type { BulletBox, BulletShape, ListMarkerFont } from "../index";
+import type { BulletBox, BulletShape, ListMarker, ListMarkerFont } from "../index";
 
 const { schema } = buildStarterKitContext();
 const item = schema.nodes["listItem"]?.create(null, schema.node("paragraph"));
@@ -105,7 +105,7 @@ describe("markers", () => {
 
 describe("what @scrivr/core exports about lists", () => {
   it("exports what other packages use, and keeps the level table internal", () => {
-    const listExports = ["isListType", "bulletShape", "bulletBox", "listMarkerFont"];
+    const listExports = ["isListType", "bulletShape", "bulletBox", "listMarkerOf"];
     expect(listExports.filter((name) => typeof Reflect.get(core, name) !== "function")).toEqual([]);
     const internal = ["LIST_LEVELS", "LIST_MARKER_HANGING", "listKind", "listLevel", "listMarker", "listStart"];
     expect(internal.filter((name) => Reflect.has(core, name))).toEqual([]);
@@ -114,7 +114,10 @@ describe("what @scrivr/core exports about lists", () => {
   it("exports the types those functions take and return", () => {
     const shape = "disc" satisfies BulletShape;
     const box = core.bulletBox(10) satisfies BulletBox;
-    const font = core.listMarkerFont([]) satisfies ListMarkerFont;
-    expect([core.bulletShape("•"), box.size, font.size > 0]).toEqual([shape, 3, true]);
+    const face: ListMarkerFont = { font: "14px Arial", size: 14 };
+    const marker = core.listMarkerOf({ ...core.layoutBlock(buildStarterKitContext().schema.node("paragraph"), {
+      nodePos: 0, x: 0, y: 0, availableWidth: 100, page: 1, measurer: createMeasurer(),
+    }), listMarker: "1.", listMarkerX: 0, listMarkerFace: face }) satisfies ListMarker | null;
+    expect([core.bulletShape("•"), box.size, marker?.size]).toEqual([shape, 3, 14]);
   });
 });

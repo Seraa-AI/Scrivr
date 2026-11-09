@@ -628,6 +628,18 @@ section is what is true.
   letters change font mid-word is judged by its first part. How Word places a number whose hanging indent does not fit a
   cell is not documented and could not be checked here; this keeps it inside
   the box Word draws for the cell.
+- **After floats beside and inside tables merged (2026-11-09).** The first-line
+  settings a marker resolves to (the push past a wide number, the line kept
+  for a float-only item) are measured once, carried on the measured entry and
+  the flow, and reused when an item is re-laid around a float; the three tests
+  that waited on this pass. A number's face (`listMarkerFace`) is recorded at
+  measurement and kept by every part of a split item, and `listMarkerOf`
+  (replacing `listMarkerFont`, approved by the user on 2026-11-09) gives
+  canvas and PDF one face and one baseline, past a full-width image's gap; the
+  first-line indent goes to the first line below such a gap. Up and Down step
+  over text-less lines across pages too. Known limit: a line's doc position
+  for a gap beside a full-width image mid-paragraph is still its paragraph's
+  start, so a click in that gap puts the caret there (as on `main`).
 - **Known gaps in cells, not lists' own:** a cell adds its blocks' margins
   together where the body collapses them (already so on `main`), and a cell
   of a table nested in a cell cannot be selected, because cell hit-testing
