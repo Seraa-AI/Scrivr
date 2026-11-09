@@ -116,7 +116,7 @@ One-time changes to watch for:
 - An attribute change reads its values in words on cards and in the popover:
   an object value is spelled out (`x 0, y 48`), never `[object Object]`, and an
   equal value written anew is not listed. `describeAttrChanges` and
-  `changedAttrKeys` (new, `@scrivr/plugins`, awaiting approval) are that one description, shared
+  `changedAttrKeys` (new, `@scrivr/plugins`) are that one description, shared
   by the popover and the panel. An image whose older `floatOffset` changed
   with its `yOffset` reads as moved: `IMAGE_PLACEMENT_ATTRS` includes
   `floatOffset`.
