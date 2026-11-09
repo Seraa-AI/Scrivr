@@ -75,8 +75,10 @@ import type {
  * A ProseMirror node spec plus the Scrivr-side declarations that go with it.
  *
  * `layout` says how the node participates in the visual flow — a dimension
- * independent of what it means in the document tree. Omit it and the node
- * behaves as `{ kind: "block" }`, which is what every built-in node relies on.
+ * independent of what it means in the document tree. Omit it and a node that
+ * holds inline content or nothing behaves as `{ kind: "block" }`, while a node
+ * whose content is blocks behaves as `{ kind: "transparent" }`; declare
+ * `{ kind: "block" }` to give such a node its own box and painter.
  */
 export type ScrivrNodeSpec = NodeSpec & {
   layout?: NodeLayout;

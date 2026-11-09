@@ -7,7 +7,6 @@ import {
   FontConfig,
   defaultFontConfig,
   DEFAULT_FONT_FAMILY,
-  getBlockStyle,
   BlockStyle,
   applyPageFont,
 } from "./FontConfig";
@@ -34,7 +33,6 @@ import {
   type PageChromeContribution,
   type PageChromeMeasureInput,
 } from "./PageMetrics";
-import { LIST_MARKER_HANGING } from "../model/lists";
 import {
   collectLayoutItems,
   itemSpacing,

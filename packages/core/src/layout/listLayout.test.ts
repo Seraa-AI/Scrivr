@@ -13,6 +13,7 @@ import { StarterKit } from "../extensions/StarterKit";
 import { Table } from "../extensions/built-in/Table";
 import { ExtensionManager } from "../extensions/ExtensionManager";
 import { Extension } from "../extensions/Extension";
+import { nodeLayout } from "./BlockRegistry";
 import { buildStarterKitContext, createMeasurer, measureTextWidth } from "../test-utils";
 
 /**
@@ -621,6 +622,32 @@ describe("a list inside a table cell", () => {
     expect(rows.map((row) => row.isLastRow === true)).toEqual([false, true]);
   });
 
+  it("keeps a narrow cell's first word inside the cell, after the number, at any column width", () => {
+    const narrowCell = (content: Json[]): Json => ({ type: "tableCell", content });
+    const overruns: string[] = [];
+    // Five to eight columns: narrow enough that a list's indent cannot fit,
+    // wide enough that the word fits after the number and a space.
+    for (let columns = 5; columns <= 8; columns++) {
+      const docNode = manager.schema.nodeFromJSON({ type: "doc", content: [
+        { type: "table", attrs: { grid: Array.from({ length: columns }, () => 100) }, content: [{ type: "tableRow", content: [
+          narrowCell([ol(item("alphabet"))]),
+          ...Array.from({ length: columns - 1 }, () => narrowCell([p("x")])),
+        ] }] },
+        { type: "paragraph" },
+      ] });
+      const row = runPipeline(docNode, { pageConfig: defaultPageConfig, measurer: createMeasurer(), fontConfig: manager.buildBlockStyles() })
+        .pages.flatMap((page) => page.blocks).find((block) => block.cells !== undefined);
+      const cell = row?.cells?.[0];
+      if (!cell) throw new Error("no cell");
+      const block = blockOf(cell.blocks, "alphabet");
+      const word = block.lines[0]?.spans[0];
+      const wordStart = block.x + (word?.x ?? 0);
+      const numberEnd = (block.listMarkerX ?? 0) + measureTextWidth("1.", fontOf(block));
+      if (wordStart + (word?.width ?? 0) > cell.x + cell.width || wordStart <= numberEnd) overruns.push(`${columns} columns`);
+    }
+    expect(overruns).toEqual([]);
+  });
+
   it("keeps the number inside a narrow cell, clear of its text", () => {
     const narrowCell = (content: Json[]): Json => ({ type: "tableCell", content });
     const docNode = manager.schema.nodeFromJSON({ type: "doc", content: [
@@ -657,6 +684,25 @@ describe("a block container that is not a list", () => {
       .pages.flatMap((page) => page.blocks);
     expect(blocks.map((block) => block.node.textContent)).toEqual(["in an item", "loose"]);
     expect(blocks.map((block) => block.listMarker)).toEqual([undefined, undefined]);
+  });
+
+  it("is what nodeLayout reports: transparent when undeclared, its own box when declared", () => {
+    const Containers = Extension.create({
+      name: "containers",
+      addNodes() {
+        return {
+          undeclaredContainer: { group: "block", content: "paragraph+", toDOM: () => ["div", 0] },
+          declaredContainer: { group: "block", content: "paragraph+", layout: { kind: "block" }, toDOM: () => ["div", 0] },
+        };
+      },
+    });
+    const { schema: containers } = new ExtensionManager([StarterKit, Containers]);
+    const kindOf = (name: string) => {
+      const type = containers.nodes[name];
+      return type ? nodeLayout(type).kind : undefined;
+    };
+    expect(["undeclaredContainer", "declaredContainer", "paragraph", "image"].map(kindOf))
+      .toEqual(["transparent", "block", "block", "block"]);
   });
 
   it("keeps its own box when it declares one, so its painter draws it", () => {

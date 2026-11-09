@@ -17,7 +17,7 @@ import {
   listStart,
 } from "../model/lists";
 import { layoutBlock, ownFirstLineIndent, type BlockLayoutOptions, type LayoutBlock } from "./BlockLayout";
-import { declaresOwnBox, nodeLayout } from "./BlockRegistry";
+import { nodeLayout } from "./BlockRegistry";
 import { getBlockStyle, type BlockStyle, type FontConfig } from "./FontConfig";
 import type { LayoutLine } from "./LineBreaker";
 import type { TextMeasurerLike } from "./TextMeasurer";
@@ -67,9 +67,8 @@ interface ListPlace {
  * Each node contributes according to the layout participation its spec
  * declares (see `NodeLayout`): a `block` node contributes one item, a
  * `transparent` node contributes none of its own and its children are
- * collected in its place. A block that holds blocks but is neither a list nor
- * a table, and does not declare a box of its own, has no lines of its own, so
- * its blocks are laid out in its place too.
+ * collected in its place — which, by `nodeLayout`'s default, includes any
+ * undeclared node whose content is blocks.
  *
  * Lists and tables are expanded ahead of that, because their expansion is not
  * merely transparent — they carry markers, indents and column widths down to
@@ -141,10 +140,7 @@ export function collectChildItems(parent: Node, base: number): LayoutItem[] {
       return;
     }
 
-    // A node that declares a box of its own keeps it, and its painter draws it.
-    const holdsBlocks = !node.isTextblock && node.firstChild !== null && node.firstChild.isBlock
-      && !declaresOwnBox(node.type);
-    if (nodeLayout(node.type).kind === "transparent" || holdsBlocks) {
+    if (nodeLayout(node.type).kind === "transparent") {
       walk(node, offset + 1, list);
       return;
     }
@@ -174,6 +170,8 @@ export function collectLayoutItems(doc: Node): LayoutItem[] {
 
 /** However deep a block is indented, an inch of the line is left for its text. */
 const MIN_TEXT_WIDTH = 96;
+/** The least of the line a tab stop must leave for the text after a list number: the same inch. */
+const MIN_TEXT_AFTER_NUMBER = MIN_TEXT_WIDTH;
 
 /** A list marker to measure a block against: its text, how far in the block's text is, and how far the marker hangs before it. */
 export interface MarkerPlacement {
@@ -252,10 +250,10 @@ export function itemSpacing(
  * How far a list number pushes the item's first line of text. Word follows the
  * number with a tab (`w:suff`, a tab when omitted) that follows the normal tab
  * stop rules: the text stays where it is unless the number reaches it, and
- * then moves to the next default stop past the number. With no stop left on
- * the line, the text follows the number after a space, as Word's
- * `w:suff="space"` places it; what Word does with a tab past the line's last
- * stop is not documented.
+ * then moves to the next default stop past the number. When that stop would
+ * leave less than `MIN_TEXT_AFTER_NUMBER` of the line, the text follows the
+ * number after a space instead, as Word's `w:suff="space"` places it; what
+ * Word does with a tab past the line's last usable stop is not documented.
  */
 function markerFirstLineOffset(
   marker: MarkerPlacement,
@@ -272,8 +270,10 @@ function markerFirstLineOffset(
   const markerEnd = marker.indentLeft - marker.hanging + width;
   if (markerEnd < textStart) return 0;
   const nextStop = (Math.floor(markerEnd / DEFAULT_TAB_STOP) + 1) * DEFAULT_TAB_STOP;
-  const lastTextStart = marker.indentLeft + blockWidth - LIST_MARKER_HANGING;
-  const target = nextStop <= lastTextStart ? nextStop : markerEnd + measurer.measureWidth(" ", font);
+  const lineEnd = marker.indentLeft + blockWidth;
+  const target = lineEnd - nextStop >= MIN_TEXT_AFTER_NUMBER
+    ? nextStop
+    : markerEnd + measurer.measureWidth(" ", font);
   return Math.max(0, target - textStart);
 }
 
