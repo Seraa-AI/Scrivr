@@ -218,7 +218,7 @@ export interface WrapperLayout {
  *   them, restyles them, or hangs a marker before them.
  * - `break` — the node has no box: a block that breaks the page starts the
  *   next block on a new page, an inline node that breaks the line ends its
- *   line. A break its context cannot honour lays out as a plain leaf.
+ *   line. Only a leaf can break; a node that holds content ignores it.
  */
 export type NodeLayout =
   | { kind: "block" }
@@ -263,7 +263,8 @@ function isNodeLayout(value: unknown): value is NodeLayout {
  */
 export function nodeLayout(type: NodeType): NodeLayout {
   const declared: unknown = type.spec["layout"];
-  if (isNodeLayout(declared)) return declared;
+  // A break has no content to lay out, so a node that holds some ignores it.
+  if (isNodeLayout(declared) && (declared.kind !== "break" || type.isLeaf)) return declared;
   return !type.isLeaf && !type.inlineContent ? TRANSPARENT : DEFAULT_NODE_LAYOUT;
 }
 

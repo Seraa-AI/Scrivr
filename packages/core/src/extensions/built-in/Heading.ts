@@ -184,7 +184,11 @@ export const Heading = Extension.create<HeadingOptions>({
       if (jc) pPr.push(xml("w:jc", { "w:val": jc }));
       return xml("w:p", undefined, [xml("w:pPr", undefined, pPr), ...children]);
     };
-    const outlineLevel: PdfOutlineLevel = (node) => readLevel(node.attrs["level"]);
+    // The node's own level, so a heading deeper than `levels` still nests in order.
+    const outlineLevel: PdfOutlineLevel = (node) => {
+      const level = node.attrs["level"];
+      return typeof level === "number" ? level : readLevel(level);
+    };
     const semanticHandler: SemanticNodeHandler = () => ({ type: "heading" });
     return {
       docx: { nodes: { heading: headingHandler } },

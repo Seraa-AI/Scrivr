@@ -13,6 +13,7 @@ const Breaks = Extension.create({
     return {
       sceneBreak: { group: "block", atom: true, layout: { kind: "break", breaks: "page" } },
       lineSeparator: { group: "inline", inline: true, selectable: false, layout: { kind: "break", breaks: "line" } },
+      chapterBox: { group: "block", content: "block+", layout: { kind: "break", breaks: "page" } },
     };
   },
 });
@@ -42,6 +43,11 @@ describe("a break from outside core", () => {
     const custom = pagesOf([p(text("before")), { type: "sceneBreak" }, p(text("after"))]);
     const builtIn = pagesOf([p(text("before")), { type: "pageBreak" }, p(text("after"))]);
     expect(custom.map((blocks) => blocks.map((block) => block.y))).toEqual(builtIn.map((blocks) => blocks.map((block) => block.y)));
+  });
+
+  it("is ignored on a node that holds content, which lays out in its place", () => {
+    const pages = pagesOf([p(text("before")), { type: "chapterBox", content: [p(text("inside"))] }]);
+    expect(pageOf(pages, "inside")).toBe(1);
   });
 
   it("ends the line when it breaks the line, as the built-in line break does", () => {

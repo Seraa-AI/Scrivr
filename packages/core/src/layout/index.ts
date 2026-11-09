@@ -57,7 +57,7 @@ export {
 export { runMiniPipeline } from "./runMiniPipeline";
 export type { MiniPipelineOptions } from "./runMiniPipeline";
 export { resolveFont } from "./StyleResolver";
-export { BlockRegistry, InlineRegistry, nodeLayout, DEFAULT_NODE_LAYOUT } from "./BlockRegistry";
+export { BlockRegistry, InlineRegistry, breakOf, nodeLayout, DEFAULT_NODE_LAYOUT } from "./BlockRegistry";
 export { LayoutCoordinator } from "./LayoutCoordinator";
 export type { LayoutCoordinatorOptions } from "./LayoutCoordinator";
 export type {

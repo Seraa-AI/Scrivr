@@ -152,7 +152,7 @@ function collectEntries(layout: DocumentLayout, levels: ReadonlyMap<string, PdfO
 
 function entryOf(block: LayoutBlock, levels: ReadonlyMap<string, PdfOutlineLevel>): { title: string; level: number } | null {
   const level = levels.get(block.node.type.name)?.(block.node);
-  if (level === undefined || level === null) return null;
+  if (typeof level !== "number" || !Number.isFinite(level)) return null;
   const title = block.node.textContent.trim();
   return title ? { title, level } : null;
 }

@@ -1,4 +1,4 @@
-import { describeInlineMark, stableStringify } from "@scrivr/core";
+import { breakOf, describeInlineMark, stableStringify } from "@scrivr/core";
 import type {
   IBaseEditor,
   InlineMark,
@@ -84,7 +84,7 @@ interface Extracted {
 
 const textOf = (spans: readonly InlineSpan[]) => spans.map((s) => s.text).join("");
 
-const isLineBreak = (node: PmNode) => node.type.name === "hardBreak";
+const isLineBreak = (node: PmNode) => breakOf(node.type) === "line";
 
 const endOf = (change: SemanticChange) => (change.at ?? 0) + (change.length ?? 0);
 

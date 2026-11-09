@@ -48,6 +48,16 @@ function readOutline(pdfDoc: PDFDocument): Entry[] {
   return root ? walk(root) : [];
 }
 
+function outlineOf(extensions: Extension[], content: unknown[]): Promise<Entry[]> {
+  const editor = new ServerEditor({ extensions });
+  const doc = editor.schema.nodeFromJSON({ type: "doc", content });
+  const measurer = new TextMeasurer({ context: measureContext(createCanvas(800, 600).getContext("2d")) });
+  const layout = runPipeline(doc, { pageConfig: PAGE_CONFIG, measurer, fontConfig: new ExtensionManager(extensions).buildBlockStyles() });
+  return buildPdf(layout, editor).then(async (bytes) => readOutline(await PDFDocument.load(bytes)));
+}
+
+const titled = (type: string, text: string, attrs: Record<string, unknown> = {}) => ({ type, attrs, content: [{ type: "text", text }] });
+
 describe("an outline block from outside core", () => {
   it("is bookmarked at the level its extension declares, with headings nested beneath it", async () => {
     const extensions = [StarterKit, Chapter];
@@ -62,5 +72,33 @@ describe("an outline block from outside core", () => {
 
     const pdf = await PDFDocument.load(await buildPdf(layout, editor));
     expect(readOutline(pdf)).toEqual([{ title: "Chapter One", children: [{ title: "Opening", children: [] }] }]);
+  });
+
+  it("leaves out a block whose declared level is not a number, keeping the rest in order", async () => {
+    const Untitled = Extension.create({
+      name: "untitled",
+      addNodes() {
+        return { untitled: { group: "block", content: "inline*", toDOM: () => ["p", 0] } };
+      },
+      addExports() {
+        return { pdf: { nodes: { untitled: (block, ctx) => ctx.draw.lines(block, ctx) }, outline: { untitled: () => Number.NaN } } };
+      },
+    });
+    expect(await outlineOf([StarterKit, Untitled], [
+      titled("heading", "One", { level: 1 }),
+      titled("untitled", "Stray"),
+      titled("heading", "Two", { level: 1 }),
+    ])).toEqual([{ title: "One", children: [] }, { title: "Two", children: [] }]);
+  });
+
+  it("nests a heading deeper than the configured levels by its own level", async () => {
+    expect(await outlineOf([StarterKit.configure({ heading: { levels: [1, 2, 3] } })], [
+      titled("heading", "Section", { level: 2 }),
+      titled("heading", "Detail", { level: 4 }),
+      titled("heading", "Next", { level: 2 }),
+    ])).toEqual([
+      { title: "Section", children: [{ title: "Detail", children: [] }] },
+      { title: "Next", children: [] },
+    ]);
   });
 });
