@@ -53,6 +53,10 @@ export {
   previousSection,
   sectionAt,
 } from "./sections";
+// Track changes and the semantic exporter ask what a list is; PDF draws
+// markers. The level table itself stays internal to core.
+export { bulletBox, bulletShape, isListType } from "./lists";
+export type { BulletBox, BulletShape } from "./lists";
 export type {
   Section,
   SectionBreakType,

@@ -134,8 +134,10 @@ export interface BlockStrategy {
  * Registry mapping ProseMirror node type names to BlockStrategies.
  *
  * Built by ExtensionManager from all extensions that implement addLayoutHandlers().
- * Consumed by PageRenderer — for each block, PageRenderer calls
- * registry.get(block.blockType)?.render(block, ctx, map).
+ * Consumed through `paintBlock`, which every surface calls for each block: it
+ * looks the block's strategy up here by `blockType` and then draws the block's
+ * list marker. A new surface paints with `paintBlock` rather than calling a
+ * strategy itself, or its lists lose their numbers.
  */
 export class BlockRegistry {
   private readonly strategies = new Map<string, BlockStrategy>();
@@ -171,15 +173,22 @@ export class BlockRegistry {
  * - `block` — the node occupies its own box in the flow. Today its painter
  *   comes from `addLayoutHandlers()`; the strategy is expected to move onto
  *   this declaration, at which point the text-block fallback for undeclared
- *   nodes can become an error instead of a guess.
+ *   nodes can become an error instead of a guess. A node whose content is
+ *   blocks keeps its box only when it declares `{ kind: "block" }` explicitly.
  * - `transparent` — the node contributes no box of its own. It stays in the
  *   editor tree, but its children are collected into the parent's layout flow
  *   as if the boundary weren't there.
  */
 export type NodeLayout = { kind: "block" } | { kind: "transparent" };
 
-/** Layout for a node that declares nothing — its own box, painted by strategy. */
+/**
+ * Layout for a node that declares nothing and holds inline content or nothing:
+ * its own box, painted by strategy. An undeclared node that holds blocks is
+ * `transparent` instead (see `nodeLayout`).
+ */
 export const DEFAULT_NODE_LAYOUT: NodeLayout = { kind: "block" };
+
+const TRANSPARENT: NodeLayout = { kind: "transparent" };
 
 function isNodeLayout(value: unknown): value is NodeLayout {
   if (typeof value !== "object" || value === null || !("kind" in value)) {
@@ -190,12 +199,15 @@ function isNodeLayout(value: unknown): value is NodeLayout {
 }
 
 /**
- * Read a node type's declared layout participation.
- *
- * Nodes that declare nothing default to `block`, which is what every built-in
- * node was implicitly relying on before the declaration existed.
+ * How a node type takes part in layout: what its spec declares, or the
+ * default for its content. A node that declares nothing and holds blocks has
+ * no lines of its own, so its blocks are laid out in its place
+ * (`transparent`); any other undeclared node takes its own box
+ * (`DEFAULT_NODE_LAYOUT`), which is what every built-in text and leaf node
+ * relies on.
  */
 export function nodeLayout(type: NodeType): NodeLayout {
   const declared: unknown = type.spec["layout"];
-  return isNodeLayout(declared) ? declared : DEFAULT_NODE_LAYOUT;
+  if (isNodeLayout(declared)) return declared;
+  return !type.isLeaf && !type.inlineContent ? TRANSPARENT : DEFAULT_NODE_LAYOUT;
 }

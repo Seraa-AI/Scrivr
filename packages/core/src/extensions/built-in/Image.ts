@@ -452,6 +452,9 @@ function buildAnchoredDrawing(
   const id = nextDocxPicId(ctx);
   const marginEmu = String(pxToEmu(anchor.marginPx));
   const behindDoc = anchor.wrapMode === "behind" ? "1" : "0";
+  // Layout moves a square image below earlier square images it would overlap;
+  // Word does the same only when overlap is disallowed.
+  const allowOverlap = anchor.wrapMode === "square" ? "0" : "1";
 
   const positionH = ((): XmlNode => {
     if (typeof anchor.xCustom === "number") {
@@ -485,7 +488,7 @@ function buildAnchoredDrawing(
         "xmlns:wp": NS_WP,
         distT: marginEmu, distB: marginEmu, distL: marginEmu, distR: marginEmu,
         simplePos: "0", relativeHeight: "0", behindDoc,
-        locked: "0", layoutInCell: "1", allowOverlap: "1",
+        locked: "0", layoutInCell: "1", allowOverlap,
       },
       [
         xml("wp:simplePos", { x: "0", y: "0" }),
@@ -538,7 +541,7 @@ const imageDocxHandler: DocxNodeHandler = (node, _children, ctx) => {
     yOffset: typeof node.attrs["yOffset"] === "number" ? node.attrs["yOffset"] : 0,
     marginPx: typeof node.attrs["margin"] === "number" ? node.attrs["margin"] : 12,
   };
-  if (typeof node.attrs["x"] === "number") anchor.xCustom = node.attrs["x"];
+  if (anchor.xAlign === "custom" && typeof node.attrs["x"] === "number") anchor.xCustom = node.attrs["x"];
 
   return xml("w:r", undefined, [
     buildAnchoredDrawing(ctx, record.filename, relId, width, height, anchor),

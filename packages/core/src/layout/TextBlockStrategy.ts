@@ -234,12 +234,12 @@ export const TextBlockStrategy: BlockStrategy = {
           height: line.lineHeight,
           x,
           contentWidth: availableWidth,
-          startDocPos: line.spans[0]?.docPos ?? 0,
+          startDocPos: line.spans[0]?.docPos ?? block.nodePos + 1,
           endDocPos: line.terminalBreakDocPos !== undefined
             ? line.terminalBreakDocPos + 1
             : (lastSpan
               ? (lastSpan.kind === "text" ? lastSpan.docPos + lastSpan.text.length : lastSpan.docPos + 1)
-              : 0),
+              : block.nodePos + 1),
         });
       }
     }

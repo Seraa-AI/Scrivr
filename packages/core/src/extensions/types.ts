@@ -75,8 +75,10 @@ import type {
  * A ProseMirror node spec plus the Scrivr-side declarations that go with it.
  *
  * `layout` says how the node participates in the visual flow — a dimension
- * independent of what it means in the document tree. Omit it and the node
- * behaves as `{ kind: "block" }`, which is what every built-in node relies on.
+ * independent of what it means in the document tree. Omit it and a node that
+ * holds inline content or nothing behaves as `{ kind: "block" }`, while a node
+ * whose content is blocks behaves as `{ kind: "transparent" }`; declare
+ * `{ kind: "block" }` to give such a node its own box and painter.
  */
 export type ScrivrNodeSpec = NodeSpec & {
   layout?: NodeLayout;
@@ -805,7 +807,10 @@ export interface ExtensionConfig<Options = object> {
    * `{ kind: "block" }` (the default) and registers a painter through
    * `addLayoutHandlers`. A node that exists structurally but has no visual box
    * of its own is `{ kind: "transparent" }`: it stays in the tree, and its
-   * children are laid out into the enclosing flow as if it weren't there.
+   * children are laid out into the enclosing flow as if it weren't there. A
+   * node whose content is blocks must declare `{ kind: "block" }` explicitly to
+   * keep its own box and painter; left undeclared, its blocks are laid out in
+   * its place.
    */
   addNodes?(this: Phase1Context<Options>): Record<string, ScrivrNodeSpec>;
 

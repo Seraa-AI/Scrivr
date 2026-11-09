@@ -1,11 +1,12 @@
 import { Node } from "prosemirror-model";
+import type { ListMarkerFont } from "./listMarkers";
 import { parseFontSizePx } from "../fonts/activeFontSize";
 import type { FontResolutionId, LayoutFontResolver } from "../fonts/layoutResolver";
 import type { FontModifier } from "../extensions/types";
 import type { TextMeasurerLike } from "./TextMeasurer";
 import type { InlineRegistry } from "./BlockRegistry";
-import { normalizeImageAttrs } from "./AnchoredObjects";
-import { LineBreaker, LayoutLine, InputSpan, spanEndDocPos, computeObjectRenderY, type InlineObjectVerticalAlign, type LineSpaceProvider } from "./LineBreaker";
+import { normalizeImageAttrs, type WrapMode } from "./AnchoredObjects";
+import { LineBreaker, LayoutLine, InputSpan, indentFirstSegment, spanEndDocPos, computeObjectRenderY, type InlineObjectVerticalAlign, type LineSpaceProvider } from "./LineBreaker";
 import { CharacterMap } from "./CharacterMap";
 import {
   FontConfig,
@@ -63,7 +64,7 @@ export function resolveLeafBlockDimensions(
  * Discriminator for the variety of block this LayoutBlock represents.
  *
  *   - `"text"`     — block contributes textual lines that drive rendering and
- *                    cursor placement (paragraph, heading, list_item, codeBlock).
+ *                    cursor placement (paragraph, heading, codeBlock).
  *                    `lines` is non-empty (anchor-only paragraphs hold a single
  *                    hidden line — still "text").
  *   - `"leaf"`     — block has no inline content and contributes no lines
@@ -103,6 +104,29 @@ export interface CellSubBlock {
   background: string | null;
   /** Layout for the cell's child blocks. Empty array in Phase 1. */
   blocks: LayoutBlock[];
+  /** Images anchored in the cell's blocks, laid out inside the cell. Absent when there are none. */
+  floats?: CellFloat[];
+}
+
+/**
+ * An image laid out inside its table cell. `x` is absolute; `y` and
+ * `anchorY` (its paragraph's top) are relative to the row's top, like the
+ * cell's blocks, so a cached row carries its images to any page.
+ */
+export interface CellFloat {
+  docPos: number;
+  node: Node;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  wrapMode: WrapMode;
+  zIndex: number;
+  margin: number;
+  anchorY: number;
+  clamped?: true;
+  /** How far keeping clear of an earlier image moved it down. */
+  stackOffset?: number;
 }
 
 export interface LayoutBlock {
@@ -129,10 +153,12 @@ export interface LayoutBlock {
   align: BlockStyle["align"];
   /** Available width — renderer needs this to compute alignment offsets */
   availableWidth: number;
-  /** Bullet character or ordered number string (e.g. "•", "1."). Present on list item blocks only. */
+  /** Bullet or number (e.g. "•", "1."), on the block that carries a list item's first visible line. */
   listMarker?: string;
-  /** Absolute x position to draw the list marker — to the left of the indented text. */
+  /** Absolute x of the marker's left edge — hanging before the indented text. */
   listMarkerX?: number;
+  /** The face the marker was measured in, from the item's text; every part of a split item keeps it. */
+  listMarkerFace?: ListMarkerFont;
   /**
    * True on the 2nd, 3rd, … visual parts of a block split across pages.
    * Suppresses the list marker and sets spaceBefore = 0 for continuation parts.
@@ -166,6 +192,12 @@ export interface LayoutBlock {
   cells?: CellSubBlock[];
   /** True for the last row of a table — only it paints the table's bottom border. */
   isLastRow?: boolean;
+}
+
+/** The first-line indent a node asks for itself, through its `textIndent` attr. */
+export function ownFirstLineIndent(node: Node): number {
+  const indent = node.attrs["textIndent"];
+  return typeof indent === "number" && Number.isFinite(indent) && indent > 0 ? indent : 0;
 }
 
 export function isHiddenAnchorLine(line: LayoutLine): boolean {
@@ -240,6 +272,21 @@ export interface BlockLayoutOptions {
    * every other block kind.
    */
   tableColumns?: number[];
+  /**
+   * Extra first-line indent, on top of the node's own `textIndent`: where a
+   * list marker too wide for its hanging pushes the first line of text.
+   */
+  firstLineOffset?: number;
+  /**
+   * The first-line offset for a first line a float moves `lineStart` in from
+   * the block's left; `firstLineOffset` holds where nothing moves it.
+   */
+  firstLineOffsetAt?: (lineStart: number) => number;
+  /**
+   * A paragraph holding only floating images' anchors still takes one line.
+   * Set for a list item's first block, whose number sits on that line.
+   */
+  keepAnchorLine?: boolean;
 }
 
 // ── Constants ───────────────────────────────────────────────────────────────────
@@ -424,6 +471,9 @@ export function layoutBlock(
     lineSpaceProvider,
     inlineRegistry,
     fonts,
+    firstLineOffset = 0,
+    firstLineOffsetAt,
+    keepAnchorLine = false,
   } = options;
 
   const fontConfig = options.fontConfig ?? defaultFontConfig;
@@ -463,7 +513,8 @@ export function layoutBlock(
   // non-inline image sentinels is structural ownership, not visible document
   // content. Preserve those zero-size object spans so anchored-object layout
   // can find them, but do not inject a ZWS. That yields a zero-height flow
-  // instead of the blank line users were seeing behind floating images.
+  // instead of the blank line users were seeing behind floating images —
+  // unless the paragraph opens a list item, whose number needs its line.
   const hasNonZeroContent = spans.some(
     (s) =>
       s.kind === "text" ||
@@ -473,7 +524,7 @@ export function layoutBlock(
     (s) => s.kind === "object" && s.width === 0 && s.height === 0,
   );
   const isAnchorOnlyFlow = !hasNonZeroContent && hasZeroSizeObjectSentinel;
-  if (isAnchorOnlyFlow) {
+  if (isAnchorOnlyFlow && !keepAnchorLine) {
     return {
       kind: "text",
       node,
@@ -504,36 +555,36 @@ export function layoutBlock(
     ...(zwsAnswer ? { resolution: zwsAnswer.resolution } : {}),
     docPos: nodePos + 1,
   };
-  const inputSpans: InputSpan[] = hasNonZeroContent ? spans : [zwsSpan];
+  // A kept anchor line ends in the sentinel, after the anchors it carries.
+  const inputSpans: InputSpan[] = hasNonZeroContent
+    ? spans
+    : isAnchorOnlyFlow
+      ? [...spans, { ...zwsSpan, docPos: nodePos + 1 + node.content.size }]
+      : [zwsSpan];
 
   // ── 3. Break into lines ───────────────────────────────────────────────────
   const breaker = new LineBreaker(measurer);
 
   // First-line indent: reduce first line's width so text wraps earlier.
-  const rawTextIndent = node.attrs["textIndent"];
-  const textIndent = typeof rawTextIndent === "number" && rawTextIndent > 0 ? rawTextIndent : 0;
+  const ownIndent = ownFirstLineIndent(node);
+  const firstLineIndentAt = (lineStart: number): number =>
+    ownIndent + (lineStart > 0 && firstLineOffsetAt ? firstLineOffsetAt(lineStart) : firstLineOffset);
+  const indentsFirstLine = ownIndent + firstLineOffset > 0 || firstLineOffsetAt !== undefined;
 
-  // Wrap the line-space provider to apply textIndent on the first line.
+  // Wrap the line-space provider to apply the indent on the first line.
   let firstLineConsumed = false;
   const indentAwareLineSpace: LineSpaceProvider | undefined =
-    textIndent > 0
+    indentsFirstLine
       ? (lineY: number, lineHeight: number) => {
           // Forward the real line height so the float-exclusion probe inside the
           // provider tests the line's true vertical extent (a 1px probe leaves a
           // straddling first line full-width under a float's top edge).
           const base = lineSpaceProvider?.(lineY, lineHeight) ?? { segments: [{ x: 0, width: availableWidth }] };
-          if (!firstLineConsumed) {
+          // A full-width float's gap is not the first line: the indent goes
+          // to the first line below it that holds text.
+          if (!firstLineConsumed && base.segments.length > 0) {
             firstLineConsumed = true;
-            return {
-              ...base,
-              segments: base.segments
-                .map((segment, index) =>
-                  index === 0
-                    ? { x: segment.x + textIndent, width: Math.max(0, segment.width - textIndent) }
-                    : segment,
-                )
-                .filter((segment) => segment.width > 0),
-            };
+            return { ...base, segments: indentFirstSegment(base.segments, firstLineIndentAt) };
           }
           return base;
         }
@@ -550,6 +601,8 @@ export function layoutBlock(
       defaultFontFamily: parsedBase.family,
       defaultFontSize: parseFloat(parsedBase.size),
       ...(indentAwareLineSpace ? { lineSpaceProvider: indentAwareLineSpace, startY: y } : {}),
+      ...(firstLineOffset > 0 || firstLineOffsetAt ? { firstLineMayStayEmpty: true } : {}),
+      ...(indentsFirstLine ? { firstLineIndent: firstLineIndentAt } : {}),
     },
   );
 
@@ -691,7 +744,7 @@ export function layoutBlock(
     blockType: node.type.name,
     align: resolvedAlign,
     availableWidth,
-    // listMarker and listMarkerX are set by layoutDocument for list items
+    // listMarker and listMarkerX are set by layoutBlockWithMarker for a list item's first block
   };
 }
 

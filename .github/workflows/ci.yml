@@ -12,7 +12,9 @@ concurrency:
 jobs:
   ci:
     name: Typecheck & Test
-    runs-on: ubuntu-latest
+    # Layout tests measure with the runner's real fonts; ubuntu-26.04 ships
+    # different ones. Pinned until the tests are re-baselined for it.
+    runs-on: ubuntu-24.04
 
     steps:
       - uses: actions/checkout@v4

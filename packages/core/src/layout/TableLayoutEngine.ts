@@ -5,8 +5,9 @@
  * carry per-cell rectangles and the laid-out child blocks of each cell. The
  * engine:
  *   1. Derives column x-offsets from the table's `grid` widths.
- *   2. Lays out every cell's child blocks (paragraphs, headings, …) inside the
- *      cell's content box (column width minus padding) by reusing `layoutBlock`.
+ *   2. Lays out every cell's child blocks (paragraphs, headings, lists, …)
+ *      inside the cell's content box (column width minus padding), collected
+ *      and measured as the page body's are, list markers and indents included.
  *   3. Sizes the row to its tallest cell; every cell fills that height.
  *
  * Position model (matches the line model so the measure cache can reuse a row
@@ -22,12 +23,16 @@
  */
 import type { Node } from "prosemirror-model";
 import { cellBackground, cellGridSpan, cellVMerge } from "../table/attrs";
-import { layoutBlock, type LayoutBlock, type CellSubBlock } from "./BlockLayout";
+import type { LayoutBlock, CellSubBlock, CellFloat } from "./BlockLayout";
+import { ANCHORED_OBJECT_MARGIN, anchorsInLines, clearOfEarlier } from "./AnchoredObjects";
+import { ExclusionManager } from "./ExclusionManager";
+import type { LineSpaceProvider } from "./LineBreaker";
 import type { TextMeasurerLike } from "./TextMeasurer";
-import type { FontConfig } from "./FontConfig";
+import { defaultFontConfig, type FontConfig } from "./FontConfig";
 import type { FontModifier } from "../extensions/types";
-import { nodeLayout, type InlineRegistry } from "./BlockRegistry";
+import type { InlineRegistry } from "./BlockRegistry";
 import type { LayoutFontResolver } from "../fonts/layoutResolver";
+import { collectChildItems, layoutItem } from "./layoutItems";
 
 /** Horizontal cell padding (left + right) in CSS px. */
 export const CELL_PADDING_H = 6;
@@ -57,22 +62,6 @@ export interface TableRowLayoutContext {
 
 function columnWidth(columns: number[], index: number): number {
   return columns[index] ?? DEFAULT_COLUMN_WIDTH;
-}
-
-/**
- * Visit the blocks a cell lays out. A `transparent` node has no box of its own,
- * so its children take its place, as they do in the body flow.
- */
-function forEachFlowChild(
-  parent: Node,
-  base: number,
-  visit: (node: Node, nodePos: number) => void,
-): void {
-  parent.forEach((node, offset) => {
-    const nodePos = base + offset;
-    if (nodeLayout(node.type).kind === "transparent") forEachFlowChild(node, nodePos + 1, visit);
-    else visit(node, nodePos);
-  });
 }
 
 /**
@@ -114,30 +103,9 @@ export function layoutTableRowCells(
     const contentWidth = Math.max(0, cellWidth - 2 * CELL_PADDING_H);
     const cellPos = ctx.rowNodePos + 1 + offsetInRow;
 
-    // Lay out the cell's child blocks, stacking `y` relative to the row top.
-    const blocks: LayoutBlock[] = [];
-    let relY = CELL_PADDING_V;
-    forEachFlowChild(cellNode, cellPos + 1, (childNode, childNodePos) => {
-      const childBlock = layoutBlock(childNode, {
-        nodePos: childNodePos,
-        x: contentX,
-        y: relY,
-        availableWidth: contentWidth,
-        page: ctx.page,
-        measurer: ctx.measurer,
-        // No `map`: the CharacterMap is populated at paint time (TableRowStrategy),
-        // matching the convention for cached, position-independent layouts.
-        ...(ctx.fontConfig ? { fontConfig: ctx.fontConfig } : {}),
-        ...(ctx.fontModifiers ? { fontModifiers: ctx.fontModifiers } : {}),
-        ...(ctx.inlineRegistry ? { inlineRegistry: ctx.inlineRegistry } : {}),
-        ...(ctx.fonts ? { fonts: ctx.fonts } : {}),
-      });
-      blocks.push(childBlock);
-      relY += childBlock.spaceBefore + childBlock.height + childBlock.spaceAfter;
-    });
-
-    const contentHeight = relY - CELL_PADDING_V;
-    const cellHeight = contentHeight + 2 * CELL_PADDING_V;
+    const box: CellBox = { cellPos, contentX, contentWidth };
+    const { blocks, contentBottom, floats } = layoutCellContent(cellNode, box, ctx);
+    const cellHeight = Math.max(contentBottom, ...floats.filter(wrapsText).map((f) => f.y + f.height)) + CELL_PADDING_V;
 
     cells.push({
       cellPos,
@@ -148,6 +116,7 @@ export function layoutTableRowCells(
       vMerge: cellVMerge(cellNode),
       background: cellBackground(cellNode),
       blocks,
+      ...(floats.length > 0 ? { floats } : {}),
     });
 
     col += span;
@@ -158,4 +127,156 @@ export function layoutTableRowCells(
   for (const cell of cells) cell.height = rowHeight;
 
   return { cells, height: rowHeight };
+}
+
+interface CellBox {
+  cellPos: number;
+  contentX: number;
+  contentWidth: number;
+}
+
+/** Text in a cell wraps around square and top-and-bottom images; behind and front wrap nothing. */
+function wrapsText(f: CellFloat): boolean {
+  return f.wrapMode === "square" || f.wrapMode === "top-bottom";
+}
+
+/**
+ * Passes allowed for a cell whose images move their own anchors: an image
+ * placed from its paragraph can wrap the text above that paragraph and so
+ * move it. Word re-places until it settles; a cell keeps the last placement.
+ */
+const MAX_CELL_PASSES = 3;
+
+/**
+ * Lay out a cell's blocks and the images anchored in them, as Word does with
+ * `layoutInCell`: each image is placed in the cell from its paragraph's top
+ * and the cell's text wraps around it. Every `y` is relative to the row top.
+ */
+function layoutCellContent(
+  cellNode: Node,
+  box: CellBox,
+  ctx: TableRowLayoutContext,
+): { blocks: LayoutBlock[]; contentBottom: number; floats: CellFloat[] } {
+  let laid = layoutCellBlocks(cellNode, box, ctx);
+  let floats = placeCellFloats(laid.blocks, box);
+  // The images the laid-out text wraps around. Returned with it, so text and
+  // image never disagree: an image that keeps moving its own anchor stays
+  // where the text last wrapped it, as the body locks one.
+  let wrapped = floats;
+  for (let pass = 0; pass < MAX_CELL_PASSES && floats.some(wrapsText); pass++) {
+    laid = layoutCellBlocks(cellNode, box, ctx, wrapAround(floats, box));
+    wrapped = floats;
+    const replaced = placeCellFloats(laid.blocks, box);
+    const settled = replaced.every((f, i) => f.x === floats[i]?.x && f.y === floats[i]?.y);
+    floats = replaced;
+    if (settled) break;
+  }
+  return { ...laid, floats: wrapped };
+}
+
+function layoutCellBlocks(
+  cellNode: Node,
+  box: CellBox,
+  ctx: TableRowLayoutContext,
+  lineSpaceIn?: (x: number, width: number) => LineSpaceProvider,
+): { blocks: LayoutBlock[]; contentBottom: number } {
+  // Each block is resolved as the page body resolves it. A page break has no
+  // meaning inside a cell.
+  const blocks: LayoutBlock[] = [];
+  let relY = CELL_PADDING_V;
+  for (const item of collectChildItems(cellNode, box.cellPos + 1)) {
+    if (item.isPageBreak) continue;
+    const childBlock = layoutItem(item, { x: box.contentX, width: box.contentWidth }, {
+      y: relY,
+      page: ctx.page,
+      measurer: ctx.measurer,
+      // No `map`: the CharacterMap is populated at paint time (TableRowStrategy),
+      // matching the convention for cached, position-independent layouts.
+      fontConfig: ctx.fontConfig ?? defaultFontConfig,
+      ...(ctx.fontModifiers ? { fontModifiers: ctx.fontModifiers } : {}),
+      ...(ctx.inlineRegistry ? { inlineRegistry: ctx.inlineRegistry } : {}),
+      ...(ctx.fonts ? { fonts: ctx.fonts } : {}),
+    }, lineSpaceIn);
+    blocks.push(childBlock);
+    relY += childBlock.spaceBefore + childBlock.height + childBlock.spaceAfter;
+  }
+  return { blocks, contentBottom: relY };
+}
+
+/**
+ * Place each image anchored in the cell's blocks: `yOffset` from its
+ * paragraph's top, never above the cell's content top, and kept inside the
+ * cell horizontally. A square image that would overlap one placed before it
+ * moves clear of it, as in the body.
+ */
+function placeCellFloats(blocks: readonly LayoutBlock[], box: CellBox): CellFloat[] {
+  const floats: CellFloat[] = [];
+  for (const block of blocks) {
+    for (const anchor of anchorsInLines(block.lines)) {
+      const { attrs } = anchor;
+      // An image wider than its cell is scaled down whole, never squashed.
+      const scale = Math.min(1, box.contentWidth / attrs.width);
+      const width = attrs.width * scale;
+      const height = attrs.height * scale;
+      const maxX = box.contentX + box.contentWidth - width;
+      const x = attrs.xAlign === "custom"
+        ? Math.min(Math.max(box.contentX + (attrs.x ?? 0), box.contentX), maxX)
+        : attrs.xAlign === "center" ? box.contentX + (box.contentWidth - width) / 2
+        : attrs.xAlign === "right" ? maxX
+        : box.contentX;
+      const atOffset = Math.max(CELL_PADDING_V, block.y + attrs.yOffset);
+      const float: CellFloat = {
+        docPos: anchor.docPos,
+        node: anchor.node,
+        x,
+        y: atOffset,
+        width,
+        height,
+        wrapMode: attrs.wrapMode,
+        zIndex: attrs.zIndex,
+        margin: attrs.margin,
+        anchorY: block.y,
+        ...(atOffset !== block.y + attrs.yOffset ? { clamped: true } : {}),
+      };
+      if (wrapsText(float)) {
+        // A top-and-bottom image takes the whole width, so it can only move below.
+        const contentRight = box.contentX + box.contentWidth;
+        const reach = (f: CellFloat) => f.wrapMode === "top-bottom" ? { ...f, x: box.contentX, width: box.contentWidth } : f;
+        const spot = clearOfEarlier(reach(float), floats.filter(wrapsText).map(reach), box.contentX, contentRight, ANCHORED_OBJECT_MARGIN);
+        if (float.wrapMode === "square") float.x = spot.x;
+        if (spot.y > float.y) float.stackOffset = spot.y - float.y;
+        float.y = spot.y;
+      }
+      floats.push(float);
+    }
+  }
+  return floats;
+}
+
+/**
+ * The cell's lines asked against its wrapping images, answered for the box a
+ * block lays its text in (an indented list item's is narrower than the cell).
+ */
+function wrapAround(floats: readonly CellFloat[], box: CellBox): (x: number, width: number) => LineSpaceProvider {
+  const exclusions = new ExclusionManager();
+  for (const f of floats) {
+    // As in the body, the margin band never reaches above the image's own
+    // paragraph: the blocks above fix where that paragraph starts, so letting
+    // the band move them makes the image chase its own anchor.
+    const top = Math.max(CELL_PADDING_V, f.y - f.margin, Math.min(f.y, f.anchorY));
+    const bottom = f.y + f.height + f.margin;
+    if (f.wrapMode === "square") {
+      exclusions.addRect({ page: 1, x: f.x - f.margin, right: f.x + f.width + f.margin, y: top, bottom, side: "left", docPos: f.docPos });
+    } else if (f.wrapMode === "top-bottom") {
+      exclusions.addFullWidthRect({ page: 1, y: top, bottom, contentX: box.contentX, contentWidth: box.contentWidth, docPos: f.docPos });
+    }
+  }
+  return (x, width) => (lineY, lineHeight = 1) => {
+    const space = exclusions.getAvailableSegments(1, lineY, lineHeight, x, width);
+    const segments = space.segments.map((seg) => ({ x: seg.x - x, width: seg.width }));
+    if (segments.length === 0 && space.skipToY === undefined) {
+      return { segments, skipToY: exclusions.getNextFreeY(1, lineY, lineHeight, x, width) };
+    }
+    return space.skipToY !== undefined ? { segments, skipToY: space.skipToY } : { segments };
+  };
 }

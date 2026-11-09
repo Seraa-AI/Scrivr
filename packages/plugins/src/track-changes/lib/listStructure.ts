@@ -1,10 +1,7 @@
-import { Node as PMNode, NodeType, Schema } from "@scrivr/core/pm";
+import { isListType } from "@scrivr/core";
+import { Node as PMNode, Schema } from "@scrivr/core/pm";
 
 import { ListLevel } from "../types";
-
-/** A list container: a node whose items are list items. */
-export const isListType = (type: NodeType) =>
-  !!type.schema.nodes.listItem && type.contentMatch.defaultType === type.schema.nodes.listItem;
 
 /** A block at the bottom of the list structure, with where it sits in it. */
 export interface ListLeaf {
