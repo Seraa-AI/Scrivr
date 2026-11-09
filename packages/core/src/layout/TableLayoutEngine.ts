@@ -5,9 +5,9 @@
  * carry per-cell rectangles and the laid-out child blocks of each cell. The
  * engine:
  *   1. Derives column x-offsets from the table's `grid` widths.
- *   2. Lays out every cell's child blocks (paragraphs, headings, lists, …)
+ *   2. Lays out every cell's child blocks (paragraphs, headings, wrapped blocks, …)
  *      inside the cell's content box (column width minus padding), collected
- *      and measured as the page body's are, list markers and indents included.
+ *      and measured as the page body's are, markers and indents included.
  *   3. Sizes the row to its tallest cell; every cell fills that height.
  *
  * Position model (matches the line model so the measure cache can reuse a row
@@ -255,7 +255,7 @@ function placeCellFloats(blocks: readonly LayoutBlock[], box: CellBox): CellFloa
 
 /**
  * The cell's lines asked against its wrapping images, answered for the box a
- * block lays its text in (an indented list item's is narrower than the cell).
+ * block lays its text in (an indented block's is narrower than the cell).
  */
 function wrapAround(floats: readonly CellFloat[], box: CellBox): (x: number, width: number) => LineSpaceProvider {
   const exclusions = new ExclusionManager();

@@ -50,6 +50,7 @@ import type { InputRule } from "prosemirror-inputrules";
 import type { CharacterMap } from "../layout/CharacterMap";
 import type { PageConfig, DocumentLayout } from "../layout/PageLayout";
 import type { BlockStrategy, InlineStrategy, NodeLayout } from "../layout/BlockRegistry";
+import type { MarkerPainter } from "../layout/markers";
 import type { BlockStyle } from "../layout/FontConfig";
 import type { ParsedFont } from "../layout/StyleResolver";
 import type { PageChromeContribution } from "../layout/PageMetrics";
@@ -167,6 +168,8 @@ export interface IBaseEditor {
   getExportContributions(): ExportContributionMap[];
   /** Import contributions from all extensions, in registration order. */
   getImportContributions(): ImportContributionMap[];
+  /** Marker painters from all extensions, by key; a later extension's replaces an earlier one's. */
+  getMarkerPainters(): ReadonlyMap<string, MarkerPainter>;
   /**
    * Names of doc-level attributes declared by extensions via `addDocAttrs()`.
    *
@@ -972,6 +975,18 @@ export interface ExtensionConfig<Options = object> {
   addInlineHandlers?(this: Phase1Context<Options>): Record<string, InlineStrategy>;
 
   /**
+   * Painters for the markers this extension's wrappers hang (see
+   * `WrapperLayout`), by the key a `BlockMarker` names: canvas and PDF side by
+   * side, so a marker draws the same on screen and in the file.
+   *
+   * @example
+   * addMarkerPainters() {
+   *   return { checkbox: { canvas: (ctx, marker) => …, pdf: (marker, ctx) => … } };
+   * }
+   */
+  addMarkerPainters?(this: Phase1Context<Options>): Record<string, MarkerPainter>;
+
+  /**
    * Block styles contributed by this extension.
    * Merged into the FontConfig used by layoutDocument.
    * Keys are node type names or compound keys like "heading_1".
@@ -1196,6 +1211,8 @@ export interface ResolvedExtension {
   layoutHandlers: Record<string, BlockStrategy>;
   /** Map of node type name → InlineStrategy, contributed by this extension. */
   inlineHandlers: Record<string, InlineStrategy>;
+  /** Map of marker key → MarkerPainter, contributed by this extension. */
+  markerPainters: Record<string, MarkerPainter>;
   /** Block styles contributed by this extension (merged into FontConfig). */
   blockStyles: Record<string, BlockStyle>;
   markDecorators: Map<string, MarkDecorator>;

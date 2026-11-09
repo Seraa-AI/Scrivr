@@ -16,7 +16,7 @@ export { LineBreaker } from "./LineBreaker";
 export type { InputSpan, LayoutSpan, LayoutLine, LineSpaceProvider } from "./LineBreaker";
 export { layoutBlock, resolveLeafBlockDimensions, computeAlignmentOffset, computeJustifySpaceBonus, countSpaces } from "./BlockLayout";
 export { chromeBlocks } from "./chromeBlocks";
-export type { LayoutBlock, BlockLayoutOptions } from "./BlockLayout";
+export type { LayoutBlock, BlockLayoutOptions, MarkerLine } from "./BlockLayout";
 export { runPipeline, buildFragments, defaultPageConfig, defaultPagelessConfig, collapseMargins } from "./PageLayout";
 export type { PageConfig, LayoutPage, DocumentLayout, PageLayoutOptions, LayoutFragment } from "./PageLayout";
 export type {
@@ -60,8 +60,16 @@ export { resolveFont } from "./StyleResolver";
 export { BlockRegistry, InlineRegistry, nodeLayout, DEFAULT_NODE_LAYOUT } from "./BlockRegistry";
 export { LayoutCoordinator } from "./LayoutCoordinator";
 export type { LayoutCoordinatorOptions } from "./LayoutCoordinator";
-export type { BlockStrategy, BlockRenderContext, InlineStrategy, NodeLayout } from "./BlockRegistry";
+export type {
+  BlockStrategy,
+  BlockRenderContext,
+  InlineStrategy,
+  NodeLayout,
+  WrapperLayout,
+  WrapPlacement,
+  WrapScope,
+} from "./BlockRegistry";
 export { TextBlockStrategy } from "./TextBlockStrategy";
-// PDF draws list markers in the face and size the canvas draws them in.
-export { listMarkerOf } from "./listMarkers";
-export type { ListMarker, ListMarkerFont } from "./listMarkers";
+// Canvas and PDF draw a block's marker from the same anchor.
+export { markerAnchorOf } from "./markers";
+export type { BlockMarker, LaidMarker, MarkerFace, MarkerPainter, PlacedMarker } from "./markers";

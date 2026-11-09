@@ -1,5 +1,5 @@
 import { Node } from "prosemirror-model";
-import type { ListMarkerFont } from "./listMarkers";
+import type { LaidMarker } from "./markers";
 import { parseFontSizePx } from "../fonts/activeFontSize";
 import type { FontResolutionId, LayoutFontResolver } from "../fonts/layoutResolver";
 import type { FontModifier } from "../extensions/types";
@@ -153,15 +153,11 @@ export interface LayoutBlock {
   align: BlockStyle["align"];
   /** Available width — renderer needs this to compute alignment offsets */
   availableWidth: number;
-  /** Bullet or number (e.g. "•", "1."), on the block that carries a list item's first visible line. */
-  listMarker?: string;
-  /** Absolute x of the marker's left edge — hanging before the indented text. */
-  listMarkerX?: number;
-  /** The face the marker was measured in, from the item's text; every part of a split item keeps it. */
-  listMarkerFace?: ListMarkerFont;
+  /** The marker a wrapper hangs before the block, on the part that carries its first visible line. */
+  marker?: LaidMarker;
   /**
    * True on the 2nd, 3rd, … visual parts of a block split across pages.
-   * Suppresses the list marker and sets spaceBefore = 0 for continuation parts.
+   * Suppresses the marker and sets spaceBefore = 0 for continuation parts.
    */
   isContinuation?: boolean;
   /**
@@ -273,20 +269,24 @@ export interface BlockLayoutOptions {
    */
   tableColumns?: number[];
   /**
+   * The first-line room a marker takes. A block with a marker keeps a line
+   * for it even when it holds only floating images' anchors.
+   */
+  marker?: MarkerLine;
+}
+
+/** How a marker shapes its block's first line. */
+export interface MarkerLine {
+  /**
    * Extra first-line indent, on top of the node's own `textIndent`: where a
-   * list marker too wide for its hanging pushes the first line of text.
+   * marker too wide for its hanging pushes the first line of text.
    */
-  firstLineOffset?: number;
+  offset?: number;
   /**
-   * The first-line offset for a first line a float moves `lineStart` in from
-   * the block's left; `firstLineOffset` holds where nothing moves it.
+   * The offset for a first line a float moves `lineStart` in from the
+   * block's left; `offset` holds where nothing moves it.
    */
-  firstLineOffsetAt?: (lineStart: number) => number;
-  /**
-   * A paragraph holding only floating images' anchors still takes one line.
-   * Set for a list item's first block, whose number sits on that line.
-   */
-  keepAnchorLine?: boolean;
+  offsetAt?: (lineStart: number) => number;
 }
 
 // ── Constants ───────────────────────────────────────────────────────────────────
@@ -471,9 +471,7 @@ export function layoutBlock(
     lineSpaceProvider,
     inlineRegistry,
     fonts,
-    firstLineOffset = 0,
-    firstLineOffsetAt,
-    keepAnchorLine = false,
+    marker,
   } = options;
 
   const fontConfig = options.fontConfig ?? defaultFontConfig;
@@ -514,7 +512,7 @@ export function layoutBlock(
   // content. Preserve those zero-size object spans so anchored-object layout
   // can find them, but do not inject a ZWS. That yields a zero-height flow
   // instead of the blank line users were seeing behind floating images —
-  // unless the paragraph opens a list item, whose number needs its line.
+  // unless the paragraph carries a marker, which needs its line.
   const hasNonZeroContent = spans.some(
     (s) =>
       s.kind === "text" ||
@@ -524,7 +522,7 @@ export function layoutBlock(
     (s) => s.kind === "object" && s.width === 0 && s.height === 0,
   );
   const isAnchorOnlyFlow = !hasNonZeroContent && hasZeroSizeObjectSentinel;
-  if (isAnchorOnlyFlow && !keepAnchorLine) {
+  if (isAnchorOnlyFlow && !marker) {
     return {
       kind: "text",
       node,
@@ -567,9 +565,11 @@ export function layoutBlock(
 
   // First-line indent: reduce first line's width so text wraps earlier.
   const ownIndent = ownFirstLineIndent(node);
+  const markerOffset = marker?.offset ?? 0;
+  const markerOffsetAt = marker?.offsetAt;
   const firstLineIndentAt = (lineStart: number): number =>
-    ownIndent + (lineStart > 0 && firstLineOffsetAt ? firstLineOffsetAt(lineStart) : firstLineOffset);
-  const indentsFirstLine = ownIndent + firstLineOffset > 0 || firstLineOffsetAt !== undefined;
+    ownIndent + (lineStart > 0 && markerOffsetAt ? markerOffsetAt(lineStart) : markerOffset);
+  const indentsFirstLine = ownIndent + markerOffset > 0 || markerOffsetAt !== undefined;
 
   // Wrap the line-space provider to apply the indent on the first line.
   let firstLineConsumed = false;
@@ -601,7 +601,7 @@ export function layoutBlock(
       defaultFontFamily: parsedBase.family,
       defaultFontSize: parseFloat(parsedBase.size),
       ...(indentAwareLineSpace ? { lineSpaceProvider: indentAwareLineSpace, startY: y } : {}),
-      ...(firstLineOffset > 0 || firstLineOffsetAt ? { firstLineMayStayEmpty: true } : {}),
+      ...(markerOffset > 0 || markerOffsetAt ? { firstLineMayStayEmpty: true } : {}),
       ...(indentsFirstLine ? { firstLineIndent: firstLineIndentAt } : {}),
     },
   );
@@ -744,7 +744,6 @@ export function layoutBlock(
     blockType: node.type.name,
     align: resolvedAlign,
     availableWidth,
-    // listMarker and listMarkerX are set by layoutBlockWithMarker for a list item's first block
   };
 }
 

@@ -6,6 +6,7 @@ import type { TextMeasurerLike } from "./TextMeasurer";
 import type { LayoutBlock } from "./BlockLayout";
 import type { MarkDecorator } from "../extensions/types";
 import type { ResolvedTheme } from "../model/theme";
+import type { BlockMarker, MarkerPainter } from "./markers";
 
 // ── InlineStrategy ────────────────────────────────────────────────────────────
 
@@ -131,16 +132,18 @@ export interface BlockStrategy {
 // ── BlockRegistry ─────────────────────────────────────────────────────────────
 
 /**
- * Registry mapping ProseMirror node type names to BlockStrategies.
+ * How blocks are painted: BlockStrategies by node type name, and marker
+ * painters by the key a `BlockMarker` names.
  *
- * Built by ExtensionManager from all extensions that implement addLayoutHandlers().
+ * Built by ExtensionManager from addLayoutHandlers() and addMarkerPainters().
  * Consumed through `paintBlock`, which every surface calls for each block: it
  * looks the block's strategy up here by `blockType` and then draws the block's
- * list marker. A new surface paints with `paintBlock` rather than calling a
- * strategy itself, or its lists lose their numbers.
+ * marker. A new surface paints with `paintBlock` rather than calling a
+ * strategy itself, or its markers are lost.
  */
 export class BlockRegistry {
   private readonly strategies = new Map<string, BlockStrategy>();
+  private readonly markerPainters = new Map<string, MarkerPainter>();
 
   register(nodeTypeName: string, strategy: BlockStrategy): this {
     this.strategies.set(nodeTypeName, strategy);
@@ -154,9 +157,45 @@ export class BlockRegistry {
   has(nodeTypeName: string): boolean {
     return this.strategies.has(nodeTypeName);
   }
+
+  registerMarkerPainter(key: string, painter: MarkerPainter): this {
+    this.markerPainters.set(key, painter);
+    return this;
+  }
+
+  markerPainter(key: string): MarkerPainter | undefined {
+    return this.markerPainters.get(key);
+  }
 }
 
 // ── NodeLayout ────────────────────────────────────────────────────────────────
+
+/** Opaque to core: whatever a wrapper's extension hands down to what it wraps. */
+export type WrapScope = Readonly<Record<string, unknown>>;
+
+/** What a wrapper does to one block it wraps. */
+export interface WrapPlacement {
+  /** How much further in the block sits; the indents of every wrapper around it add up. */
+  indent: number;
+  /** Hung before the block's first line. The innermost wrapper that hangs one wins. */
+  marker?: BlockMarker;
+  /** The block style it is spaced by, in place of its own. The innermost wrapper that names one wins. */
+  styleKey?: string;
+}
+
+/** How a transparent node shapes the blocks laid out in its place. */
+export interface WrapperLayout {
+  /**
+   * What this wrapper hands down, from what it received. Spread `outer` into
+   * the result so wrappers inside still see what wrappers outside handed down.
+   */
+  enter(node: Node, outer: WrapScope): WrapScope;
+  /**
+   * Called for each block laid out inside this wrapper, at any depth and in
+   * order; `index` counts them from 0, so 0 is the wrapper's first block.
+   */
+  place(block: Node, index: number, scope: WrapScope): WrapPlacement;
+}
 
 /**
  * How a node participates in layout — declared on its node spec, independent of
@@ -165,10 +204,8 @@ export class BlockRegistry {
  * These are two separate dimensions. A node can matter enormously to the model
  * (identity, provenance, actions, lifecycle) and have no visual existence of
  * its own; `sourcedBlock` is exactly that. Before this existed, the layout
- * walker inferred participation from the node's *name* — lists and tables
- * expanded, everything else was assumed to be a text block — so a new
- * structural node either had to be added to that list or laid out as one empty
- * line.
+ * walker inferred participation from the node's *name*, so a new structural
+ * node either had to be special-cased there or laid out as one empty line.
  *
  * - `block` — the node occupies its own box in the flow. Today its painter
  *   comes from `addLayoutHandlers()`; the strategy is expected to move onto
@@ -177,9 +214,10 @@ export class BlockRegistry {
  *   blocks keeps its box only when it declares `{ kind: "block" }` explicitly.
  * - `transparent` — the node contributes no box of its own. It stays in the
  *   editor tree, but its children are collected into the parent's layout flow
- *   as if the boundary weren't there.
+ *   as if the boundary weren't there. With `wrap`, it shapes them: indents
+ *   them, restyles them, or hangs a marker before them.
  */
-export type NodeLayout = { kind: "block" } | { kind: "transparent" };
+export type NodeLayout = { kind: "block" } | { kind: "transparent"; wrap?: WrapperLayout };
 
 /**
  * Layout for a node that declares nothing and holds inline content or nothing:
@@ -190,12 +228,19 @@ export const DEFAULT_NODE_LAYOUT: NodeLayout = { kind: "block" };
 
 const TRANSPARENT: NodeLayout = { kind: "transparent" };
 
+function isWrapperLayout(value: unknown): value is WrapperLayout {
+  return typeof value === "object" && value !== null
+    && "enter" in value && typeof value.enter === "function"
+    && "place" in value && typeof value.place === "function";
+}
+
 function isNodeLayout(value: unknown): value is NodeLayout {
   if (typeof value !== "object" || value === null || !("kind" in value)) {
     return false;
   }
-  const { kind } = value;
-  return kind === "block" || kind === "transparent";
+  if (value.kind === "block") return true;
+  if (value.kind !== "transparent") return false;
+  return !("wrap" in value) || value.wrap === undefined || isWrapperLayout(value.wrap);
 }
 
 /**

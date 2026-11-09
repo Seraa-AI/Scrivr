@@ -3,7 +3,6 @@ import * as painter from "./paintBlock";
 import { renderPage } from "./PageRenderer";
 import { TileManager } from "./TileManager";
 import { CharacterMap } from "../layout/CharacterMap";
-import { BlockRegistry } from "../layout/BlockRegistry";
 import { defaultPageConfig, defaultPagelessConfig, runPipeline } from "../layout/PageLayout";
 import type { LayoutBlock } from "../layout/BlockLayout";
 import { ExtensionManager } from "../extensions/ExtensionManager";
@@ -14,7 +13,7 @@ import { createMeasurer, createTestEditor } from "../test-utils";
 
 /**
  * Every surface paints a block through `paintBlock`, which draws the block's
- * list marker as well as the block. A surface that calls a strategy itself
+ * marker as well as the block. A surface that calls a strategy itself
  * paints the block and silently drops its number.
  */
 
@@ -33,7 +32,7 @@ const canvas = () => {
 };
 /** Blocks `paintBlock` was handed that carry a list marker. */
 const markedBlocksPainted = (spy: { mock: { calls: Array<[LayoutBlock, ...unknown[]]> } }) =>
-  spy.mock.calls.map(([block]) => block).filter((block) => block.listMarker !== undefined).map((block) => block.listMarker);
+  spy.mock.calls.map(([block]) => block).filter((block) => block.marker !== undefined).map((block) => block.marker?.data);
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -45,13 +44,13 @@ describe("painting a block", () => {
     const layout = runPipeline(docNode, { pageConfig: defaultPageConfig, measurer: createMeasurer(), fontConfig: manager.buildBlockStyles() });
     const block = layout.pages[0]?.blocks.find((b) => b.node.textContent === "shaded");
     if (!block) throw new Error("no block");
-    expect(block.listMarker).toBe("10.");
+    expect(block.marker?.data).toBe("10.");
 
     const ctx = canvas();
     const fillRect = vi.spyOn(ctx, "fillRect");
     const fillText = vi.spyOn(ctx, "fillText");
     // A painter that fills the block's box before its text, as a shaded block does.
-    const shaded = new BlockRegistry().register("paragraph", {
+    const shaded = manager.buildBlockRegistry().register("paragraph", {
       render: (painted, renderCtx) => {
         renderCtx.ctx.fillRect(0, painted.y, 1000, painted.height);
         return renderCtx.lineIndexOffset;

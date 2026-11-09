@@ -70,8 +70,9 @@ export function block(
   opts: {
     y?: number;
     align?: LayoutBlock["align"];
-    listMarker?: string;
-    listMarkerX?: number;
+    /** A list's bullet or number, drawn when `markerX` places it. */
+    marker?: string;
+    markerX?: number;
     attrs?: Record<string, unknown>;
   } = {},
 ): LayoutBlock {
@@ -91,8 +92,9 @@ export function block(
     blockType: nodeType,
     align: opts.align ?? "left",
     availableWidth: AVAIL_W,
-    ...(opts.listMarker ? { listMarker: opts.listMarker } : {}),
-    ...(opts.listMarkerX !== undefined ? { listMarkerX: opts.listMarkerX } : {}),
+    ...(opts.marker !== undefined && opts.markerX !== undefined
+      ? { marker: { painter: "list", data: opts.marker, x: opts.markerX } }
+      : {}),
   } as unknown as LayoutBlock;
 }
 

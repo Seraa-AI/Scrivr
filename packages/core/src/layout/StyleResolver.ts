@@ -68,7 +68,7 @@ export function parseFont(font: string): ParsedFont {
   const rawFamily = tokens.slice(sizeIndex + 1).join(" ") || "serif";
   // Strip quotes only when they wrap the entire family value. In a fallback
   // list such as `"ACME, Sans", serif`, the leading quote belongs to the
-  // first family and must survive until the list-aware parser sees it.
+  // first family and must survive until the fallback-aware parser sees it.
   const family =
     rawFamily.length >= 2 &&
     ((rawFamily.startsWith('"') && rawFamily.endsWith('"')) ||

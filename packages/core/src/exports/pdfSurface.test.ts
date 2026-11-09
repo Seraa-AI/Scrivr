@@ -6,6 +6,7 @@ import { defaultEditorTheme } from "../model/theme";
 import type {
   PdfBox,
   PdfDrawSurface,
+  PdfEllipseOp,
   PdfFontHandle,
   PdfImageHandle,
   PdfImageOp,
@@ -49,6 +50,7 @@ describe("the PDF mark contract an extension writes against", () => {
       text: (op: PdfTextOp) => drawn.push(`text:${op.text}`),
       line: (op: PdfLineOp) => drawn.push(`line:${op.from.x}->${op.to.x}`),
       rect: (op: PdfRectOp) => drawn.push(`rect:${op.width}`),
+      ellipse: (op: PdfEllipseOp) => drawn.push(`ellipse:${op.radiusX}`),
       image: (op: PdfImageOp) => drawn.push(`image:${op.image.src}`),
       imagePlaceholder: (box: PdfBox) => drawn.push(`placeholder:${box.width}`),
     };
@@ -60,9 +62,10 @@ describe("the PDF mark contract an extension writes against", () => {
     surface.text({ text: "hi", x: 0, baselineY: 10, sizePx: 12, font, color: { r: 0, g: 0, b: 0 } });
     surface.line({ from, to: { x: 20, y: 10 }, thicknessPx: 1, color: { r: 0, g: 0, b: 0 } });
     surface.rect({ x: 0, y: 0, width: 5, height: 5, color: { r: 1, g: 2, b: 3 } });
+    surface.ellipse({ center: from, radiusX: 3, radiusY: 3, color: { r: 1, g: 2, b: 3 } });
     surface.image({ x: 0, y: 0, width: 5, height: 5, image });
     surface.imagePlaceholder({ x: 0, y: 0, width: 5, height: 5 });
 
-    expect(drawn).toEqual(["text:hi", "line:0->20", "rect:5", "image:a.png", "placeholder:5"]);
+    expect(drawn).toEqual(["text:hi", "line:0->20", "rect:5", "ellipse:3", "image:a.png", "placeholder:5"]);
   });
 });

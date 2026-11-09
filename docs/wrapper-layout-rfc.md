@@ -158,4 +158,33 @@ Breaking, during beta (patch changesets):
 
 ## What shipped
 
-Nothing yet.
+All of it, in one PR on `feat/wrapper-layout`, as designed, with these
+differences:
+
+- **`place` is called for every block laid out inside a wrapper, at any
+  depth**, not only its children, with `index` counting those blocks. Indents
+  add up and the innermost marker wins. A list item is its own wrapper (it
+  numbers its first block and hands its text indent to a list nested in it);
+  a list's wrapper only counts and nests.
+- **`place` may also return `styleKey`**, the block style a block is spaced by
+  in place of its own: a list paragraph takes `list_item`, which the walk used
+  to decide by name.
+- **The marker line options are `BlockLayoutOptions.marker: MarkerLine`**
+  (`{ offset?, offsetAt? }`); having one keeps an anchor-only block's line,
+  which `keepAnchorLine` said separately.
+- **`LayoutBlock.marker` is a `LaidMarker`** (`painter`, `data`, `x`,
+  `face`): what the painter and `markerAnchorOf` need, without the measuring
+  half of `BlockMarker`. A marker's `data` is compared by identity for cache
+  reuse; a list's is its text.
+- **The PDF painter is `(marker, ctx: PdfNodeContext)`** and draws through
+  `ctx.draw`, so core never names pdf-lib. The surface gained `ellipse` for
+  discs and rings.
+- **Canvas painters are registered on `BlockRegistry`**, which every surface
+  already passes to `paintBlock`; the PDF exporter reads
+  `editor.getMarkerPainters()`.
+- **`markerColor: null` takes the theme's text colour.** Both old
+  `listMarker` defaults equalled `defaultText`, so nothing changes by default,
+  and a dark theme's markers follow its text.
+- The level table and painters live in `extensions/built-in/listLevels.ts` and
+  `listLayout.ts`. Two tests hold the RFC's grep check: no source file under
+  `layout/`, `renderer/` or `export-pdf/src` uses list vocabulary.

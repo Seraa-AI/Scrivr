@@ -25,6 +25,7 @@ import type {
 import type { IBaseEditor, IEditor } from "./types";
 import type { SelectionBehavior, HitTester, SelectionGestureProvider, NodeActionContribution } from "../selection/types";
 import { BlockRegistry, InlineRegistry } from "../layout/BlockRegistry";
+import type { MarkerPainter } from "../layout/markers";
 import type { FontConfig } from "../layout/FontConfig";
 import type { PageConfig } from "../layout/PageLayout";
 import type { PageChromeContribution } from "../layout/PageMetrics";
@@ -539,6 +540,11 @@ export class ExtensionManager {
     return this.resolved.map((ext) => ext.exports);
   }
 
+  /** Marker painters from all extensions, by key; a later extension's replaces an earlier one's. */
+  getMarkerPainters(): ReadonlyMap<string, MarkerPainter> {
+    return new Map(this.resolved.flatMap((ext) => Object.entries(ext.markerPainters)));
+  }
+
   /**
    * Import contributions from all extensions, in registration order.
    * Format packages call this at import time to collect parse handlers.
@@ -557,8 +563,8 @@ export class ExtensionManager {
   }
 
   /**
-   * Builds a BlockRegistry from all extensions that implement addLayoutHandlers().
-   * PageRenderer uses this to dispatch rendering to the correct strategy per block type.
+   * Builds a BlockRegistry from all extensions' addLayoutHandlers() and
+   * addMarkerPainters(). `paintBlock` dispatches each block and its marker through it.
    */
   buildBlockRegistry(): BlockRegistry {
     const registry = new BlockRegistry();
@@ -568,6 +574,9 @@ export class ExtensionManager {
       )) {
         registry.register(nodeTypeName, strategy);
       }
+    }
+    for (const [key, painter] of this.getMarkerPainters()) {
+      registry.registerMarkerPainter(key, painter);
     }
     return registry;
   }

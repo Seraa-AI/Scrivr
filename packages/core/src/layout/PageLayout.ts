@@ -13,7 +13,8 @@ import {
 import { layoutBlock, LayoutBlock, type LayoutBlockKind, type CellSubBlock } from "./BlockLayout";
 import type { InlineRegistry } from "./BlockRegistry";
 import { LineBreaker, isSpacerLine, type InputSpan, type LayoutLine } from "./LineBreaker";
-import type { ListMarkerFont } from "./listMarkers";
+import type { MarkerLine } from "./BlockLayout";
+import type { LaidMarker, MarkerFace } from "./markers";
 import {
   normalizeImageAttrs,
   type AnchoredObjectPlacement,
@@ -33,10 +34,9 @@ import {
 import {
   collectLayoutItems,
   itemSpacing,
-  listMarkerXOf,
+  laidMarkerOf,
   measureWithMarker,
   resolveItem,
-  type FirstLineSettings,
   type LayoutItem,
   type MarkerPlacement,
 } from "./layoutItems";
@@ -271,12 +271,12 @@ export interface MeasureCacheEntry {
   spaceAfter: number;
   blockType: string;
   align: BlockStyle["align"];
-  /** The list marker the block was measured with, and its indent; a different one is a cache miss. */
-  listMarker?: { text: string; indentLeft: number };
-  /** The first-line settings its marker resolved to; every re-layout reuses them. */
-  firstLine?: FirstLineSettings;
+  /** The marker the block was measured with, and where; a different one is a cache miss. */
+  marker?: MarkerPlacement;
+  /** The first-line room its marker resolved to; every re-layout reuses it. */
+  markerLine?: MarkerLine;
   /** The face its marker was measured in. */
-  listMarkerFace?: ListMarkerFont;
+  markerFace?: MarkerFace;
   /**
    * Phase 1b — early termination.
    *
@@ -313,8 +313,8 @@ export interface FlowConfig {
 export interface FlowBlock {
   /** Original ProseMirror node. */
   node: Node;
-  /** The first-line settings its list marker resolved to; every re-layout reuses them. */
-  firstLine?: FirstLineSettings;
+  /** The first-line room its marker resolved to; every re-layout reuses it. */
+  markerLine?: MarkerLine;
   nodePos: number;
   /**
    * Mirrors `LayoutBlock.kind` so the pagination loop and exclusion reflow can
@@ -335,9 +335,7 @@ export interface FlowBlock {
   availableWidth: number;
   blockType: string;
   align: BlockStyle["align"];
-  listMarker?: string;
-  listMarkerX?: number;
-  listMarkerFace?: ListMarkerFont;
+  marker?: LaidMarker;
   indentLeft: number;
   /** True if any line span is a zero-width anchored-object anchor. */
   hasAnchoredObject: boolean;
@@ -1340,14 +1338,17 @@ function blockHasAnchoredObject(lines: LayoutLine[]): boolean {
 
 /**
  * Whether a cached measurement still describes a block: the same width, and
- * the same list marker at the same indent — a marker draws on its block and
- * can move its first line. A renumbered item is a miss, so a layout that
- * reuses the tail of the previous one never shows its old number.
+ * the same marker at the same indent — a marker draws on its block and can
+ * move its first line. A changed marker is a miss, so a layout that reuses the
+ * tail of the previous one never shows an old one.
  */
 function isCacheHitFor(entry: MeasureCacheEntry, blockWidth: number, marker: MarkerPlacement | undefined): boolean {
+  const cached = entry.marker;
   return entry.availableWidth === blockWidth
-    && entry.listMarker?.text === marker?.text
-    && entry.listMarker?.indentLeft === marker?.indentLeft;
+    && cached?.marker.painter === marker?.marker.painter
+    && cached?.marker.data === marker?.marker.data
+    && cached?.hanging === marker?.hanging
+    && cached?.indentLeft === marker?.indentLeft;
 }
 
 export function buildBlockFlow(
@@ -1418,9 +1419,8 @@ export function buildBlockFlow(
       availableWidth: blockWidth,
       blockType: entry.blockType,
       align: entry.align,
-      ...(marker ? { listMarker: marker.text, listMarkerX: listMarkerXOf(blockX, marker) } : {}),
-      ...(entry.firstLine ? { firstLine: entry.firstLine } : {}),
-      ...(entry.listMarkerFace ? { listMarkerFace: entry.listMarkerFace } : {}),
+      ...(marker ? { marker: laidMarkerOf(marker, blockX, entry.markerFace) } : {}),
+      ...(entry.markerLine ? { markerLine: entry.markerLine } : {}),
       indentLeft,
       hasAnchoredObject: blockHasAnchoredObject(entry.lines),
       inputHash: computeInputHash(nodePos, node, blockWidth),
@@ -1494,14 +1494,9 @@ function shiftBlock(
   return shifted;
 }
 
-/** A flow's list marker, as the block that carries its first line takes it. */
-function markerFields(flow: FlowBlock): Pick<LayoutBlock, "listMarker" | "listMarkerX" | "listMarkerFace"> {
-  if (flow.listMarker === undefined || flow.listMarkerX === undefined) return {};
-  return {
-    listMarker: flow.listMarker,
-    listMarkerX: flow.listMarkerX,
-    ...(flow.listMarkerFace ? { listMarkerFace: flow.listMarkerFace } : {}),
-  };
+/** A flow's marker, as the block that carries its first line takes it. */
+function markerFields(flow: FlowBlock): Pick<LayoutBlock, "marker"> {
+  return flow.marker ? { marker: flow.marker } : {};
 }
 
 function rebreakWrappedLinesWithoutExclusions(
@@ -1657,7 +1652,7 @@ function resolveBlockEntry(
 
   // Cache miss — measure and populate. map is intentionally omitted:
   // CharacterMap population is deferred to Editor.ensurePagePopulated().
-  const { block: measured, firstLine } = measureWithMarker(node, {
+  const { block: measured, markerLine } = measureWithMarker(node, {
     nodePos,
     x: blockX,
     y: targetY,
@@ -1680,9 +1675,9 @@ function resolveBlockEntry(
     spaceAfter: measured.spaceAfter,
     blockType: measured.blockType,
     align: measured.align,
-    ...(marker ? { listMarker: { text: marker.text, indentLeft: marker.indentLeft } } : {}),
-    ...(firstLine ? { firstLine } : {}),
-    ...(measured.listMarkerFace ? { listMarkerFace: measured.listMarkerFace } : {}),
+    ...(marker ? { marker } : {}),
+    ...(markerLine ? { markerLine } : {}),
+    ...(measured.marker?.face ? { markerFace: measured.marker.face } : {}),
   };
   measureCache?.set(node, entry);
   return entry;

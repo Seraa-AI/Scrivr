@@ -1,46 +1,29 @@
 /**
- * Layout items: the blocks a flow lays out, one after another, with the list
- * marker and indent each carries. The page body and every table cell collect
- * their blocks here and measure them through `layoutBlockWithMarker`, so a
- * list draws the same wherever it sits.
+ * Layout items: the blocks a flow lays out, one after another, with the
+ * indent, style and marker the wrappers around each give it. The page body and
+ * every table cell collect their blocks here and measure them through
+ * `layoutBlockWithMarker`, so a wrapped block draws the same wherever it sits.
  */
 import type { Node } from "prosemirror-model";
 import { coerceSectionSettings, isSectionBreak, type SectionBreakType } from "../model/sections";
-import {
-  bulletBox,
-  bulletShape,
-  DEFAULT_TAB_STOP,
-  LIST_MARKER_HANGING,
-  listKind,
-  listLevel,
-  listMarker,
-  itemLevel,
-  levelCounter,
-  listStart,
-  nestedListLevel,
-} from "../model/lists";
-import { layoutBlock, ownFirstLineIndent, type BlockLayoutOptions, type LayoutBlock } from "./BlockLayout";
-import { nodeLayout } from "./BlockRegistry";
+import { layoutBlock, ownFirstLineIndent, type BlockLayoutOptions, type LayoutBlock, type MarkerLine } from "./BlockLayout";
+import { nodeLayout, type WrapperLayout, type WrapScope } from "./BlockRegistry";
 import { getBlockStyle, type BlockStyle, type FontConfig } from "./FontConfig";
 import type { LayoutLine, LineSpaceProvider } from "./LineBreaker";
 import type { TextMeasurerLike } from "./TextMeasurer";
-import { markerFaceOf } from "./listMarkers";
+import { markerFaceOf, type BlockMarker, type LaidMarker, type MarkerFace } from "./markers";
 
-/** A single item ready for layout — either a plain block or an expanded list item. */
+/** A single item ready for layout: a block, or a page break between blocks. */
 export interface LayoutItem {
   isPageBreak?: true;
   pageBreakType?: Exclude<SectionBreakType, "continuous">;
   node: Node;
   nodePos: number;
-  /** Extra left indent in px: a list level's text indent, plus the block's own `indent`. */
+  /** Extra left indent in px: what the wrappers around the block add, plus its own `indent`. */
   indentLeft: number;
-  /** Bullet or number, e.g. "•" or "1.", on the first block of a list item only. */
-  listMarker?: string;
-  /**
-   * Override the FontConfig key used for block-style lookup.
-   * A paragraph in a list item takes the `list_item` spacing defined in
-   * addBlockStyles(), not the paragraph style.
-   */
+  /** Hung before the block's first line by a wrapper around it. */
+  marker?: BlockMarker;
+  /** Overrides the FontConfig key the block's style is looked up by: a wrapper's restyle. */
   styleKey?: string;
   /** Column widths (from the parent table's `grid`) — set on table row items. */
   tableColumns?: number[];
@@ -56,14 +39,11 @@ const blockIndentOf = (node: Node): number => {
   return typeof indent === "number" && Number.isFinite(indent) && indent > 0 ? indent * BLOCK_INDENT_STEP : 0;
 };
 
-/** Where a block sits in a list. */
-interface ListPlace {
-  /** The level the block is drawn at: its item's. */
-  depth: number;
-  /** The level of the list the item is in, which a list nested in it counts from. */
-  listLevel: number;
-  /** The item's marker, on its first block only. */
-  marker?: string;
+/** A wrapper the walk is inside: its layout, what it handed down, and how many blocks it has placed. */
+interface WrapFrame {
+  wrap: WrapperLayout;
+  scope: WrapScope;
+  placed: number;
 }
 
 /**
@@ -74,25 +54,34 @@ interface ListPlace {
  * declares (see `NodeLayout`): a `block` node contributes one item, a
  * `transparent` node contributes none of its own and its children are
  * collected in its place — which, by `nodeLayout`'s default, includes any
- * undeclared node whose content is blocks.
+ * undeclared node whose content is blocks. A transparent node with `wrap`
+ * shapes every block collected inside it: their indents add up, and the
+ * innermost wrapper's marker and style win.
  *
- * Lists and tables are expanded ahead of that, because their expansion is not
- * merely transparent — they carry markers, indents and column widths down to
- * the items they produce. Every block of a list item is laid out at its
- * level's indent, and only the item's first block carries the marker.
+ * A table is expanded into its rows, the unit pagination places.
  */
 export function collectChildItems(parent: Node, base: number): LayoutItem[] {
   const items: LayoutItem[] = [];
+  const frames: WrapFrame[] = [];
 
-  // Children laid out in their parent's place: the first takes the parent's
-  // list place, marker included; the rest take only its depth.
-  const walk = (container: Node, start: number, list: ListPlace | null): void => {
-    container.forEach((node, relOffset, index) => {
-      walkOne(node, start + relOffset, index === 0 || !list ? list : { depth: list.depth, listLevel: list.listLevel });
-    });
+  const placeInWrappers = (node: Node): Pick<LayoutItem, "indentLeft" | "marker" | "styleKey"> => {
+    let indentLeft = 0;
+    let marker: BlockMarker | undefined;
+    let styleKey: string | undefined;
+    for (const frame of frames) {
+      const placement = frame.wrap.place(node, frame.placed++, frame.scope);
+      indentLeft += placement.indent;
+      marker = placement.marker ?? marker;
+      styleKey = placement.styleKey ?? styleKey;
+    }
+    return { indentLeft, ...(marker ? { marker } : {}), ...(styleKey !== undefined ? { styleKey } : {}) };
   };
 
-  const walkOne = (node: Node, offset: number, list: ListPlace | null): void => {
+  const walk = (container: Node, start: number, scope: WrapScope): void => {
+    container.forEach((node, relOffset) => walkOne(node, start + relOffset, scope));
+  };
+
+  const walkOne = (node: Node, offset: number, scope: WrapScope): void => {
     if (node.type.name === "pageBreak") {
       items.push({ isPageBreak: true, node, nodePos: offset, indentLeft: 0 });
       return;
@@ -115,31 +104,20 @@ export function collectChildItems(parent: Node, base: number): LayoutItem[] {
       return;
     }
 
-    const kind = listKind(node);
-    if (kind) {
-      const listLevel = nestedListLevel(list ? list.listLevel : null);
-      const number = levelCounter(listLevel, kind === "ordered" ? listStart(node) : 1);
-      node.forEach((listItem, itemOffset) => {
-        const depth = itemLevel(listItem, listLevel);
-        walk(listItem, offset + 1 + itemOffset + 1, { depth, listLevel, marker: listMarker(kind, depth, number(depth)) });
-      });
-      return;
-    }
-
     if (node.type.name === "table") {
       // One item per row: a row moves to the next page whole, so it is the
-      // unit pagination places.
+      // unit pagination places. A row takes its wrappers' indent only: it has
+      // no first line to hang a marker on, and its cells style their own text.
       const gridAttr = node.attrs["grid"];
       const tableColumns = Array.isArray(gridAttr)
         ? gridAttr.filter((w): w is number => typeof w === "number" && Number.isFinite(w))
         : [];
       const lastRowIndex = node.childCount - 1;
       node.forEach((rowNode, rowOffset, rowIndex) => {
-        const rowNodePos = offset + 1 + rowOffset;
         items.push({
           node: rowNode,
-          nodePos: rowNodePos,
-          indentLeft: list ? listLevel(list.depth).textIndent : 0,
+          nodePos: offset + 1 + rowOffset,
+          indentLeft: placeInWrappers(rowNode).indentLeft,
           tableColumns,
           isLastRow: rowIndex === lastRowIndex,
         });
@@ -149,26 +127,24 @@ export function collectChildItems(parent: Node, base: number): LayoutItem[] {
 
     // A node laid out in place that holds nothing still takes its line, so an
     // empty container does not vanish from the page.
-    if (nodeLayout(node.type).kind === "transparent" && node.childCount > 0) {
-      walk(node, offset + 1, list);
+    const layout = nodeLayout(node.type);
+    if (layout.kind === "transparent" && node.childCount > 0) {
+      if (!layout.wrap) {
+        walk(node, offset + 1, scope);
+        return;
+      }
+      const inner = layout.wrap.enter(node, scope);
+      frames.push({ wrap: layout.wrap, scope: inner, placed: 0 });
+      walk(node, offset + 1, inner);
+      frames.pop();
       return;
     }
 
-    if (!list) {
-      items.push({ node, nodePos: offset, indentLeft: blockIndentOf(node) });
-      return;
-    }
-    items.push({
-      node,
-      nodePos: offset,
-      indentLeft: listLevel(list.depth).textIndent + blockIndentOf(node),
-      ...(list.marker !== undefined ? { listMarker: list.marker } : {}),
-      // A heading or code block in an item keeps its own style.
-      ...(node.type.name === "paragraph" ? { styleKey: "list_item" } : {}),
-    });
+    const placed = placeInWrappers(node);
+    items.push({ node, nodePos: offset, ...placed, indentLeft: placed.indentLeft + blockIndentOf(node) });
   };
 
-  walk(parent, base, null);
+  walk(parent, base, {});
   return items;
 }
 
@@ -179,32 +155,39 @@ export function collectLayoutItems(doc: Node): LayoutItem[] {
 
 /** However deep a block is indented, an inch of the line is left for its text. */
 const MIN_TEXT_WIDTH = 96;
-/** The least of the line a tab stop must leave for the text after a list number: the same inch. */
-const MIN_TEXT_AFTER_NUMBER = MIN_TEXT_WIDTH;
+/** The least of the line a tab stop must leave for the text after a marker: the same inch. */
+const MIN_TEXT_AFTER_MARKER = MIN_TEXT_WIDTH;
+/** Word's default tab stops: every half inch from the content edge. */
+const DEFAULT_TAB_STOP = 48;
 
-/** A list marker to measure a block against: its text, how far in the block's text is, and how far the marker hangs before it. */
+/** A marker to measure a block against: the marker, how far in the block's text is, and how far the marker hangs before it. */
 export interface MarkerPlacement {
-  text: string;
+  marker: BlockMarker;
   indentLeft: number;
   /**
-   * How far the marker's left edge sits before the text: a quarter inch, or
-   * less where the content box leaves less, so the number never leaves it.
+   * How far the marker's left edge sits before the text: its own hanging, or
+   * less where the content box leaves less, so the marker never leaves it.
    */
   hanging: number;
 }
 
-/** The marker's left edge, for text that starts at `textX`. */
-export function listMarkerXOf(textX: number, marker: MarkerPlacement): number {
-  return textX - marker.hanging;
+/** The marker as layout leaves it on a block whose text starts at `textX`. */
+export function laidMarkerOf(placement: MarkerPlacement, textX: number, face?: MarkerFace): LaidMarker {
+  return {
+    painter: placement.marker.painter,
+    data: placement.marker.data,
+    x: textX - placement.hanging,
+    ...(face ? { face } : {}),
+  };
 }
 
 /**
- * Where the marker starts, from the item's content-box edge: at its hang, or
+ * Where the marker starts, from the block's content-box edge: at its hang, or
  * at the line's start on a first line a float moves `lineStart` in past the
  * text's edge, and so past the hang.
  */
-function markerStartOf(marker: MarkerPlacement, lineStart: number): number {
-  return lineStart > 0 ? marker.indentLeft + lineStart : marker.indentLeft - marker.hanging;
+function markerStartOf(placement: MarkerPlacement, lineStart: number): number {
+  return lineStart > 0 ? placement.indentLeft + lineStart : placement.indentLeft - placement.hanging;
 }
 
 /** An item placed in a content box: where its text goes, its marker, and the style it is spaced by. */
@@ -220,9 +203,9 @@ export interface ResolvedItem {
 
 /**
  * Resolves an item against the content box it is laid out in — the page body
- * or a table cell — so both lay a list out by the same rules: the indent fits
- * the box, the marker stays inside it, and a list paragraph takes the list's
- * spacing (`styleKey`) rather than a paragraph's.
+ * or a table cell — so both lay a wrapped block out by the same rules: the
+ * indent fits the box, the marker stays inside it, and the block takes the
+ * style its wrapper names (`styleKey`) rather than its own.
  */
 export function resolveItem(item: LayoutItem, box: { x: number; width: number }, fontConfig: FontConfig): ResolvedItem {
   const indentLeft = Math.min(item.indentLeft, Math.max(0, box.width - MIN_TEXT_WIDTH));
@@ -232,9 +215,7 @@ export function resolveItem(item: LayoutItem, box: { x: number; width: number },
     indentLeft,
     x: box.x + indentLeft,
     width: box.width - indentLeft,
-    ...(item.listMarker !== undefined
-      ? { marker: { text: item.listMarker, indentLeft, hanging: Math.min(LIST_MARKER_HANGING, indentLeft) } }
-      : {}),
+    ...(item.marker ? { marker: { marker: item.marker, indentLeft, hanging: Math.min(item.marker.hanging, indentLeft) } } : {}),
     style,
   };
 }
@@ -265,81 +246,68 @@ export function itemSpacing(
 }
 
 /**
- * How far a list number pushes the item's first line of text. Word follows the
+ * How far a marker pushes the block's first line of text. Word follows a
  * number with a tab (`w:suff`, a tab when omitted) that follows the normal tab
- * stop rules: the text stays where it is unless the number reaches it, and
- * then moves to the next default stop past the number. When that stop would
- * leave less than `MIN_TEXT_AFTER_NUMBER` of the line, the text follows the
- * number after a space instead, as Word's `w:suff="space"` places it; what
+ * stop rules: the text stays where it is unless the marker reaches it, and
+ * then moves to the next default stop past the marker. When that stop would
+ * leave less than `MIN_TEXT_AFTER_MARKER` of the line, the text follows the
+ * marker after a space instead, as Word's `w:suff="space"` places it; what
  * Word does with a tab past the line's last usable stop is not documented.
- * A float that moves the line `lineStart` in moves the number with it.
+ * A float that moves the line `lineStart` in moves the marker with it.
  */
 function markerFirstLineOffset(
-  marker: MarkerPlacement,
+  placement: MarkerPlacement,
   lines: readonly LayoutLine[],
   measurer: TextMeasurerLike,
   ownIndent: number,
   blockWidth: number,
   lineStart: number,
 ): number {
-  const { font, size } = markerFaceOf(lines);
-  const width = bulletShape(marker.text)
-    ? bulletBox(size).size
-    : measurer.measureWidth(marker.text, font);
-  const textStart = marker.indentLeft + lineStart + ownIndent;
-  const markerEnd = markerStartOf(marker, lineStart) + width;
+  const face = markerFaceOf(lines);
+  const textStart = placement.indentLeft + lineStart + ownIndent;
+  const markerEnd = markerStartOf(placement, lineStart) + placement.marker.width(face, measurer);
   if (markerEnd < textStart) return 0;
   const nextStop = (Math.floor(markerEnd / DEFAULT_TAB_STOP) + 1) * DEFAULT_TAB_STOP;
-  const lineEnd = marker.indentLeft + blockWidth;
-  const target = lineEnd - nextStop >= MIN_TEXT_AFTER_NUMBER
+  const lineEnd = placement.indentLeft + blockWidth;
+  const target = lineEnd - nextStop >= MIN_TEXT_AFTER_MARKER
     ? nextStop
-    : markerEnd + measurer.measureWidth(" ", font);
+    : markerEnd + measurer.measureWidth(" ", face.font);
   return Math.max(0, target - textStart);
 }
 
 /**
- * The first-line settings a list marker resolves to. Every re-layout of the
- * block (around a float, on another page) reuses them, so its first line
- * keeps clear of the number and keeps a line for it.
- */
-export type FirstLineSettings = Pick<BlockLayoutOptions, "firstLineOffset" | "firstLineOffsetAt" | "keepAnchorLine">;
-
-/**
- * Lays a block out with its list marker. The marker is sized by the first
- * line's font, which only measuring tells, so a number too wide for its
- * hanging re-breaks the lines past it; a list item's first block keeps a line
- * for its number even when it holds only a floating image's anchor, as Word
- * draws it.
+ * Lays a block out with its marker. The marker is sized by the first line's
+ * font, which only measuring tells, so a marker too wide for its hanging
+ * re-breaks the lines past it. The block keeps a line for its marker even when
+ * it holds only a floating image's anchor, as Word draws a number there. The
+ * returned `markerLine` is what every re-layout of the block (around a float,
+ * on another page) reuses, so its first line keeps clear of the marker.
  */
 export function measureWithMarker(
   node: Node,
   options: BlockLayoutOptions,
-  marker: MarkerPlacement | undefined,
-): { block: LayoutBlock; firstLine?: FirstLineSettings } {
-  if (!marker) return { block: layoutBlock(node, options) };
-  const first = layoutBlock(node, { ...options, keepAnchorLine: true });
+  placement: MarkerPlacement | undefined,
+): { block: LayoutBlock; markerLine?: MarkerLine } {
+  if (!placement) return { block: layoutBlock(node, options) };
+  const first = layoutBlock(node, { ...options, marker: {} });
   const offsetAt = (lineStart: number) =>
-    markerFirstLineOffset(marker, first.lines, options.measurer, ownFirstLineIndent(node), options.availableWidth, lineStart);
+    markerFirstLineOffset(placement, first.lines, options.measurer, ownFirstLineIndent(node), options.availableWidth, lineStart);
   const offset = offsetAt(0);
-  const firstLine: FirstLineSettings = {
-    keepAnchorLine: true,
-    firstLineOffsetAt: offsetAt,
-    ...(offset > 0 ? { firstLineOffset: offset } : {}),
-  };
-  // A float beside the item can move its first line, and the push with it.
-  const measured = offset > 0 || options.lineSpaceProvider ? layoutBlock(node, { ...options, ...firstLine }) : first;
+  const markerLine: MarkerLine = { offsetAt, ...(offset > 0 ? { offset } : {}) };
+  // A float beside the block can move its first line, and the push with it.
+  const measured = offset > 0 || options.lineSpaceProvider ? layoutBlock(node, { ...options, marker: markerLine }) : first;
   return {
-    block: { ...measured, listMarker: marker.text, listMarkerX: listMarkerXOf(options.x, marker), listMarkerFace: markerFaceOf(measured.lines) },
-    firstLine,
+    block: { ...measured, marker: laidMarkerOf(placement, options.x, markerFaceOf(measured.lines)) },
+    markerLine,
   };
 }
 
 export function layoutBlockWithMarker(
   node: Node,
   options: BlockLayoutOptions,
-  marker: MarkerPlacement | undefined,
+  placement: MarkerPlacement | undefined,
 ): LayoutBlock {
-  return measureWithMarker(node, options, marker).block;
+  return measureWithMarker(node, options, placement).block;
 }
 
 /**

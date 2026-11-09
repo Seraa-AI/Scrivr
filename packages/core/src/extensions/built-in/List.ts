@@ -6,18 +6,17 @@ import { wrappingInputRule } from "prosemirror-inputrules";
 import type { Node as PmNode, NodeType } from "prosemirror-model";
 import type { Command, EditorState, Transaction } from "prosemirror-state";
 import { Extension } from "../Extension";
+import { isListType, listKind, type ListKind } from "../../model/lists";
 import {
-  isListType,
   LIST_LEVEL_COUNT,
   LIST_MARKER_HANGING,
-  listKind,
   listLevel,
   itemLevel,
   itemLevelOffset,
   listStart,
   nestedListLevel,
-  type ListKind,
-} from "../../model/lists";
+} from "./listLevels";
+import { LIST_MARKER_PAINTER, listItemWrap, listMarkerPainter, listWrap } from "./listLayout";
 import type { SlashCommandContribution, ToolbarItemSpec } from "../types";
 import { KeymapPriority } from "../types";
 import {
@@ -272,6 +271,11 @@ const joinOntoListAbove: Command = (state, dispatch) => {
 
 const listPdf: PdfNodeHandler = (block, ctx) => ctx.draw.lines(block, ctx);
 
+interface ListOptions {
+  /** Colour of bullets and numbers, on canvas and in PDF; null takes the theme's text colour. */
+  markerColor: string | null;
+}
+
 /**
  * List — bullet and ordered list support.
  *
@@ -289,8 +293,12 @@ const listPdf: PdfNodeHandler = (block, ctx) => ctx.draw.lines(block, ctx);
  *   • Bullet list
  *   1. Ordered list
  */
-export const List = Extension.create({
+export const List = Extension.create<ListOptions>({
   name: "list",
+
+  defaultOptions: {
+    markerColor: null,
+  },
 
   // Enter must reach `splitListItem` before Paragraph's `splitBlockInheritAttrs`
   // — which is also the last link in List's own Enter chain, so Paragraph
@@ -308,6 +316,7 @@ export const List = Extension.create({
         },
         parseDOM: [{ tag: "ul" }],
         toDOM: () => ["ul", 0],
+        layout: { kind: "transparent", wrap: listWrap },
       },
       orderedList: {
         group: "block",
@@ -326,6 +335,7 @@ export const List = Extension.create({
           },
         ],
         toDOM: (node) => ["ol", { start: listStart(node) }, 0],
+        layout: { kind: "transparent", wrap: listWrap },
       },
       listItem: {
         content: "paragraph block*",
@@ -346,6 +356,7 @@ export const List = Extension.create({
           if (node.attrs.nodeId) attrs["data-node-id"] = node.attrs.nodeId as string;
           return ["li", attrs, 0];
         },
+        layout: { kind: "transparent", wrap: listItemWrap },
       },
     };
   },
@@ -375,6 +386,10 @@ export const List = Extension.create({
       liftListItem: () => liftListItem(listItem!),
       sinkListItem: () => sinkListItem(listItem!),
     };
+  },
+
+  addMarkerPainters() {
+    return { [LIST_MARKER_PAINTER]: listMarkerPainter(this.options.markerColor) };
   },
 
   addBlockStyles() {

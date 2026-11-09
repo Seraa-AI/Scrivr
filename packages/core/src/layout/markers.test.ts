@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LayoutLine } from "./LineBreaker";
-import { listMarkerOf, markerFaceOf } from "./listMarkers";
+import { markerAnchorOf, markerFaceOf } from "./markers";
 import { layoutBlock } from "./BlockLayout";
 import { createMeasurer } from "../test-utils";
 import { buildStarterKitContext } from "../test-utils";
@@ -52,9 +52,9 @@ describe("the line a number is drawn on", () => {
     const text = lineIn("16px Georgia");
     const block = {
       ...layoutBlock(schema.node("paragraph"), { nodePos: 0, x: 0, y: 0, availableWidth: 100, page: 1, measurer: createMeasurer() }),
-      y: 100, lines: [gap, anchorAlone, text], listMarker: "1.", listMarkerX: 0,
+      y: 100, lines: [gap, anchorAlone, text], marker: { painter: "list", data: "1.", x: 0 },
     };
-    expect(listMarkerOf(block)?.baseline).toBe(100 + 72 + text.ascent);
+    expect(markerAnchorOf(block)?.baseline).toBe(100 + 72 + text.ascent);
   });
 });
 

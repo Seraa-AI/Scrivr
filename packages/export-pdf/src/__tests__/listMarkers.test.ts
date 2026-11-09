@@ -7,7 +7,7 @@
 import { describe, expect, it } from "vitest";
 import { buildPdf as buildPdfWithEditor } from "../index";
 import { PT_PER_PX } from "../context";
-import { Extension, ServerEditor, StarterKit, listMarkerOf, type LayoutLine } from "@scrivr/core";
+import { Extension, ServerEditor, StarterKit, markerAnchorOf, type LayoutLine } from "@scrivr/core";
 import { exportEditor, textLine, block, onePage, schema } from "./fixtures";
 import { recordDrawOps, type DrawOp } from "./opLog";
 
@@ -17,8 +17,8 @@ async function markerOps(marker: string): Promise<DrawOp[]> {
   const layout = onePage([
     block("paragraph", [textLine("item", { font: "16px Helvetica" })], {
       y: 100,
-      listMarker: marker,
-      listMarkerX: MARKER_X,
+      marker: marker,
+      markerX: MARKER_X,
     }),
   ]);
   const ops = await recordDrawOps(() => buildPdfWithEditor(layout, exportEditor));
@@ -72,10 +72,10 @@ describe("the marker's size", () => {
       spans: [{ kind: "object", node: image, x: 0, width: 10, height: 10, docPos: 1, verticalAlign: "baseline" }],
       width: 10, ascent: 10, descent: 2, lineHeight: 14, textAscent: 10, cursorHeight: 14, xHeight: 6,
     };
-    const numbered = block("paragraph", [line], { y: 100, listMarker: "1.", listMarkerX: MARKER_X });
+    const numbered = block("paragraph", [line], { y: 100, marker: "1.", markerX: MARKER_X });
     const ops = await recordDrawOps(() => buildPdfWithEditor(onePage([numbered]), exportEditor));
     const marker = ops.find((op) => op.op === "text" && op["value"] === "1.");
-    expect(marker?.["size"]).toBeCloseTo((listMarkerOf(numbered)?.size ?? 0) * PT_PER_PX, 3);
+    expect(marker?.["size"]).toBeCloseTo((markerAnchorOf(numbered)?.size ?? 0) * PT_PER_PX, 3);
   });
 });
 
@@ -89,7 +89,7 @@ describe("whoever draws the block", () => {
     });
     const editor = new ServerEditor({ extensions: [StarterKit, SilentParagraph] });
     const ops = await recordDrawOps(() => buildPdfWithEditor(
-      onePage([block("paragraph", [textLine("item", { font: "16px Helvetica" })], { y: 100, listMarker: "1.", listMarkerX: MARKER_X })]),
+      onePage([block("paragraph", [textLine("item", { font: "16px Helvetica" })], { y: 100, marker: "1.", markerX: MARKER_X })]),
       editor,
     ));
     expect(ops.filter((op) => op.op === "text" && op["value"] === "1.")).toHaveLength(1);
@@ -111,7 +111,7 @@ describe("the marker's face", () => {
       spans: [{ kind: "object", node: image, x: 0, width: 10, height: 10, docPos: 1, verticalAlign: "baseline" }, ...text.spans],
     };
     const ops = await recordDrawOps(() => buildPdfWithEditor(
-      onePage([block("paragraph", [line], { y: 100, listMarker: "1.", listMarkerX: MARKER_X })]),
+      onePage([block("paragraph", [line], { y: 100, marker: "1.", markerX: MARKER_X })]),
       exportEditor,
     ));
     const faceOf = (value: string) => ops.find((op) => op.op === "text" && op["value"] === value)?.["font"];
@@ -123,7 +123,7 @@ describe("the marker's face", () => {
     const text = textLine("clause", { font: "16px Courier" });
     const numberLine: LayoutLine = { ...text, spans: [], width: 0 };
     const ops = await recordDrawOps(() => buildPdfWithEditor(
-      onePage([block("paragraph", [numberLine, text], { y: 100, listMarker: "1.", listMarkerX: MARKER_X })]),
+      onePage([block("paragraph", [numberLine, text], { y: 100, marker: "1.", markerX: MARKER_X })]),
       exportEditor,
     ));
     const faceOf = (value: string) => ops.find((op) => op.op === "text" && op["value"] === value)?.["font"];

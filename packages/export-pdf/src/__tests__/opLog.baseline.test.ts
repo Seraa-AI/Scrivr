@@ -48,7 +48,7 @@ describe("baseline — node rendering", () => {
 
   it("listItem with a marker", async () => {
     expect(
-      await record(onePage([block("listItem", [textLine("First")], { listMarker: "1." })])),
+      await record(onePage([block("listItem", [textLine("First")], { marker: "1." })])),
     ).toMatchSnapshot();
   });
 

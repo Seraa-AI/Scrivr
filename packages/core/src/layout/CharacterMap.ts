@@ -429,7 +429,7 @@ export class CharacterMap {
 
   /**
    * Returns all lines that overlap the given ProseMirror position range.
-   * Includes an empty line (one holding no position: a list number's line of
+   * Includes an empty line (one holding no position: a marker's line of
    * its own, the gap past a float) only when the range runs across it, from
    * before its position. Used by the renderer to draw full-line selection
    * highlights.

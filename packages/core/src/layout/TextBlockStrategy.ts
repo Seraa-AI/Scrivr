@@ -10,7 +10,7 @@ import type { BlockStrategy, BlockRenderContext } from "./BlockRegistry";
  * TextBlockStrategy — the default render strategy for text-based block nodes.
  *
  * Handles any block whose layout is expressed as LayoutLines of LayoutSpans
- * (paragraph, heading, list item, etc.). Draws each span with mark decorators
+ * (paragraph, heading, etc.). Draws each span with mark decorators
  * and registers glyph positions into the CharacterMap for cursor hit-testing.
  *
  * Text spans are drawn directly. Object spans (inline images, widgets) are

@@ -101,7 +101,6 @@ const PLAYGROUND_THEME: EditorTheme = {
   imagePlaceholderBg: "var(--scrivr-img-placeholder-bg)",
   imagePlaceholderBorder: "var(--scrivr-img-placeholder-border)",
   imagePlaceholderText: "var(--scrivr-img-placeholder-text)",
-  listMarker: "var(--scrivr-list-marker)",
   hrColor: "var(--scrivr-hr)",
   resizeHandle: "var(--scrivr-resize-handle)",
 };
