@@ -163,8 +163,8 @@ interface FloatSet {
   placementIn(float: PlacedFloat, current: readonly FlowBlock[]): AnchoredObjectPlacement;
 }
 
-/** An empty page's exclusions, for reading pages no float has touched. */
-const NO_EXCLUSIONS = new ExclusionManager();
+/** A page's exclusions, read-only: only carving a float adds to them. */
+type ExclusionsReader = Pick<ExclusionManager, "getAvailableSegments" | "getNextFreeY" | "hasExclusionsOnPage">;
 
 export function resolveAnchoredObjects(
   inputFlows: FlowBlock[],
@@ -181,7 +181,7 @@ export function resolveAnchoredObjects(
   // One ExclusionManager per page holds every float's rect on it, so a flow
   // beside two floats reflows against both.
   const exclusionsByPage = new Map<number, ExclusionManager>();
-  const exclusionsOn = (page: number): ExclusionManager => exclusionsByPage.get(page) ?? NO_EXCLUSIONS;
+  const exclusionsOn = (page: number): ExclusionsReader => exclusionsByPage.get(page) ?? new ExclusionManager();
   const carve = (float: PlacedFloat): void => {
     const page = float.placement.page;
     let exclusions = exclusionsByPage.get(page);
@@ -548,6 +548,7 @@ function sameRect(float: PlacedFloat, a: AnchoredObjectPlacement, b: AnchoredObj
   const rb = float.exclusionOf(b);
   return ra.y === rb.y && ra.bottom === rb.bottom;
 }
+
 /**
  * Reflow one page against all of its exclusions.
  *
@@ -566,7 +567,7 @@ function sameRect(float: PlacedFloat, a: AnchoredObjectPlacement, b: AnchoredObj
  */
 function reflowFlowsAgainstExclusions(
   flows: FlowBlock[],
-  exclusionsOn: (page: number) => ExclusionManager,
+  exclusionsOn: (page: number) => ExclusionsReader,
   zone: {
     pageNumber: number;
     band: Band | undefined;
