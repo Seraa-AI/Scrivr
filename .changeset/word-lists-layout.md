@@ -21,18 +21,23 @@ Lists lay out, print and export like Word's.
   the level above (the first level half an inch from the margin, where it was a
   quarter inch), and the marker hangs a quarter inch before the text,
   left-aligned. A number wide enough to reach its text moves the item's first
-  line to the next tab stop, as Word's tab after the number does; with no stop
-  left on the line, the text follows the number after a space and is never
-  drawn over it. Existing lists move a quarter inch to the right.
+  line to the next tab stop, as Word's tab after the number does; when the
+  next stop would leave less than an inch of the line, the text follows the
+  number after a space, and a first word that still does not fit wraps to the
+  next line, leaving the number alone on its line, as in Word. The text is
+  never drawn over the number. Existing lists move a quarter inch to the
+  right.
 - **Lists inside table cells are drawn.** A list in a cell (pasting one
   there makes one) used to lay out as one empty line, its text never painted
   on canvas or in PDF. A cell now lays out its blocks as the page body does:
-  numbered, nested, indented and spaced, the number kept inside even a narrow
-  cell, and a table nested in a cell shows its rows and its bottom border.
+  numbered, nested, indented and spaced, the number and the first word kept
+  inside even a narrow cell, and a table nested in a cell shows its rows and
+  its bottom border.
   A block that holds other blocks but is not a list or a table — a custom
-  container, say — lays out the blocks it holds instead of one empty line,
-  unless its node spec declares `layout: { kind: "block" }`, which keeps its
-  own box and the painter it registered.
+  container, say — lays out the blocks it holds instead of one empty line
+  (and still takes a line when it holds none), unless its node spec declares
+  `layout: { kind: "block" }`, which keeps its own box and the painter it
+  registered.
 - **No block is indented past an inch from the right margin.** Any block's
   indent — a deeply nested list, or a paragraph's own `indent` — leaves at
   least an inch of the line for its text.

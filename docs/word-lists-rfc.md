@@ -609,9 +609,15 @@ section is what is true.
   previous column's grid line, and a number that then reaches the text pushes
   it on. A tab stop is taken only when it leaves an inch of the line for the
   text (`MIN_TEXT_AFTER_NUMBER`); otherwise the text follows the number after a
-  space, so in a narrow cell the first word stays inside the cell. A word wider
-  than the whole cell still runs over it, as it does without a number. Our DOCX keeps the number inside the
-  cell too. How Word places a number whose hanging indent does not fit a
+  space. A first word that does not fit after the number wraps to the next
+  line, leaving the number alone on its line, as Word does: the line breaker
+  leaves an indented first line empty when its first word does not fit what
+  the indent leaves (`breakIntoLines`' `firstLineIndent`), and the empty line
+  keeps the word's font so the number has its baseline and face. A wide word
+  split for a full line is wrapped the same way instead of being forced onto
+  the narrowed first line. So in a narrow cell the first word stays inside the
+  cell; only a word wider than the whole cell runs over it, as it does without
+  a number. Our DOCX keeps the number inside the cell too. How Word places a number whose hanging indent does not fit a
   cell is not documented and could not be checked here; this keeps it inside
   the box Word draws for the cell.
 - **Known gaps in cells, not lists' own:** a cell adds its blocks' margins
@@ -622,7 +628,8 @@ section is what is true.
   that is neither a list nor a table — such as a custom `(listItem |
   paragraph)+` node, no longer a list since `isListType` tightened — has no
   lines of its own, so its blocks are laid out in its place, as a transparent
-  node's are; before, it painted as one empty line. `nodeLayout` gives this
+  node's are; before, it painted as one empty line. One that holds no blocks
+  still takes a line, so an empty container does not vanish. `nodeLayout` gives this
   answer itself: an undeclared node whose content is blocks is `transparent`,
   and `DEFAULT_NODE_LAYOUT` (`block`) is the default only for undeclared nodes
   that hold inline content or nothing. A node that declares
