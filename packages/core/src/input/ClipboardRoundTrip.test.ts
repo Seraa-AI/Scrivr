@@ -14,7 +14,6 @@ function makeContext() {
   const plugins = manager.buildPlugins();
   const transformer = new PasteTransformer(
     schema,
-    manager.buildMarkdownRules(),
     manager.buildMarkdownParserTokens(),
   );
   return { schema, plugins, transformer };
@@ -325,7 +324,6 @@ describe("clipboard round-trip — tables", () => {
     const plugins = manager.buildPlugins();
     const transformer = new PasteTransformer(
       schema,
-      manager.buildMarkdownRules(),
       manager.buildMarkdownParserTokens(),
       { pasteHtmlTransforms: manager.buildPasteHtmlTransforms() },
     );

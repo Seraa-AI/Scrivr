@@ -1375,7 +1375,7 @@ export function buildBlockFlow(
         spaceBefore: 0,
         spaceAfter: 0,
         availableWidth: 0,
-        blockType: "pageBreak",
+        blockType: item.node.type.name,
         align: "left",
         indentLeft: 0,
         hasAnchoredObject: false,

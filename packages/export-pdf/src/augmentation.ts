@@ -7,11 +7,12 @@ import type {
   LayoutPage,
   PdfMarkHandler,
   PdfNodeHandler,
+  PdfOutlineLevel,
 } from "@scrivr/core";
 import type { PdfContext } from "./context";
 
 /** Declared by core, so an extension types its handler without depending here. */
-export type { PdfNodeHandler };
+export type { PdfNodeHandler, PdfOutlineLevel };
 
 /**
  * Draw chrome (headers, footers, footnote bands) onto a PDF page.
@@ -30,6 +31,8 @@ export type PdfChromeHandler<P = unknown> = (
 export interface PdfHandlers {
   /** Per-block drawing + inline atom dispatch table, keyed by node.type.name. */
   nodes?: Record<string, PdfNodeHandler>;
+  /** Per-block bookmark level, keyed by node.type.name. A block whose type has none is not bookmarked. */
+  outline?: Record<string, PdfOutlineLevel>;
   /** Per-mark inline styling, keyed by mark.type.name. */
   marks?: Record<string, PdfMarkHandler>;
   /** Per-page chrome, keyed by chrome contributor name. */

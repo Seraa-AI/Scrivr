@@ -63,6 +63,7 @@ export type { LayoutCoordinatorOptions } from "./LayoutCoordinator";
 export type {
   BlockStrategy,
   BlockRenderContext,
+  BreakKind,
   InlineStrategy,
   NodeLayout,
   WrapperLayout,

@@ -21,7 +21,7 @@ function pasteHtml(html: string): Node {
     getData: (type: string) => (type === "text/html" ? html : ""),
   } as DataTransfer;
   const htmlTransforms: PasteHtmlTransform[] = manager.buildPasteHtmlTransforms();
-  const transformer = new PasteTransformer(schema, [], {}, {
+  const transformer = new PasteTransformer(schema, {}, {
     pasteHtmlTransforms: htmlTransforms,
     pasteTransforms: manager.buildPasteTransforms(),
   });
@@ -267,7 +267,7 @@ describe("pasting a markdown table", () => {
     const state = EditorState.create({ schema, plugins: manager.buildPlugins() });
     const clipboardData = new DataTransfer();
     clipboardData.setData("text/plain", text);
-    const transformer = new PasteTransformer(schema, manager.buildMarkdownRules(), manager.buildMarkdownParserTokens(), {
+    const transformer = new PasteTransformer(schema, manager.buildMarkdownParserTokens(), {
       pasteTransforms: manager.buildPasteTransforms(),
     });
     const tr = transformer.transform(clipboardData, state);

@@ -686,7 +686,6 @@ export class Editor extends BaseEditor implements IEditor {
 
 		const pasteTransformer = new PasteTransformer(
 			this.manager.schema,
-			this.manager.buildMarkdownRules(),
 			this.manager.buildMarkdownParserTokens(),
 			{
 				pasteTransforms: this.manager.buildPasteTransforms(),

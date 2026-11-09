@@ -4,7 +4,7 @@ import { parseFontSizePx } from "../fonts/activeFontSize";
 import type { FontResolutionId, LayoutFontResolver } from "../fonts/layoutResolver";
 import type { FontModifier } from "../extensions/types";
 import type { TextMeasurerLike } from "./TextMeasurer";
-import type { InlineRegistry } from "./BlockRegistry";
+import { breakOf, type InlineRegistry } from "./BlockRegistry";
 import { normalizeImageAttrs, type WrapMode } from "./AnchoredObjects";
 import { LineBreaker, LayoutLine, InputSpan, indentFirstSegment, spanEndDocPos, computeObjectRenderY, type InlineObjectVerticalAlign, type LineSpaceProvider } from "./LineBreaker";
 import { CharacterMap } from "./CharacterMap";
@@ -68,7 +68,7 @@ export function resolveLeafBlockDimensions(
  *                    `lines` is non-empty (anchor-only paragraphs hold a single
  *                    hidden line — still "text").
  *   - `"leaf"`     — block has no inline content and contributes no lines
- *                    (image, horizontalRule, pageBreak, and inline-atom
+ *                    (image, horizontal rule, page break, and inline-atom
  *                    sub-blocks dispatched by the PDF exporter). `lines` is `[]`.
  *   - `"tableRow"` — produced by the Table extension; carries per-cell
  *                    sub-blocks (`cells`) instead of `lines`. `lines` is `[]`.
@@ -503,7 +503,7 @@ export function layoutBlock(
   });
 
   // ── 2. Empty node fallback ────────────────────────────────────────────────
-  // An empty paragraph (or one containing only hardBreak nodes) has no
+  // An empty paragraph (or one containing only line breaks) has no
   // renderable content. We create a virtual zero-width-space span so
   // LineBreaker returns one line and CharacterMap registers a cursor position.
   //
@@ -795,8 +795,7 @@ function extractSpans(
       return;
     }
 
-    // Hard line break: flush the current line and start a new one.
-    if (child.type.name === "hardBreak") {
+    if (breakOf(child.type) === "line") {
       spans.push({ kind: "break", docPos: childDocPos });
       return;
     }
@@ -805,8 +804,8 @@ function extractSpans(
     //
     // Something has to claim it: either an `InlineStrategy`, which is an
     // extension saying it owns how this node is measured and painted, or
-    // explicit numeric width/height attrs. A structural leaf like a hardBreak
-    // has neither — and is intercepted by name above anyway — so it cannot be
+    // explicit numeric width/height attrs. A structural leaf like a line break
+    // has neither — and is intercepted above anyway — so it cannot be
     // mistaken for an object and given a 200px line box.
     //
     // A strategy alone is enough. An atom that measures itself — a page
@@ -1175,7 +1174,7 @@ export function populateCharMap(
       spacesBeforeSpan += countSpaces(span.text);
     }
 
-    // Register a zero-width glyph at the hardBreak's doc position so
+    // Register a zero-width glyph at the line break's doc position so
     // coordsAtPos(breakDocPos) returns the correct cursor location at line-end.
     if (line.terminalBreakDocPos !== undefined) {
       const breakX = block.x + lineOffsetX + line.width;

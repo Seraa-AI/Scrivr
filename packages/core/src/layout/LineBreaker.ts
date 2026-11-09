@@ -80,12 +80,12 @@ export type InputSpan =
     }
   | {
       /**
-       * Hard line break (Shift-Enter / hardBreak node).
+       * Line break (Shift-Enter, or any inline node that breaks the line).
        * Flushes the current line and starts a new one. Does not contribute
        * any visible width or height — the break itself is invisible.
        */
       kind: "break";
-      /** ProseMirror doc position of the hardBreak node */
+      /** ProseMirror doc position of the line break node */
       docPos: number;
     };
 
@@ -165,7 +165,7 @@ export interface LayoutLine {
   /** Available inline segments used to place this line, relative to block content left. */
   segments?: AvailableSegment[];
   /**
-   * When this line ends with a hardBreak node, the ProseMirror doc position of
+   * When this line ends with a line break node, the ProseMirror doc position of
    * that break. Used by CharacterMap registration to expose the break position as
    * a clickable cursor target — without this, coordsAtPos(breakPos) has no anchor.
    * Undefined for lines that end due to normal word-wrap.
@@ -331,7 +331,7 @@ export class LineBreaker {
     spans: InputSpan[],
     maxWidth: number,
     options: {
-      /** Font family for phantom ZWS lines emitted on hardBreak tokens, e.g. "Georgia". */
+      /** Font family for phantom ZWS lines emitted on line break tokens, e.g. "Georgia". */
       defaultFontFamily: string;
       /** Font size in CSS pixels for phantom ZWS lines, e.g. 14. */
       defaultFontSize: number;
@@ -364,7 +364,7 @@ export class LineBreaker {
     let currentSegmentUsed = 0;
     let cumulativeLineY = 0;
     // Tracks the most recently seen text font — used to size the phantom ZWS
-    // line emitted after a trailing hardBreak.
+    // line emitted after a trailing line break.
     let lastSeenFont: string | undefined = undefined;
     let currentLinePositioned = false;
 
@@ -636,7 +636,7 @@ export class LineBreaker {
       }
       lines.push(lastLine);
     } else if (words.length > 0 && words[words.length - 1]!.kind === "break") {
-      // Trailing break: the paragraph ends with a hardBreak and currentLine is empty.
+      // Trailing break: the paragraph ends with a line break and currentLine is empty.
       // Emit a phantom ZWS line so the cursor after the break is reachable.
       // Use the font of the last text token seen (guaranteed to exist because the
       // ZWS fallback in BlockLayout replaces span-less paragraphs before we get here).
@@ -801,7 +801,7 @@ export class LineBreaker {
         }
       }
 
-      // Register a zero-width glyph at the hardBreak's doc position so
+      // Register a zero-width glyph at the line break's doc position so
       // coordsAtPos(breakDocPos) returns a valid cursor location at the end
       // of this line rather than falling back to the wrong-page heuristic.
       if (line.terminalBreakDocPos !== undefined) {

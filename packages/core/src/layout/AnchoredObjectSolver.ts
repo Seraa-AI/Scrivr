@@ -504,7 +504,7 @@ function reflowFlowsAgainstExclusions(
     if (!flow) break;
     const flowY = flow.globalY ?? 0;
     if (flowY >= pageBottom) break;
-    // Leaf flows (image/HR/pageBreak) cannot be re-broken around a wrap zone.
+    // Leaf flows (image, rule, page break) cannot be re-broken around a wrap zone.
     if (flow.kind === "leaf" || flowY + flow.height <= pageTop) continue;
     // A table cannot be re-broken either, so it moves below the float instead.
     if (flow.kind === "tableRow") {

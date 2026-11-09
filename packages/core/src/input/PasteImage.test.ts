@@ -77,7 +77,7 @@ describe("pasting an image file", () => {
     vi.stubGlobal("Image", FailingDecoder);
 
     const { schema, state } = makeContext();
-    const transformer = new PasteTransformer(schema, [], {}, {
+    const transformer = new PasteTransformer(schema, {}, {
       uploadImage: async () => "https://cdn.example.com/uploaded.png",
     });
     const pending = transformer.prepareImagePaste(
@@ -119,7 +119,7 @@ describe("pasting an image file", () => {
   it("uses a supplied uploader's URL instead of embedding the bytes", async () => {
     const { schema, state } = makeContext();
     const uploaded: File[] = [];
-    const transformer = new PasteTransformer(schema, [], {}, {
+    const transformer = new PasteTransformer(schema, {}, {
       uploadImage: async (f) => {
         uploaded.push(f);
         return "https://cdn.example.com/uploaded.png";
@@ -138,7 +138,7 @@ describe("pasting an image file", () => {
 
   it("falls back to no insertion when the uploader fails", async () => {
     const { schema, state } = makeContext();
-    const transformer = new PasteTransformer(schema, [], {}, {
+    const transformer = new PasteTransformer(schema, {}, {
       uploadImage: async () => {
         throw new Error("network down");
       },
@@ -164,7 +164,7 @@ describe("pasting an image file", () => {
 
   it("rejects a src the uploader returns that is not a safe URL", async () => {
     const { schema, state } = makeContext();
-    const transformer = new PasteTransformer(schema, [], {}, {
+    const transformer = new PasteTransformer(schema, {}, {
       uploadImage: async () => "javascript:alert(1)",
     });
 

@@ -82,8 +82,10 @@ export const Strikethrough = Extension.create({
     return { docx: { marks: { strike: handler } } };
   },
 
-  // GFM strikethrough (~~text~~) — parser token requires markdown-it-strikethrough plugin,
-  // so we only add the serializer rule for now. HTML paste handles <s>/<del> via parseDOM.
+  addMarkdownParserTokens() {
+    return { s: { mark: "strikethrough" } };
+  },
+
   addMarkdownSerializerRules() {
     return {
       marks: {

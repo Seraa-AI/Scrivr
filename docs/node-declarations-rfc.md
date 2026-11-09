@@ -1,6 +1,6 @@
 # Node declarations: breaks, outline levels, markdown paste
 
-Status: Draft (2026-11-09), for sign-off.
+Status: Approved (2026-11-09).
 
 ## Problem
 
@@ -131,4 +131,18 @@ belong to the later passes.
 
 ## What shipped
 
-Nothing yet.
+All of it, in one PR on `feat/node-declarations`, as designed, with these
+details:
+
+- **`BreakKind`** names `"page" | "line"`, exported beside `NodeLayout`. The
+  engine reads a node's break through one helper, `breakOf(type)`.
+- **`PdfOutlineLevel`** (`(node) => number | null`) is declared in core beside
+  `PdfNodeHandler`, so an extension types its level without depending on
+  `@scrivr/export-pdf`, which re-exports it. The exporter's `addOutline` takes
+  the merged map; a heading's level is clamped to `Heading`'s configured
+  `levels`, as its DOCX export already was.
+- **`PasteTransformer`'s constructor** drops the rules argument:
+  `(schema, markdownParserTokens, options)`.
+- The vocabulary guards hold the grep check: no `pageBreak` or `hardBreak`
+  under `layout/` or `renderer/`; no `heading`, `bulletList`, `orderedList`
+  or `listItem` literal under `input/`; no `heading` under `export-pdf/src`.

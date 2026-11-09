@@ -22,7 +22,6 @@ function makeContext() {
   const state = EditorState.create({ schema, plugins: manager.buildPlugins() });
   const transformer = new PasteTransformer(
     schema,
-    manager.buildMarkdownRules(),
     manager.buildMarkdownParserTokens(),
   );
   return { state, transformer };

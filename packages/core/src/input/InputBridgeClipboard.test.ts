@@ -62,7 +62,6 @@ function mountEditor(initialText = "Hello world"): Harness {
     navigator: {} as EditorNavigator,
     pasteTransformer: new PasteTransformer(
       schema,
-      manager.buildMarkdownRules(),
       manager.buildMarkdownParserTokens(),
     ),
     onFocus: () => {},

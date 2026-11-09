@@ -12,13 +12,12 @@ The `PasteTransformer` converts complex HTML and Markdown payloads originating f
 ```ts
 new PasteTransformer(
   schema: Schema,
-  extraMarkdownRules: MarkdownBlockRule[] = [],
-  markdownParserTokens: Record<string, MarkdownParserTokenSpec> = {}
+  markdownParserTokens: Record<string, MarkdownParserTokenSpec> = {},
+  options: PasteTransformerOptions = {}
 )
 ```
 - **`schema`**: The compiled Prosemirror schema used to construct valid block nodes.
-- **`extraMarkdownRules`**: Regex pattern rules injected by Custom Extensions to scrape plain text strings into rich layouts (e.g. matching `---` to a Horizontal Rule).
-- **`markdownParserTokens`**: CommonMark schema translations.
+- **`markdownParserTokens`**: The markdown tokens extensions declare through `addMarkdownParserTokens()`. Pasted markdown becomes only the nodes and marks declared here.
 
 ---
 
@@ -30,9 +29,8 @@ transform(clipboardData: DataTransfer, state: EditorState): Transaction | null
 ```
 The central invocation function. Parses the `DataTransfer` using a prioritized fallback list:
 1. `text/html` utilizing a sterilized DOM Parser.
-2. `text/plain` utilizing `prosemirror-markdown` CommonMark.
-3. `text/plain` utilizing legacy line-by-line fallback regex processing.
-4. Normal `insertText()` string concatenation as an absolute last resort.
+2. `text/plain` utilizing `prosemirror-markdown` CommonMark, over the declared tokens.
+3. Plain text, one paragraph per line, when the markdown holds a construct no extension declares (a pipe table without `Table`, for one).
 
 ---
 

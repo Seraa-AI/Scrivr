@@ -13,7 +13,6 @@ import type {
   ToolbarItemSpec,
   SlashCommandContribution,
   InputHandler,
-  MarkdownBlockRule,
   PasteTransform,
   PasteHtmlTransform,
   MarkdownParserTokenSpec,
@@ -689,14 +688,6 @@ export class ExtensionManager {
       mergeContributions(merged, ext.inputHandlers, ext.name, "InputHandler", "warn");
     }
     return specsOf(merged);
-  }
-
-  /**
-   * All markdown block rules from all extensions, in registration order.
-   * Passed to PasteTransformer so custom nodes are recognised on paste.
-   */
-  buildMarkdownRules(): MarkdownBlockRule[] {
-    return this.resolved.flatMap((ext) => ext.markdownRules);
   }
 
   /**
