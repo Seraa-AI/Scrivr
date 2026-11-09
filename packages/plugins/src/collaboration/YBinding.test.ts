@@ -3,8 +3,7 @@ import * as Y from "yjs";
 import { Slice, TextSelection } from "@scrivr/core/pm";
 import { ServerEditor, Extension, StarterKit } from "@scrivr/core";
 import { DOC_ATTRS_MAP_NAME, YBinding } from "./YBinding";
-import { TrackChanges } from "../track-changes/TrackChanges";
-import { TrackChangesStatus } from "../track-changes/types";
+import { TrackChanges, TrackChangesStatus } from "@scrivr/plugins";
 import type { DocAttrEnvelope } from "./YBinding";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
