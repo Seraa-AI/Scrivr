@@ -64,6 +64,28 @@ describe("list import", () => {
     expect(doc.child(0).textContent).toBe("first");
   });
 
+  it("round-trips a list that skips levels, as Tab past the item above makes", async () => {
+    const para = (text: string) => ({ type: "paragraph", content: [{ type: "text", text }] });
+    const skipping = {
+      type: "doc",
+      content: [{
+        type: "bulletList",
+        attrs: { levelOffset: 1 },
+        content: [{
+          type: "listItem",
+          content: [para("one"), { type: "bulletList", attrs: { levelOffset: 2 }, content: [{ type: "listItem", content: [para("deep")] }] }],
+        }],
+      }],
+    };
+    const { doc } = await importDocx(new ServerEditor(), await bytesOf(skipping));
+    const outer = doc.child(0);
+    const inner = outer.child(0).child(1);
+    expect(outer.attrs["levelOffset"]).toBe(1);
+    expect(inner.type.name).toBe("bulletList");
+    expect(inner.attrs["levelOffset"]).toBe(2);
+    expect(inner.child(0).textContent).toBe("deep");
+  });
+
   it("reports a list it cannot model, rather than dropping it quietly", async () => {
     // Moving the handler onto the extension changed which diagnostic this
     // produces: a kit that cannot model a list now says the block is

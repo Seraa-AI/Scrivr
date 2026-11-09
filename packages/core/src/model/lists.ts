@@ -91,6 +91,22 @@ export function listKind(node: Node): ListKind | null {
   return node.type.name === "orderedList" ? "ordered" : "bullet";
 }
 
+/** How many levels deeper a list sits than its place puts it: Tab on its first item adds one, as Word indents a list. */
+export function listLevelOffset(node: Node): number {
+  const offset = node.attrs["levelOffset"];
+  return typeof offset === "number" && Number.isInteger(offset) && offset > 0 ? offset : 0;
+}
+
+/**
+ * The level a list's items are drawn at (0 = top): one past the list it is
+ * nested in, or the top, plus its own `levelOffset`, never past the ninth.
+ * `parentLevel` is the enclosing list's level, or null at the top.
+ */
+export function nestedListLevel(list: Node, parentLevel: number | null): number {
+  const level = (parentLevel === null ? 0 : parentLevel + 1) + listLevelOffset(list);
+  return Math.min(level, LIST_LEVEL_COUNT - 1);
+}
+
 /** The number an ordered list starts at, kept within MIN_START–MAX_START. */
 export function listStart(node: Node): number {
   const order = node.attrs["order"];

@@ -504,7 +504,15 @@ export type DocxBlock =
   | { type: "paragraph"; attrs: DocxParagraphAttrs; content: DocxInline[] }
   | { type: "horizontalRule" }
   | { type: "pageBreak" }
-  | { type: "list"; listType: "bullet" | "ordered"; items: DocxListItem[] }
+  | {
+      type: "list";
+      listType: "bullet" | "ordered";
+      items: DocxListItem[];
+      /** Levels deeper than its place puts it, where Word's levels skip one. */
+      levelOffset?: number;
+      /** The number an ordered list starts at, when not 1. */
+      start?: number;
+    }
   | { type: "table"; grid: number[]; rows: DocxTableRow[] }
   | { type: "sdt"; tag: string | null; content: DocxBlock[] };
 

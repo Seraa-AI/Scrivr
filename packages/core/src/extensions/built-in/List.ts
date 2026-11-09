@@ -4,7 +4,7 @@ import { chainCommands, liftEmptyBlock } from "prosemirror-commands";
 import { splitBlockInheritAttrs } from "./Paragraph";
 import { wrappingInputRule } from "prosemirror-inputrules";
 import type { Node as PmNode, NodeType } from "prosemirror-model";
-import type { Command } from "prosemirror-state";
+import type { Command, EditorState, Transaction } from "prosemirror-state";
 import { Extension } from "../Extension";
 import {
   isListType,
@@ -12,7 +12,9 @@ import {
   LIST_MARKER_HANGING,
   listKind,
   listLevel,
+  listLevelOffset,
   listStart,
+  nestedListLevel,
   type ListKind,
 } from "../../model/lists";
 import type { SlashCommandContribution, ToolbarItemSpec } from "../types";
@@ -188,6 +190,50 @@ function makeToggleList(listType: NodeType, itemType: NodeType): Command {
   };
 }
 
+/** The innermost list the selection is in, its position, and the level its items are drawn at. */
+function listAtSelection(state: EditorState): { list: PmNode; pos: number; level: number; isFirstItem: boolean } | null {
+  const { $from } = state.selection;
+  let level: number | null = null;
+  let found: { list: PmNode; pos: number; level: number; isFirstItem: boolean } | null = null;
+  for (let d = 1; d <= $from.depth; d++) {
+    const node = $from.node(d);
+    if (!isListType(node.type)) continue;
+    level = nestedListLevel(node, level);
+    found = { list: node, pos: $from.before(d), level, isFirstItem: $from.index(d) === 0 };
+  }
+  return found;
+}
+
+/** Sets how many levels deeper a list sits than its place puts it. */
+function shiftList(state: EditorState, at: { list: PmNode; pos: number }, by: number, dispatch?: (tr: Transaction) => void): boolean {
+  if (dispatch) dispatch(state.tr.setNodeMarkup(at.pos, undefined, { ...at.list.attrs, levelOffset: listLevelOffset(at.list) + by }));
+  return true;
+}
+
+/**
+ * Tab in a list, as Word: an item with one above it nests under it; a list's
+ * first item takes the whole list a level in. Nothing goes past the ninth
+ * level, and the key is still consumed there.
+ */
+function deeperListItem(itemType: NodeType): Command {
+  return (state, dispatch) => {
+    const at = listAtSelection(state);
+    if (!at) return false;
+    if (at.level >= LIST_LEVEL_COUNT - 1) return true;
+    if (sinkListItem(itemType)(state, dispatch)) return true;
+    return at.isFirstItem ? shiftList(state, at, 1, dispatch) : false;
+  };
+}
+
+/** Shift-Tab in a list: a list a first item took in comes back a level, before any item lifts out. */
+function shallowerListItem(itemType: NodeType): Command {
+  return (state, dispatch) => {
+    const at = listAtSelection(state);
+    if (at && at.isFirstItem && listLevelOffset(at.list) > 0) return shiftList(state, at, -1, dispatch);
+    return liftListItem(itemType)(state, dispatch);
+  };
+}
+
 const listPdf: PdfNodeHandler = (block, ctx) => ctx.draw.lines(block, ctx);
 
 /**
@@ -221,6 +267,7 @@ export const List = Extension.create({
         group: "block",
         content: "listItem+",
         attrs: {
+          levelOffset: { default: 0 },
           nodeId:      { default: null },
           dataTracked: { default: [] },
         },
@@ -232,6 +279,7 @@ export const List = Extension.create({
         content: "listItem+",
         attrs: {
           order:       { default: 1 },
+          levelOffset: { default: 0 },
           nodeId:      { default: null },
           dataTracked: { default: [] },
         },
@@ -274,8 +322,8 @@ export const List = Extension.create({
       // splitListItem handles Enter inside a non-empty list item;
       // splitBlockKeepMarks is the fallback for Enter outside lists.
       Enter: chainCommands(liftEmptyBlock, splitListItem(listItem!), splitBlockInheritAttrs),
-      Tab: sinkListItem(listItem!),
-      "Shift-Tab": liftListItem(listItem!),
+      Tab: deeperListItem(listItem!),
+      "Shift-Tab": shallowerListItem(listItem!),
       // Mod-Shift-8: toggle bullet list (⌘⇧8 = • on most keyboards)
       "Mod-Shift-8": makeToggleList(bulletList!, listItem!),
       // Mod-Shift-9: toggle ordered list (⌘⇧9 = ( )
@@ -371,7 +419,11 @@ export const List = Extension.create({
         if (children.length === 0) continue;
         items.push(listItemType.create(null, children));
       }
-      return items.length === 0 ? null : listType.create(null, items);
+      const attrs = {
+        ...(block.levelOffset ? { levelOffset: block.levelOffset } : {}),
+        ...(block.start !== undefined && block.listType === "ordered" ? { order: block.start } : {}),
+      };
+      return items.length === 0 ? null : listType.create(attrs, items);
     };
 
     return { docx: { blocks: { list: handler } } };
@@ -402,15 +454,15 @@ export const List = Extension.create({
         return numId;
       };
 
-      const walk = (node: PmNode, stack: ListKind[]) => {
+      const walk = (node: PmNode, enclosing: { kind: ListKind; level: number } | null) => {
         const kind = listKind(node);
-        const enclosing = stack[stack.length - 1];
         if (enclosing && node.type.name === "listItem") {
-          itemMap.set(node, { numId: numIdFor(enclosing), ilvl: Math.min(stack.length - 1, LIST_LEVEL_COUNT - 1) });
+          itemMap.set(node, { numId: numIdFor(enclosing.kind), ilvl: enclosing.level });
         }
-        node.forEach((child) => walk(child, kind ? [...stack, kind] : stack));
+        const inside = kind ? { kind, level: nestedListLevel(node, enclosing ? enclosing.level : null) } : enclosing;
+        node.forEach((child) => walk(child, inside));
       };
-      walk(ctx.editor.getState().doc, []);
+      walk(ctx.editor.getState().doc, null);
     };
 
     // bulletList / orderedList don't emit their own element — Word lists are

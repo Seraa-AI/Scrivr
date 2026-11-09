@@ -15,6 +15,7 @@ import {
   listLevel,
   listMarker,
   listStart,
+  nestedListLevel,
 } from "../model/lists";
 import { layoutBlock, ownFirstLineIndent, type BlockLayoutOptions, type LayoutBlock } from "./BlockLayout";
 import { nodeLayout } from "./BlockRegistry";
@@ -111,7 +112,7 @@ export function collectChildItems(parent: Node, base: number): LayoutItem[] {
 
     const kind = listKind(node);
     if (kind) {
-      const depth = list ? list.depth + 1 : 0;
+      const depth = nestedListLevel(node, list ? list.depth : null);
       let n = kind === "ordered" ? listStart(node) : 1;
       node.forEach((listItem, itemOffset) => {
         walk(listItem, offset + 1 + itemOffset + 1, { depth, marker: listMarker(kind, depth, n++) });

@@ -642,6 +642,59 @@ describe("Tab and Shift-Tab are visible", () => {
   });
 });
 
+describe("Tab keeps going deeper, as in Word", () => {
+  const twoItems = { type: "doc", content: [ul(item("one"), item("two")), { type: "paragraph" }] };
+
+  it("takes an item a level further on each Tab, past the item above", () => {
+    const editor = new KeyEditor({ extensions: [StarterKit], content: twoItems });
+    editor.caretAt("two");
+    editor.press("Tab");
+    expect(editor.press("Tab")).toBe(true);
+
+    const blocks = laidOut(editor.getState().doc);
+    const [one, two] = [blockOf(blocks, "one"), blockOf(blocks, "two")];
+    expect(two.listMarker).toBe("▪");
+    expect(two.x - one.x).toBe(2 * HALF_INCH);
+  });
+
+  it("brings it back a level on each Shift-Tab", () => {
+    const editor = new KeyEditor({ extensions: [StarterKit], content: twoItems });
+    editor.caretAt("two");
+    editor.press("Tab");
+    editor.press("Tab");
+    editor.press("Shift-Tab");
+
+    const blocks = laidOut(editor.getState().doc);
+    const [one, two] = [blockOf(blocks, "one"), blockOf(blocks, "two")];
+    expect(two.listMarker).toBe("◦");
+    expect(two.x - one.x).toBe(HALF_INCH);
+  });
+
+  it("moves a whole list a level in from its first item", () => {
+    const editor = new KeyEditor({ extensions: [StarterKit], content: twoItems });
+    const before = blockOf(laidOut(editor.getState().doc), "one").x;
+    editor.caretAt("one");
+    expect(editor.press("Tab")).toBe(true);
+
+    const blocks = laidOut(editor.getState().doc);
+    expect(blockOf(blocks, "one").x - before).toBe(HALF_INCH);
+    expect(blockOf(blocks, "two").x - before).toBe(HALF_INCH);
+    expect(blockOf(blocks, "one").listMarker).toBe("◦");
+  });
+
+  it("stops at the ninth level", () => {
+    const editor = new KeyEditor({ extensions: [StarterKit], content: twoItems });
+    editor.caretAt("one");
+    for (let i = 0; i < 8; i++) editor.press("Tab");
+    const deepest = editor.getState().doc;
+    expect(editor.press("Tab")).toBe(true);
+    expect(editor.getState().doc.eq(deepest)).toBe(true);
+    const blocks = laidOut(editor.getState().doc);
+    const top = defaultPageConfig.margins.left + HALF_INCH;
+    expect(blockOf(blocks, "one").x - top).toBe(8 * HALF_INCH);
+  });
+});
+
 describe("drawing markers on the canvas", () => {
   const paint = (block: LayoutBlock) => {
     const ctx = document.createElement("canvas").getContext("2d");
