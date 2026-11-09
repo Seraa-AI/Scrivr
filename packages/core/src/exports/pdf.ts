@@ -13,7 +13,6 @@
  * same line rather than each inventing its own geometry.
  */
 
-import type { Node } from "prosemirror-model";
 import type { ResolvedTheme } from "../model/theme";
 import type { Rgb } from "../model/cssColor";
 import type { FontResolutionId } from "../fonts/layoutResolver";
@@ -201,9 +200,6 @@ export interface PdfBlockDrawSurface extends PdfDrawSurface {
 
 /** Draw a block (or inline atom) onto a PDF page. */
 export type PdfNodeHandler = (block: LayoutBlock, ctx: PdfNodeContext) => void;
-
-/** A block's level in the file's bookmarks, 1 at the top; null leaves it out. */
-export type PdfOutlineLevel = (node: Node) => number | null;
 
 /**
  * What a node handler is typed against: it paints through `draw` and renders

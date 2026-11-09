@@ -297,3 +297,33 @@ As designed, with these differences:
   lands the block after them one page above where it is painted, so an image
   anchored right after them is placed a page early.
 
+### Phase 3 — outline level on the spec
+
+As designed, with these details:
+
+- **`outlineLevel?: (node) => number | null`** is typed on `ScrivrNodeSpec`
+  and read through one helper, `outlineLevelOf(node)`, which returns null for
+  a node that declares none or answers with anything but a finite number.
+- **`Heading` declares it**: its own `level`, a level stored as text read as
+  the number it spells, 1 otherwise. `pdf.outline` and `PdfOutlineLevel`
+  (#239) are removed.
+- **The PDF bookmarks** read `outlineLevelOf` for every block.
+- **The semantic lane** reads it in three places: the walker's breadcrumb
+  (`headingLevel` is the declared level), the grouping's heading-led unit,
+  and `toDocumentOutline`, which opens a section on a unit with a
+  `headingLevel` rather than on the unit type. The grouping's "short lede" is
+  the schema's default textblock, not a block named `paragraph`.
+- A guard keeps heading and paragraph names out of the semantic walker,
+  grouping and outline. The lane's part types (paragraph, heading,
+  codeBlock) and list/table container labels still name nodes; they are not
+  outline rules and move with the floats and tables work.
+- A lede is a textblock that heads no section, as well as the schema's
+  default. `outlineLevel` must be pure and must not throw: it runs for every
+  block the outlines visit.
+- **To check (older than this phase): the two outlines read one declaration
+  but still visit different blocks.** A heading nested in a list, sourced
+  block or table cell is a PDF bookmark but no semantic section; an empty
+  heading is left out of the bookmarks but opens an untitled semantic section,
+  which changes what nests under it; and with grouping on, a semantic
+  section's title includes its lede while its children's breadcrumbs do not.
+

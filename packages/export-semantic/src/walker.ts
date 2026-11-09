@@ -1,5 +1,5 @@
 import type { Node as PmNode } from "@scrivr/core/pm";
-import type { SemanticChange, SemanticNodeResult, SemanticPart, SemanticUnit, UnitCtx } from "@scrivr/core";
+import { outlineLevelOf, type SemanticChange, type SemanticNodeResult, type SemanticPart, type SemanticUnit, type UnitCtx } from "@scrivr/core";
 import type { ResolvedHandlers } from "./collectHandlers";
 import { groupBlocks } from "./grouping";
 import { resolveNodeId, type BlockEntry } from "./id";
@@ -18,11 +18,6 @@ function warnUnknown(name: string): void {
 
 function unplaced({ at: _at, length: _length, ...change }: SemanticChange): SemanticChange {
   return change;
-}
-
-function headingLevelOf(node: PmNode): number {
-  const raw = node.attrs["level"];
-  return typeof raw === "number" ? raw : 1;
 }
 
 /**
@@ -71,16 +66,14 @@ export function walkSemantic(
     // true ancestors (a sibling heading — or a top-level heading with none —
     // must not inherit the previous section). Body units then read the full
     // active-heading stack.
-    const isHeading = anchor.type.name === "heading";
-    let headingLevel: number | undefined;
-    if (isHeading) {
-      headingLevel = headingLevelOf(anchor);
+    const headingLevel = outlineLevelOf(anchor) ?? undefined;
+    if (headingLevel !== undefined) {
       while (stack.length > 0 && stack[stack.length - 1]!.level >= headingLevel) {
         stack.pop();
       }
     }
     const breadcrumb = stack.map((s) => s.title);
-    if (isHeading && headingLevel !== undefined) {
+    if (headingLevel !== undefined) {
       // Breadcrumbs are embedding input too, so they must use the same
       // mark-aware extraction as unit text (notably excluding tracked deletes).
       stack.push({ level: headingLevel, title: ctx.toText(anchor) });
