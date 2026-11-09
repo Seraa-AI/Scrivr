@@ -32,9 +32,10 @@ import {
 import {
   collectLayoutItems,
   itemSpacing,
-  layoutBlockWithMarker,
   listMarkerXOf,
+  measureWithMarker,
   resolveItem,
+  type FirstLineSettings,
   type LayoutItem,
   type MarkerPlacement,
 } from "./layoutItems";
@@ -271,6 +272,8 @@ export interface MeasureCacheEntry {
   align: BlockStyle["align"];
   /** The list marker the block was measured with, and its indent; a different one is a cache miss. */
   listMarker?: { text: string; indentLeft: number };
+  /** The first-line settings its marker resolved to; every re-layout reuses them. */
+  firstLine?: FirstLineSettings;
   /**
    * Phase 1b — early termination.
    *
@@ -307,6 +310,8 @@ export interface FlowConfig {
 export interface FlowBlock {
   /** Original ProseMirror node. */
   node: Node;
+  /** The first-line settings its list marker resolved to; every re-layout reuses them. */
+  firstLine?: FirstLineSettings;
   nodePos: number;
   /**
    * Mirrors `LayoutBlock.kind` so the pagination loop and exclusion reflow can
@@ -1415,6 +1420,7 @@ export function buildBlockFlow(
       blockType: entry.blockType,
       align: entry.align,
       ...(marker ? { listMarker: marker.text, listMarkerX: listMarkerXOf(blockX, marker) } : {}),
+      ...(entry.firstLine ? { firstLine: entry.firstLine } : {}),
       indentLeft,
       hasAnchoredObject: blockHasAnchoredObject(entry.lines),
       inputHash: computeInputHash(nodePos, node, blockWidth),
@@ -1641,7 +1647,7 @@ function resolveBlockEntry(
 
   // Cache miss — measure and populate. map is intentionally omitted:
   // CharacterMap population is deferred to Editor.ensurePagePopulated().
-  const measured = layoutBlockWithMarker(node, {
+  const { block: measured, firstLine } = measureWithMarker(node, {
     nodePos,
     x: blockX,
     y: targetY,
@@ -1665,6 +1671,7 @@ function resolveBlockEntry(
     blockType: measured.blockType,
     align: measured.align,
     ...(marker ? { listMarker: { text: marker.text, indentLeft: marker.indentLeft } } : {}),
+    ...(firstLine ? { firstLine } : {}),
   };
   measureCache?.set(node, entry);
   return entry;

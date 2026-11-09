@@ -565,6 +565,7 @@ function reflowFlowsAgainstExclusions(
       lineSpaceProvider,
       ...(inlineRegistry ? { inlineRegistry } : {}),
       ...(fonts ? { fonts } : {}),
+      ...flow.firstLine,
     });
 
     const nextFlow: FlowBlock = {

@@ -280,27 +280,43 @@ function markerFirstLineOffset(
 }
 
 /**
+ * The first-line settings a list marker resolves to. Every re-layout of the
+ * block (around a float, on another page) reuses them, so its first line
+ * keeps clear of the number and keeps a line for it.
+ */
+export type FirstLineSettings = Pick<BlockLayoutOptions, "firstLineOffset" | "keepAnchorLine">;
+
+/**
  * Lays a block out with its list marker. The marker is sized by the first
  * line's font, which only measuring tells, so a number too wide for its
  * hanging re-breaks the lines past it; a list item's first block keeps a line
  * for its number even when it holds only a floating image's anchor, as Word
  * draws it.
  */
+export function measureWithMarker(
+  node: Node,
+  options: BlockLayoutOptions,
+  marker: MarkerPlacement | undefined,
+): { block: LayoutBlock; firstLine?: FirstLineSettings } {
+  if (!marker) return { block: layoutBlock(node, options) };
+  const settingsFor = (firstLineOffset: number): FirstLineSettings =>
+    firstLineOffset > 0 ? { keepAnchorLine: true, firstLineOffset } : { keepAnchorLine: true };
+  const first = layoutBlock(node, { ...options, ...settingsFor(0) });
+  const offset = markerFirstLineOffset(marker, first.lines, options.measurer, ownFirstLineIndent(node), options.availableWidth);
+  const firstLine = settingsFor(offset);
+  const measured = offset > 0 ? layoutBlock(node, { ...options, ...firstLine }) : first;
+  return {
+    block: { ...measured, listMarker: marker.text, listMarkerX: listMarkerXOf(options.x, marker) },
+    firstLine,
+  };
+}
+
 export function layoutBlockWithMarker(
   node: Node,
   options: BlockLayoutOptions,
   marker: MarkerPlacement | undefined,
 ): LayoutBlock {
-  if (!marker) return layoutBlock(node, options);
-  const measure = (firstLineOffset: number) => layoutBlock(node, {
-    ...options,
-    keepAnchorLine: true,
-    ...(firstLineOffset > 0 ? { firstLineOffset } : {}),
-  });
-  const first = measure(0);
-  const offset = markerFirstLineOffset(marker, first.lines, options.measurer, ownFirstLineIndent(node), options.availableWidth);
-  const measured = offset > 0 ? measure(offset) : first;
-  return { ...measured, listMarker: marker.text, listMarkerX: listMarkerXOf(options.x, marker) };
+  return measureWithMarker(node, options, marker).block;
 }
 
 /**
