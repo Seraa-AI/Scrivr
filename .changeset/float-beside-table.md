@@ -17,3 +17,4 @@ leaves the whole content width free.
 `AnchoredObjectPlacement` gains an optional `stackOffset`: how far the solver
 moved a stacked image below the float it would overlap. `globalY` includes it;
 the user's offset from the anchor is `globalY - stackOffset - anchorGlobalY`.
+(Public field approved by the user on 2026-11-09.)

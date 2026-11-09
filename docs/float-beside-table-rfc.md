@@ -39,7 +39,9 @@ Approved by the user on 2026-11-08.
    2026-11-08, confirmed 2026-11-09*). A square float that would overlap one
    placed before it on the page moves below it; its anchor paragraph stays
    where the text puts it. The offset belongs to the float and is carried on
-   the placement as `stackOffset`, so a drag starts from the user's `yOffset`.
+   the placement as `stackOffset`, so a drag starts from the user's `yOffset`
+   (the public `AnchoredObjectPlacement.stackOffset` field was *approved by the
+   user on 2026-11-09*).
 
    *The evidence, honestly.* This matches Word only when `wp:anchor
    allowOverlap="0"`. Word's default is `allowOverlap="1"`, which lets floats
