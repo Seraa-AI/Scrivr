@@ -146,7 +146,7 @@ interface PlacedFloat {
   /**
    * Where the float goes, and where its anchor flow must start, given where
    * that flow would start on its own. A locked float stays where it is and
-   * holds its anchor on its page; it moves only when its anchor reaches a
+   * no longer pushes its anchor; it moves only when its anchor reaches a
    * later page.
    */
   place(anchorFlowStart: number): FloatPlace;
@@ -237,10 +237,7 @@ export function resolveAnchoredObjects(
   // float and anchor all agree, and is locked as Word does: when one of its
   // placements repeats (an oscillation, as LibreOffice's SwOszControl
   // detects it) or after MAX_PLACEMENTS_BEFORE_LOCK placements that never
-  // settle. A placement counts toward that only when the float's own zone
-  // reaches above its anchor — otherwise it cannot move its anchor at all —
-  // and no other float re-carved in the last pass reaches higher still and
-  // above that anchor, which would make it the one moving it.
+  // settle.
   const settleFrom = (first: PlacedFloat, carried: { from: number; to: number }): void => {
     const dirty = new Map<number, Band | undefined>();
     const markBand = (page: number, band: Band): void => {
@@ -265,18 +262,6 @@ export function resolveAnchoredObjects(
     markMoved(carried);
 
     const history = new Map<PlacedFloat, AnchoredObjectPlacement[]>();
-    let recarvedLastPass: Array<{ float: PlacedFloat; page: number; top: number }> = [
-      { float: first, page: first.placement.page, top: first.zoneOf(first.placement).top },
-    ];
-    const reachesAboveAnchor = (float: PlacedFloat, at: AnchoredObjectPlacement): boolean =>
-      float.zoneOf(at).top < at.anchorGlobalY;
-    const drivenByAnother = (float: PlacedFloat, at: AnchoredObjectPlacement): boolean => {
-      const ownTop = float.zoneOf(at).top;
-      return recarvedLastPass.some((o) =>
-        o.float !== float && o.page === at.page && o.top < at.anchorGlobalY && o.top < ownTop);
-    };
-    const clearOfLocked = (float: PlacedFloat, at: AnchoredObjectPlacement): boolean =>
-      !placed.some((other) => other !== float && other.locked && other.wraps && paintedOverlap(other.placement, at));
 
     for (let pass = 0; ; pass++) {
       let firstMoved = flows.length;
@@ -293,7 +278,6 @@ export function resolveAnchoredObjects(
       if (pass >= MAX_SETTLE_PASSES) return;
 
       const pagesWithMovedFloats = new Set<number>();
-      const recarvedNow: typeof recarvedLastPass = [];
       for (const float of placed) {
         const index = float.anchorFlowIndex;
         if (index < firstMoved && !pagesWithMovedFloats.has(float.placement.page)) continue;
@@ -308,41 +292,17 @@ export function resolveAnchoredObjects(
         const previous = float.placement;
         const next = float.place(flows[index]?.globalY ?? 0).placement;
         if (samePlacement(next, previous)) continue;
-        if (sameRect(float, previous, next)) {
-          float.placement = next;
-          continue;
-        }
         // place() moves a locked float only onto a later page.
         float.locked = false;
 
-        const movesOwnAnchor = reachesAboveAnchor(float, previous) || reachesAboveAnchor(float, next);
-        if (float.wraps && movesOwnAnchor && !drivenByAnother(float, next)) {
+        if (float.wraps) {
           const seen = history.get(float) ?? [previous];
           if (seen.some((p) => samePlacement(p, next)) || seen.length > MAX_PLACEMENTS_BEFORE_LOCK) {
+            // Lock at the state it is returning to: its fixed point, if it
+            // was converging.
             float.locked = true;
-            // Lock at the state it is returning to — its fixed point, if it
-            // was converging — but never on the earlier page of a cycle that
-            // crosses one, nor on another locked float when this state is
-            // clear of them.
-            const lockWhereItIs = next.page < previous.page ||
-              (next.page === previous.page && !clearOfLocked(float, next) && clearOfLocked(float, previous));
-            if (lockWhereItIs) {
-              // Now locked, the float holds its anchor on its page.
-              const held = restampFrom(index);
-              if (held.to > held.from) {
-                firstMoved = Math.min(firstMoved, held.from);
-                markMoved(held);
-              }
-              // Tables and later floats may have been placed against the other
-              // state of the oscillation: re-scan and re-stack around it.
-              markBand(previous.page, float.zoneOf(previous));
-              pagesWithMovedFloats.add(previous.page);
-              continue;
-            }
           }
           history.set(float, [...seen, next]);
-        } else {
-          history.delete(float);
         }
 
         if (float.wraps) uncarve(float);
@@ -353,12 +313,7 @@ export function resolveAnchoredObjects(
         carve(float);
         markBand(previous.page, float.zoneOf(previous));
         markBand(next.page, float.zoneOf(next));
-        recarvedNow.push(
-          { float, page: previous.page, top: float.zoneOf(previous).top },
-          { float, page: next.page, top: float.zoneOf(next).top },
-        );
       }
-      recarvedLastPass = recarvedNow;
       if (dirty.size === 0) return;
     }
   };
@@ -420,12 +375,12 @@ export function resolveAnchoredObjects(
     };
 
     // Square stacking: a square float that would overlap one
-    // placed before it on the page, or a locked one, moves down below it;
+    // placed before it on the page moves down below it;
     // its anchor paragraph stays where it is.
     const stackBelowOthers = (painted: number, page: number): number => {
       if (wrapMode !== "square") return painted;
       const obstacles = placed
-        .filter((other, index) => index !== order && (index < order || other.locked))
+        .slice(0, order)
         .map((other) => other.placement)
         .filter((p) => p.wrapMode === "square")
         .sort((a, b) => a.globalY - b.globalY);
@@ -483,9 +438,7 @@ export function resolveAnchoredObjects(
     const place = (anchorFlowStart: number): FloatPlace => {
       const fresh = placeFresh(anchorFlowStart);
       if (!self.locked || fresh.placement.page > self.placement.page) return fresh;
-      const page = self.placement.page;
-      const held = barriers.pageForGlobalY(anchorFlowStart) < page ? barriers.pageStartGlobal(page) : anchorFlowStart;
-      return { placement: self.placement, anchorStart: held };
+      return { placement: self.placement, anchorStart: anchorFlowStart };
     };
 
     // The zone may not reach above the anchor on the strength of its margin
@@ -538,15 +491,6 @@ function paintedOverlap(
 
 function samePlacement(a: AnchoredObjectPlacement, b: AnchoredObjectPlacement): boolean {
   return a.page === b.page && a.globalY === b.globalY && a.anchorGlobalY === b.anchorGlobalY;
-}
-
-/** Same painted rect and wrap rect: only the anchor it was measured from moved. */
-function sameRect(float: PlacedFloat, a: AnchoredObjectPlacement, b: AnchoredObjectPlacement): boolean {
-  if (a.page !== b.page || a.globalY !== b.globalY) return false;
-  if (!float.wraps) return true;
-  const ra = float.exclusionOf(a);
-  const rb = float.exclusionOf(b);
-  return ra.y === rb.y && ra.bottom === rb.bottom;
 }
 
 /**
