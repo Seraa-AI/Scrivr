@@ -42,6 +42,7 @@ interface ImageRect {
 }
 
 interface LayoutBlockFixture {
+  kind: "text";
   nodePos: number;
   y: number;
   height: number;
@@ -251,8 +252,8 @@ describe("PointerController — drag UX", () => {
       overrideLayout(setup.editor, {
         anchoredObjects: [makePlacement(setup)],
         pages: [
-          { pageNumber: 1, blocks: [{ nodePos: 0, y: 0, height: 200 }] },
-          { pageNumber: 2, blocks: [{ nodePos: 42, y: 50, height: 120 }] },
+          { pageNumber: 1, blocks: [{ kind: "text", nodePos: 0, y: 0, height: 200 }] },
+          { pageNumber: 2, blocks: [{ kind: "text", nodePos: 42, y: 50, height: 120 }] },
         ] satisfies { pageNumber: number; blocks: LayoutBlockFixture[] }[],
       });
       // posAtCoords returns 0 on page 2 (virtualized), 5 on page 1.
@@ -279,8 +280,8 @@ describe("PointerController — drag UX", () => {
   describe("Step 7 — same-page re-anchor", () => {
     it("dy past threshold re-anchors to the closer paragraph", () => {
       setup = makePointerControllerSetup({ isPageless: true });
-      const sourceBlock = { nodePos: 4, y: 50, height: 100 };
-      const targetBlock = { nodePos: 20, y: 200, height: 100 };
+      const sourceBlock: LayoutBlockFixture = { kind: "text", nodePos: 4, y: 50, height: 100 };
+      const targetBlock: LayoutBlockFixture = { kind: "text", nodePos: 20, y: 200, height: 100 };
       overrideLayout(setup.editor, {
         anchoredObjects: [makePlacement(setup)],
         pages: [
@@ -337,8 +338,8 @@ describe("PointerController — drag UX", () => {
 
     it("no closer paragraph → keeps the original anchor (setNodeAttrs path)", () => {
       setup = makePointerControllerSetup({ isPageless: true });
-      const sourceBlock = { nodePos: 4, y: 50, height: 100 };
-      const farBlock = { nodePos: 20, y: 400, height: 100 };
+      const sourceBlock: LayoutBlockFixture = { kind: "text", nodePos: 4, y: 50, height: 100 };
+      const farBlock: LayoutBlockFixture = { kind: "text", nodePos: 20, y: 400, height: 100 };
       overrideLayout(setup.editor, {
         anchoredObjects: [makePlacement(setup)],
         pages: [
@@ -358,6 +359,95 @@ describe("PointerController — drag UX", () => {
     });
   });
 
+  describe("a drop measures from where layout measures the anchor", () => {
+    const PAGE = 1123;
+    const SLOT = PAGE + 24;
+    const words = (n: number) => "word ".repeat(n).trim();
+    const text = (t: string) => ({ type: "text", text: t });
+    const front = { type: "image", attrs: { src: "x", wrapMode: "front", xAlign: "left", width: 80, height: 40 } };
+    const fillers = (n: number) => Array.from({ length: n }, (_, i) => ({ type: "paragraph", content: [text(`F${i}`)] }));
+
+    function dragImage(content: unknown[], to: (layout: PointerControllerSetup["editor"]["layout"]) => { page: number; y: number }) {
+      setup = makePointerControllerSetup({ tileHeight: PAGE, slotHeight: SLOT, content: { type: "doc", content } });
+      const editor = setup.editor;
+      const source = editor.layout.anchoredObjects?.[0];
+      if (!source) throw new Error("no image");
+      const grabX = source.x + 20;
+      const grabY = (source.page - 1) * SLOT + source.y + 10;
+      const target = to(editor.layout);
+      const dropY = (target.page - 1) * SLOT + target.y + 10;
+      mousedown(setup.container, grabX, grabY);
+      mousemove(grabX, dropY);
+      mouseup(grabX, dropY);
+      const landed = editor.layout.anchoredObjects?.[0];
+      if (!landed) throw new Error("image vanished");
+      return landed;
+    }
+
+    function startOn(layout: PointerControllerSetup["editor"]["layout"], prefix: string) {
+      for (const page of layout.pages) {
+        const block = page.blocks.find((b) => !b.isContinuation && b.node.textContent.startsWith(prefix));
+        if (block) return { page: page.pageNumber, block };
+      }
+      throw new Error(`no ${prefix}`);
+    }
+
+    it("an image dragged into the middle of a paragraph on another page lands where it was dropped", () => {
+      const landed = dragImage(
+        [{ type: "paragraph", content: [text("Img"), front] }, ...fillers(40), { type: "paragraph", content: [text(`P2 ${words(400)}`)] }],
+        (layout) => {
+          const { page, block } = startOn(layout, "P2");
+          expect(page).toBe(2);
+          const lineFive = block.lines.slice(0, 5).reduce((sum, line) => sum + line.lineHeight, 0);
+          return { page, y: block.y + lineFive };
+        },
+      );
+      const { page, block } = startOn(setup.editor.layout, "P2");
+      const lineFive = block.lines.slice(0, 5).reduce((sum, line) => sum + line.lineHeight, 0);
+      expect(landed.page).toBe(page);
+      expect(landed.y).toBeCloseTo(block.y + lineFive, 6);
+    });
+
+    it("an image dropped on a paragraph carried over from the previous page stays on the page it was dropped on", () => {
+      let target = { page: 0, y: 0 };
+      const landed = dragImage(
+        [
+          { type: "paragraph", content: [text("Img"), front] },
+          ...fillers(25),
+          { type: "paragraph", content: [text(`P2 ${words(400)}`)] },
+          { type: "paragraph", content: [text(`Q ${words(40)}`)] },
+        ],
+        (layout) => {
+          const carried = layout.pages[1]?.blocks[0];
+          expect(carried?.isContinuation).toBe(true);
+          target = { page: 2, y: (carried?.y ?? 0) + 20 };
+          return target;
+        },
+      );
+      expect(landed.page).toBe(target.page);
+      expect(landed.y).toBeCloseTo(target.y, 6);
+    });
+
+    it("an image dragged up onto a carried-over paragraph on its own page stays on that page", () => {
+      let target = { page: 0, y: 0 };
+      const landed = dragImage(
+        [
+          ...fillers(25),
+          { type: "paragraph", content: [text(`P2 ${words(400)}`)] },
+          { type: "paragraph", content: [front, text(`Q ${words(40)}`)] },
+        ],
+        (layout) => {
+          const carried = layout.pages[1]?.blocks[0];
+          expect(carried?.isContinuation).toBe(true);
+          target = { page: 2, y: (carried?.y ?? 0) + 10 };
+          return target;
+        },
+      );
+      expect(landed.page).toBe(target.page);
+      expect(landed.y).toBeCloseTo(target.y, 6);
+    });
+  });
+
   describe("Step 8 — cross-page yOffset preserves visual position", () => {
     it("drop on a destination page commits non-zero yOffset against the new anchor", () => {
       setup = makePointerControllerSetup({
@@ -368,8 +458,8 @@ describe("PointerController — drag UX", () => {
       overrideLayout(setup.editor, {
         anchoredObjects: [makePlacement(setup)],
         pages: [
-          { pageNumber: 1, blocks: [{ nodePos: 0, y: 0, height: 200 }] },
-          { pageNumber: 2, blocks: [{ nodePos: 42, y: 50, height: 120 }] },
+          { pageNumber: 1, blocks: [{ kind: "text", nodePos: 0, y: 0, height: 200 }] },
+          { pageNumber: 2, blocks: [{ kind: "text", nodePos: 42, y: 50, height: 120 }] },
         ] satisfies { pageNumber: number; blocks: LayoutBlockFixture[] }[],
       });
       vi.spyOn(setup.editor.charMap, "posAtCoords").mockImplementation((_x, _y, page) =>

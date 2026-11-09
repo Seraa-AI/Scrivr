@@ -7,6 +7,7 @@ import {
   computeNewSize,
 } from "./ResizeController";
 import { normalizeImageAttrs, type AnchoredObjectPlacement } from "../layout/AnchoredObjects";
+import type { LayoutBlock } from "../layout/BlockLayout";
 import { resolvePointOwner, type PointOwner } from "../layout/pointOwnership";
 import {
   type PageFlowMetrics,
@@ -922,19 +923,18 @@ export class PointerController {
     }
 
     let commitPath: "moveAndUpdateNode" | "moveNode" | "setNodeAttrs";
-    const crossPageYOffset = newDocPos !== null
-      ? this.resolveCrossPageDropYOffset(e, newDocPos)
-      : 0;
+    const drop = newDocPos !== null ? this.resolveCrossPageDrop(e, newDocPos) : null;
+    const crossPageYOffset = drop?.yOffset ?? 0;
 
-    if (!horizontallyStill && !verticallyStill && newX !== null && newDocPos !== null) {
-      editor.moveAndUpdateNode(docPos, newDocPos, {
+    if (!horizontallyStill && !verticallyStill && newX !== null && drop) {
+      editor.moveAndUpdateNode(docPos, drop.docPos, {
         xAlign: "custom",
         x: newX,
         yOffset: crossPageYOffset,
       });
       commitPath = "moveAndUpdateNode";
-    } else if (!verticallyStill && newDocPos !== null) {
-      editor.moveAndUpdateNode(docPos, newDocPos, { yOffset: crossPageYOffset });
+    } else if (!verticallyStill && drop) {
+      editor.moveAndUpdateNode(docPos, drop.docPos, { yOffset: crossPageYOffset });
       commitPath = "moveAndUpdateNode";
     } else if (newX !== null) {
       editor.setNodeAttrs(docPos, { xAlign: "custom", x: newX });
@@ -947,7 +947,7 @@ export class PointerController {
       commitPath,
       docPos,
       newX,
-      newDocPos,
+      newDocPos: drop?.docPos ?? newDocPos,
       newYOffset: crossPageYOffset,
       crossPage: true,
     });
@@ -991,20 +991,7 @@ export class PointerController {
     const sourceFrom = this.anchoredDrag.docPos;
     const sourceTo = sourceFrom + this.anchoredDrag.nodeSize;
 
-    let best: { docPos: number; globalY: number; distance: number } | null = null;
-    const page = this.deps.editor.layout.pages?.[sourcePage - 1];
-    if (!page) return null;
-
-    for (const block of page.blocks) {
-      const docPos = block.nodePos + 1;
-      if (docPos >= sourceFrom && docPos <= sourceTo) continue;
-      const globalY = this.pageLocalYToGlobal(sourcePage, block.y);
-      const distance = Math.abs(imageGlobalY - globalY);
-      if (!best || distance < best.distance) {
-        best = { docPos, globalY, distance };
-      }
-    }
-
+    const best = this.nearestAnchorStartingOn(sourcePage, imageGlobalY, (docPos) => docPos >= sourceFrom && docPos <= sourceTo);
     if (!best) return null;
     const wouldReduce = Math.abs(committedYOffset) - best.distance;
     if (wouldReduce <= RE_ANCHOR_THRESHOLD_PX) return null;
@@ -1017,15 +1004,62 @@ export class PointerController {
     };
   }
 
-  private resolveCrossPageDropYOffset(e: PointerEvent, newDocPos: number): number {
-    if (!this.anchoredDrag) return 0;
+  /**
+   * Where a cross-page drop anchors and its offset from that anchor. The
+   * paragraph under the drop keeps the image if it starts on the drop page;
+   * one carried over from an earlier page gives way, as in Word, to the
+   * nearest paragraph that starts on the drop page.
+   */
+  private resolveCrossPageDrop(e: PointerEvent, newDocPos: number): { docPos: number; yOffset: number } | null {
+    if (!this.anchoredDrag) return null;
     const hit = this.hitTest(e.clientX, e.clientY);
-    if (!hit || hit.gap) return 0;
+    if (!hit || hit.gap) return null;
+    const ghostGlobalY = this.pageLocalYToGlobal(hit.page, hit.docY - this.anchoredDrag.grabOffsetY);
 
-    const ghostTopLocalY = hit.docY - this.anchoredDrag.grabOffsetY;
-    const ghostGlobalY = this.pageLocalYToGlobal(hit.page, ghostTopLocalY);
-    const anchorGlobalY = this.globalYForDocPos(newDocPos, hit.page);
-    return ghostGlobalY - anchorGlobalY;
+    const { doc } = this.deps.editor.getState();
+    const $pos = newDocPos <= doc.content.size ? doc.resolve(newDocPos) : null;
+    const paragraph = $pos?.parent.isTextblock && $pos.depth > 0 ? this.anchorStartOf($pos.before()) : null;
+    if (paragraph && paragraph.page === hit.page) {
+      return { docPos: newDocPos, yOffset: ghostGlobalY - paragraph.globalY };
+    }
+    const nearest = this.nearestAnchorStartingOn(hit.page, ghostGlobalY, () => false);
+    if (nearest) return { docPos: nearest.docPos, yOffset: ghostGlobalY - nearest.globalY };
+    return paragraph ? { docPos: newDocPos, yOffset: ghostGlobalY - paragraph.globalY } : null;
+  }
+
+  /**
+   * The global Y layout measures an anchor in a paragraph from: the top of
+   * the paragraph's first part, which is the anchor flow's start.
+   */
+  private anchorStartGlobalY(pageNumber: number, block: LayoutBlock): number {
+    return this.pageLocalYToGlobal(pageNumber, block.y);
+  }
+
+  /** Where the paragraph at `nodePos` starts, as `anchorStartGlobalY` measures it. */
+  private anchorStartOf(nodePos: number): { page: number; globalY: number } | null {
+    for (const page of this.deps.editor.layout.pages ?? []) {
+      const block = page.blocks.find((b) => b.nodePos === nodePos && !b.isContinuation);
+      if (block) return { page: page.pageNumber, globalY: this.anchorStartGlobalY(page.pageNumber, block) };
+    }
+    return null;
+  }
+
+  /** The paragraph starting on `pageNumber` whose anchor start is nearest `globalY`. */
+  private nearestAnchorStartingOn(
+    pageNumber: number,
+    globalY: number,
+    skip: (docPos: number) => boolean,
+  ): { docPos: number; globalY: number; distance: number } | null {
+    let best: { docPos: number; globalY: number; distance: number } | null = null;
+    for (const block of this.deps.editor.layout.pages?.[pageNumber - 1]?.blocks ?? []) {
+      if (block.kind !== "text" || block.isContinuation) continue;
+      const docPos = block.nodePos + 1;
+      if (skip(docPos)) continue;
+      const start = this.anchorStartGlobalY(pageNumber, block);
+      const distance = Math.abs(globalY - start);
+      if (!best || distance < best.distance) best = { docPos, globalY: start, distance };
+    }
+    return best;
   }
 
   private metricsForPage(pageNumber: number): PageFlowMetrics {
@@ -1068,33 +1102,6 @@ export class PointerController {
       this.pageStartGlobal(pageNumber) +
       (localY - this.metricsForPage(pageNumber).contentTop)
     );
-  }
-
-  private globalYForDocPos(docPos: number, preferredPage: number): number {
-    const { editor } = this.deps;
-    editor.ensurePagePopulated(preferredPage);
-    const coords = editor.charMap.coordsAtPos(docPos, preferredPage);
-    if (coords && coords.page === preferredPage) {
-      return this.pageLocalYToGlobal(coords.page, coords.y);
-    }
-
-    const layout = editor.layout;
-    const page = layout.pages?.[preferredPage - 1];
-    if (page) {
-      let nearestBlockY: number | null = null;
-      for (const block of page.blocks) {
-        const nodeSize = block.node?.nodeSize;
-        const containsDocPos = nodeSize === undefined
-          ? docPos === block.nodePos || docPos === block.nodePos + 1
-          : docPos >= block.nodePos && docPos <= block.nodePos + nodeSize;
-        if (containsDocPos) {
-          return this.pageLocalYToGlobal(preferredPage, block.y);
-        }
-        if (block.nodePos <= docPos) nearestBlockY = block.y;
-      }
-      if (nearestBlockY !== null) return this.pageLocalYToGlobal(preferredPage, nearestBlockY);
-    }
-    return this.pageStartGlobal(preferredPage);
   }
 
   /**
