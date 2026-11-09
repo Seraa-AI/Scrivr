@@ -859,21 +859,22 @@ describe("float beside a table — the table moves below the float", () => {
       });
 
       // An image dragged up over the lines above its paragraph, when that
-      // paragraph is the last on the page: the lines it covers move below it
+      // paragraph is near the page bottom: the lines it covers move below it
       // and push the paragraph onto the next page, the image follows, the
-      // lines come back, and so does the paragraph. It must still end on its
-      // paragraph's page, with no text under it.
-      it("43: an image whose paragraph flips between pages ends on its page with no text under it", () => {
+      // lines come back, and so does the paragraph. Wherever the paragraph
+      // starts, the image must end on its page with no text under it.
+      it("43: an image dragged up in a paragraph near the page bottom ends on its page with no text under it", () => {
         const count = fillersOnPage1([]);
-        const plain = layout(docOf(...Array.from({ length: count - 1 }, (_, k) => filler(k)), para("Flip")));
-        const flipY = blockWith(plain, "Flip").y;
-        const coverFrom = must(blocksOf(plain).filter((b) => b.text.startsWith("Filler ")).at(-3), "filler").y;
-        const l = expectStable(docOf(
-          ...Array.from({ length: count - 1 }, (_, k) => filler(k)),
-          para("Flip", image({ wrapMode: "top-bottom", width: 200, height: 80, yOffset: coverFrom - flipY })),
-        ));
-        expect(textUnderFloats(l)).toEqual([]);
-        expectFloatsOnAnchorPages(l);
+        for (let n = count - 12; n <= count; n++) {
+          for (const yOffset of [-40, -100]) {
+            const l = expectStable(docOf(
+              ...Array.from({ length: n }, (_, k) => filler(k)),
+              para("Flip", image({ wrapMode: "top-bottom", width: 127, height: 160, yOffset })),
+            ));
+            expect(textUnderFloats(l), `${n} fillers, yOffset ${yOffset}`).toEqual([]);
+            expectFloatsOnAnchorPages(l);
+          }
+        }
       });
 
       it("44: a paragraph that runs onto the next page keeps its wrap on both pages", () => {

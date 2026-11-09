@@ -146,7 +146,7 @@ interface PlacedFloat {
   /**
    * Where the float goes, and where its anchor flow must start, given where
    * that flow would start on its own. A locked float stays where it is and
-   * no longer pushes its anchor; it moves only when its anchor reaches a
+   * holds its anchor on its page; it moves only when its anchor reaches a
    * later page.
    */
   place(anchorFlowStart: number): FloatPlace;
@@ -438,7 +438,9 @@ export function resolveAnchoredObjects(
     const place = (anchorFlowStart: number): FloatPlace => {
       const fresh = placeFresh(anchorFlowStart);
       if (!self.locked || fresh.placement.page > self.placement.page) return fresh;
-      return { placement: self.placement, anchorStart: anchorFlowStart };
+      const page = self.placement.page;
+      const held = barriers.pageForGlobalY(anchorFlowStart) < page ? barriers.pageStartGlobal(page) : anchorFlowStart;
+      return { placement: self.placement, anchorStart: held };
     };
 
     // The zone may not reach above the anchor on the strength of its margin
