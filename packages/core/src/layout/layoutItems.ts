@@ -243,8 +243,8 @@ export function itemSpacing(
 
 /**
  * How far a marker pushes the block's first line of text: not at all unless
- * the marker reaches the text, and then to a space past the marker. A float
- * that moves the line `lineStart` in moves the marker with it.
+ * the marker reaches the text, and then to where the marker ends, as Word
+ * does. A float that moves the line `lineStart` in moves the marker with it.
  */
 function markerFirstLineOffset(
   placement: MarkerPlacement,
@@ -256,8 +256,7 @@ function markerFirstLineOffset(
   const face = markerFaceOf(lines);
   const textStart = placement.indentLeft + lineStart + ownIndent;
   const markerEnd = markerStartOf(placement, lineStart) + placement.marker.width(face, measurer);
-  if (markerEnd < textStart) return 0;
-  return markerEnd + measurer.measureWidth(" ", face.font) - textStart;
+  return Math.max(0, markerEnd - textStart);
 }
 
 /**

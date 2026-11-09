@@ -139,7 +139,7 @@ function listInCellTable() {
         type: "tableRow",
         content: [
           { type: "tableCell", content: [numbered(1000, item("Unbelievably"), item("Long words"))] },
-          bodyCell("In a narrow cell the text follows 1000. after a space, as it does anywhere a number reaches its text."),
+          bodyCell("In a narrow cell the text starts where 1000. ends, as it does anywhere a number reaches its text."),
         ],
       },
     ],
@@ -561,12 +561,12 @@ const DEMO_DOC = {
       attrs: { level: 3, align: "left" },
       content: [{ type: "text", text: "Wide numbers and marker faces" }],
     },
-    para("This list starts at 98. Once the number grows wider than its quarter-inch hang, the first line starts a space after it instead of running into it."),
+    para("This list starts at 98. Once the number grows wider than its quarter-inch hang, the first line starts where it ends instead of running into it, as in Word."),
     numbered(
       98,
       item("Ninety-eight fits in the hang"),
       item("Ninety-nine still fits"),
-      item("One hundred is wider than the hang, so this line starts a space after the number while the lines that wrap below it keep the item's indent."),
+      item("One hundred is wider than the hang, so this line starts where the number ends while the lines that wrap below it keep the item's indent."),
     ),
     numbered(
       1,
@@ -591,7 +591,7 @@ const DEMO_DOC = {
       item(
         withImage(
           { src: "https://picsum.photos/seed/listsquare/150/130", alt: "Square image beside a list", width: 150, height: 130, wrapMode: "square", xAlign: "left" },
-          "A square image anchored in a list item pushes the item, number and all, to its right: the number starts at the image's edge and the text a space after it.",
+          "A square image anchored in a list item pushes the item, number and all, to its right: the number starts at the image's edge and the text where the number ends.",
         ),
       ),
       item("The next items stay beside the image until it ends, each with its number in front of its own text."),

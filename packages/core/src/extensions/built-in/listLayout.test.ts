@@ -128,7 +128,7 @@ describe("list geometry (Word's built-in lists)", () => {
   });
 });
 
-describe("a number too wide for its hanging indent (the text follows it after a space)", () => {
+describe("a number too wide for its hanging indent (the text starts where it ends, as in Word)", () => {
   /**
    * A list item whose number, measured in the item's own font, is `minWidth`
    * to `maxWidth` wide — found by measuring, not assumed, so the test asks the
@@ -177,15 +177,15 @@ describe("a number too wide for its hanging indent (the text follows it after a 
     };
     const wide = blockOf(laidOut([float, olFrom(100, item(text))]), text);
     const numberEnd = (wide.marker?.x ?? 0) + measureTextWidth("100.", fontOf(wide));
-    expect(wide.x + firstLineStart(wide)).toBeGreaterThan(numberEnd);
+    expect(wide.x + firstLineStart(wide)).toBeGreaterThanOrEqual(numberEnd - 0.5);
   });
 
-  it("starts the first line a space after a wide number, and only the first line", () => {
+  it("starts the first line where a wide number ends, and only the first line", () => {
     const text = "wide ".repeat(60).trim();
     const wide = blockOf(laidOut([olFrom(1000, item(text))]), text);
     const firstTextX = wide.x + firstLineStart(wide);
     const numberEnd = (wide.marker?.x ?? 0) + measureTextWidth("1000.", fontOf(wide));
-    expect(firstTextX - numberEnd).toBeCloseTo(measureTextWidth(" ", fontOf(wide)), 0);
+    expect(firstTextX - numberEnd).toBeCloseTo(0, 0);
     for (const line of wide.lines.slice(1)) expect(line.spans[0]?.x).toBe(0);
   });
 
@@ -213,7 +213,7 @@ describe("a number too wide for its hanging indent (the text follows it after a 
     expect(overNumber).toEqual([]);
   });
 
-  it("follows the number with a space nine levels deep on a narrow page", () => {
+  it("starts the text where the number ends, nine levels deep on a narrow page", () => {
     // The text is held an inch wide here. The number is chosen by measuring,
     // so that it reaches the text and still leaves room for the first word
     // after it, on any fonts.
@@ -235,8 +235,7 @@ describe("a number too wide for its hanging indent (the text follows it after a 
 
     const block = blockOf(laidOut(deep(fitting), narrow), "deep text");
     const { textStart, numberEnd } = textAndNumber(block);
-    expect(textStart).toBeGreaterThan(numberEnd);
-    expect(textStart - numberEnd).toBeLessThan(QUARTER_INCH);
+    expect(textStart - numberEnd).toBeCloseTo(0, 0);
   });
 });
 
@@ -403,7 +402,7 @@ describe("a first word that does not fit after its number (Word leaves the numbe
     const marker = markerAnchorOf(block);
     expect(marker?.baseline).toBeCloseTo(textTop + (textLine?.ascent ?? 0), 6);
     const firstSpan = textLine?.spans.find((span) => span.kind === "text");
-    expect(block.x + (firstSpan?.x ?? 0)).toBeGreaterThan((block.marker?.x ?? 0) + measureTextWidth("100.", fontOf(block)));
+    expect(block.x + (firstSpan?.x ?? 0)).toBeGreaterThanOrEqual((block.marker?.x ?? 0) + measureTextWidth("100.", fontOf(block)) - 0.5);
   });
 
   it("moves Down and Up across a full-width image's gap in a plain paragraph", () => {
@@ -430,7 +429,7 @@ describe("a first word that does not fit after its number (Word leaves the numbe
     editor.destroy();
   });
 
-  it("moves the number past a float on the item's left, and the text a space after it", () => {
+  it("moves the number past a float on the item's left, and the text to where it ends", () => {
     const float: Json = { type: "paragraph", content: [
       { type: "image", attrs: { src: "data:image/png;base64,AA==", width: 150, height: 200, wrapMode: "square", xAlign: "left" } },
       { type: "text", text: "anchor" },
@@ -447,7 +446,7 @@ describe("a first word that does not fit after its number (Word leaves the numbe
       const textX = block.x + firstLineStart(block);
       expect(marker?.x).toBeGreaterThanOrEqual(f.x + f.width + ANCHORED_OBJECT_MARGIN - 0.5);
       const numberEnd = (marker?.x ?? 0) + measureTextWidth(number, fontOf(block));
-      expect(textX - numberEnd).toBeCloseTo(measureTextWidth(" ", fontOf(block)), 0);
+      expect(textX - numberEnd).toBeCloseTo(0, 0);
     }
   });
 
@@ -459,7 +458,7 @@ describe("a first word that does not fit after its number (Word leaves the numbe
     const block = blockOf(laidOut([float, olFrom(100, item(`${word} tail`))]), `${word} tail`);
     const textLine = block.lines.find((line) => line.spans.some((span) => span.kind === "text"));
     const first = textLine?.spans.find((span) => span.kind === "text");
-    expect(block.x + (first?.x ?? 0)).toBeGreaterThan((block.marker?.x ?? 0) + measureTextWidth("100.", fontOf(block)));
+    expect(block.x + (first?.x ?? 0)).toBeGreaterThanOrEqual((block.marker?.x ?? 0) + measureTextWidth("100.", fontOf(block)) - 0.5);
   });
 
   it("never lets an indented paragraph's first word run into a float beside it", () => {
@@ -1095,7 +1094,7 @@ describe("a list inside a table cell", () => {
         const cellRight = cell.x + cell.width;
         const wordFitsCell = word.width <= cell.width - 2 * CELL_PADDING_H;
         const where = `${columns} columns, order ${order}`;
-        if (lineIndex === 0 && wordStart <= numberEnd) faults.push(`${where}: over the number`);
+        if (lineIndex === 0 && wordStart < numberEnd - 0.5) faults.push(`${where}: over the number`);
         if (wordFitsCell && wordStart + word.width > cellRight) faults.push(`${where}: past the cell`);
       }
     }
@@ -1118,7 +1117,7 @@ describe("a list inside a table cell", () => {
     const first = blockOf(cell.blocks, "first");
     const markerX = first.marker?.x ?? Number.NEGATIVE_INFINITY;
     expect(markerX).toBeGreaterThanOrEqual(cell.x);
-    expect(first.x + firstLineStart(first)).toBeGreaterThan(markerX + measureTextWidth("1.", fontOf(first)));
+    expect(first.x + firstLineStart(first)).toBeGreaterThanOrEqual(markerX + measureTextWidth("1.", fontOf(first)) - 0.5);
   });
 });
 
