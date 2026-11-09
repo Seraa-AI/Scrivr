@@ -93,7 +93,7 @@ export class PointerController {
     anchorGlobalY: number;
     /** Image's painted globalY at gesture start. Used to derive yOffset on commit. */
     startImageGlobalY: number;
-    /** yOffset attr value at pointerdown (= startImageGlobalY - anchorGlobalY). */
+    /** The image's offset from its anchor at pointerdown, stacking excluded. */
     startYOffset: number;
     /** wrapMode at pointerdown. */
     wrapMode: string;
@@ -476,7 +476,7 @@ export class PointerController {
         startImageX: anchoredHit.x,
         anchorGlobalY: anchoredHit.anchorGlobalY,
         startImageGlobalY: anchoredHit.globalY,
-        startYOffset: anchoredHit.globalY - anchoredHit.anchorGlobalY,
+        startYOffset: anchoredHit.globalY - (anchoredHit.stackOffset ?? 0) - anchoredHit.anchorGlobalY,
         wrapMode: anchoredHit.wrapMode,
         rect: {
           x: anchoredHit.x,

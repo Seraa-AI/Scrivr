@@ -302,6 +302,37 @@ describe("PointerController — drag UX", () => {
       expect(setNodeAttrs).not.toHaveBeenCalled();
     });
 
+    it("a stacked float nudged a few px changes its yOffset by exactly that, and keeps its anchor", () => {
+      setup = makePointerControllerSetup({ isPageless: true });
+      // Anchor paragraph at y=50; the float stacked 112px below where its
+      // yOffset (0) puts it, beside the next paragraph.
+      const stackOffset = 112;
+      const sourceBlock = { nodePos: 4, y: 50, height: 100 };
+      const besideBlock = { nodePos: 20, y: 150, height: 100 };
+      const stacked: AnchoredObjectPlacement = {
+        ...makePlacement(setup, { y: SQUARE_RECT.y + stackOffset }),
+        anchorGlobalY: SQUARE_RECT.y,
+        stackOffset,
+      };
+      overrideLayout(setup.editor, {
+        anchoredObjects: [stacked],
+        pages: [
+          { pageNumber: 1, blocks: [sourceBlock, besideBlock] },
+        ] satisfies { pageNumber: number; blocks: LayoutBlockFixture[] }[],
+      });
+      vi.spyOn(setup.editor.charMap, "posAtCoords").mockReturnValue(5);
+      const setNodeAttrs = vi.spyOn(setup.editor, "setNodeAttrs").mockImplementation(() => {});
+      const moveAndUpdateNode = vi.spyOn(setup.editor, "moveAndUpdateNode").mockReturnValue(true);
+
+      const grabY = stacked.y + 30;
+      mousedown(setup.container, SQUARE_RECT.x + 30, grabY);
+      mousemove(SQUARE_RECT.x + 30, grabY + 5);
+      mouseup(SQUARE_RECT.x + 30, grabY + 5);
+
+      expect(setNodeAttrs).toHaveBeenCalledWith(5, { yOffset: 5 });
+      expect(moveAndUpdateNode).not.toHaveBeenCalled();
+    });
+
     it("no closer paragraph → keeps the original anchor (setNodeAttrs path)", () => {
       setup = makePointerControllerSetup({ isPageless: true });
       const sourceBlock = { nodePos: 4, y: 50, height: 100 };

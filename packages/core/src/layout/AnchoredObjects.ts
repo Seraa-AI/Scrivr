@@ -281,11 +281,18 @@ export interface AnchoredObjectPlacement {
   anchorGlobalY: number;
   anchorPage: number;
   /**
-   * Painted top in continuous global-Y. Equals `anchorGlobalY + yOffset`
-   * after the page-edge clamp. Single source of truth for paint coords,
-   * exclusion rects, hit-testing, and PDF export.
+   * Painted top in continuous global-Y: `anchorGlobalY + yOffset`, clamped to
+   * the anchor's page, plus `stackOffset`. Single source of truth for paint
+   * coords, exclusion rects, hit-testing, and PDF export.
    */
   globalY: number;
+  /**
+   * How far the solver moved the image down so it does not overlap a square
+   * float placed before it. It is the image's own, not the user's: a drag
+   * starts from `globalY - stackOffset - anchorGlobalY`, never from
+   * `globalY - anchorGlobalY`. Absent when the image is not stacked.
+   */
+  stackOffset?: number;
   /**
    * True if the user-set `yOffset` was clamped to keep the image on its
    * anchor's page. Drag overlay reads this to render an explicit boundary
