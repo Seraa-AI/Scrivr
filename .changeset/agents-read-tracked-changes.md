@@ -68,18 +68,22 @@ One-time changes to watch for:
 - **Block ids are now unique after a split.** `UniqueId` gives the block an
   edit creates — a split's new half, a list Enter's new item, a pasted copy
   (rules and page breaks included) — a fresh id when another block already
-  carries its id. The copy holding the original content keeps it: Enter at a
-  paragraph's start makes the empty line before it the new block. Only the
+  carries its id. The copy holding the block's first words keeps it: Enter at
+  the start of a paragraph or a list item makes the empty one before it the
+  new block. Only the
   author's client assigns it; a change arriving through sync is never
   re-keyed, and undo and redo never rename. A pending move's two copies still
   share their id. A tracked cut pasted elsewhere is a move, as Word tracks it,
-  so the pasted block keeps its id (approved by the user, 2026-11-09).
+  so a pasted block the cut took whole keeps its id (approved by the user,
+  2026-11-09). A pasted copy of a block that is still in place is not that
+  cut, even when it reads the same.
   Documents saved with duplicates keep them; edits never repair them.
-- **An agent's edit to a block proposed for deletion is rejected**, and every
-  agent write path — `applyRichEdit` and the structural ops — rejects an id
-  two live blocks carry rather than acting on the first. That can happen in a
-  document saved with duplicates, or after concurrent cut-and-paste of one
-  block in collaboration.
+- **An agent's edit to a block proposed for deletion is rejected.**
+  `findLiveNodeById` returns `null` for an id two live blocks carry, so every
+  write that resolves an id through it — the agent's edits and structural ops,
+  ghost text, suggestions, image layout — refuses that id rather than acting
+  on the first copy. That can happen in a document saved with duplicates, or
+  after concurrent cut-and-paste of one block in collaboration.
 - `blockIdOf(node)` is exported from `@scrivr/core` (approved by the user,
   2026-11-09): the one answer to which nodes carry a block id. An empty
   `nodeId` counts as none, so `UniqueId` now stamps it as it stamps `null`.

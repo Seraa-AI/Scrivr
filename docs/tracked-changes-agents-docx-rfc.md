@@ -423,7 +423,15 @@ record means:
   an agent edits by id, so reading both would give two targets for one block.
   A block proposed for deletion stays. It reads `text: ""` with its `suggestedDelete`, so an
   agent can see and review it. An edit to it is already reported as rejected,
-  because `findLiveNodeById` returns null. See D9.
+  because `findLiveNodeById` returns null. See D9. Units and parts are paired
+  with the blocks they were read from by id — the k-th unit under an id with
+  the k-th block carrying it — through `blockIdOf`.
+  *Known limit:* "a pending move" here means a drag-move, paired by
+  `moveNodeId`. The block a tracked cut leaves behind when it is pasted
+  elsewhere (paired by `moveId`) still reads, as a block proposed for deletion
+  under the pasted block's id. Widening `isMoveShadow` to `moveId` would change
+  `reviewPlan`: rejecting an unrelated Enter after a cut-and-paste becomes
+  `blocked` on the cut's deletion. Waiting on a decision.
 
 ### Block ids are unique at the source (D13)
 
@@ -439,16 +447,19 @@ another block in the document already carries.* After a batch of local,
 authored transactions, `UniqueId`'s `appendTransaction` finds every id carried
 by more than one block. A copy that was already there before the batch keeps
 it — on the copy now holding its content: where the original's content start
-mapped through the batch (a leaf, which has no content, by its own position).
+mapped through the batch — the start of its first textblock's content, so a
+list item follows its first paragraph's words (a leaf, which has no content,
+by its own position). A block the batch removed whole keeps nothing.
 Any copy the batch created gets a fresh id, in the same appended transaction
 that fills empty ids (`NORMALIZATION_META`, nobody's edit). Which nodes carry a
 block id, and what counts as one, is one predicate, core's `blockIdOf`, leaves
 included. So:
 
-- a split or a list Enter: the half holding the original content keeps the id
-  and the other half is new. Enter at the very start of a paragraph leaves the
-  paragraph its id and makes the empty line before it the new block, as Word
-  inserts an empty paragraph;
+- a split or a list Enter: the half holding the original's first words keeps
+  the id and the other half is new. Enter at the very start of a paragraph or
+  a list item — or over a selection that starts there — leaves it its ids and
+  makes the empty one before it the new block, as Word inserts an empty
+  paragraph;
 - pasting a copy of a block — a horizontal rule or page break included — into
   the same document: the pasted copy gets a fresh id;
 - a move inside one transaction (delete at the old place, insert at the new)
@@ -468,8 +479,11 @@ putting the moved block back where it was as a deleted copy — the left-behind
 copy — under the same id, so the two read as one block with a pending
 decision. On every later edit both copies were there before the batch, so
 neither is renamed. Accepting or rejecting the move removes one copy. A cut
-pasted elsewhere is tracked as a move, as Word tracks it, so the pasted block
-keeps its id too. This is the only sharing the rule allows.
+pasted elsewhere is tracked as a move, as Word tracks it, so a pasted block
+the cut took whole keeps its id too. A paste is that cut only when its text
+matches and no block it writes whole names a block the cut left in place: a
+copy of another block that reads the same is a paste, not the move. This is
+the only sharing the rule allows.
 
 **Why track changes also clears ids when it writes back.** Recording an edit,
 the engine undoes the author's step and writes it again from the step's
@@ -479,7 +493,9 @@ already have re-keyed that copy, and the replay would put the stale id back.
 Core cannot tell from the document which written content is a move's
 left-behind copy and must keep its id; only track changes knows. So the engine
 clears, in what it writes, any block id the document already carries — except
-for moved content — and `UniqueId`'s fill gives each cleared block its own.
+for content a drag-move carries, and, for a pasted cut, an id whose other copy
+the cut deleted whole — and `UniqueId`'s fill gives each cleared block its
+own.
 Core owns the rule and the predicate; the engine applies it to the content it
 writes.
 
@@ -494,8 +510,9 @@ id: two peers cutting and pasting the same block while apart each paste a copy
 under its id, and the merge keeps both (a test pins this); and a peer's own Y
 undo after another peer's paste is applied as a sync, so `UniqueId` skips it.
 Repairing these deterministically on every peer is a design change and is not
-part of this work. Agents stay safe: every agent write path refuses an id two
-live blocks carry.
+part of this work. Agents stay safe: `findLiveNodeById` names no block for an
+id two live blocks carry, so every write that resolves an id through it
+refuses that id.
 
 **Existing documents.** Decided by the user on 2026-11-08: documents saved with
 duplicate ids are **not repaired**. Reads never assign ids (`ServerEditor`
@@ -505,8 +522,9 @@ tracking, and renaming a move's copy would break the move. Repair is a
 follow-up. Readers stay correct on such a document: an agent's unit is matched
 by its id and whether it is proposed for deletion
 (`SemanticUnit.proposedForDeletion`), a write by id goes to the live copy, and
-an id two *live* blocks carry is refused by every agent write path — rich edits
-and structural ops alike.
+an id two *live* blocks carry is refused by `findLiveNodeById`, and so by every
+write that resolves ids through it — rich edits, structural ops, ghost text,
+suggestions and image layout alike.
 
 **Header and footer surfaces.** Their editors (`surfaces.ts`) do not run
 `UniqueId`, so an Enter there still duplicates an id. Nothing reads header or
@@ -520,8 +538,17 @@ matches a handed-back unit by id and by whether it is proposed for deletion.
 **Track-changes splits.** A tracked split records itself by record ids —
 `node_split` on the second half, `reference` on the first, pointing at the
 split's record id — never by `nodeId`. Accepting keeps both halves with
-distinct ids. Rejecting rejoins them under the paragraph's own id: the first
-half's, or the second's when the break was at the paragraph's very start.
+distinct ids. Rejecting rejoins them under the id the paragraph had before the
+split, which the `reference` record carries as `originalNodeId`, written when
+the split is recorded (approved by the user, 2026-11-09). It is read from the
+block before the author's step, so neither later typing, nor emptying a half,
+nor the order extensions are registered in changes it. A document clone
+re-keys it with the block it names.
+*Known limit:* a tracked Enter inside a list item is recorded as an insertion
+of the second item, not as a split, so it carries no `originalNodeId`. With
+the item's ids now on the item holding its words, rejecting an Enter at an
+item's very start rejoins the text into the first, freshly keyed item, and
+the item's ids are lost. Waiting on a decision.
 
 ### PR B: DOCX revisions
 
@@ -885,6 +912,9 @@ Approved by the user on 2026-11-09:
   carry a block id, which track changes' write-back shares with `UniqueId`.
 - A tracked cut-and-paste keeps the block's id as a move, matching Word, which
   tracks cut and paste as a move.
+- `ReferenceAttrs.originalNodeId` — the id a block had when a tracked split
+  was made, so rejecting the split restores it instead of guessing from what
+  the halves hold at the time of the reject.
 
 Added in the third review round, approved by the user on 2026-11-08:
 
@@ -941,20 +971,25 @@ Added in the third review round, approved by the user on 2026-11-08:
   block an authored local edit creates under an id another block carries;
   track changes marks its recording transaction `NORMALIZATION_META` and, when
   it writes a split or an insertion back, clears ids the document already has
-  so `UniqueId` fills them. A move — a cut pasted elsewhere included — keeps
-  the moved block's id. Undo and redo are not authored, so they never rename a
-  pending move's copy. The copy holding a split's original content keeps the
-  id (Enter at a paragraph's start makes the empty line the new block), and a
-  rejected split rejoins under the paragraph's own id. One predicate,
-  `blockIdOf`, decides which nodes carry an id, leaves included. Tested with
+  so `UniqueId` fills them. A drag-move keeps the moved block's id; a pasted
+  cut keeps only ids whose other copy the cut deleted whole, and a paste whose
+  whole blocks name a block the cut left in place is not that cut. Undo and
+  redo are not authored, so they never rename a pending move's copy. The copy
+  holding a block's first words keeps the id (Enter at the start of a
+  paragraph or list item makes the empty one the new block), and a rejected
+  split rejoins under the id recorded on its `reference` as `originalNodeId`.
+  One predicate, `blockIdOf`, decides which nodes carry an id, leaves
+  included; an empty id counts as none, so `UniqueId` stamps it. Tested with
   two Yjs peers, untracked and tracked: the receiving peer gets the author's
   ids and mints none.
-- **Every agent write path refuses an id two live blocks carry** — rich edits
-  and structural ops alike. That happens in a document saved before D13, and
-  in the collaboration cases D13 lists as a known limitation. `applyRichEdit`
-  matches a handed-back unit by its id and whether it was read as proposed for
-  deletion — no copy counting — and `unitsToRead` leaves out a move's
-  left-behind copy by where its block is.
+- **`findLiveNodeById` names no block for an id two live blocks carry,** so
+  every write that resolves ids through it refuses one — rich edits,
+  structural ops, ghost text, suggestions, image layout. That happens in a
+  document saved before D13, and in the collaboration cases D13 lists as a
+  known limitation. `applyRichEdit` matches a handed-back unit by its id and
+  whether it was read as proposed for deletion — no copy counting — and
+  `unitsToRead` pairs units and parts with their blocks by id and leaves out a
+  drag-move's left-behind copy by where its block is.
 - **`findChanges` and the paint colours look operations up in maps**, guarded
   on a string, so a synced record naming `""`, `"toString"` or `"__proto__"`
   neither breaks loading nor paints a bogus frame.
@@ -975,6 +1010,17 @@ Added in the third review round, approved by the user on 2026-11-08:
   across peers is a follow-up.
 - Header and footer surfaces do not run `UniqueId`; PR B must close this before
   it reads their ids.
+- The block a tracked cut leaves behind when pasted elsewhere still reads in
+  `getRichBlocks`, as a block proposed for deletion under the pasted block's
+  id. Leaving it out needs `isMoveShadow` to know `moveId`, which would change
+  `reviewPlan` (rejecting an unrelated Enter after a cut-and-paste becomes
+  `blocked`). Waiting on a decision.
+- A tracked Enter at a list item's very start, rejected, loses the item's
+  ids: the engine records a list Enter as an insertion of the second item, not
+  a split, so no `originalNodeId` is written. Waiting on a decision.
+- Cutting a block a pending drag-move put in place throws in the engine
+  (`changeMovedToInsertsOnSourceDeletion`, "No node at given position"). Found
+  while probing; not investigated or fixed here.
 - Deleting text across a hard break ("b⏎c") reads as three changes, because
   the engine records three acts, and a reviewer decides three. The lane follows
   `changeActs`.

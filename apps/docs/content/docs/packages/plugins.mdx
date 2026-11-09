@@ -172,20 +172,22 @@ moved block carries the same id. Two lookups answer two different questions:
 
 | Lookup | From | Returns | Use it to |
 |--------|------|---------|-----------|
-| `findLiveNodeById(doc, nodeId)` | `@scrivr/plugins` (also `@scrivr/ai`) | The block a person sees, skipping a copy left by a pending deletion. `null` if only such a copy has the id. | Read or write the block an agent's edit or a suggestion means. |
+| `findLiveNodeById(doc, nodeId)` | `@scrivr/plugins` (also `@scrivr/ai`) | The block a person sees, skipping a copy left by a pending deletion. `null` if only such a copy has the id, or if two live blocks carry it. | Read or write the block an agent's edit or a suggestion means. |
 | `findNodeById(doc, nodeId, accept?)` | `@scrivr/core` (also `@scrivr/ai`) | The first node with the id, in document order, copy or not. `accept` skips nodes it refuses. | Ask whether an id is in the document at all, or look up a block in a document without track changes. |
 
 Without track changes the two return the same node.
 
-The AI toolkit reads with `findLiveNodeById`, so the copy a pending move leaves
-behind is left out of `getRichBlocks`: an agent reads one unit per id, the live
-one. A block proposed for deletion has no live copy, so it stays in
+`getRichBlocks` leaves out the copy a pending drag-move leaves behind, so an
+agent reads that block once, where it went. The block a tracked cut leaves
+behind when it is pasted elsewhere is not left out: it reads as a block
+proposed for deletion. Any block proposed for deletion stays in
 `getRichBlocks`. It reads `text: ""` and `proposedForDeletion: true`, with its
 deletion in `changes`, and it cannot be edited (an edit to it comes back
-`rejected`). Block ids are unique: a split, a list Enter or a paste gives the
-new block its own id. In a document saved before that held, or after
-concurrent cut-and-paste of one block in collaboration, two live blocks can
-share an id; every agent write by that id is refused rather than guessed.
+`rejected`). An edit creates no duplicate ids: a split, a list Enter or a paste
+gives the new block its own id. A document saved with duplicates keeps them,
+and collaboration can still make one: two people cutting and pasting the same
+block at once. `findLiveNodeById` names no block for an id two live blocks
+carry, so every agent write by that id is refused rather than guessed.
 Block markers and
 citations still reach it, since it is on screen, struck through, until someone
 decides it.
