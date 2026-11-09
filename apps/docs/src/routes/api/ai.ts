@@ -43,8 +43,11 @@ const DocUnitSchema = z.object({
     text: z.string(),
     id: z.string().optional(),
     at: z.number().int().optional(),
+    length: z.number().int().optional(),
     authorId: z.string().optional(),
     oldAttrs: z.record(z.string(), z.unknown()).optional(),
+    /** For a formatting change, the formatting the text has in the proposed version. */
+    nowAttrs: z.record(z.string(), z.unknown()).optional(),
     /** The src of an image the change inserts or deletes. */
     image: z.string().optional(),
   })).optional(),
@@ -58,17 +61,27 @@ const CHANGE_VERBS: Record<DocChange["type"], string> = {
   suggestedAttrs: "format",
 };
 
+/** The words a change covers in its block's text, when it says where. */
+function coveredText(change: DocChange, unitText: string): string | undefined {
+  if (change.at === undefined || change.length === undefined || change.length === 0) return undefined;
+  return unitText.slice(change.at, change.at + change.length);
+}
+
 /** What a change adds, removes or changes, as the agent reads it. */
-function changeSubject(change: DocChange): string {
-  if (change.type === "suggestedAttrs") return `was ${JSON.stringify(change.oldAttrs ?? {})}`;
+function changeSubject(change: DocChange, unitText: string): string {
+  if (change.type === "suggestedAttrs") {
+    const covered = coveredText(change, unitText);
+    const now = change.nowAttrs ? `, now ${JSON.stringify(change.nowAttrs)}` : "";
+    return `${covered !== undefined ? `${JSON.stringify(covered)} ` : ""}was ${JSON.stringify(change.oldAttrs ?? {})}${now}`;
+  }
   return change.image ? `image ${change.image}` : JSON.stringify(change.text);
 }
 
 /** One pending change: what it does, where in the block's text, whose, and the id to review it by. */
-function describeChange(change: DocChange, showsText: boolean): string {
-  const at = showsText && change.at !== undefined ? ` at ${change.at}` : "";
+function describeChange(change: DocChange, unitText: string | undefined): string {
+  const at = unitText !== undefined && change.at !== undefined ? ` at ${change.at}` : "";
   const by = change.authorId ? ` by ${change.authorId}` : "";
-  return `  pending ${CHANGE_VERBS[change.type]} ${changeSubject(change)}${at}${by}${change.id ? ` (id ${change.id})` : ""}`;
+  return `  pending ${CHANGE_VERBS[change.type]} ${changeSubject(change, unitText ?? "")}${at}${by}${change.id ? ` (id ${change.id})` : ""}`;
 }
 
 const RequestBodySchema = z.object({
@@ -96,7 +109,8 @@ export const Route = createFileRoute("/api/ai")({
             "is the proposed version: pending insertions are in it, pending deletions are not. A block's",
             "pending changes are listed under it, each with the id to review it by and, where given, `at`:",
             "the character offset into that block's `text` line. The two halves of a replacement or a move",
-            "are listed under one id. A block proposed for deletion reads empty. To put something at the end",
+            "are listed under one id. A format change names the words it covers, the formatting they had",
+            "(`was`) and the formatting the change gives them (`now`). A block proposed for deletion reads empty. To put something at the end",
             "of the document, place it after the block marked `last block`.",
             "",
           );
@@ -116,7 +130,7 @@ export const Route = createFileRoute("/api/ai")({
                 docContextLines.push(`  - nodeId: ${part.nodeId}${gone} — ${part.text}`);
               }
             }
-            for (const change of u.changes ?? []) docContextLines.push(describeChange(change, !u.image));
+            for (const change of u.changes ?? []) docContextLines.push(describeChange(change, u.image ? undefined : u.text));
             docContextLines.push("");
           }
         } else if (context) {
@@ -144,7 +158,8 @@ export const Route = createFileRoute("/api/ai")({
           "  (a paragraph becomes a heading), 0 makes a heading a paragraph.",
           "- To accept or reject pending changes → `review_changes(accepted, rejected)` with the ids listed under the",
           "  blocks; both halves of a replacement or a move are listed under one id, which decides both. Only when the",
-          "  user asks you to review. The result says what was decided, or why not.",
+          "  user asks you to review. The result says what was decided, or why not. A decided change is no longer",
+          "  pending, so it is gone from the document content you see next: that is the review having worked.",
           "- You MAY include a short text message (1-2 sentences) explaining what you are doing.",
           "- NEVER write suggested content only in a text reply — always put it in a tool call.",
           "- If the user is asking a general question (not requesting new content), reply with text only.",

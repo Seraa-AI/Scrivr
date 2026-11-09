@@ -2,7 +2,7 @@ import { useRef, useEffect, useMemo, useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls } from "ai";
 import type { UIMessage, DataUIPart } from "ai";
-import type { Editor } from "@scrivr/core";
+import type { Editor, InlineSpan } from "@scrivr/core";
 import { getAiToolkit, parseSemanticEdits } from "@scrivr/ai";
 import type { DocUnit, ToolOutputData } from "../routes/api/ai";
 import { clearAgentDebug, downloadAgentDebug, recordEdit, recordReview, recordThread } from "./agentDebug";
@@ -18,6 +18,18 @@ interface ChatPanelProps {
 
 const stringList = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+
+/** The formatting the proposed text has between `at` and `at + length`. */
+function marksOver(spans: InlineSpan[], at: number, length: number): InlineSpan["marks"] {
+  const marks = new Map<string, InlineSpan["marks"][number]>();
+  let offset = 0;
+  for (const span of spans) {
+    const end = offset + span.text.length;
+    if (offset < at + length && end > at) for (const mark of span.marks) marks.set(JSON.stringify(mark), mark);
+    offset = end;
+  }
+  return [...marks.values()];
+}
 
 function getDocContext(editor: Editor | null): {
   units?: DocUnit[];
@@ -48,13 +60,18 @@ function getDocContext(editor: Editor | null): {
     ...(unit.image ? { image: unit.image } : {}),
     ...(unit.proposedForDeletion ? { proposedForDeletion: true } : {}),
     ...(unit.changes ? {
-      changes: unit.changes.map(({ type, text, id, at, authorId, oldAttrs, image }) => ({
+      changes: unit.changes.map(({ type, text, id, at, length, authorId, oldAttrs, image }) => ({
         type,
         text,
         ...(id ? { id } : {}),
         ...(at !== undefined ? { at } : {}),
+        ...(length !== undefined ? { length } : {}),
         ...(authorId ? { authorId } : {}),
         ...(oldAttrs ? { oldAttrs } : {}),
+        // A formatting change says what the text had; the agent also needs what it has now.
+        ...(oldAttrs && "marks" in oldAttrs && at !== undefined && length !== undefined
+          ? { nowAttrs: { marks: marksOver(unit.spans ?? [{ text: unit.text, marks: [] }], at, length) } }
+          : {}),
         ...(image ? { image: image.src } : {}),
       })),
     } : {}),
