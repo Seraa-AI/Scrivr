@@ -22,7 +22,7 @@ function para(text: string): Node {
 }
 
 function layoutAt(d: Node, pageHeight: number): DocumentLayout {
-  return runPipeline(d, { pageConfig: { ...defaultPageConfig, pageHeight }, fontConfig, measurer: createMeasurer() });
+  return runPipeline(d, { pageConfig: { ...defaultPageConfig, pageHeight }, fontConfig, fontModifiers: manager.buildFontModifiers(), measurer: createMeasurer() });
 }
 
 /** Blocks not at their page's content top nor right after the block above (with or without the gap). */

@@ -124,30 +124,18 @@ export function normalizeFont(font: string): string {
  *
  * @param baseFont  — the font for this block type from FontConfig
  * @param marks     — the marks on this text node from ProseMirror
- * @param modifiers — optional map of mark name → FontModifier from extensions.
- *                    When a modifier is found for a mark, it is called instead
- *                    of the built-in switch fallback.
+ * @param modifiers — mark name → FontModifier, from extensions. A mark with
+ *                    none does not change the font.
  */
 export function resolveFont(
   baseFont: string,
   marks: readonly Mark[],
-  modifiers?: Map<string, FontModifier>
+  modifiers?: ReadonlyMap<string, FontModifier>
 ): string {
   const parsed = parseFont(baseFont);
 
   for (const mark of marks) {
-    const modifier = modifiers?.get(mark.type.name);
-    if (modifier) {
-      modifier(parsed, mark.attrs as Record<string, unknown>);
-    } else {
-      // Fallback for marks without a registered modifier
-      switch (mark.type.name) {
-        case "bold":        parsed.weight = "bold"; break;
-        case "italic":      parsed.style = "italic"; break;
-        case "fontSize":   parsed.size = `${mark.attrs["size"] as number}px`; break;
-        case "fontFamily": parsed.family = mark.attrs["family"] as string; break;
-      }
-    }
+    modifiers?.get(mark.type.name)?.(parsed, mark.attrs);
   }
 
   return buildFont(parsed);

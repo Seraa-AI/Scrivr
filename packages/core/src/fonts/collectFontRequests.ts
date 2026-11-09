@@ -2,7 +2,10 @@ import type { Node as PmNode } from "prosemirror-model";
 import type { DocumentLayout } from "../layout/PageLayout";
 import type { LayoutBlock } from "../layout/BlockLayout";
 import { chromeBlocks } from "../layout/chromeBlocks";
-import type { FontResolutionId } from "./layoutResolver";
+import { parseFont, resolveFont } from "../layout/StyleResolver";
+import { applyPageFont, blockFontOf, defaultFontConfig, type FontConfig } from "../layout/FontConfig";
+import type { FontModifier } from "../extensions/types";
+import { faceOf, type FontResolutionId } from "./layoutResolver";
 import type {
   FontKey,
   FontProvider,
@@ -97,8 +100,18 @@ const keyOf = (key: FontKey): string =>
 export function collectFontRequests(
   doc: PmNode,
   fallback: FontRequest,
-  options: { maxBlocks?: number } = {},
+  options: {
+    maxBlocks?: number;
+    /** The editor's font modifiers: how each mark changes a run's face. */
+    fontModifiers?: ReadonlyMap<string, FontModifier>;
+    /**
+     * The block styles layout draws with, the document's family applied. By
+     * default, the core paragraph style in the fallback's family.
+     */
+    fontConfig?: FontConfig;
+  } = {},
 ): FontRequest[] {
+  const fontConfig = options.fontConfig ?? applyPageFont(defaultFontConfig, fallback.family);
   const found = new Map<string, FontRequest>();
   const add = (family: unknown, weight: number, style: "normal" | "italic") => {
     if (typeof family !== "string" || family.length === 0) return;
@@ -107,26 +120,15 @@ export function collectFontRequests(
   };
 
   const fromText = (node: PmNode, parent: PmNode | null): void => {
-    const bold = node.marks.some((m) => m.type.name === "bold");
-    const italic = node.marks.some((m) => m.type.name === "italic");
-    const weight = bold ? 700 : 400;
-    const style = italic ? "italic" : "normal";
-
-    const mark = node.marks.find((m) => m.type.name === "fontFamily");
-    if (mark) {
-      add(mark.attrs["family"], weight, style);
-      return;
-    }
-    // The block's family is the base for every run inside it, so a bold run in
-    // a Georgia paragraph is Georgia bold. Asking for the default family's
-    // bold instead names a face the layout will never resolve, and the one it
-    // does resolve is then never installed.
-    const inherited = parent?.attrs["fontFamily"];
-    add(
-      typeof inherited === "string" && inherited.length > 0 ? inherited : fallback.family,
-      weight,
-      style,
-    );
+    if (!parent) return;
+    // The face layout draws the run in: its block's font, the marks applied
+    // by the font modifiers. A bold run in a Georgia paragraph is Georgia
+    // bold, and a heading's text is the heading's weight. Asking for any other
+    // face names one the layout will never resolve, and the one it does
+    // resolve is then never installed.
+    const parsed = parseFont(resolveFont(blockFontOf(parent, fontConfig), node.marks, options.fontModifiers));
+    const { weight, style } = faceOf(parsed);
+    add(parsed.family, weight, style);
   };
 
   const fromBlock = (node: PmNode): void => add(node.attrs["fontFamily"], 400, "normal");
@@ -167,9 +169,15 @@ export function collectFontRequests(
 export async function prepareDocumentFonts(
   doc: PmNode,
   provider: FontProvider,
-  constraints?: Parameters<FontProvider["resolve"]>[1],
+  options: {
+    /** The editor's font modifiers and block styles, so each run asks for the face it is drawn in. */
+    fontModifiers?: ReadonlyMap<string, FontModifier>;
+    fontConfig?: FontConfig;
+    constraints?: Parameters<FontProvider["resolve"]>[1];
+  } = {},
 ): Promise<FontShortfall[]> {
-  const requests = collectFontRequests(doc, provider.defaultRequest());
+  const { constraints, ...faces } = options;
+  const requests = collectFontRequests(doc, provider.defaultRequest(), faces);
   await provider.prepare(requests, constraints);
 
   const shortfalls: FontShortfall[] = [];

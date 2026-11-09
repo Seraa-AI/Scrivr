@@ -1,5 +1,6 @@
 import { EditorState, Transaction } from "prosemirror-state";
 import type { FontProvider } from "./fonts/types";
+import type { FontConfig } from "./layout/FontConfig";
 import type { InlineRegistry } from "./layout/BlockRegistry";
 import type { MarkerPainter } from "./layout/markers";
 import { MarkdownSerializer } from "prosemirror-markdown";
@@ -9,6 +10,7 @@ import { ExtensionManager } from "./extensions/ExtensionManager";
 import { StarterKit } from "./extensions/StarterKit";
 import type { Extension } from "./extensions/Extension";
 import type {
+  FontModifier,
   IBaseEditor,
   MarkdownParserTokenSpec,
   SlashCommandSpec,
@@ -530,6 +532,14 @@ export class BaseEditor implements IBaseEditor {
 
   getMarkerPainters(): ReadonlyMap<string, MarkerPainter> {
     return this.manager.getMarkerPainters();
+  }
+
+  getFontModifiers(): ReadonlyMap<string, FontModifier> {
+    return this.manager.buildFontModifiers();
+  }
+
+  getBlockStyles(): FontConfig {
+    return this.manager.buildBlockStyles();
   }
 
   getDocAttrNames(): string[] {

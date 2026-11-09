@@ -39,7 +39,7 @@ export {
   compareAnchoredObjectPaintOrder,
   compareAnchoredObjectHitOrder,
 } from "./AnchoredObjects";
-export { defaultFontConfig, getBlockStyle, DEFAULT_FONT_FAMILY } from "./FontConfig";
+export { applyPageFont, defaultFontConfig, getBlockStyle, DEFAULT_FONT_FAMILY } from "./FontConfig";
 export type { FontConfig, BlockStyle } from "./FontConfig";
 export type {
   PageMetrics,

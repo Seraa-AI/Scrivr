@@ -11,10 +11,12 @@ import { CharacterMap } from "./CharacterMap";
 import {
   FontConfig,
   defaultFontConfig,
+  blockFontOf,
+  blockStyleOf,
   getBlockStyle,
   BlockStyle,
 } from "./FontConfig";
-import { resolveFont, substituteFamily, parseFont } from "./StyleResolver";
+import { resolveFont, parseFont } from "./StyleResolver";
 import { layoutTableRowCells } from "./TableLayoutEngine";
 
 /**
@@ -475,15 +477,9 @@ export function layoutBlock(
   } = options;
 
   const fontConfig = options.fontConfig ?? defaultFontConfig;
-  const level = node.attrs["level"] as number | undefined;
-  const blockStyle = getBlockStyle(fontConfig, node.type.name, level);
+  const blockStyle = blockStyleOf(node, fontConfig);
 
-  // Node-level fontFamily attr overrides the block style's family.
-  // Priority: node attr > fontConfig (which may already have page font applied) > blockStyle default.
-  const nodeFontFamily = node.attrs["fontFamily"] as string | null | undefined;
-  const baseFont = nodeFontFamily
-    ? substituteFamily(blockStyle.font, nodeFontFamily)
-    : blockStyle.font;
+  const baseFont = blockFontOf(node, fontConfig);
 
   // Per-node alignment attr overrides the static BlockStyle default.
   // Guards against garbage values — only the four known align strings are accepted.

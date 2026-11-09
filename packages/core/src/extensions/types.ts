@@ -51,7 +51,7 @@ import type { CharacterMap } from "../layout/CharacterMap";
 import type { PageConfig, DocumentLayout } from "../layout/PageLayout";
 import type { BlockStrategy, InlineStrategy, NodeLayout } from "../layout/BlockRegistry";
 import type { MarkerPainter } from "../layout/markers";
-import type { BlockStyle } from "../layout/FontConfig";
+import type { BlockStyle, FontConfig } from "../layout/FontConfig";
 import type { ParsedFont } from "../layout/StyleResolver";
 import type { PageChromeContribution } from "../layout/PageMetrics";
 import type { SurfaceOwnerRegistration } from "../surfaces/types";
@@ -170,6 +170,10 @@ export interface IBaseEditor {
   getImportContributions(): ImportContributionMap[];
   /** Marker painters from all extensions, by key; a later extension's replaces an earlier one's. */
   getMarkerPainters(): ReadonlyMap<string, MarkerPainter>;
+  /** Font modifiers from all extensions, by mark name: how each mark changes a run's face. */
+  getFontModifiers(): ReadonlyMap<string, FontModifier>;
+  /** Block styles from all extensions, by style key, before the document's family is applied. */
+  getBlockStyles(): FontConfig;
   /**
    * Names of doc-level attributes declared by extensions via `addDocAttrs()`.
    *

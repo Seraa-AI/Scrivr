@@ -12,7 +12,7 @@ import type {
   MeasureCacheEntry,
   LayoutResumption,
 } from "./PageLayout";
-import type { FontConfig } from "./FontConfig";
+import { applyPageFont, DEFAULT_FONT_FAMILY, type FontConfig } from "./FontConfig";
 import type { InlineRegistry } from "./BlockRegistry";
 import type { TextMeasurerLike } from "./TextMeasurer";
 import type { FontModifier } from "../extensions/types";
@@ -242,6 +242,8 @@ export class LayoutCoordinator {
     // layout refines — but the first page is not held waiting on it.
     const fromDocument = collectFontRequests(this.opts.getDoc(), provider.defaultRequest(), {
       maxBlocks: LayoutCoordinator.INITIAL_BLOCKS,
+      fontModifiers: this.opts.fontModifiers,
+      fontConfig: applyPageFont(this.opts.fontConfig, this.opts.pageConfig.fontFamily ?? DEFAULT_FONT_FAMILY),
     });
     const fromLayout = [...(this.fontResolverValue?.table().values() ?? [])].map((r) => r.request);
     // Duplicates are free: `installFaces` keys by resource id.

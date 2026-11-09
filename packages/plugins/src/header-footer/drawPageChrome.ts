@@ -13,6 +13,7 @@ import {
   CharacterMap,
   type EditorSurface,
   type DocumentLayout,
+  type FontConfig,
   type PageChromePaintContext,
 } from "@scrivr/core";
 import type { Node } from "@scrivr/core/pm";
@@ -21,7 +22,6 @@ import type { ResolvedHeaderFooter, SlotLayout } from "./resolveChrome";
 import { HeaderFooterSurfaceCache } from "./surfaces";
 import { resolveSlotKey } from "./resolveSlot";
 import { setTokenContext, arrangedForPage } from "./tokenStrategies";
-import { chromeFontConfig } from "./chromeFontConfig";
 
 /** Reusable throwaway CharacterMap for non-cursor pages. Avoids allocating on every paint. */
 const THROWAWAY_CHARMAP = new CharacterMap();
@@ -75,7 +75,7 @@ function drawBandIfPresent(
     // Live editing: re-layout from the surface's current doc
     const charMap = isCursorPage ? activeSurface!.charMap : THROWAWAY_CHARMAP;
     charMap.clear();
-    const layout = layoutAtBandY(activeSurface!.state.doc, paintCtx, bandY);
+    const layout = layoutAtBandY(activeSurface!.state.doc, paintCtx, bandY, resolved.fontConfig);
     const page = layout.pages[0];
     if (!page || page.blocks.length === 0) return;
     drawBlocks(paintCtx, layout, charMap);
@@ -97,6 +97,7 @@ function layoutAtBandY(
   doc: Node,
   paintCtx: PageChromePaintContext,
   bandY: number,
+  fontConfig: FontConfig,
 ): DocumentLayout {
   // Arranged for the page being painted, so a band under the caret keeps the
   // token width the stored arrangement gave it and the line does not shift.
@@ -106,7 +107,7 @@ function layoutAtBandY(
       margins: { ...paintCtx.pageConfig.margins, top: bandY },
     },
     measurer: paintCtx.measurer,
-    fontConfig: chromeFontConfig,
+    fontConfig,
     ...(paintCtx.fontModifiers ? { fontModifiers: paintCtx.fontModifiers } : {}),
     // The same resolver the page was measured with. Without it a header being
     // edited is measured against the family the document names rather than the

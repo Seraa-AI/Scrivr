@@ -10,6 +10,7 @@ import { describe, it, expect } from "vitest";
 import { ServerEditor } from "../ServerEditor";
 import { DefaultFontProvider } from "./DefaultFontProvider";
 import { collectFontRequests, prepareDocumentFonts, usedResolutions } from "./collectFontRequests";
+import { applyPageFont } from "../layout/FontConfig";
 import type { LayoutBlock } from "../layout/BlockLayout";
 import type { DocumentLayout } from "../layout/PageLayout";
 import type { FontResource } from "./types";
@@ -38,6 +39,7 @@ const text = (value: string, marks: Array<Record<string, unknown>> = []) => ({
 
 const para = (...content: unknown[]) => ({ type: "paragraph", content });
 
+const fontModifiers = new ServerEditor().getFontModifiers();
 const fallback = { family: "App Sans", weight: 400, style: "normal" as const, size: 14 };
 
 describe("collecting what a document asks for", () => {
@@ -49,7 +51,7 @@ describe("collecting what a document asks for", () => {
         para(text("b", [{ type: "fontFamily", attrs: { family: "Inter" } }])),
       ],
     });
-    expect(collectFontRequests(doc, fallback)).toHaveLength(1);
+    expect(collectFontRequests(doc, fallback, { fontModifiers })).toHaveLength(1);
   });
 
   it("treats bold and italic as different faces", () => {
@@ -68,7 +70,7 @@ describe("collecting what a document asks for", () => {
         ),
       ],
     });
-    const found = collectFontRequests(doc, fallback);
+    const found = collectFontRequests(doc, fallback, { fontModifiers });
     expect(found).toHaveLength(3);
     expect(found.map((r) => `${r.weight}/${r.style}`).sort()).toEqual([
       "400/normal",
@@ -81,12 +83,12 @@ describe("collecting what a document asks for", () => {
     // Unstyled text is not absent from the question — it carries the
     // document's default, which is a request like any other.
     const doc = docOf({ type: "doc", content: [para(text("plain"))] });
-    expect(collectFontRequests(doc, fallback)).toEqual([fallback]);
+    expect(collectFontRequests(doc, fallback, { fontModifiers })).toEqual([fallback]);
   });
 
   it("asks for the default even for an empty document", () => {
     const doc = docOf({ type: "doc", content: [para()] });
-    expect(collectFontRequests(doc, fallback)).toEqual([fallback]);
+    expect(collectFontRequests(doc, fallback, { fontModifiers })).toEqual([fallback]);
   });
 });
 
@@ -102,12 +104,12 @@ describe("preparing a document's fonts", () => {
 
   it("says nothing when every face was supplied", async () => {
     const inter = resource("Inter");
-    const shortfalls = await prepareDocumentFonts(docWith("Inter"), provider({ resources: [inter] }));
+    const shortfalls = await prepareDocumentFonts(docWith("Inter"), provider({ resources: [inter] }), { fontModifiers });
     expect(shortfalls).toEqual([]);
   });
 
   it("reports a face that fell back to the default", async () => {
-    const shortfalls = await prepareDocumentFonts(docWith("Aptos"), provider());
+    const shortfalls = await prepareDocumentFonts(docWith("Aptos"), provider(), { fontModifiers });
     expect(shortfalls).toHaveLength(1);
     expect(shortfalls[0]).toMatchObject({
       resolved: expect.objectContaining({ family: "App Sans" }),
@@ -121,6 +123,7 @@ describe("preparing a document's fonts", () => {
     const shortfalls = await prepareDocumentFonts(
       docWith("Aptos"),
       provider({ systemCandidates: ["Aptos"] }),
+      { fontModifiers },
     );
     // It is the face that was asked for — and it does not leave this machine.
     expect(shortfalls[0]).toMatchObject({ source: "requested", portable: false });
@@ -130,8 +133,8 @@ describe("preparing a document's fonts", () => {
     const p = provider({ systemCandidates: ["Aptos"] });
     const doc = docWith("Aptos");
 
-    const onScreen = await prepareDocumentFonts(doc, p);
-    const forExport = await prepareDocumentFonts(doc, p, { portable: true });
+    const onScreen = await prepareDocumentFonts(doc, p, { fontModifiers });
+    const forExport = await prepareDocumentFonts(doc, p, { fontModifiers, constraints: { portable: true } });
 
     expect(onScreen[0]?.source).toBe("requested");
     expect(forExport[0]?.source).toBe("default");
@@ -188,8 +191,19 @@ describe("a family set on the block", () => {
       ],
     });
 
-    const asked = collectFontRequests(doc, fallback).map((r) => `${r.family}/${r.weight}`);
+    const asked = collectFontRequests(doc, fallback, { fontModifiers }).map((r) => `${r.family}/${r.weight}`);
     expect(asked).toContain("Georgia/700");
+  });
+});
+
+describe("a block style that changes the face", () => {
+  it("is asked for in the face layout draws its text in: a heading's bold, in the document's family", () => {
+    const editor = new ServerEditor();
+    const doc = docOf({ type: "doc", content: [{ type: "heading", attrs: { level: 1 }, content: [text("Title")] }] });
+    const fontConfig = applyPageFont(editor.getBlockStyles(), "Georgia");
+
+    const asked = collectFontRequests(doc, fallback, { fontModifiers, fontConfig }).map((r) => `${r.family}/${r.weight}`);
+    expect(asked).toEqual(["Georgia/700"]);
   });
 });
 
@@ -208,12 +222,12 @@ describe("scoping to the blocks that will be painted", () => {
     const families = (rs: ReturnType<typeof collectFontRequests>) =>
       [...new Set(rs.map((r) => r.family))].sort();
 
-    expect(families(collectFontRequests(doc, fallback))).toEqual([
+    expect(families(collectFontRequests(doc, fallback, { fontModifiers }))).toEqual([
       "App Sans",
       "Courier New",
       "Georgia",
     ]);
-    expect(families(collectFontRequests(doc, fallback, { maxBlocks: 100 }))).toEqual(["App Sans"]);
+    expect(families(collectFontRequests(doc, fallback, { maxBlocks: 100, fontModifiers }))).toEqual(["App Sans"]);
   });
 
   it("counts blocks, not the whole subtree, so a scoped walk still sees nested text", () => {
@@ -233,7 +247,7 @@ describe("scoping to the blocks that will be painted", () => {
       ],
     });
 
-    expect(collectFontRequests(doc, fallback, { maxBlocks: 2 }).map((r) => r.family).sort())
+    expect(collectFontRequests(doc, fallback, { maxBlocks: 2, fontModifiers }).map((r) => r.family).sort())
       .toEqual(["App Sans", "Georgia"]);
   });
 });

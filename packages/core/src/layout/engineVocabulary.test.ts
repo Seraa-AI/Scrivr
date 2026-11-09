@@ -9,11 +9,18 @@ import { describe, expect, it } from "vitest";
 /** Document-list vocabulary; "list" as plain English (an item list, a font list) is not one. */
 const LIST_WORDS = /bullet|numbered|\blists\b|\b(a|the|nested|ordered) list\b|list[ -]?(item|marker|number|level|kind|start|indent|paragraph)|orderedList|bulletList/i;
 
-/** Nodes that declare what they do, through their spec or their markdown tokens. */
+/**
+ * A font mark read by its name: compared, switched on, or looked up. "bold"
+ * and "italic" alone are CSS words, and `fontFamily` is also a block attr.
+ */
+const FONT_MARKS = /(name ?[!=]==? ?|case |includes\(|marks\[)["'`](bold|italic|fontSize|fontFamily)["'`]/;
+
+/** Nodes and marks that declare what they do, through their spec, tokens, styles or font modifiers. */
 const NODE_NAMES: Record<string, RegExp> = {
-  layout: /\b(pageBreak|hardBreak)\b/,
-  renderer: /\b(pageBreak|hardBreak)\b/,
-  input: /["'`](heading|bulletList|orderedList|listItem)["'`]/,
+  layout: new RegExp(`\\b(pageBreak|hardBreak)\\b|["'\`]heading(_\\d)?["'\`]|${FONT_MARKS.source}`),
+  renderer: new RegExp(`\\b(pageBreak|hardBreak)\\b|${FONT_MARKS.source}`),
+  fonts: FONT_MARKS,
+  input: /["'`](paragraph|heading|bulletList|orderedList|listItem)["'`]/,
 };
 
 const sourceFiles = (dir: string): string[] =>
@@ -33,7 +40,12 @@ describe("the engine's vocabulary", () => {
     expect(linesMatching(dir, LIST_WORDS)).toEqual([]);
   });
 
-  it.each(Object.entries(NODE_NAMES))("no source file under %s/ names a node that declares itself", (dir, words) => {
+  it.each(Object.entries(NODE_NAMES))("no source file under %s/ names a node or mark that declares itself", (dir, words) => {
     expect(linesMatching(dir, words)).toEqual([]);
+  });
+
+  it("the editor reads a run's font through the font modifiers, not the marks' names", () => {
+    const named = readFileSync(join(__dirname, "..", "Editor.ts"), "utf8").split("\n").filter((line) => FONT_MARKS.test(line));
+    expect(named).toEqual([]);
   });
 });

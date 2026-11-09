@@ -1,6 +1,7 @@
 import type { LayoutFontResolver } from "./fonts/layoutResolver";
-import { resolveActiveFontSize } from "./fonts/activeFontSize";
-import { getBlockStyle } from "./layout/FontConfig";
+import { parseFontSizePx, resolveActiveFontSize } from "./fonts/activeFontSize";
+import { applyPageFont, blockFontOf, blockStyleOf } from "./layout/FontConfig";
+import { parseFont, resolveFont, type ParsedFont } from "./layout/StyleResolver";
 import {
 	EditorState,
 	Transaction,
@@ -15,7 +16,7 @@ import type {
 	OverlayRenderHandler,
 	IEditor,
 } from "./extensions/types";
-import type { Node as PmNode, Schema } from "prosemirror-model";
+import type { Mark, Node as PmNode, Schema } from "prosemirror-model";
 import { StarterKit } from "./extensions/StarterKit";
 import { BlockRegistry } from "./layout/BlockRegistry";
 import type { Extension } from "./extensions/Extension";
@@ -31,7 +32,7 @@ import {
 	usedResolutions,
 	type FontShortfall,
 } from "./fonts/collectFontRequests";
-import { primaryFamily } from "./fonts/layoutResolver";
+import { faceOf, primaryFamily } from "./fonts/layoutResolver";
 import { DEFAULT_FONT_FAMILY } from "./layout/FontConfig";
 import { CursorManager } from "./renderer/CursorManager";
 import { SelectionRegistry } from "./selection/SelectionRegistry";
@@ -1052,31 +1053,55 @@ export class Editor extends BaseEditor implements IEditor {
 	}
 
 	/**
+	 * The font a run is drawn in: its block's font with the run's marks applied
+	 * through the font modifiers, as layout resolves it. A font control that
+	 * re-derived it would drift from the thing it describes.
+	 */
+	private runFont(marks: readonly Mark[], block: PmNode, config: FontConfig): ParsedFont {
+		return parseFont(resolveFont(blockFontOf(block, config), marks, this.fontModifiers));
+	}
+
+	/**
+	 * The font of every run the selection covers, in order; for a collapsed
+	 * selection, or one that covers no text, the one the next typed character
+	 * takes.
+	 */
+	private selectedRunFonts(): Array<{ font: ParsedFont; block: PmNode }> {
+		const state = this.getActiveState();
+		const { from, to, empty, $from } = state.selection;
+		const config = applyPageFont(this.fontConfig, this.pageConfig.fontFamily ?? DEFAULT_FONT_FAMILY);
+		const runs: Array<{ font: ParsedFont; block: PmNode }> = [];
+		let firstTextblock: PmNode | null = null;
+		if (!empty) {
+			state.doc.nodesBetween(from, to, (node, _pos, parent) => {
+				if (node.isTextblock) firstTextblock ??= node;
+				if (node.isText && parent) runs.push({ font: this.runFont(node.marks, parent, config), block: parent });
+			});
+		}
+		if (runs.length > 0) return runs;
+		// No text: an empty block, an image, or a whole document of empty blocks.
+		const block = $from.parent.isTextblock ? $from.parent : (firstTextblock ?? $from.parent);
+		return [{ font: this.runFont(state.storedMarks ?? $from.marks(), block, config), block }];
+	}
+
+	/**
 	 * The family in effect at the selection, and the face it is drawn in.
 	 *
-	 * The precedence — inline mark, then block attr, then the document default —
-	 * is the editor's own rule, so a font control that re-derived it would drift
-	 * from the thing it describes.
+	 * Asked of every run rather than the first: a range drawn in two families
+	 * is `mixed`, so one family is not named confidently for it.
 	 */
 	getActiveFontFamily(): ActiveFontFamily {
-		const inline = this.getActiveMarkAttrs()["fontFamily"]?.["family"];
-		const block = this.getBlockInfo().blockAttrs["fontFamily"];
-		const mixed = this.selectionSpansMultipleFamilies();
-		const requested = primaryFamily(
-			typeof inline === "string" && inline.length > 0
-				? inline
-				: typeof block === "string" && block.length > 0
-					? block
-					: (this.pageConfig.fontFamily ?? DEFAULT_FONT_FAMILY),
-		);
+		const runs = this.selectedRunFonts();
+		const families = runs.map((run) => primaryFamily(run.font.family));
+		const first = runs[0]?.font;
+		const requested = families[0] ?? primaryFamily(this.pageConfig.fontFamily ?? DEFAULT_FONT_FAMILY);
+		const mixed = families.some((family) => family !== requested);
 
-		if (!this.fonts) return { requested, resolved: requested, substituted: false, mixed };
+		if (!this.fonts || !first) return { requested, resolved: requested, substituted: false, mixed };
 
-		const marks = this.getActiveMarks();
 		const { resolved } = this.fonts.resolve({
 			family: requested,
-			weight: marks.includes("bold") ? 700 : 400,
-			style: marks.includes("italic") ? "italic" : "normal",
+			...faceOf(first),
 			// Size never changes which face answers; the provider's own is the
 			// one value guaranteed to be meaningful to it.
 			size: this.fonts.defaultRequest().size,
@@ -1090,76 +1115,21 @@ export class Editor extends BaseEditor implements IEditor {
 	}
 
 	/**
-	 * Does the selection cover runs that are drawn in different families?
-	 *
-	 * Asked of every run rather than the first: `getActiveMarkAttrs` reports a
-	 * mark only when the whole range carries it and then answers with the first
-	 * match, so one family is named confidently for a range drawn in two.
-	 */
-	private selectionSpansMultipleFamilies(): boolean {
-		const state = this.getActiveState();
-		const { from, to, empty } = state.selection;
-		if (empty) return false;
-
-		let seen: string | null = null;
-		let mixed = false;
-		state.doc.nodesBetween(from, to, (node, _pos, parent) => {
-			if (mixed || !node.isText || !parent) return !mixed;
-			const mark = node.marks.find((m) => m.type.name === "fontFamily")?.attrs["family"];
-			const blockFamily = parent.attrs["fontFamily"];
-			const family = primaryFamily(
-				typeof mark === "string" && mark.length > 0
-					? mark
-					: typeof blockFamily === "string" && blockFamily.length > 0
-						? blockFamily
-						: (this.pageConfig.fontFamily ?? DEFAULT_FONT_FAMILY),
-			);
-			if (seen === null) seen = family;
-			else if (seen !== family) mixed = true;
-			return !mixed;
-		});
-		return mixed;
-	}
-
-	/**
 	 * The size in effect at the selection, in px — the counterpart to
-	 * `getActiveFontFamily`. Inline `fontSize` mark if present, else the size the
-	 * block style renders at. Always a number.
+	 * `getActiveFontFamily`: the size each run is drawn at, or null when the
+	 * runs differ. A selection covering a 24px run and an unmarked one has no
+	 * single size, and naming either invites the reader to confirm it and
+	 * resize the other.
 	 */
 	getActiveFontSize(): number | null {
-		const state = this.getActiveState();
-		const { from, to, empty, $from } = state.selection;
-
-		/** The size a run is drawn at: its own mark, else the style of its block. */
-		const sizeOf = (markSize: unknown, block: PmNode): number => {
-			const level = block.attrs["level"];
-			return resolveActiveFontSize(
-				typeof markSize === "number" ? markSize : undefined,
-				// The textblock itself, not a depth-1 ancestor: layout styles the
-				// leaf, so a heading inside a table cell is styled as a heading
-				// while its ancestor is the table, which has no style of its own.
-				getBlockStyle(this.fontConfig, block.type.name, typeof level === "number" ? level : undefined),
-			);
-		};
-
-		if (empty) {
-			return sizeOf(this.getActiveMarkAttrs()["fontSize"]?.["size"], $from.parent);
-		}
-
-		// Every run in the range, not the first: a selection covering a 24px run
-		// and an unmarked one has no single size, and naming either invites the
-		// reader to confirm it and resize the other.
-		let answer: number | null = null;
-		let mixed = false;
-		state.doc.nodesBetween(from, to, (node, _pos, parent) => {
-			if (mixed || !node.isText || !parent) return !mixed;
-			const mark = node.marks.find((m) => m.type.name === "fontSize");
-			const size = sizeOf(mark?.attrs["size"], parent);
-			if (answer === null) answer = size;
-			else if (answer !== size) mixed = true;
-			return !mixed;
-		});
-		return mixed ? null : answer;
+		// The textblock itself, not a depth-1 ancestor: layout styles the leaf,
+		// so a heading inside a table cell is styled as a heading while its
+		// ancestor is the table, which has no style of its own.
+		const sizes = this.selectedRunFonts().map(({ font, block }) =>
+			resolveActiveFontSize(parseFontSizePx(font.size) ?? undefined, blockStyleOf(block, this.fontConfig)));
+		const [first] = sizes;
+		if (first === undefined) return null;
+		return sizes.every((size) => size === first) ? first : null;
 	}
 
 	/** True when the editor is in pageless (infinite-scroll) mode. */
