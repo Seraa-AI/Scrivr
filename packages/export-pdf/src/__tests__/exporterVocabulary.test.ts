@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest";
 /** Document-list vocabulary; "list" as plain English (an item list, a font list) is not one. */
 const LIST_WORDS = /bullet|numbered|\blists\b|\b(a|the|nested|ordered) list\b|list[ -]?(item|marker|number|level|kind|start|indent|paragraph)|orderedList|bulletList/i;
 
-/** Nodes that declare their outline level through `pdf.outline`. */
+/** Nodes that declare their outline level on their spec (`outlineLevel`). */
 const OUTLINE_NODES = /heading/i;
 
 const sourceFiles = (dir: string): string[] =>

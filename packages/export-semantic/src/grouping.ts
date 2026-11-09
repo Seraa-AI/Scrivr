@@ -1,13 +1,15 @@
-import { isListType } from "@scrivr/core";
+import { isListType, outlineLevelOf } from "@scrivr/core";
 import type { BlockEntry } from "./id";
 
 const DEFAULT_SHORT_MAX = 200;
 
+/** A block that heads a section: one whose spec declares an outline level. */
 function isHeading(node: BlockEntry["node"]): boolean {
-  return node.type.name === "heading";
+  return outlineLevelOf(node) !== null;
 }
+/** A plain block: the document's default textblock, a paragraph in every built-in schema. */
 function isParagraph(node: BlockEntry["node"]): boolean {
-  return node.type.name === "paragraph";
+  return node.type === node.type.schema.topNodeType.contentMatch.defaultType;
 }
 function isShort(
   node: BlockEntry["node"],

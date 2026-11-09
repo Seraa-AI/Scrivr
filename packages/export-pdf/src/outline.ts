@@ -6,11 +6,11 @@ import {
   type PDFDocument,
   type PDFRef,
 } from "pdf-lib";
-import type { DocumentLayout, LayoutBlock, PdfOutlineLevel } from "@scrivr/core";
+import { outlineLevelOf, type DocumentLayout, type LayoutBlock } from "@scrivr/core";
 import { PT_PER_PX } from "./context";
 
 /**
- * Bookmarks, built from the blocks whose extensions declare an outline level.
+ * Bookmarks, built from the blocks whose specs declare an outline level.
  *
  * A reader opening a twelve-page agreement has no way through it but scrolling
  * unless the file carries an outline. Titles already say where the parts
@@ -20,12 +20,8 @@ import { PT_PER_PX } from "./context";
  * Must run after every page has been added: each bookmark's destination names
  * the page object it jumps to.
  */
-export function addOutline(
-  pdfDoc: PDFDocument,
-  layout: DocumentLayout,
-  levels: ReadonlyMap<string, PdfOutlineLevel>,
-): void {
-  const entries = collectEntries(layout, levels);
+export function addOutline(pdfDoc: PDFDocument, layout: DocumentLayout): void {
+  const entries = collectEntries(layout);
   const tree = nest(entries);
   const first = tree.roots[0];
   const last = tree.roots[tree.roots.length - 1];
@@ -127,7 +123,7 @@ interface OutlineEntry {
   topPt: number;
 }
 
-function collectEntries(layout: DocumentLayout, levels: ReadonlyMap<string, PdfOutlineLevel>): OutlineEntry[] {
+function collectEntries(layout: DocumentLayout): OutlineEntry[] {
   const pageHeightPt = layout.pageConfig.pageHeight * PT_PER_PX;
   const entries: OutlineEntry[] = [];
   const visit = (blocks: readonly LayoutBlock[], pageIndex: number, originY: number): void => {
@@ -136,7 +132,7 @@ function collectEntries(layout: DocumentLayout, levels: ReadonlyMap<string, PdfO
       // Pagination repeats the source node in every visual fragment. Only
       // its first fragment owns a bookmark; equal titles in distinct source
       // blocks must remain distinct entries.
-      const entry = block.isContinuation ? null : entryOf(block, levels);
+      const entry = block.isContinuation ? null : entryOf(block);
       if (entry) {
         entries.push({ ...entry, pageIndex, topPt: pageHeightPt - pageY * PT_PER_PX });
       }
@@ -150,9 +146,9 @@ function collectEntries(layout: DocumentLayout, levels: ReadonlyMap<string, PdfO
   return entries;
 }
 
-function entryOf(block: LayoutBlock, levels: ReadonlyMap<string, PdfOutlineLevel>): { title: string; level: number } | null {
-  const level = levels.get(block.node.type.name)?.(block.node);
-  if (typeof level !== "number" || !Number.isFinite(level)) return null;
+function entryOf(block: LayoutBlock): { title: string; level: number } | null {
+  const level = outlineLevelOf(block.node);
+  if (level === null) return null;
   const title = block.node.textContent.trim();
   return title ? { title, level } : null;
 }

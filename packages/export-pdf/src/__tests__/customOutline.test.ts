@@ -1,7 +1,7 @@
 /**
  * Which blocks a reader can jump to belongs to their extensions. This one is
  * written only against the public surface: a chapter title that declares its
- * own outline level, beside the built-in headings.
+ * own outline level on its spec, beside the built-in headings.
  */
 import { describe, expect, it } from "vitest";
 import { createCanvas } from "@napi-rs/canvas";
@@ -13,15 +13,10 @@ import { PAGE_CONFIG } from "./fixtures";
 const Chapter = Extension.create({
   name: "chapter",
   addNodes() {
-    return { chapter: { group: "block", content: "inline*", toDOM: () => ["h1", 0] } };
+    return { chapter: { group: "block", content: "inline*", outlineLevel: () => 1, toDOM: () => ["h1", 0] } };
   },
   addExports() {
-    return {
-      pdf: {
-        nodes: { chapter: (block, ctx) => ctx.draw.lines(block, ctx) },
-        outline: { chapter: () => 1 },
-      },
-    };
+    return { pdf: { nodes: { chapter: (block, ctx) => ctx.draw.lines(block, ctx) } } };
   },
 });
 
@@ -78,10 +73,10 @@ describe("an outline block from outside core", () => {
     const Untitled = Extension.create({
       name: "untitled",
       addNodes() {
-        return { untitled: { group: "block", content: "inline*", toDOM: () => ["p", 0] } };
+        return { untitled: { group: "block", content: "inline*", outlineLevel: () => Number.NaN, toDOM: () => ["p", 0] } };
       },
       addExports() {
-        return { pdf: { nodes: { untitled: (block, ctx) => ctx.draw.lines(block, ctx) }, outline: { untitled: () => Number.NaN } } };
+        return { pdf: { nodes: { untitled: (block, ctx) => ctx.draw.lines(block, ctx) } } };
       },
     });
     expect(await outlineOf([StarterKit, Untitled], [

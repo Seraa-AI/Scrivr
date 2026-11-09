@@ -2,7 +2,7 @@
 import "./augmentation";
 
 export { PdfExport } from "./PdfExport";
-export type { PdfHandlers, PdfNodeHandler, PdfOutlineLevel, PdfChromeHandler } from "./augmentation";
+export type { PdfHandlers, PdfNodeHandler, PdfChromeHandler } from "./augmentation";
 // The handler contract lives in core so an extension can describe its node and
 // its mark without depending on this package; re-exported for consumers already
 // importing it from here.
@@ -33,7 +33,6 @@ export type { ImageResolver, ImageBytes } from "./fetchImage";
 import { PDFDocument, type PDFPage, type PDFImage } from "pdf-lib";
 import type {
   PdfMarkHandler,
-  PdfOutlineLevel,
   IEditor,
   IBaseEditor,
   DocumentLayout,
@@ -91,7 +90,7 @@ export interface PdfExportOptions {
    */
   metadata?: PdfMetadata;
   /**
-   * Build bookmarks from the blocks whose extensions declare an outline level. On by default: a reader
+   * Build bookmarks from the blocks whose specs declare an outline level. On by default: a reader
    * opening a long agreement has no way through it but scrolling without them.
    */
   outline?: boolean;
@@ -175,7 +174,6 @@ async function writePdf(
   // later extensions override earlier registrations in all three lanes.
   const nodeHandlers = new Map<string, PdfNodeHandler>();
   const markHandlers = new Map<string, PdfMarkHandler>();
-  const outlineLevels = new Map<string, PdfOutlineLevel>();
   const chromeHandlers = new Map<string, PdfChromeHandler<unknown>>();
   const lifecycleHooks: {
     before: Array<(ctx: PdfContext) => void | Promise<void>>;
@@ -192,9 +190,6 @@ async function writePdf(
     }
     for (const [name, handler] of Object.entries(pdfContrib.marks ?? {})) {
       markHandlers.set(name, handler);
-    }
-    for (const [name, level] of Object.entries(pdfContrib.outline ?? {})) {
-      outlineLevels.set(name, level);
     }
     for (const [name, handler] of Object.entries(pdfContrib.chrome ?? {})) {
       chromeHandlers.set(name, handler);
@@ -367,7 +362,7 @@ async function writePdf(
   // After the pages exist, because a bookmark's destination names the page
   // object it jumps to.
   applyMetadata(pdfDoc, options?.metadata);
-  if (options?.outline !== false) addOutline(pdfDoc, layout, outlineLevels);
+  if (options?.outline !== false) addOutline(pdfDoc, layout);
   return pdfDoc.save();
 }
 

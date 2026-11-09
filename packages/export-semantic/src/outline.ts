@@ -43,7 +43,7 @@ export function toDocumentOutline(
     closed.push({ ...section, endUnit });
   };
 
-  const firstHeading = units.findIndex((unit) => unit.type === "heading");
+  const firstHeading = units.findIndex((unit) => unit.headingLevel !== undefined);
   if (firstHeading !== 0) {
     // Content before the first heading is a section the reader navigates to,
     // so it gets one — with a supplied name, because the document gives none.
@@ -63,7 +63,7 @@ export function toDocumentOutline(
   }
 
   units.forEach((unit, index) => {
-    if (unit.type !== "heading") return;
+    if (unit.headingLevel === undefined) return;
 
     // Depth comes from the breadcrumb the walker already threaded, not from a
     // second level-comparison here. "Which headings am I under" has one owner,

@@ -1,5 +1,6 @@
 import { setBlockType } from "prosemirror-commands";
-import type { PdfNodeHandler, PdfOutlineLevel } from "../../exports/pdf";
+import type { Node } from "prosemirror-model";
+import type { PdfNodeHandler } from "../../exports/pdf";
 import { textblockTypeInputRule } from "prosemirror-inputrules";
 import { Extension } from "../Extension";
 import type {
@@ -53,6 +54,16 @@ export const HEADING_LEVEL_SPEC: Record<number, HeadingLevelSpec> = {
   6: { size: 12, spaceBefore: 10, spaceAfter: 2 },
 };
 
+/**
+ * A heading's own level, so one deeper than the configured `levels` still
+ * nests in order; a level stored as text reads as the number it spells.
+ */
+function headingOutlineLevel(node: Node): number {
+  const raw = node.attrs["level"];
+  const level = typeof raw === "string" && raw.trim() !== "" ? Number(raw) : raw;
+  return typeof level === "number" && Number.isFinite(level) ? level : 1;
+}
+
 const headingPdf: PdfNodeHandler = (block, ctx) => ctx.draw.lines(block, ctx);
 
 export const Heading = Extension.create<HeadingOptions>({
@@ -77,6 +88,7 @@ export const Heading = Extension.create<HeadingOptions>({
           dataTracked: { default: [] },
         },
         defining: true,
+        outlineLevel: headingOutlineLevel,
         parseDOM: this.options.levels.map((level) => ({
           tag: `h${level}`,
           getAttrs(dom) {
@@ -184,19 +196,11 @@ export const Heading = Extension.create<HeadingOptions>({
       if (jc) pPr.push(xml("w:jc", { "w:val": jc }));
       return xml("w:p", undefined, [xml("w:pPr", undefined, pPr), ...children]);
     };
-    // The node's own level, so a heading deeper than `levels` still nests in order.
-    const outlineLevel: PdfOutlineLevel = (node) => {
-      const level = node.attrs["level"];
-      return typeof level === "number" ? level : readLevel(level);
-    };
     const semanticHandler: SemanticNodeHandler = () => ({ type: "heading" });
     return {
       docx: { nodes: { heading: headingHandler } },
       semantic: { nodes: { heading: semanticHandler } },
-      pdf: {
-        nodes: { heading: headingPdf },
-        outline: { heading: outlineLevel },
-      },
+      pdf: { nodes: { heading: headingPdf } },
     };
   },
 
