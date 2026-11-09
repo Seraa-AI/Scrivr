@@ -204,7 +204,7 @@ totalContentHeight: number;
 **File**: `packages/core/src/layout/PageLayout.ts` — `paginateFlow()`
 
 Added optional `pageless?: boolean` parameter to `paginateFlow`:
-- Hard page break nodes (`flow.isPageBreak`) are skipped when `pageless`
+- Flows that start a new page (`flow.pageStart`) are skipped when `pageless`
 - Overflow check (`blockBottom > pageBottom`) is short-circuited to `false` when `pageless`
 - `y` grows unbounded on a single `LayoutPage`
 

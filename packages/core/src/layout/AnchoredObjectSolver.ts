@@ -35,7 +35,7 @@ function naturalStartOf(
   if (!flow) return 0;
   if (!prev) return flow.originalGlobalY ?? flow.globalY ?? 0;
   const prevEnd = advanceFlowGlobalY(prev, prev.globalY ?? 0, pageConfig, geometry).endGlobalY;
-  const gap = prev.isPageBreak ? 0 : collapseMargins(prev.spaceAfter, flow.spaceBefore);
+  const gap = prev.pageStart ? 0 : collapseMargins(prev.spaceAfter, flow.spaceBefore);
   return landingAfter(flow, prevEnd, gap, pageConfig, geometry);
 }
 

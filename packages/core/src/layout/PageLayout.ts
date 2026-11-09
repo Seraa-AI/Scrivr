@@ -36,11 +36,12 @@ import {
   itemSpacing,
   laidMarkerOf,
   measureWithMarker,
+  pageStartPast,
   resolveItem,
   type LayoutItem,
   type MarkerPlacement,
+  type PageStart,
 } from "./layoutItems";
-import type { SectionBreakType } from "../model/sections";
 import { fitLinesInCapacity } from "./splitLines";
 import {
   assignGlobalY,
@@ -341,10 +342,8 @@ export interface FlowBlock {
   hasAnchoredObject: boolean;
   /** djb2 hash of nodePos + textContent + availableWidth for incremental re-layout. */
   inputHash: number;
-  /** True when this entry represents a hard page break node. */
-  isPageBreak?: true;
-  /** Section-aware page target; absent means an ordinary next-page break. */
-  pageBreakType?: Exclude<SectionBreakType, "continuous">;
+  /** Set on a boundary that moves the flow: the page the next block starts on. */
+  pageStart?: PageStart;
   /** True when the block measurement was a cache hit. */
   wasCacheHit: boolean;
   partKind?: "block" | "fragment";
@@ -657,7 +656,7 @@ export function runFlowPipeline(
     // Replay the consumed prefix plus this chunk, preserving progress. Page
     // breaks are layout items but do not count against the block budget.
     maxBlocks += snapshot.items.slice(0, snapshot.nextItemIndex)
-      .filter((item) => !item.isPageBreak).length;
+      .filter((item) => !item.boundary).length;
   }
   const items = snapshot ? snapshot.items : collectLayoutItems(doc);
   const startIndex = cursor ? cursor.nextItemIndex : 0;
@@ -958,8 +957,8 @@ export function paginateFlow(
     if (!flow.wasCacheHit) remainingCacheMisses -= 1;
 
     // ── Hard page break (skipped in pageless mode) ───────────────────────────
-    if (flow.isPageBreak && !pageless) {
-      const target = targetPageNumber(currentPage.pageNumber, flow.pageBreakType);
+    if (flow.pageStart && !pageless) {
+      const target = targetPageNumber(currentPage.pageNumber, flow.pageStart);
       while (currentPage.pageNumber < target) {
         pages.push(currentPage);
         currentPage = newPage(pages.length + 1);
@@ -1365,7 +1364,11 @@ export function buildBlockFlow(
   for (let itemIdx = startIndex; itemIdx < items.length; itemIdx++) {
     const item = items[itemIdx]!;
 
-    if (item.isPageBreak) {
+    if (item.boundary) {
+      // A continuous section boundary does not move the flow, so it is not a
+      // flow of its own: the next block collapses its margin against the last.
+      const pageStart = pageStartPast(item.boundary);
+      if (pageStart === null) continue;
       flows.push({
         node: item.node,
         nodePos: item.nodePos,
@@ -1380,8 +1383,7 @@ export function buildBlockFlow(
         indentLeft: 0,
         hasAnchoredObject: false,
         inputHash: 0,
-        isPageBreak: true,
-        ...(item.pageBreakType ? { pageBreakType: item.pageBreakType } : {}),
+        pageStart,
         wasCacheHit: false,
       });
       continue;

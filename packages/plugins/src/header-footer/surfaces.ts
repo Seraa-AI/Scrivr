@@ -20,7 +20,7 @@ import { keymap } from "@scrivr/core/pm";
 import { baseKeymap } from "@scrivr/core/pm";
 import { history, undo, redo } from "@scrivr/core/pm";
 import { Plugin } from "@scrivr/core/pm";
-import { breakOf, EditorSurface } from "@scrivr/core";
+import { breakOf, EditorSurface, isSectionBreak } from "@scrivr/core";
 import type { HeaderFooterDefinition } from "./types";
 
 export type SlotKey =
@@ -56,8 +56,8 @@ function createBlockedNodeFilter(blocked: ReadonlySet<string>): Plugin {
       let hasBlocked = false;
       tr.doc.descendants((node) => {
         if (hasBlocked) return false;
-        // A header or footer has no next page to break to.
-        if (blocked.has(node.type.name) || breakOf(node.type) === "page") {
+        // A header or footer has no next page to break to, and no sections.
+        if (blocked.has(node.type.name) || breakOf(node.type) === "page" || isSectionBreak(node)) {
           hasBlocked = true;
           return false;
         }

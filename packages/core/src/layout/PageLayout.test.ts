@@ -2654,14 +2654,14 @@ describe("buildBlockFlow — Stage 1", () => {
     expect(flows).toHaveLength(1);
   });
 
-  it("pageBreak item produces a zero-height isPageBreak FlowBlock", () => {
+  it("pageBreak item produces a zero-height FlowBlock that starts the next page", () => {
     const testDoc = doc(p("Before"), pageBreak(), p("After"));
     const measurer = createMeasurer();
     const items = collectLayoutItems(testDoc);
     const cfg = { margins: defaultPageConfig.margins, contentWidth: 650 };
     const { flows } = buildBlockFlow(items, 0, cfg, { measurer, fontConfig: defaultFontConfig });
     expect(flows).toHaveLength(3);
-    expect(flows[1]!.isPageBreak).toBe(true);
+    expect(flows[1]!.pageStart).toBe("nextPage");
     expect(flows[1]!.height).toBe(0);
   });
 });

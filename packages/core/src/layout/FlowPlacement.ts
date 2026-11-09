@@ -5,6 +5,7 @@
 import type { PageGeometry } from "./PageMetrics";
 import { fitLinesInCapacity } from "./splitLines";
 import type { FlowBlock, PageConfig } from "./PageLayout";
+import type { PageStart } from "./layoutItems";
 
 /**
  * Global Y of the start of the first page strictly below `y`. A content bottom
@@ -15,7 +16,7 @@ import type { FlowBlock, PageConfig } from "./PageLayout";
 function nextPageStartAfter(
   geometry: PageGeometry,
   y: number,
-  breakType: FlowBlock["pageBreakType"],
+  breakType: PageStart | undefined,
 ): number {
   let contentPage = geometry.pageAt(y);
   if (contentPage > 1 && geometry.startOf(contentPage) === y) {
@@ -26,7 +27,7 @@ function nextPageStartAfter(
 
 export function targetPageNumber(
   currentPage: number,
-  breakType: FlowBlock["pageBreakType"],
+  breakType: PageStart | undefined,
 ): number {
   let target = currentPage + 1;
   if (breakType === "evenPage" && target % 2 !== 0) target++;
@@ -53,8 +54,8 @@ export function advanceFlowGlobalY(
   pageConfig: PageConfig,
   geometry: PageGeometry,
 ): { startGlobalY: number; endGlobalY: number } {
-  if (flow.isPageBreak && !pageConfig.pageless) {
-    const start = nextPageStartAfter(geometry, naturalStart, flow.pageBreakType);
+  if (flow.pageStart && !pageConfig.pageless) {
+    const start = nextPageStartAfter(geometry, naturalStart, flow.pageStart);
     return { startGlobalY: start, endGlobalY: start + flow.height };
   }
   if (pageConfig.pageless) {
@@ -130,7 +131,7 @@ export function flowCursorAfter(
 ): FlowCursor {
   return {
     y: advanceFlowGlobalY(flow, startGlobalY, pageConfig, geometry).endGlobalY,
-    prevSpaceAfter: flow.isPageBreak ? 0 : flow.spaceAfter,
+    prevSpaceAfter: flow.pageStart ? 0 : flow.spaceAfter,
   };
 }
 
@@ -159,7 +160,7 @@ export function landingAfter(
   geometry: PageGeometry,
 ): number {
   const start = prevEnd + gap;
-  if (pageConfig.pageless || flow.isPageBreak) {
+  if (pageConfig.pageless || flow.pageStart) {
     return advanceFlowGlobalY(flow, start, pageConfig, geometry).startGlobalY;
   }
   let page = geometry.pageAt(prevEnd);

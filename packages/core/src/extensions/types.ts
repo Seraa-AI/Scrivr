@@ -83,6 +83,12 @@ import type {
  */
 export type ScrivrNodeSpec = NodeSpec & {
   layout?: NodeLayout;
+  /**
+   * The node ends a section, when it is a leaf with a `settings` attr, which
+   * holds the settings of the section it ends (see `deriveSections`). Only one
+   * between the document's own blocks ends a section.
+   */
+  sectionBoundary?: boolean;
 };
 
 // ── Overlay render handler ─────────────────────────────────────────────────────

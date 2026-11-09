@@ -185,7 +185,7 @@ function layoutCellBlocks(
   const blocks: LayoutBlock[] = [];
   let relY = CELL_PADDING_V;
   for (const item of collectChildItems(cellNode, box.cellPos + 1)) {
-    if (item.isPageBreak) continue;
+    if (item.boundary) continue;
     const childBlock = layoutItem(item, { x: box.contentX, width: box.contentWidth }, {
       y: relY,
       page: ctx.page,

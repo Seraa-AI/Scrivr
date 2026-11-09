@@ -47,4 +47,16 @@ describe("a custom page break in a header or footer", () => {
     surface.dispatch(surface.state.tr.insert(0, sceneBreak.create()));
     expect(surface.state.doc.toJSON()).toEqual(before);
   });
+
+  it("refuses a section boundary too: a header or footer has no sections", () => {
+    const editor = new ServerEditor({ extensions: [StarterKit, HeaderFooter] });
+    const surface = new HeaderFooterSurfaceCache(editor.schema).getOrCreate("defaultFooter", {
+      content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "hello" }] }] },
+    });
+    const before = surface.state.doc.toJSON();
+    const sectionBreak = editor.schema.nodes["sectionBreak"];
+    if (!sectionBreak) throw new Error("no sectionBreak");
+    surface.dispatch(surface.state.tr.insert(0, sectionBreak.create()));
+    expect(surface.state.doc.toJSON()).toEqual(before);
+  });
 });
