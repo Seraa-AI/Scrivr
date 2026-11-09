@@ -1,5 +1,5 @@
 import { IMAGE_PLACEMENT_ATTRS } from "@scrivr/core";
-import { CHANGE_OPERATION } from "@scrivr/plugins";
+import { CHANGE_OPERATION, changedAttrKeys } from "@scrivr/plugins";
 import type { NodeAttrChange, TrackedChange } from "@scrivr/plugins";
 
 export interface ChangeMeta {
@@ -70,10 +70,32 @@ const NODE_NAMES: Partial<Record<string, Partial<Record<CHANGE_OPERATION, Change
   },
 };
 
+/** What a reviewer calls each kind of block. */
+const BLOCK_NAMES: Record<string, string> = {
+  paragraph: "Paragraph",
+  heading: "Heading",
+  listItem: "List item",
+  bulletList: "Bulleted list",
+  orderedList: "Numbered list",
+  table: "Table",
+  image: "Image",
+  codeBlock: "Code block",
+  blockquote: "Quote",
+  horizontalRule: "Horizontal line",
+  pageBreak: "Page break",
+};
+
+/** A block added or removed, named by what it is: "List item added", or by its type when it has no name here. */
+function blockName(nodeType: string, operation: CHANGE_OPERATION, generic: ChangeMeta): ChangeMeta | undefined {
+  const name = BLOCK_NAMES[nodeType] ?? nodeType;
+  if (operation === CHANGE_OPERATION.insert) return { icon: generic.icon, label: `${name} added` };
+  if (operation === CHANGE_OPERATION.delete) return { icon: generic.icon, label: `${name} removed` };
+  return undefined;
+}
+
 /** Only where the node sits changed, not what it is. */
 const onlyPlaced = ({ oldAttrs, newAttrs }: NodeAttrChange) => {
-  const changed = Object.keys({ ...oldAttrs, ...newAttrs }).filter(key =>
-    key !== "dataTracked" && JSON.stringify(oldAttrs[key]) !== JSON.stringify(newAttrs[key]));
+  const changed = changedAttrKeys(oldAttrs, newAttrs);
   return changed.length > 0 && changed.every(key => IMAGE_PLACEMENT_ATTRS.includes(key));
 };
 
@@ -95,7 +117,7 @@ export function getChangeMeta(change: TrackedChange): ChangeMeta {
     };
   }
   const named = change.type === "node-change" && !change.dataTracked.moveNodeId
-    ? NODE_NAMES[change.node.type.name]?.[op]
+    ? NODE_NAMES[change.node.type.name]?.[op] ?? blockName(change.node.type.name, op, changeName(change.type, op, false))
     : undefined;
   if (named) return named;
   if (change.type === "node-attr-change" && onlyPlaced(change)) {

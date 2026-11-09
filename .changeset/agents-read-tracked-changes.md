@@ -3,6 +3,7 @@
 "@scrivr/export-semantic": patch
 "@scrivr/plugins": patch
 "@scrivr/ai": patch
+"@scrivr/react": patch
 ---
 
 Agents read pending tracked changes and can review them.
@@ -107,3 +108,15 @@ One-time changes to watch for:
 - An inserted, deleted or moved empty line — a new empty list item or
   paragraph — is marked on the canvas again. The caret's zero-width glyph on
   the line counted as text, so it was left unmarked.
+- Review cards and the change popover name a block added or removed by what
+  it is — "List item added", "Paragraph added", "Image removed" — instead of
+  "Block added", and leave out the preview line of a block with no words.
+  `ChangePopoverInfo.nodeTypeName` (new) says which block a node change is on,
+  so a host can name it too (asked for by the user, 2026-11-09).
+- An attribute change reads its values in words on cards and in the popover:
+  an object value is spelled out (`x 0, y 48`), never `[object Object]`, and an
+  equal value written anew is not listed. `describeAttrChanges` and
+  `changedAttrKeys` (new, `@scrivr/plugins`, awaiting approval) are that one description, shared
+  by the popover and the panel. An image whose older `floatOffset` changed
+  with its `yOffset` reads as moved: `IMAGE_PLACEMENT_ATTRS` includes
+  `floatOffset`.

@@ -608,8 +608,9 @@ const imagePdf: PdfNodeHandler = (block, ctx) => {
 /**
  * Attrs that only place an anchored image on its page. Dragging an image within
  * its page writes these and nothing else, so a change to them alone is a move.
+ * `floatOffset` is the older offset that `yOffset` replaced; it still places.
  */
-export const IMAGE_PLACEMENT_ATTRS: readonly string[] = ["xAlign", "x", "yOffset"];
+export const IMAGE_PLACEMENT_ATTRS: readonly string[] = ["xAlign", "x", "yOffset", "floatOffset"];
 
 export const Image = Extension.create({
   name: "image",

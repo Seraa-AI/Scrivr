@@ -24,6 +24,7 @@ export {
   proposedForDeletion,
 } from "./helpers";
 export { changePreviewText, createChangePopover } from "./createChangePopover";
+export { changedAttrKeys, describeAttrChanges } from "./attrChanges";
 export type { ChangePopoverInfo, ChangePopoverCallbacks } from "./createChangePopover";
 export { isTrackedMark } from "./helpers";
 export { trackChangesPluginKey } from "./engine/trackChangesPlugin";
