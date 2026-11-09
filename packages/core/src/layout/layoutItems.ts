@@ -155,10 +155,6 @@ export function collectLayoutItems(doc: Node): LayoutItem[] {
 
 /** However deep a block is indented, an inch of the line is left for its text. */
 const MIN_TEXT_WIDTH = 96;
-/** The least of the line a tab stop must leave for the text after a marker: the same inch. */
-const MIN_TEXT_AFTER_MARKER = MIN_TEXT_WIDTH;
-/** Word's default tab stops: every half inch from the content edge. */
-const DEFAULT_TAB_STOP = 48;
 
 /** A marker to measure a block against: the marker, how far in the block's text is, and how far the marker hangs before it. */
 export interface MarkerPlacement {
@@ -246,33 +242,21 @@ export function itemSpacing(
 }
 
 /**
- * How far a marker pushes the block's first line of text. Word follows a
- * number with a tab (`w:suff`, a tab when omitted) that follows the normal tab
- * stop rules: the text stays where it is unless the marker reaches it, and
- * then moves to the next default stop past the marker. When that stop would
- * leave less than `MIN_TEXT_AFTER_MARKER` of the line, the text follows the
- * marker after a space instead, as Word's `w:suff="space"` places it; what
- * Word does with a tab past the line's last usable stop is not documented.
- * A float that moves the line `lineStart` in moves the marker with it.
+ * How far a marker pushes the block's first line of text: not at all unless
+ * the marker reaches the text, and then to where the marker ends, as Word
+ * does. A float that moves the line `lineStart` in moves the marker with it.
  */
 function markerFirstLineOffset(
   placement: MarkerPlacement,
   lines: readonly LayoutLine[],
   measurer: TextMeasurerLike,
   ownIndent: number,
-  blockWidth: number,
   lineStart: number,
 ): number {
   const face = markerFaceOf(lines);
   const textStart = placement.indentLeft + lineStart + ownIndent;
   const markerEnd = markerStartOf(placement, lineStart) + placement.marker.width(face, measurer);
-  if (markerEnd < textStart) return 0;
-  const nextStop = (Math.floor(markerEnd / DEFAULT_TAB_STOP) + 1) * DEFAULT_TAB_STOP;
-  const lineEnd = placement.indentLeft + blockWidth;
-  const target = lineEnd - nextStop >= MIN_TEXT_AFTER_MARKER
-    ? nextStop
-    : markerEnd + measurer.measureWidth(" ", face.font);
-  return Math.max(0, target - textStart);
+  return Math.max(0, markerEnd - textStart);
 }
 
 /**
@@ -291,7 +275,7 @@ export function measureWithMarker(
   if (!placement) return { block: layoutBlock(node, options) };
   const first = layoutBlock(node, { ...options, marker: {} });
   const offsetAt = (lineStart: number) =>
-    markerFirstLineOffset(placement, first.lines, options.measurer, ownFirstLineIndent(node), options.availableWidth, lineStart);
+    markerFirstLineOffset(placement, first.lines, options.measurer, ownFirstLineIndent(node), lineStart);
   const offset = offsetAt(0);
   const markerLine: MarkerLine = { offsetAt, ...(offset > 0 ? { offset } : {}) };
   // A float beside the block can move its first line, and the push with it.
