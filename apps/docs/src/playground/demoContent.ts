@@ -641,6 +641,83 @@ const DEMO_DOC = {
     },
     architectureTable(),
 
+    // ── Floating images beside tables ─────────────────────────────────────────
+    {
+      type: "heading",
+      attrs: { level: 3, align: "left" },
+      content: [{ type: "text", text: "Images beside tables" }],
+    },
+    {
+      type: "paragraph",
+      attrs: { align: "left" },
+      content: [
+        {
+          type: "image",
+          attrs: {
+            src: "https://picsum.photos/seed/besidetable/200/220",
+            alt: "Square image reaching over a table",
+            width: 200,
+            height: 220,
+            wrapMode: "square",
+            xAlign: "right",
+          },
+        },
+        {
+          type: "text",
+          text: "A table never shrinks to sit beside a floating image. As in Word, rows that would run under a square or top-and-bottom image move below it instead, and rows above the image keep their place. This image is anchored here and is taller than this paragraph, so the schedule below starts under it rather than behind it.",
+        },
+      ],
+    },
+    scheduleTable(),
+    {
+      type: "paragraph",
+      attrs: { align: "left" },
+      content: [
+        {
+          type: "image",
+          attrs: {
+            src: "https://picsum.photos/seed/stacked/160/110",
+            alt: "Stacked square image",
+            width: 160,
+            height: 110,
+            wrapMode: "square",
+            xAlign: "left",
+          },
+        },
+        {
+          type: "image",
+          attrs: {
+            src: "https://picsum.photos/seed/stacked2/160/110",
+            alt: "Second stacked square image",
+            width: 160,
+            height: 110,
+            wrapMode: "square",
+            xAlign: "left",
+          },
+        },
+        {
+          type: "text",
+          text: "Two square images on the same side never overlap: as in Word, the second one sits beside the first while the column has room, and below it when it does not. The text wraps around both.",
+        },
+      ],
+    },
+    {
+      type: "heading",
+      attrs: { level: 3, align: "left" },
+      content: [{ type: "text", text: "Try it" }],
+    },
+    steps([
+      "Drag the right-hand image down so it ends above the schedule. Rows it would cover move below it; rows above it stay put.",
+      "Drop an image onto a cell of the schedule. As in Word, it moves into that cell, the cell's text wraps around it, and the row grows to hold it.",
+      "Drag that image to another cell, then back out below the table. It follows the drop each time.",
+      "Click an image sitting in a cell. It selects, and you can drag it again.",
+      "Switch an image in a cell to ↕ Break, then to Behind or Front. ↕ Break puts the cell's text below it; Behind and Front leave the row as it was.",
+      "Make the column narrow, or widen the stacked images, so they no longer fit side by side. The second moves below the first.",
+      "Add rows until the table crosses onto the next page. A row carries its image with it.",
+      "Export to PDF and to Word. Images in cells, rows and wraps sit where they do on screen.",
+      "To check: drop a square image onto the top of a page that begins with a paragraph carried over from the page before. It should land where you drop it.",
+    ]),
+
     // ── Layout engine ─────────────────────────────────────────────────────────
     {
       type: "heading",
@@ -837,84 +914,6 @@ const DEMO_DOC = {
         },
       ],
     },
-
-    // ── Floating images beside tables ─────────────────────────────────────────
-    { type: "pageBreak" },
-    {
-      type: "heading",
-      attrs: { level: 3, align: "left" },
-      content: [{ type: "text", text: "Images beside tables" }],
-    },
-    {
-      type: "paragraph",
-      attrs: { align: "left" },
-      content: [
-        {
-          type: "image",
-          attrs: {
-            src: "https://picsum.photos/seed/besidetable/200/220",
-            alt: "Square image reaching over a table",
-            width: 200,
-            height: 220,
-            wrapMode: "square",
-            xAlign: "right",
-          },
-        },
-        {
-          type: "text",
-          text: "A table never shrinks to sit beside a floating image. As in Word, rows that would run under a square or top-and-bottom image move below it instead, and rows above the image keep their place. This image is anchored here and is taller than this paragraph, so the schedule below starts under it rather than behind it.",
-        },
-      ],
-    },
-    scheduleTable(),
-    {
-      type: "paragraph",
-      attrs: { align: "left" },
-      content: [
-        {
-          type: "image",
-          attrs: {
-            src: "https://picsum.photos/seed/stacked/160/110",
-            alt: "Stacked square image",
-            width: 160,
-            height: 110,
-            wrapMode: "square",
-            xAlign: "left",
-          },
-        },
-        {
-          type: "image",
-          attrs: {
-            src: "https://picsum.photos/seed/stacked2/160/110",
-            alt: "Second stacked square image",
-            width: 160,
-            height: 110,
-            wrapMode: "square",
-            xAlign: "left",
-          },
-        },
-        {
-          type: "text",
-          text: "Two square images on the same side never overlap: as in Word, the second one sits beside the first while the column has room, and below it when it does not. The text wraps around both.",
-        },
-      ],
-    },
-    {
-      type: "heading",
-      attrs: { level: 3, align: "left" },
-      content: [{ type: "text", text: "Try it" }],
-    },
-    steps([
-      "Drag the right-hand image down so it ends above the schedule. Rows it would cover move below it; rows above it stay put.",
-      "Drop an image onto a cell of the schedule. As in Word, it moves into that cell, the cell's text wraps around it, and the row grows to hold it.",
-      "Drag that image to another cell, then back out below the table. It follows the drop each time.",
-      "Click an image sitting in a cell. It selects, and you can drag it again.",
-      "Switch an image in a cell to ↕ Break, then to Behind or Front. ↕ Break puts the cell's text below it; Behind and Front leave the row as it was.",
-      "Make the column narrow, or widen the stacked images, so they no longer fit side by side. The second moves below the first.",
-      "Add rows until the table crosses onto the next page. A row carries its image with it.",
-      "Export to PDF and to Word. Images in cells, rows and wraps sit where they do on screen.",
-      "To check: drop a square image onto the top of a page that begins with a paragraph carried over from the page before. It should land where you drop it.",
-    ]),
   ],
 };
 
