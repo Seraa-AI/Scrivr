@@ -139,10 +139,21 @@ details:
 - **`PdfOutlineLevel`** (`(node) => number | null`) is declared in core beside
   `PdfNodeHandler`, so an extension types its level without depending on
   `@scrivr/export-pdf`, which re-exports it. The exporter's `addOutline` takes
-  the merged map; a heading's level is clamped to `Heading`'s configured
-  `levels`, as its DOCX export already was.
+  the merged map.
 - **`PasteTransformer`'s constructor** drops the rules argument:
   `(schema, markdownParserTokens, options)`.
+- **Paste turns off a markdown-it rule only when no extension declares its
+  token** (blockquote, link, autolink, image, inline code), so that syntax
+  pastes as its text. Inline code used to be dropped by an ignore rule.
+- **A break is honoured only on a leaf**; a node that holds content ignores
+  it. A heading's outline level is its own, not clamped to `levels`, so a
+  deeper one still nests in order; a level that is not a finite number leaves
+  the block out.
+- **`breakOf` is exported.** The semantic exporter and the agent's rich diff
+  read a declared line break as "\n", and a header or footer refuses any node
+  that breaks the page.
+- **Deferred:** the semantic outline still finds headings by name; moving the
+  outline level to the node spec, read by both, is its own PR.
 - The vocabulary guards hold the grep check: no `pageBreak` or `hardBreak`
   under `layout/` or `renderer/`; no `heading`, `bulletList`, `orderedList`
   or `listItem` literal under `input/`; no `heading` under `export-pdf/src`.

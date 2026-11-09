@@ -42,6 +42,13 @@ describe("pasting markdown", () => {
     );
   });
 
+  it("keeps inline code, which no extension declares, as the text it was", () => {
+    expect(blocksOf(paste([StarterKit], "# Setup\n\nRun `npm i` now"))).toEqual([
+      { type: "heading", text: "Setup" },
+      { type: "paragraph", text: "Run `npm i` now" },
+    ]);
+  });
+
   it("pastes the text as it is when no extension declares markdown tokens", () => {
     expect(blocksOf(paste([Document, Paragraph], "# Title\nbody"))).toEqual([
       { type: "paragraph", text: "# Title" },

@@ -22,12 +22,22 @@ import { safeImageUrl } from "../model/safeUrl";
 // Require intentional block-level structure — mid-sentence asterisks are NOT markdown.
 const MARKDOWN_PATTERN = /^(#{1,6} |[*-] |\d+\. |`{3}|---)/m;
 
-// Tokens that markdown-it emits but our schema has no equivalent for.
-// These are self-closing inline tokens — { ignore: true } silently skips them.
+// A "two spaces, newline" break with no line break node declared reads as a space.
 const IGNORE_TOKENS: Record<string, MarkdownParserTokenSpec> = {
   hardbreak: { ignore: true },
-  code_inline: { ignore: true },
-  image: { ignore: true },
+};
+
+/**
+ * Inline and block markdown-it rules, by the token they emit. A rule whose
+ * token no extension declares is turned off, so its syntax pastes as the text
+ * it was rather than failing the whole paste.
+ */
+const RULE_TOKENS: Record<string, string> = {
+  blockquote: "blockquote",
+  link: "link",
+  autolink: "link",
+  image: "image",
+  backticks: "code_inline",
 };
 
 export interface PasteOptions {
@@ -125,11 +135,10 @@ export class PasteTransformer {
     > = {},
     private readonly options: PasteTransformerOptions = {},
   ) {
-    // Disable rules that generate tokens our schema can't handle (blockquote, link, image).
-    // Their content still renders as plain text — no data loss, just no special formatting.
     this.md = createMarkdownIt();
-    //TODO: add these to the schema
-    this.md.disable(["blockquote", "image", "link"]);
+    this.md.disable(
+      Object.entries(RULE_TOKENS).flatMap(([rule, token]) => (token in markdownParserTokens ? [] : [rule])),
+    );
   }
 
   transform(

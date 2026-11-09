@@ -11,14 +11,19 @@ bookmarks work exactly as before, now from `PageBreak`, `HardBreak` and
 - **`NodeLayout` gains `{ kind: "break", breaks: "page" | "line" }`** (`BreakKind`).
   A block that breaks the page starts the next block on a new page; an inline
   node that breaks the line ends its line. A break its context cannot honour
-  lays out as a plain leaf. A page break's flow `blockType` is its node's name.
+  lays out as a plain leaf; a node that holds content ignores it. A page
+  break's flow `blockType` is its node's name. `breakOf(type)` reads it, and
+  the semantic exporter, the agent's rich diff and the header/footer surfaces
+  honour declared breaks as they do the built-in ones.
 - **`addExports().pdf.outline`** maps a node name to a `PdfOutlineLevel`,
   `(node) => number | null`: the block's bookmark level, 1 at the top. `Heading`
-  declares its level, clamped to its configured `levels` as its DOCX export is.
+  declares its own level.
 - **Pasted markdown goes through the tokens extensions declare.**
   `Strikethrough` declares `~~text~~`, so it pastes struck through. Markdown
   holding a construct no extension declares (a pipe table without `Table`)
-  pastes as plain text, one paragraph per line.
+  pastes as plain text, one paragraph per line. Inline code, links,
+  blockquotes and images that no extension declares paste as their markdown
+  text; inline code was dropped before.
 
 **Breaking:**
 
