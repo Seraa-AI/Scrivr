@@ -537,6 +537,13 @@ section is what is true.
   try put the offset on the list, which moved every item with the one tabbed;
   the live test showed it.
 
+- **D10 — The text follows a wide number after a space** (user, 2026-11-09,
+  found in the playground: "text should not move to the next tab … text start
+  after the number"). Replaces the tab-stop push of the first-line rule and
+  D8's "text at the next tab stop": when a number reaches its text, beside a
+  float or not, the first line starts one space past it. DOCX export still
+  writes no `w:suff`, so Word applies its own tab rule to an exported file.
+
 ### Where the code differs from the design above
 
 - **The level table is not exported, and its type changed.** §2's

@@ -128,7 +128,7 @@ describe("list geometry (Word's built-in lists)", () => {
   });
 });
 
-describe("a number too wide for its hanging indent (Word: the tab after it goes to the next stop)", () => {
+describe("a number too wide for its hanging indent (the text follows it after a space)", () => {
   /**
    * A list item whose number, measured in the item's own font, is `minWidth`
    * to `maxWidth` wide — found by measuring, not assumed, so the test asks the
@@ -180,12 +180,12 @@ describe("a number too wide for its hanging indent (Word: the tab after it goes 
     expect(wide.x + firstLineStart(wide)).toBeGreaterThan(numberEnd);
   });
 
-  it("moves the first line to the next tab stop, and only the first line", () => {
+  it("starts the first line a space after a wide number, and only the first line", () => {
     const text = "wide ".repeat(60).trim();
     const wide = blockOf(laidOut([olFrom(1000, item(text))]), text);
     const firstTextX = wide.x + firstLineStart(wide);
-    expect(firstTextX).toBeGreaterThan((wide.marker?.x ?? 0) + measureTextWidth("1000.", fontOf(wide)));
-    expect((firstTextX - defaultPageConfig.margins.left) % HALF_INCH).toBe(0);
+    const numberEnd = (wide.marker?.x ?? 0) + measureTextWidth("1000.", fontOf(wide));
+    expect(firstTextX - numberEnd).toBeCloseTo(measureTextWidth(" ", fontOf(wide)), 0);
     for (const line of wide.lines.slice(1)) expect(line.spans[0]?.x).toBe(0);
   });
 
@@ -431,7 +431,7 @@ describe("a first word that does not fit after its number (Word leaves the numbe
     editor.destroy();
   });
 
-  it("moves the number past a float on the item's left, and the text to the tab stop after it", () => {
+  it("moves the number past a float on the item's left, and the text a space after it", () => {
     const float: Json = { type: "paragraph", content: [
       { type: "image", attrs: { src: "data:image/png;base64,AA==", width: 150, height: 200, wrapMode: "square", xAlign: "left" } },
       { type: "text", text: "anchor" },
@@ -447,8 +447,8 @@ describe("a first word that does not fit after its number (Word leaves the numbe
       const marker = markerAnchorOf(block);
       const textX = block.x + firstLineStart(block);
       expect(marker?.x).toBeGreaterThanOrEqual(f.x + f.width + ANCHORED_OBJECT_MARGIN - 0.5);
-      expect(textX).toBeGreaterThan((marker?.x ?? 0) + measureTextWidth(number, fontOf(block)));
-      expect((textX - defaultPageConfig.margins.left) % HALF_INCH).toBe(0);
+      const numberEnd = (marker?.x ?? 0) + measureTextWidth(number, fontOf(block));
+      expect(textX - numberEnd).toBeCloseTo(measureTextWidth(" ", fontOf(block)), 0);
     }
   });
 
