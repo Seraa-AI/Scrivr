@@ -46,6 +46,17 @@ export type SemanticTextView = "proposed";
  * Derived from the same units, so the same JSON always yields the same
  * outline: ids come from unit anchors, never from fresh identity.
  */
+/** A block that heads a section, as a unit holds it. */
+export interface SemanticHeading {
+  /** The heading block's anchor id. */
+  nodeId: string;
+  level: number;
+  /** Its proposed text. */
+  title: string;
+  /** The headings it sits under, outermost first. */
+  breadcrumb: string[];
+}
+
 export interface OutlineSection {
   /** The anchor id of the section's first unit. Stable across reads. */
   id: string;
@@ -89,7 +100,15 @@ export interface SemanticUnit {
   view: SemanticTextView;
   /** Heading path, e.g. `["Limitation of Liability", "Exclusions"]`. */
   breadcrumb: string[];
+  /** The anchor block's outline level, when it heads a section (see `headings`). */
   headingLevel?: number;
+  /**
+   * Every block in this unit that heads a section, in document order: its
+   * anchor, a heading nested in a list, sourced block or table cell, each with
+   * the breadcrumb it sits under. A block heads a section when its spec
+   * declares an outline level and its proposed text is not empty.
+   */
+  headings?: SemanticHeading[];
   /** Monotonic document order. */
   order: number;
   /** Plain text for embedding. Tracked-delete text excluded, tracked-insert included. */

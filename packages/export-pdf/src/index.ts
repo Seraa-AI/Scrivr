@@ -31,6 +31,7 @@ export type { PdfMetadata } from "./metadata";
 export type { ImageResolver, ImageBytes } from "./fetchImage";
 
 import { PDFDocument, type PDFPage, type PDFImage } from "pdf-lib";
+import type { Node as PmNode } from "@scrivr/core/pm";
 import type {
   PdfMarkHandler,
   IEditor,
@@ -181,8 +182,11 @@ async function writePdf(
   } = { before: [], after: [] };
 
   const markerPainters = editor.getMarkerPainters();
+  const removers: Array<(node: PmNode) => boolean> = [];
 
   for (const contrib of editor.getExportContributions()) {
+    const remover = proposedRemoverOf(contrib);
+    if (remover) removers.push(remover);
     const pdfContrib = contrib.pdf;
     if (!pdfContrib) continue;
     for (const [name, handler] of Object.entries(pdfContrib.nodes ?? {})) {
@@ -362,8 +366,22 @@ async function writePdf(
   // After the pages exist, because a bookmark's destination names the page
   // object it jumps to.
   applyMetadata(pdfDoc, options?.metadata);
-  if (options?.outline !== false) addOutline(pdfDoc, layout);
+  if (options?.outline !== false) addOutline(pdfDoc, layout, (node) => removers.some((removed) => removed(node)));
   return pdfDoc.save();
+}
+
+/**
+ * What the proposed view leaves out, as an extension declares it on the
+ * semantic lane (`isRemoved`): a bookmark is titled by its block's proposed
+ * text, as the semantic outline titles a section. Read by shape, since this package does
+ * not depend on the semantic one.
+ */
+function proposedRemoverOf(contrib: object): ((node: PmNode) => boolean) | null {
+  if (!("semantic" in contrib)) return null;
+  const semantic: unknown = contrib.semantic;
+  if (typeof semantic !== "object" || semantic === null || !("isRemoved" in semantic)) return null;
+  const isRemoved: unknown = semantic.isRemoved;
+  return typeof isRemoved === "function" ? (node) => isRemoved(node) === true : null;
 }
 
 // ── Anchored objects ────────────────────────────────────────────────────────

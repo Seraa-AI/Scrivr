@@ -320,10 +320,30 @@ As designed, with these details:
 - A lede is a textblock that heads no section, as well as the schema's
   default. `outlineLevel` must be pure and must not throw: it runs for every
   block the outlines visit.
-- **To check (older than this phase): the two outlines read one declaration
-  but still visit different blocks.** A heading nested in a list, sourced
+- **Fixed in phase 4 (below):** ~~the two outlines read one declaration
+  but still visit different blocks.~~ A heading nested in a list, sourced
   block or table cell is a PDF bookmark but no semantic section; an empty
   heading is left out of the bookmarks but opens an untitled semantic section,
   which changes what nests under it; and with grouping on, a semantic
   section's title includes its lede while its children's breadcrumbs do not.
+
+### Phase 4 — the outlines agree, then floats and images
+
+**Outlines (user, 2026-11-10: "add them to phase 4 and lets start with
+them").** Decisions: the semantic outline follows the PDF, and an empty
+heading heads nothing.
+
+- **A unit lists the headings it holds** (`SemanticUnit.headings`,
+  `SemanticHeading`: anchor id, level, title, breadcrumb), its anchor and any
+  nested in a list, sourced block or table cell. The walker threads each into
+  the breadcrumbs of what follows; `toDocumentOutline` opens a section for
+  each. A section opened by a nested heading starts at the unit holding it,
+  and one it closes ends one unit later, since both share that unit.
+- **A block heads a section when it declares an outline level and its
+  proposed text is not empty**, in both outlines. The bookmarks read the
+  proposed text through the `isRemoved` declarations on the semantic lane (by
+  shape: the PDF package does not depend on the semantic one), so a heading
+  whose text is all proposed for deletion is no bookmark and no section.
+- **A section is titled by its heading**, not by the unit's text, which with
+  grouping on includes the lede.
 
