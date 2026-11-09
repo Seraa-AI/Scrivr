@@ -275,8 +275,9 @@ export interface AnchoredObjectPlacement {
   zIndex: number;
   node: Node;
   /**
-   * Anchor flow's globalY at solve time (post anchor-push / stacking).
-   * Phase 2's drag snapshot reads this; do not use for paint or exclusion.
+   * Anchor flow's globalY the placement was measured from (post anchor-push);
+   * for a float locked with no fixed point, where it was when it locked.
+   * The drag snapshot reads this; do not use for paint or exclusion.
    */
   anchorGlobalY: number;
   anchorPage: number;

@@ -336,6 +336,53 @@ describe("PointerController — drag UX", () => {
       expect(landed.globalY).toBeCloseTo(stacked.globalY + dy, 6);
     });
 
+    function dragFirstImage(content: unknown[], dy: number): { before: AnchoredObjectPlacement; anchorY: number; after: AnchoredObjectPlacement } {
+      setup = makePointerControllerSetup({ content: { type: "doc", content } });
+      const before = setup.editor.layout.anchoredObjects?.[0];
+      if (!before) throw new Error("no image");
+      const anchorY = setup.editor.layout.pages[0]?.blocks.at(-1)?.y ?? 0;
+      const grabX = before.x + 20;
+      const grabY = before.y + 10;
+      mousedown(setup.container, grabX, grabY);
+      mousemove(grabX, grabY + dy);
+      mouseup(grabX, grabY + dy);
+      const after = setup.editor.layout.anchoredObjects?.[0];
+      if (!after) throw new Error("image vanished");
+      return { before, anchorY, after };
+    }
+
+    it("an image clamped to the page top lands where it was dropped", () => {
+      const { before, after } = dragFirstImage([
+        { type: "paragraph", content: [{ type: "text", text: "word ".repeat(40).trim() }] },
+        { type: "paragraph", content: [{ type: "text", text: "A" }, { type: "image", attrs: { src: "x", wrapMode: "front", xAlign: "left", width: 80, height: 40, yOffset: -5000 } }] },
+      ], 60);
+      expect(before.clamped).toBe(true);
+      expect(after.globalY).toBeCloseTo(before.globalY + 60, 6);
+    });
+
+    it("an image locked off its offset lands where it was dropped", () => {
+      // A top-bottom image over the last line of the paragraph above its own
+      // has no fixed point and is locked where the line it covers leaves it.
+      const above = { type: "paragraph", content: [{ type: "text", text: `Above ${"word ".repeat(40).trim()}` }] };
+      setup = makePointerControllerSetup({ content: { type: "doc", content: [above, { type: "paragraph", content: [{ type: "text", text: "Anchor" }] }] } });
+      const [aboveBlock, anchorBlock] = setup.editor.layout.pages[0]?.blocks ?? [];
+      const lastLine = aboveBlock?.lines.at(-1);
+      if (!aboveBlock || !anchorBlock || !lastLine) throw new Error("no blocks");
+      const yOffset = aboveBlock.y + aboveBlock.height - lastLine.lineHeight - anchorBlock.y;
+      setup.cleanup();
+
+      const { before, anchorY, after } = dragFirstImage([
+        above,
+        { type: "paragraph", content: [
+          { type: "text", text: `Anchor ${"word ".repeat(40).trim()}` },
+          { type: "image", attrs: { src: "x", wrapMode: "top-bottom", xAlign: "left", width: 200, height: 60, yOffset } },
+        ] },
+      ], 150);
+      // Page 1: global and page-local Y differ by nothing.
+      expect(before.globalY).not.toBeCloseTo(anchorY + yOffset, 1);
+      expect(after.globalY).toBeCloseTo(before.globalY + 150, 6);
+    });
+
     it("no closer paragraph → keeps the original anchor (setNodeAttrs path)", () => {
       setup = makePointerControllerSetup({ isPageless: true });
       const sourceBlock: LayoutBlockFixture = { kind: "text", nodePos: 4, y: 50, height: 100 };

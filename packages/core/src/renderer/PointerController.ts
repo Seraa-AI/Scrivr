@@ -988,10 +988,11 @@ export class PointerController {
     if (!this.anchoredDrag) return null;
     const sourcePage = this.anchoredDrag.rect.page;
     const imageGlobalY = this.anchoredDrag.anchorGlobalY + committedYOffset;
-    const sourceFrom = this.anchoredDrag.docPos;
-    const sourceTo = sourceFrom + this.anchoredDrag.nodeSize;
-
-    const best = this.nearestAnchorStartingOn(sourcePage, imageGlobalY, (docPos) => docPos >= sourceFrom && docPos <= sourceTo);
+    // The image's own paragraph is where it is measured from already. A
+    // locked image is measured from where that paragraph started when it
+    // locked, not where its wrap has since moved it.
+    const ownParagraph = this.deps.editor.getState().doc.resolve(this.anchoredDrag.docPos).start();
+    const best = this.nearestAnchorStartingOn(sourcePage, imageGlobalY, (docPos) => docPos === ownParagraph);
     if (!best) return null;
     const wouldReduce = Math.abs(committedYOffset) - best.distance;
     if (wouldReduce <= RE_ANCHOR_THRESHOLD_PX) return null;
