@@ -4,7 +4,7 @@ import type { FontResolutionId, LayoutFontResolver } from "../fonts/layoutResolv
 import type { FontModifier } from "../extensions/types";
 import type { TextMeasurerLike } from "./TextMeasurer";
 import type { InlineRegistry } from "./BlockRegistry";
-import { normalizeImageAttrs } from "./AnchoredObjects";
+import { normalizeImageAttrs, type WrapMode } from "./AnchoredObjects";
 import { LineBreaker, LayoutLine, InputSpan, spanEndDocPos, computeObjectRenderY, type InlineObjectVerticalAlign, type LineSpaceProvider } from "./LineBreaker";
 import { CharacterMap } from "./CharacterMap";
 import {
@@ -103,6 +103,29 @@ export interface CellSubBlock {
   background: string | null;
   /** Layout for the cell's child blocks. Empty array in Phase 1. */
   blocks: LayoutBlock[];
+  /** Images anchored in the cell's blocks, laid out inside the cell. Absent when there are none. */
+  floats?: CellFloat[];
+}
+
+/**
+ * An image laid out inside its table cell. `x` is absolute; `y` and
+ * `anchorY` (its paragraph's top) are relative to the row's top, like the
+ * cell's blocks, so a cached row carries its images to any page.
+ */
+export interface CellFloat {
+  docPos: number;
+  node: Node;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  wrapMode: WrapMode;
+  zIndex: number;
+  margin: number;
+  anchorY: number;
+  clamped?: true;
+  /** How far keeping clear of an earlier image moved it down. */
+  stackOffset?: number;
 }
 
 export interface LayoutBlock {
@@ -575,6 +598,7 @@ export function layoutBlock(
       defaultFontSize: parseFloat(parsedBase.size),
       ...(indentAwareLineSpace ? { lineSpaceProvider: indentAwareLineSpace, startY: y } : {}),
       ...(firstLineOffset > 0 ? { firstLineMayStayEmpty: true } : {}),
+      ...(firstLineIndent > 0 ? { firstLineIndent } : {}),
     },
   );
 

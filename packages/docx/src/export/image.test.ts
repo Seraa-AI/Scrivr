@@ -124,6 +124,28 @@ describe("image DOCX export", () => {
     expect(documentXml).toContain('behindDoc="0"');
   });
 
+  it("a square image moves clear of earlier square images, so Word is told not to overlap it", async () => {
+    const editor = new ServerEditor();
+    setImageDoc(editor, { wrapMode: "square", yOffset: 40 });
+
+    const { bytes } = await exportDocx(editor);
+    const documentXml = readText(readZip(bytes), "word/document.xml");
+
+    expect(documentXml).toContain('allowOverlap="0"');
+    // 40 px × 9525: the user's offset.
+    expect(documentXml).toContain("<wp:posOffset>381000</wp:posOffset>");
+  });
+
+  it.each(["top-bottom", "behind", "front"])("a %s image may overlap others, as in Word", async (wrapMode) => {
+    const editor = new ServerEditor();
+    setImageDoc(editor, { wrapMode });
+
+    const { bytes } = await exportDocx(editor);
+    const documentXml = readText(readZip(bytes), "word/document.xml");
+
+    expect(documentXml).toContain('allowOverlap="1"');
+  });
+
   it("emits wp:wrapTopAndBottom for top-bottom wrap", async () => {
     const editor = new ServerEditor();
     setImageDoc(editor, { wrapMode: "top-bottom" });
@@ -167,6 +189,17 @@ describe("image DOCX export", () => {
     // 200 px × 9525 = 1905000 EMU.
     expect(documentXml).toContain("<wp:posOffset>1905000</wp:posOffset>");
     expect(documentXml).not.toContain("<wp:align>");
+  });
+
+  it("a named alignment wins over a leftover x, as layout reads it", async () => {
+    const editor = new ServerEditor();
+    setImageDoc(editor, { wrapMode: "square", xAlign: "right", x: 200 });
+
+    const { bytes } = await exportDocx(editor);
+    const documentXml = readText(readZip(bytes), "word/document.xml");
+
+    expect(documentXml).toContain("<wp:align>right</wp:align>");
+    expect(documentXml).not.toContain("<wp:posOffset>1905000</wp:posOffset>");
   });
 
   it("dedupes identical srcs — only one media part + rel per unique src", async () => {

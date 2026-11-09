@@ -1,4 +1,5 @@
 import type { Node } from "prosemirror-model";
+import type { LayoutLine } from "./LineBreaker";
 
 // Default breathing room around an anchored object's exclusion rect, in px.
 // Word's "Square" / "Tight" wrap defaults are ~0.13" ≈ 12px; matching that
@@ -220,8 +221,9 @@ function isXAlign(value: unknown): value is XAlign {
  *
  * Named alignments (`left`/`center`/`right`) snap to content bounds —
  * the typography convention and Word's default "Margin" horizontal anchor.
- * `xAlign: "custom"` is the user's free-positioning result (drag commit);
- * it clamps to *page* bounds so the image can hang into the left or right
+ * `xAlign: "custom"` is the user's free-positioning result (drag commit),
+ * measured from the content area's left edge as Word's `relativeFrom="column"`
+ * is. It clamps to *page* bounds so the image can hang into the left or right
  * margin without escaping the page. Top/bottom margins are not relaxed
  * because headers and footers live there.
  */
@@ -242,8 +244,7 @@ export function resolveImageX(
       return contentMaxX;
     case "custom": {
       const pageMaxX = Math.max(0, pageWidth - attrs.width);
-      const x = attrs.x ?? contentX;
-      return clamp(x, 0, pageMaxX);
+      return clamp(contentX + (attrs.x ?? 0), 0, pageMaxX);
     }
   }
 }
@@ -253,6 +254,62 @@ function clamp(value: number, lo: number, hi: number): number {
 }
 
 // ── Solver / layout types ───────────────────────────────────────────────────
+
+interface Box {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+function boxesOverlap(a: Box, b: Box): boolean {
+  return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+}
+
+/**
+ * Where a square image goes when it would overlap one placed before it, as
+ * Word does with `allowOverlap="0"`: beside that image while the column has
+ * room, on the side it is aligned from, otherwise below it with `gap`.
+ */
+export function clearOfEarlier(
+  image: Box,
+  earlier: readonly Box[],
+  contentX: number,
+  contentRight: number,
+  gap: number,
+): { x: number; y: number } {
+  let at = { ...image };
+  const fromRight = image.x + image.width / 2 > (contentX + contentRight) / 2;
+  for (let attempt = 0; attempt <= earlier.length * 2; attempt++) {
+    const hit = earlier.find((other) => boxesOverlap(at, other));
+    if (!hit) return { x: at.x, y: at.y };
+    const beside = fromRight ? hit.x - at.width : hit.x + hit.width;
+    const besideFits = beside >= contentX && beside + at.width <= contentRight;
+    at = besideFits ? { ...at, x: beside } : { ...at, x: image.x, y: hit.y + hit.height + gap };
+  }
+  return { x: at.x, y: at.y };
+}
+
+/** An anchored image found where its anchor sits in the text. */
+export interface AnchorRef {
+  docPos: number;
+  node: Node;
+  attrs: NormalizedImageAttrs;
+}
+
+/** The anchored images whose anchors sit in `lines`: zero-width object spans that are not inline. */
+export function anchorsInLines(lines: readonly LayoutLine[]): AnchorRef[] {
+  const anchors: AnchorRef[] = [];
+  for (const line of lines) {
+    for (const span of line.spans) {
+      if (span.kind !== "object" || span.width !== 0) continue;
+      const attrs = normalizeImageAttrs(span.node);
+      if (attrs.wrapMode === "inline") continue;
+      anchors.push({ docPos: span.docPos, node: span.node, attrs });
+    }
+  }
+  return anchors;
+}
 
 export interface AnchoredObjectInput {
   docPos: number;
@@ -275,23 +332,37 @@ export interface AnchoredObjectPlacement {
   zIndex: number;
   node: Node;
   /**
-   * Anchor flow's globalY at solve time (post anchor-push / stacking).
-   * Phase 2's drag snapshot reads this; do not use for paint or exclusion.
+   * Anchor flow's globalY the placement was measured from (post anchor-push);
+   * for a float locked with no fixed point, where it was when it locked.
+   * The drag snapshot reads this; do not use for paint or exclusion.
    */
   anchorGlobalY: number;
   anchorPage: number;
   /**
-   * Painted top in continuous global-Y. Equals `anchorGlobalY + yOffset`
-   * after the page-edge clamp. Single source of truth for paint coords,
-   * exclusion rects, hit-testing, and PDF export.
+   * Painted top in continuous global-Y: `anchorGlobalY + yOffset`, clamped to
+   * the anchor's page, plus `stackOffset`. Single source of truth for paint
+   * coords, exclusion rects, hit-testing, and PDF export.
    */
   globalY: number;
+  /**
+   * How far the solver moved the image down so it does not overlap a square
+   * float placed before it; the user's `yOffset` does not include it. A drag
+   * commits where the image was dropped, so the stack offset is absorbed
+   * there and re-applies only if the image still overlaps. Absent when the
+   * image is not stacked.
+   */
+  stackOffset?: number;
   /**
    * True if the user-set `yOffset` was clamped to keep the image on its
    * anchor's page. Drag overlay reads this to render an explicit boundary
    * indicator (Phase 2). Absent/false when no clamp was applied.
    */
   clamped?: boolean;
+  /**
+   * The table cell holding the image's anchor, laid out inside that cell as
+   * Word's `layoutInCell` does. Absent for an image anchored in the body.
+   */
+  cellPos?: number;
 }
 
 /**

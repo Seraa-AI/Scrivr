@@ -19,6 +19,7 @@ import { AllSelection } from "@scrivr/core/pm";
 import type { Node as PMNode } from "@scrivr/core/pm";
 import {
   ServerEditor,
+  StarterKit,
   PasteTransformer,
   serializeSelectionToHtml,
   serializeSelectionToText,
@@ -131,6 +132,55 @@ describe("image wrap modes — document chain round-trip", () => {
     const { doc } = await importDocx(new ServerEditor(), bytes);
 
     expect(wrapModes(doc)).toEqual(EXPECTED_MODES);
+  });
+
+  it("an image anchored in a table cell stays in that cell, at its place, through a DOCX export and import", async () => {
+    const tableKit = () => new ServerEditor({ extensions: [StarterKit.configure({ table: true })] });
+    const editor = tableKit();
+    editor.setContent({
+      type: "doc",
+      content: [{
+        type: "table",
+        content: [{
+          type: "tableRow",
+          content: [
+            { type: "tableCell", content: [{ type: "paragraph", content: [
+              { type: "text", text: "In the cell" },
+              { type: "image", attrs: { src: PNG_URL, width: 60, height: 40, wrapMode: "square", xAlign: "custom", x: 20, yOffset: 5 } },
+            ] }] },
+            { type: "tableCell", content: [{ type: "paragraph", content: [{ type: "text", text: "Other" }] }] },
+          ],
+        }],
+      }],
+    });
+
+    const bytes = await exportDocxBytes(editor);
+    const { doc } = await importDocx(tableKit(), bytes);
+
+    const placed: unknown[] = [];
+    doc.descendants((node, pos) => {
+      if (node.type.name !== "image") return;
+      const $pos = doc.resolve(pos);
+      const cell = Array.from({ length: $pos.depth + 1 }, (_, d) => $pos.node(d).type.name).includes("tableCell");
+      placed.push([cell, node.attrs["wrapMode"], node.attrs["xAlign"], node.attrs["x"], node.attrs["yOffset"]]);
+    });
+    expect(placed).toEqual([[true, "square", "custom", 20, 5]]);
+  });
+
+  it("a square image keeps the user's offset through a DOCX export and import", async () => {
+    const editor = new ServerEditor();
+    editor.setContent({
+      type: "doc",
+      content: [{
+        type: "paragraph",
+        content: [{ type: "image", attrs: { src: PNG_URL, width: 100, height: 50, wrapMode: "square", yOffset: 10 } }],
+      }],
+    });
+
+    const bytes = await exportDocxBytes(editor);
+    const { doc } = await importDocx(new ServerEditor(), bytes);
+
+    expect(images(doc).map((n) => [n.attrs["wrapMode"], n.attrs["yOffset"]])).toEqual([["square", 10]]);
   });
 
   it("survives a clipboard copy and paste", () => {

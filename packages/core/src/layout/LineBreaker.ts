@@ -345,11 +345,17 @@ export class LineBreaker {
        * leaves a list number alone on its line.
        */
       firstLineMayStayEmpty?: boolean;
+      /**
+       * How far the provider's first line is indented (a first-line indent or
+       * a list number). Narrowing the indent explains is not a float's, so it
+       * never moves a word below one.
+       */
+      firstLineIndent?: number;
     },
   ): LayoutLine[] {
     if (!spans.length) return [];
 
-    const { defaultFontFamily, defaultFontSize, map, pageContext, lineSpaceProvider, startY = 0, firstLineMayStayEmpty = false } = options;
+    const { defaultFontFamily, defaultFontSize, map, pageContext, lineSpaceProvider, startY = 0, firstLineMayStayEmpty = false, firstLineIndent = 0 } = options;
 
     const lines: LayoutLine[] = [];
     let currentLine: LayoutSpan[] = [];
@@ -427,6 +433,40 @@ export class LineBreaker {
         finished.segments = currentLineSegments;
       }
       return finished;
+    };
+
+    // A word that fits the column but no gap a float leaves beside it goes
+    // below the float, as Word wraps it, instead of overflowing past the gap.
+    // A line holding only zero-width anchors has no text yet, so the anchors
+    // move down with the word. Runs wherever a word starts a line.
+    const stepBelowNarrowGaps = (word: Token, wordWidth: number): void => {
+      // Trailing spaces may hang past the gap, as they do past the margin.
+      const fitWidth = word.kind === "text" ? this.measurer.measureWidth(word.text.trimEnd(), word.font) : wordWidth;
+      const fits = (segments: AvailableSegment[], indent = 0) =>
+        segments.some((segment, i) => fitWidth <= segment.width + (i === 0 ? indent : 0));
+      const indent = lines.length === 0 ? firstLineIndent : 0;
+      if (!currentLine.every(isAnchorSpan) || !currentLinePositioned || fitWidth > maxWidth || fits(currentLineSegments, indent)) return;
+      // Look ahead for the first line with room, then jump there in one
+      // spacer. Space that never opens (a fixed narrow column) leaves the
+      // word where it is, to overflow as before.
+      const stepHeight = probeLineHeight(word);
+      const from = startY + cumulativeLineY;
+      let y = from;
+      for (let step = 0; step < MAX_STEPS_PAST_FLOAT; step++) {
+        const space = resolveLineSpace(lineSpaceProvider, y, stepHeight, maxWidth);
+        y = space.skipToY !== undefined && space.skipToY > y ? space.skipToY : y + stepHeight;
+        const below = resolveLineSpace(lineSpaceProvider, y, stepHeight, maxWidth);
+        if (below.segments.length === 0 || !fits(below.segments)) continue;
+        lines.push(spacerLine(y - from));
+        cumulativeLineY += y - from;
+        currentLineSegments = below.segments;
+        currentLinePositioned = isPositionedLine(currentLineSegments, maxWidth);
+        currentSegmentIndex = 0;
+        currentSegmentUsed = 0;
+        const lineStart = currentLineSegments[0]?.x ?? 0;
+        currentLine = currentLine.map((span) => ({ ...span, x: lineStart }));
+        return;
+      }
     };
 
     for (const word of words) {
@@ -528,6 +568,8 @@ export class LineBreaker {
         }
       }
 
+      stepBelowNarrowGaps(word, wordWidth);
+
       const lineIsEmpty = currentLine.length === 0;
       const placement = findPlacement(
         currentLineSegments,
@@ -537,7 +579,10 @@ export class LineBreaker {
         lineIsEmpty,
       );
 
-      if (!placement && !lineIsEmpty) startNextLine(finishCurrentLine(), word);
+      if (!placement && !lineIsEmpty) {
+        startNextLine(finishCurrentLine(), word);
+        stepBelowNarrowGaps(word, wordWidth);
+      }
 
       const nextPlacement = findPlacement(
         currentLineSegments,
@@ -813,6 +858,9 @@ function resolveLineSpace(
     ? provider(absoluteLineY, lineHeight)
     : { segments: [{ x: 0, width: maxWidth }] };
 }
+
+/** How many lines to look below a float for room before letting a word overflow. */
+const MAX_STEPS_PAST_FLOAT = 200;
 
 function isPositionedLine(segments: AvailableSegment[], maxWidth: number): boolean {
   return segments.length !== 1 || segments[0]?.x !== 0 || segments[0]?.width !== maxWidth;
