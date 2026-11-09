@@ -259,12 +259,12 @@ export function itemSpacing(
  */
 function markerFirstLineOffset(
   marker: MarkerPlacement,
-  firstLine: LayoutLine | undefined,
+  lines: readonly LayoutLine[],
   measurer: TextMeasurerLike,
   ownIndent: number,
   blockWidth: number,
 ): number {
-  const { font, size } = listMarkerFont(firstLine);
+  const { font, size } = listMarkerFont(lines);
   const width = bulletShape(marker.text)
     ? bulletBox(size).size
     : measurer.measureWidth(marker.text, font);
@@ -298,7 +298,7 @@ export function layoutBlockWithMarker(
     ...(firstLineOffset > 0 ? { firstLineOffset } : {}),
   });
   const first = measure(0);
-  const offset = markerFirstLineOffset(marker, first.lines[0], options.measurer, ownFirstLineIndent(node), options.availableWidth);
+  const offset = markerFirstLineOffset(marker, first.lines, options.measurer, ownFirstLineIndent(node), options.availableWidth);
   const measured = offset > 0 ? measure(offset) : first;
   return { ...measured, listMarker: marker.text, listMarkerX: listMarkerXOf(options.x, marker) };
 }

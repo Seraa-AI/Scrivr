@@ -340,17 +340,16 @@ export class LineBreaker {
       lineSpaceProvider?: LineSpaceProvider;
       startY?: number;
       /**
-       * How far the first line is indented (its segments already narrowed by
-       * it). A first word that does not fit what the indent leaves wraps to
-       * the next line, leaving the first line empty — as Word leaves a list
-       * number alone on its line — rather than running past the line's end.
+       * A first word that does not fit the first line, but fits the next,
+       * starts the next line and leaves the first holding nothing — as Word
+       * leaves a list number alone on its line.
        */
-      firstLineIndent?: number;
+      firstLineMayStayEmpty?: boolean;
     },
   ): LayoutLine[] {
     if (!spans.length) return [];
 
-    const { defaultFontFamily, defaultFontSize, map, pageContext, lineSpaceProvider, startY = 0, firstLineIndent = 0 } = options;
+    const { defaultFontFamily, defaultFontSize, map, pageContext, lineSpaceProvider, startY = 0, firstLineMayStayEmpty = false } = options;
 
     const lines: LayoutLine[] = [];
     let currentLine: LayoutSpan[] = [];
@@ -395,6 +394,41 @@ export class LineBreaker {
       return w.kind === "object" ? Math.max(fontHeight, w.height) : fontHeight;
     };
 
+    // The space for a line starting `y` into the block, past any full-width
+    // float there, and the gap skipped to reach it.
+    const spaceFrom = (y: number, word: Token): { gap: number; space: LineSpace } => {
+      const space = resolveLineSpace(lineSpaceProvider, startY + y, probeLineHeight(word), maxWidth);
+      if (space.skipToY === undefined || space.skipToY <= startY + y || space.segments.length > 0) return { gap: 0, space };
+      return {
+        gap: space.skipToY - startY - y,
+        space: resolveLineSpace(lineSpaceProvider, space.skipToY, probeLineHeight(word), maxWidth),
+      };
+    };
+
+    const startNextLine = (finished: LayoutLine, word: Token): void => {
+      lines.push(finished);
+      cumulativeLineY += finished.lineHeight;
+      currentLine = [];
+      currentSegmentIndex = 0;
+      currentSegmentUsed = 0;
+      const next = spaceFrom(cumulativeLineY, word);
+      if (next.gap > 0) {
+        lines.push(spacerLine(next.gap));
+        cumulativeLineY += next.gap;
+      }
+      currentLineSegments = next.space.segments;
+      currentLinePositioned = isPositionedLine(currentLineSegments, maxWidth);
+    };
+
+    const finishCurrentLine = (): LayoutLine => {
+      const finished = buildLine(currentLine, this.measurer);
+      if (currentLinePositioned) {
+        finished.positioned = true;
+        finished.segments = currentLineSegments;
+      }
+      return finished;
+    };
+
     for (const word of words) {
       // Determine the available inline segments for the current line.
       let absoluteLineY = startY + cumulativeLineY;
@@ -412,11 +446,7 @@ export class LineBreaker {
         lineSpace.segments.length === 0
       ) {
         if (currentLine.length > 0) {
-          const fl = buildLine(currentLine, this.measurer);
-          if (currentLinePositioned) {
-            fl.positioned = true;
-            fl.segments = currentLineSegments;
-          }
+          const fl = finishCurrentLine();
           lines.push(fl);
           cumulativeLineY += fl.lineHeight;
           currentLine = [];
@@ -426,16 +456,7 @@ export class LineBreaker {
         }
         const gapHeight = lineSpace.skipToY - startY - cumulativeLineY;
         if (gapHeight > 0) {
-          lines.push({
-            spans: [],
-            width: 0,
-            ascent: 0,
-            descent: 0,
-            lineHeight: gapHeight,
-            textAscent: 0,
-            cursorHeight: 0,
-            xHeight: 0,
-          });
+          lines.push(spacerLine(gapHeight));
           cumulativeLineY += gapHeight;
         }
         absoluteLineY = startY + cumulativeLineY;
@@ -489,27 +510,22 @@ export class LineBreaker {
           ? word.width
           : this.measurer.measureWidth(word.text, word.font);
 
-      // An indented first line too short for its first word holds nothing:
-      // the word starts the next line. The empty line keeps the word's font,
-      // so whatever labels the line (a list number) has a baseline and a face.
-      if (
-        firstLineIndent > 0 &&
-        lines.length === 0 &&
-        currentLine.length === 0 &&
-        !findPlacement(currentLineSegments, currentSegmentIndex, currentSegmentUsed, wordWidth, false)
-      ) {
-        const font = word.kind === "text" ? word.font : lastSeenFont ?? `${defaultFontSize}px ${defaultFontFamily}`;
-        const emptyFirstLine = buildLine(
-          [{ kind: "text", text: "\u200B", font, x: currentLineSegments[0]?.x ?? 0, width: 0, docPos: word.docPos }],
-          this.measurer,
-        );
-        lines.push(emptyFirstLine);
-        cumulativeLineY += emptyFirstLine.lineHeight;
-        const nextLineSpace = resolveLineSpace(lineSpaceProvider, startY + cumulativeLineY, probeLineHeight(word), maxWidth);
-        currentLineSegments = nextLineSpace.segments;
-        currentSegmentIndex = 0;
-        currentSegmentUsed = 0;
-        currentLinePositioned = isPositionedLine(currentLineSegments, maxWidth);
+      // The first word moves to the next line, with any anchors before it,
+      // when only that makes it fit; trailing spaces may hang. The line left
+      // behind holds no position and takes the word's height and baseline.
+      if (firstLineMayStayEmpty && lines.length === 0 && currentLine.every(isAnchorSpan)) {
+        const fitWidth = word.kind === "text" ? this.measurer.measureWidth(word.text.trimEnd(), word.font) : wordWidth;
+        if (!findPlacement(currentLineSegments, currentSegmentIndex, currentSegmentUsed, fitWidth, false)) {
+          const strutFont = word.kind === "text" ? word.font : lastSeenFont ?? `${defaultFontSize}px ${defaultFontFamily}`;
+          const emptyLine = buildLine([], this.measurer, strutFont);
+          const nextLine = spaceFrom(cumulativeLineY + emptyLine.lineHeight, word);
+          if (findPlacement(nextLine.space.segments, 0, 0, fitWidth, false)) {
+            const anchors = currentLine;
+            startNextLine(emptyLine, word);
+            const x = currentLineSegments[0]?.x ?? 0;
+            currentLine = anchors.map((anchor) => ({ ...anchor, x }));
+          }
+        }
       }
 
       const lineIsEmpty = currentLine.length === 0;
@@ -521,44 +537,7 @@ export class LineBreaker {
         lineIsEmpty,
       );
 
-      if (!placement && !lineIsEmpty) {
-        const finishedLine = buildLine(currentLine, this.measurer);
-        if (currentLinePositioned) {
-          finishedLine.positioned = true;
-          finishedLine.segments = currentLineSegments;
-        }
-        lines.push(finishedLine);
-        cumulativeLineY += finishedLine.lineHeight;
-        currentLine = [];
-        currentSegmentIndex = 0;
-        currentSegmentUsed = 0;
-        // Sample constraint for the new line that's about to start.
-        const newAbsoluteLineY = startY + cumulativeLineY;
-        let newLineSpace = resolveLineSpace(lineSpaceProvider, newAbsoluteLineY, probeLineHeight(word), maxWidth);
-        if (
-          newLineSpace.skipToY !== undefined &&
-          newLineSpace.skipToY > newAbsoluteLineY &&
-          newLineSpace.segments.length === 0
-        ) {
-          const gapHeight = newLineSpace.skipToY - startY - cumulativeLineY;
-          if (gapHeight > 0) {
-            lines.push({
-              spans: [],
-              width: 0,
-              ascent: 0,
-              descent: 0,
-              lineHeight: gapHeight,
-              textAscent: 0,
-              cursorHeight: 0,
-              xHeight: 0,
-            });
-            cumulativeLineY += gapHeight;
-          }
-          newLineSpace = resolveLineSpace(lineSpaceProvider, startY + cumulativeLineY, probeLineHeight(word), maxWidth);
-        }
-        currentLineSegments = newLineSpace.segments;
-        currentLinePositioned = isPositionedLine(currentLineSegments, maxWidth);
-      }
+      if (!placement && !lineIsEmpty) startNextLine(finishCurrentLine(), word);
 
       const nextPlacement = findPlacement(
         currentLineSegments,
@@ -938,7 +917,21 @@ function tokenise(spans: InputSpan[]): Token[] {
 /** Fallback cursor height for lines that contain only inline objects (no text). */
 const DEFAULT_CURSOR_HEIGHT = 16;
 
-function buildLine(spans: LayoutSpan[], measurer: TextMeasurerLike): LayoutLine {
+/** Space a line skips past a full-width float: no spans, no caret. */
+function spacerLine(height: number): LayoutLine {
+  return { spans: [], width: 0, ascent: 0, descent: 0, lineHeight: height, textAscent: 0, cursorHeight: 0, xHeight: 0 };
+}
+
+/** A zero-size object span: a floating image's anchor. */
+function isAnchorSpan(span: LayoutSpan): boolean {
+  return span.kind === "object" && span.width === 0 && span.height === 0;
+}
+
+/**
+ * @param strutFont — a font the line is sized by though none of its text is
+ *   on the line: a line a list number stands alone on.
+ */
+function buildLine(spans: LayoutSpan[], measurer: TextMeasurerLike, strutFont?: string): LayoutLine {
   // Pass 1: collect text-only metrics.
   let textAscent = 0;
   let textDescent = 0;
@@ -946,13 +939,16 @@ function buildLine(spans: LayoutSpan[], measurer: TextMeasurerLike): LayoutLine 
   let xHeight = 0;
   let width = 0;
   const seenFonts = new Set<string>();
+  const fonts = spans.flatMap((span) => (span.kind === "text" ? [span.font] : []));
+  if (strutFont !== undefined) fonts.push(strutFont);
 
   for (const span of spans) {
     // Rightmost edge — segmented lines may place spans into non-contiguous x ranges,
     // so a sum-of-widths would underestimate. Single-segment lines see the same value either way.
     width = Math.max(width, span.x + span.width);
-    if (span.kind !== "text") continue;
-    const normFont = normalizeFont(span.font);
+  }
+  for (const font of fonts) {
+    const normFont = normalizeFont(font);
     if (seenFonts.has(normFont)) continue;
     seenFonts.add(normFont);
     const m = measurer.getFontMetrics(normFont);

@@ -18,14 +18,14 @@ export interface ListMarkerFont {
 const FALLBACK_MARKER_FONT = `${DEFAULT_FONT_SIZE_PX}px Arial, sans-serif`;
 
 /**
- * A marker takes the face and size of the text it labels: the first text run
- * of the item's first line, past any image or anchor that opens it — Word sizes
- * the number from the paragraph's text, not from a picture. Layout measures
- * the marker, and canvas and PDF draw it, in what this returns, so all three
- * use one face.
+ * A marker takes the face and size of the text it labels: the item's first
+ * text run, past any image or anchor that opens it and past a line the number
+ * stands on alone — Word sizes the number from the paragraph's text, not from
+ * a picture. Layout measures the marker, and canvas and PDF draw it, in what
+ * this returns, so all three use one face.
  */
-export function listMarkerFont(firstLine: LayoutLine | undefined): ListMarkerFont {
-  const firstText = firstLine?.spans.find((span) => span.kind === "text");
+export function listMarkerFont(lines: readonly LayoutLine[]): ListMarkerFont {
+  const firstText = lines.flatMap((line) => line.spans).find((span) => span.kind === "text");
   if (firstText?.kind !== "text") return { font: FALLBACK_MARKER_FONT, size: DEFAULT_FONT_SIZE_PX };
   const parsed = parseFontSizePx(firstText.font);
   return {
@@ -67,7 +67,7 @@ export function drawListMarker(ctx: CanvasRenderingContext2D, block: LayoutBlock
   const firstLine = block.lines[0];
   if (block.listMarker === undefined || block.listMarkerX === undefined || !firstLine) return;
   const baseline = block.y + firstLine.ascent;
-  const { font, size } = listMarkerFont(firstLine);
+  const { font, size } = listMarkerFont(block.lines);
   ctx.save();
   ctx.fillStyle = theme.listMarker;
   ctx.strokeStyle = theme.listMarker;

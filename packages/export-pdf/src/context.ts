@@ -152,7 +152,7 @@ export function drawListMarker(
 ): void {
   const firstLine = block.lines[0];
   if (!block.listMarker || block.listMarkerX === undefined || !firstLine) return;
-  const marker = listMarkerFont(firstLine);
+  const marker = listMarkerFont(block.lines);
   const baselinePx = block.y + firstLine.ascent;
   const color = parseCssColor(theme.listMarker);
   // A bullet takes only its line's size: it is drawn as the canvas's shape, so

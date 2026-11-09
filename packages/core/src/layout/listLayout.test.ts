@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import { EditorState, TextSelection, type Command } from "prosemirror-state";
 import type { Node } from "prosemirror-model";
 import { runPipeline, defaultPageConfig, type MeasureCacheEntry } from "./PageLayout";
-import type { LayoutBlock } from "./BlockLayout";
+import { layoutBlock, type BlockLayoutOptions, type LayoutBlock } from "./BlockLayout";
+import type { LayoutLine } from "./LineBreaker";
+import { rangeBandRects } from "../selection/behaviors";
 import { drawListMarker } from "./listMarkers";
 import { listMarker } from "../model/lists";
 import { CharacterMap } from "./CharacterMap";
@@ -15,7 +17,7 @@ import { ExtensionManager } from "../extensions/ExtensionManager";
 import { Extension } from "../extensions/Extension";
 import { nodeLayout } from "./BlockRegistry";
 import { CELL_PADDING_H } from "./TableLayoutEngine";
-import { buildStarterKitContext, createMeasurer, measureTextWidth } from "../test-utils";
+import { buildStarterKitContext, createMeasurer, createTestEditor, measureTextWidth } from "../test-utils";
 
 /**
  * How lists lay out. Geometry follows Word's built-in lists: each level's text
@@ -54,8 +56,9 @@ function blockOf(blocks: LayoutBlock[], text: string): LayoutBlock {
 }
 
 const markers = (blocks: LayoutBlock[]) => blocks.map((block) => block.listMarker ?? null);
+/** The font of the block's first text, on whichever line it starts. */
 const fontOf = (block: LayoutBlock) => {
-  const span = block.lines[0]?.spans[0];
+  const span = block.lines.flatMap((line) => line.spans).find((candidate) => candidate.kind === "text");
   return span?.kind === "text" ? span.font : "";
 };
 /** Where the first line's text starts, measured from the block's text edge. */
@@ -201,14 +204,16 @@ describe("a number too wide for its hanging indent (Word: the tab after it goes 
   it("never starts the text over a number that runs past the line's last tab stop", () => {
     const text = "letter item with words to wrap";
     const block = blockOf(laidOut([ol(item("top", olFrom(32767, item(text))))]), text);
-    const { textStart, numberEnd } = textAndNumber(block);
-    expect(textStart).toBeGreaterThan(numberEnd);
+    const { numberEnd } = textAndNumber(block);
+    const overNumber = (block.lines[0]?.spans ?? []).filter((span) => span.kind === "text" && block.x + span.x <= numberEnd);
+    expect(overNumber).toEqual([]);
   });
 
-  it("follows the number with a space when it ends past the line's last tab stop", () => {
-    // Nine levels deep on a narrow page: the text is held an inch wide, so the
-    // line's last tab stop falls inside it. The number is chosen by measuring,
-    // so that it ends past that stop but before the line does, on any fonts.
+  it("follows the number with a space when no tab stop leaves the text an inch", () => {
+    // Nine levels deep on a narrow page: the text is held an inch wide, so no
+    // tab stop past the number leaves the text an inch. The number is chosen
+    // by measuring, so that it reaches the text and still leaves room for the
+    // first word after it, on any fonts.
     const narrow = { ...defaultPageConfig, pageWidth: 559 };
     const deep = (order: number): Json[] => {
       let nested: Json = olFrom(order, item("deep text"));
@@ -218,18 +223,147 @@ describe("a number too wide for its hanging indent (Word: the tab after it goes 
     const probe = blockOf(laidOut(deep(1), narrow), "deep text");
     const indent = probe.x - narrow.margins.left;
     const lineEnd = indent + probe.availableWidth;
-    const lastStop = Math.floor((lineEnd - QUARTER_INCH) / HALF_INCH) * HALF_INCH;
     const roman = (n: number) => listMarker("ordered", 8, n);
     const fitting = Array.from({ length: 3999 }, (_, i) => i + 1).find((n) => {
       const end = indent - QUARTER_INCH + measureTextWidth(roman(n), fontOf(probe));
-      return end >= lastStop && end < lineEnd - QUARTER_INCH;
+      return end >= indent && end + measureTextWidth(" deep", fontOf(probe)) < lineEnd;
     });
-    if (fitting === undefined) throw new Error("no roman number ends between the last stop and the line's end");
+    if (fitting === undefined) throw new Error("no roman number reaches the text and leaves room for its first word");
 
     const block = blockOf(laidOut(deep(fitting), narrow), "deep text");
     const { textStart, numberEnd } = textAndNumber(block);
     expect(textStart).toBeGreaterThan(numberEnd);
     expect(textStart - numberEnd).toBeLessThan(QUARTER_INCH);
+  });
+});
+
+describe("a first word that does not fit after its number (Word leaves the number alone on its line)", () => {
+  const textOf = (line: LayoutLine | undefined) =>
+    (line?.spans ?? []).map((span) => (span.kind === "text" ? span.text : "")).join("");
+  const measured = (node: Node, availableWidth: number, options: Partial<BlockLayoutOptions> = {}) =>
+    layoutBlock(node, { nodePos: 0, x: 0, y: 0, page: 1, availableWidth, measurer: createMeasurer(), fontConfig, ...options });
+  const paragraph = (text: string, attrs?: Record<string, unknown>) =>
+    schema.nodeFromJSON({ type: "paragraph", ...(attrs ? { attrs } : {}), content: [{ type: "text", text }] });
+  /** How far a wide number pushes the first line, as `layoutBlockWithMarker` passes it. */
+  const NUMBER_PUSH = 50;
+  const WORD = "alphabetical";
+  const wordWidth = () => measureTextWidth(WORD, fontOf(measured(paragraph(WORD), 500)));
+  /** Too narrow for the word after the number, wide enough for it on a line of its own. */
+  const narrow = () => wordWidth() + NUMBER_PUSH / 2;
+
+  it("starts the next line, below a full-width float there", () => {
+    const floatBottom = 100;
+    const width = narrow();
+    const block = measured(paragraph(`${WORD} more`), width, {
+      firstLineOffset: NUMBER_PUSH,
+      lineSpaceProvider: (y) => (y > 0 && y < floatBottom ? { segments: [], skipToY: floatBottom } : { segments: [{ x: 0, width }] }),
+    });
+    expect(block.lines.map(textOf).join("")).toBe(`${WORD} more`);
+    const wordLine = block.lines.findIndex((line) => textOf(line).startsWith(WORD));
+    const wordTop = block.lines.slice(0, wordLine).reduce((sum, line) => sum + line.lineHeight, 0);
+    expect(wordTop).toBeGreaterThanOrEqual(floatBottom);
+  });
+
+  it("is a list rule: a plain first-line indent keeps its first word on its line", () => {
+    const block = measured(paragraph(`${WORD} more`, { textIndent: NUMBER_PUSH }), narrow());
+    expect(textOf(block.lines[0]).startsWith(WORD)).toBe(true);
+  });
+
+  it("stays after the number when the next line has no more room for it", () => {
+    const image = { type: "image", attrs: { src: "data:image/png;base64,AA==", width: 300, height: 20 } };
+    const wide = schema.nodeFromJSON({ type: "paragraph", content: [image, { type: "text", text: " after" }] });
+    const block = measured(wide, 200, { firstLineOffset: NUMBER_PUSH });
+    expect(block.lines[0]?.spans[0]?.kind).toBe("object");
+  });
+
+  it("stays after the number when only its trailing space does not fit, which may hang", () => {
+    const block = measured(paragraph(`${WORD} more`), NUMBER_PUSH + wordWidth() + 0.5, { firstLineOffset: NUMBER_PUSH });
+    expect(textOf(block.lines[0]).startsWith(WORD)).toBe(true);
+  });
+
+  it("gives the number's line the text's baseline when the item opens with a floating image", () => {
+    const anchored = schema.nodeFromJSON({ type: "paragraph", content: [
+      { type: "image", attrs: { src: "data:image/png;base64,AA==", width: 40, height: 40, wrapMode: "square" } },
+      { type: "text", text: WORD },
+    ] });
+    const block = measured(anchored, narrow(), { firstLineOffset: NUMBER_PUSH, keepAnchorLine: true });
+    const wordLine = block.lines.find((line) => textOf(line).startsWith(WORD));
+    expect(wordLine).not.toBe(block.lines[0]);
+    expect(block.lines[0]?.ascent).toBe(wordLine?.ascent);
+  });
+
+  /**
+   * An item numbered 32767 whose first word fits a whole line but not the
+   * rest of its number's line — found by measuring, so on any machine's fonts.
+   */
+  function numberAloneText(): string {
+    for (let length = 20; length <= 120; length++) {
+      const text = `${"w".repeat(length)} tail`;
+      if (textOf(blockOf(laidOut([olFrom(32767, item(text))]), text).lines[1]).startsWith("w".repeat(length))) return text;
+    }
+    throw new Error("no word fills a line but not the rest of its number's");
+  }
+  const numberAloneDoc = (text: string) => schema.nodeFromJSON({ type: "doc", content: [p("before"), olFrom(32767, item(text)), p("after")] });
+
+  /** The item, its first text position, and its number's line, from a real editor's hit-test map. */
+  function numberAloneEditor() {
+    const text = numberAloneText();
+    const editor = createTestEditor({ content: numberAloneDoc(text).toJSON() });
+    editor.ensurePagePopulated(1);
+    const block = blockOf(editor.layout.pages.flatMap((page) => page.blocks), text);
+    const numberLine = { top: block.y, bottom: block.y + (block.lines[0]?.lineHeight ?? 0) };
+    return { editor, map: editor.charMap, block, start: block.nodePos + 1, numberLine };
+  }
+
+  it("puts the caret before the word on the word's line, and Home and End keep to it", () => {
+    const { editor, map, start } = numberAloneEditor();
+    const before = map.coordsAtPos(start);
+    const after = map.coordsAtPos(start + 1);
+    expect(before?.y).toBe(after?.y);
+    expect(before?.x).toBeLessThan(after?.x ?? 0);
+    expect(map.lineStartPos(start + 3)).toBe(start);
+    expect(map.lineEndPos(start)).toBe(map.lineEndPos(start + 3));
+    editor.destroy();
+  });
+
+  it("puts the caret before the word for a click on the number's line", () => {
+    const { editor, map, block, start, numberLine } = numberAloneEditor();
+    expect(map.posAtCoords(block.x + 20, (numberLine.top + numberLine.bottom) / 2, 1)).toBe(start);
+    editor.destroy();
+  });
+
+  it("paints no selection on the number's line for a selection inside the word", () => {
+    const { editor, map, start, numberLine } = numberAloneEditor();
+    const rects = rangeBandRects(start, start + 3, map.glyphsInRange(start, start + 3), map.linesInRange(start, start + 3));
+    expect(rects.length).toBeGreaterThan(0);
+    expect(rects.filter((rect) => rect.y < numberLine.bottom && rect.y + rect.height > numberLine.top)).toEqual([]);
+    editor.destroy();
+  });
+
+  it("moves Up from the word's line out of the item, and Down from above onto the word", () => {
+    const { editor, map, start } = numberAloneEditor();
+    const x = map.coordsAtPos(start + 3)?.x ?? 0;
+    expect(map.posAbove(start + 3, x)).toBeLessThan(start);
+    expect(map.posBelow(2, x)).toBeGreaterThanOrEqual(start);
+    editor.destroy();
+  });
+
+  it("registers every letter of the word when painting fills the hit-test map", () => {
+    const text = numberAloneText();
+    const layout = runPipeline(numberAloneDoc(text), { pageConfig: defaultPageConfig, measurer: createMeasurer(), fontConfig });
+    const page = layout.pages[0];
+    const ctx = document.createElement("canvas").getContext("2d");
+    if (!page || !ctx) throw new Error("no page or no 2d context");
+    const map = new CharacterMap();
+    renderPage({
+      ctx, page, pageConfig: defaultPageConfig, renderVersion: layout.version, currentVersion: () => layout.version,
+      dpr: 1, measurer: createMeasurer(), map, blockRegistry: new ExtensionManager([StarterKit]).buildBlockRegistry(),
+    });
+    const start = blockOf(page.blocks, text).nodePos + 1;
+    const wordLength = text.indexOf(" ");
+    const glyphs = map.glyphsInRange(start, start + wordLength);
+    expect(glyphs.map((glyph) => glyph.docPos)).toEqual(Array.from({ length: wordLength }, (_, i) => start + i));
+    expect(new Set(glyphs.map((glyph) => glyph.lineIndex)).size).toBe(1);
   });
 });
 

@@ -114,7 +114,7 @@ describe("what @scrivr/core exports about lists", () => {
   it("exports the types those functions take and return", () => {
     const shape = "disc" satisfies BulletShape;
     const box = core.bulletBox(10) satisfies BulletBox;
-    const font = core.listMarkerFont(undefined) satisfies ListMarkerFont;
+    const font = core.listMarkerFont([]) satisfies ListMarkerFont;
     expect([core.bulletShape("•"), box.size, font.size > 0]).toEqual([shape, 3, true]);
   });
 });
