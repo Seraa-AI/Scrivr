@@ -442,10 +442,16 @@ export class LineBreaker {
     const stepBelowNarrowGaps = (word: Token, wordWidth: number): void => {
       // Trailing spaces may hang past the gap, as they do past the margin.
       const fitWidth = word.kind === "text" ? this.measurer.measureWidth(word.text.trimEnd(), word.font) : wordWidth;
-      const fits = (segments: AvailableSegment[], indent = 0) =>
-        segments.some((segment, i) => fitWidth <= segment.width + (i === 0 ? indent : 0));
-      const indent = lines.length === 0 ? firstLineIndent : 0;
-      if (!currentLine.every(isAnchorSpan) || !currentLinePositioned || fitWidth > maxWidth || fits(currentLineSegments, indent)) return;
+      const fits = (segments: AvailableSegment[]) => segments.some((segment) => fitWidth <= segment.width);
+      // The first line indent is still owed while no line holds text; a word
+      // the indent alone keeps off the line stays, as a plain indent's does.
+      const indent = lines.some((line) => line.spans.some((span) => span.kind === "text")) ? 0 : firstLineIndent;
+      if (!currentLine.every(isAnchorSpan) || !currentLinePositioned || fitWidth > maxWidth - indent || fits(currentLineSegments)) return;
+      // The provider spent the indent on the line the word leaves; the line it
+      // moves to takes it instead.
+      const indented = (segments: AvailableSegment[]) => indent > 0
+        ? segments.map((segment, i) => i === 0 ? { x: segment.x + indent, width: Math.max(1, segment.width - indent) } : segment)
+        : segments;
       // Look ahead for the first line with room, then jump there in one
       // spacer. Space that never opens (a fixed narrow column) leaves the
       // word where it is, to overflow as before.
@@ -455,11 +461,11 @@ export class LineBreaker {
       for (let step = 0; step < MAX_STEPS_PAST_FLOAT; step++) {
         const space = resolveLineSpace(lineSpaceProvider, y, stepHeight, maxWidth);
         y = space.skipToY !== undefined && space.skipToY > y ? space.skipToY : y + stepHeight;
-        const below = resolveLineSpace(lineSpaceProvider, y, stepHeight, maxWidth);
-        if (below.segments.length === 0 || !fits(below.segments)) continue;
+        const below = indented(resolveLineSpace(lineSpaceProvider, y, stepHeight, maxWidth).segments);
+        if (below.length === 0 || !fits(below)) continue;
         lines.push(spacerLine(y - from));
         cumulativeLineY += y - from;
-        currentLineSegments = below.segments;
+        currentLineSegments = below;
         currentLinePositioned = isPositionedLine(currentLineSegments, maxWidth);
         currentSegmentIndex = 0;
         currentSegmentUsed = 0;
@@ -553,7 +559,7 @@ export class LineBreaker {
       // The first word moves to the next line, with any anchors before it,
       // when only that makes it fit; trailing spaces may hang. The line left
       // behind holds no position and takes the word's height and baseline.
-      if (firstLineMayStayEmpty && lines.length === 0 && currentLine.every(isAnchorSpan)) {
+      if (firstLineMayStayEmpty && lines.every(isSpacerLine) && currentLine.every(isAnchorSpan)) {
         const fitWidth = word.kind === "text" ? this.measurer.measureWidth(word.text.trimEnd(), word.font) : wordWidth;
         if (!findPlacement(currentLineSegments, currentSegmentIndex, currentSegmentUsed, fitWidth, false)) {
           const strutFont = word.kind === "text" ? word.font : lastSeenFont ?? `${defaultFontSize}px ${defaultFontFamily}`;
@@ -966,6 +972,15 @@ function tokenise(spans: InputSpan[]): Token[] {
 const DEFAULT_CURSOR_HEIGHT = 16;
 
 /** Space a line skips past a full-width float: no spans, no caret. */
+/**
+ * A line that only reserves height: the gap a full-width float leaves, or a
+ * word's step below a float. It has no spans and no glyph metrics, so it is no
+ * first line for an indent or a list number.
+ */
+export function isSpacerLine(line: LayoutLine): boolean {
+  return line.spans.length === 0 && line.ascent === 0 && line.cursorHeight === 0;
+}
+
 function spacerLine(height: number): LayoutLine {
   return { spans: [], width: 0, ascent: 0, descent: 0, lineHeight: height, textAscent: 0, cursorHeight: 0, xHeight: 0 };
 }

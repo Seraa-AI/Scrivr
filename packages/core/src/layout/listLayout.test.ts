@@ -17,6 +17,7 @@ import { ExtensionManager } from "../extensions/ExtensionManager";
 import { Extension } from "../extensions/Extension";
 import { nodeLayout } from "./BlockRegistry";
 import { CELL_PADDING_H } from "./TableLayoutEngine";
+import { ANCHORED_OBJECT_MARGIN } from "./AnchoredObjects";
 import { buildStarterKitContext, createMeasurer, createTestEditor, measureTextWidth } from "../test-utils";
 
 /**
@@ -419,6 +420,90 @@ describe("a first word that does not fit after its number (Word leaves the numbe
     expect(map.posAbove(after.docPos, x)).toBeLessThan(after.docPos);
     expect(map.posAbove(after.docPos, x)).toBeGreaterThan(block.nodePos + 1);
     editor.destroy();
+  });
+
+  it("keeps the push past a wide number when a float moves the first word below it", () => {
+    const word = "w".repeat(30);
+    const float: Json = { type: "paragraph", content: [
+      { type: "image", attrs: { src: "data:image/png;base64,AA==", width: 480, height: 60, wrapMode: "square", xAlign: "right" } },
+    ] };
+    const block = blockOf(laidOut([float, olFrom(100, item(`${word} tail`))]), `${word} tail`);
+    const textLine = block.lines.find((line) => line.spans.some((span) => span.kind === "text"));
+    const first = textLine?.spans.find((span) => span.kind === "text");
+    expect(block.x + (first?.x ?? 0)).toBeGreaterThan((block.listMarkerX ?? 0) + measureTextWidth("100.", fontOf(block)));
+  });
+
+  it("never lets an indented paragraph's first word run into a float beside it", () => {
+    // Every first-word length, so some fall between the gap and the indented line.
+    for (let length = 6; length <= 40; length++) {
+      const plain = schema.nodeFromJSON({ type: "paragraph", attrs: { textIndent: 48 }, content: [
+        { type: "text", text: `${"w".repeat(length)} tail` },
+        { type: "image", attrs: { src: "data:image/png;base64,AA==", width: 450, height: 60, wrapMode: "square", xAlign: "right" } },
+      ] });
+      const l = runPipeline(schema.node("doc", null, [plain]), { pageConfig: defaultPageConfig, measurer: createMeasurer(), fontConfig });
+      const f = l.anchoredObjects?.[0];
+      const block = l.pages[0]?.blocks[0];
+      if (!f || !block) throw new Error("no float or block");
+      let top = block.y;
+      for (const line of block.lines) {
+        const beside = top < f.y + f.height && top + line.lineHeight > f.y;
+        for (const span of line.spans) {
+          // Text keeps clear of the image's wrap margin, not just its pixels.
+          if (beside && span.kind === "text") expect(block.x + span.x + span.width).toBeLessThanOrEqual(f.x - ANCHORED_OBJECT_MARGIN + 0.5);
+        }
+        top += line.lineHeight;
+      }
+    }
+  });
+
+  it("draws the number of an item split just below a full-width image, on the part with its text", () => {
+    const image = (height: number): Json => ({ type: "paragraph", content: [
+      { type: "image", attrs: { src: "data:image/png;base64,AA==", width: 420, height, wrapMode: "top-bottom", xAlign: "center" } },
+    ] });
+    let splitSeen = false;
+    for (const height of [100, 200, 300]) {
+      for (let fillers = 20; fillers <= 32; fillers++) {
+        const text = "item text after the image";
+        const content = [...Array.from({ length: fillers }, (_, i) => p(`Filler ${i}`)), image(height), olFrom(7, item(text))];
+        const parts = laidOut(content).filter((block) => block.node.textContent === text);
+        if (parts.length > 1) splitSeen = true;
+        const drawn = parts.map((part) => listMarkerOf(part)).filter((marker) => marker !== null);
+        expect(drawn).toHaveLength(1);
+      }
+    }
+    expect(splitSeen).toBe(true);
+  });
+
+  it("leaves a wide number alone on its line below a full-width image that opens the item in a narrow cell", () => {
+    const manager = new ExtensionManager([StarterKit, Table]);
+    const tableFont = manager.buildBlockStyles();
+    const cases = [[208, "Telecommunications", 18], [208, "Telecommunications", 14], [156, "Responsibilities", 14]] as const;
+    for (const [column, word, size] of cases) {
+      const text = `${word} and more words follow here`;
+      const grid = Array.from({ length: Math.round(624 / column) }, () => column);
+      const docNode = manager.schema.nodeFromJSON({ type: "doc", content: [{ type: "table", attrs: { grid }, content: [{ type: "tableRow", content: [
+        { type: "tableCell", content: [olFrom(100, li({ type: "paragraph", content: [
+          { type: "image", attrs: { src: "data:image/png;base64,AA==", width: 100, height: 60, wrapMode: "top-bottom", xAlign: "center" } },
+          { type: "text", text, marks: [{ type: "fontSize", attrs: { size } }] },
+        ] }))] },
+        ...grid.slice(1).map(() => ({ type: "tableCell", content: [p("b")] })),
+      ] }] }] });
+      const l = runPipeline(docNode, { pageConfig: defaultPageConfig, measurer: createMeasurer(), fontConfig: tableFont });
+      const cell = l.pages[0]?.blocks.find((block) => block.cells)?.cells?.[0];
+      const item = cell?.blocks.find((block) => block.node.textContent === text);
+      if (!item) throw new Error("no item");
+      const marker = listMarkerOf(item);
+      if (!marker) throw new Error("no marker");
+      // The number sits on a line of its own or on its text's line, never on
+      // the anchor's empty line above the text.
+      let top = item.y;
+      const numberLine = item.lines.find((line) => {
+        const here = Math.abs(top + line.ascent - marker.baseline) < 0.01;
+        top += line.lineHeight;
+        return here;
+      });
+      expect(numberLine?.ascent ?? 0).toBeGreaterThan(0);
+    }
   });
 
   it("registers every letter of the word when painting fills the hit-test map", () => {

@@ -12,7 +12,7 @@ import {
 } from "./FontConfig";
 import { layoutBlock, LayoutBlock, type LayoutBlockKind, type CellSubBlock } from "./BlockLayout";
 import type { InlineRegistry } from "./BlockRegistry";
-import { LineBreaker, type InputSpan, type LayoutLine } from "./LineBreaker";
+import { LineBreaker, isSpacerLine, type InputSpan, type LayoutLine } from "./LineBreaker";
 import type { ListMarkerFont } from "./listMarkers";
 import {
   normalizeImageAttrs,
@@ -1114,6 +1114,7 @@ export function paginateFlow(
       }
       let remainingLines = flow.lines;
       let hasPlacedAnyPart = false;
+      let markerPlaced = false;
       let currentPartStartY = targetY;
       let fragmentIdx = 0;
       // Tracks whether gap-suppression has already been applied for this block.
@@ -1201,8 +1202,12 @@ export function paginateFlow(
           ...(isCont || !isLastPart ? { fragmentIndex: fragmentIdx, sourceNodePos: nodePos } : {}),
         };
 
-        // The marker goes on the part that carries the item's first line.
-        if (!isCont) Object.assign(partBlock, markerFields(flow));
+        // The marker goes on the first part with a line it can stand on: a
+        // part holding only a full-width image's gap passes it on.
+        if (!markerPlaced && partLines.some((line) => !isSpacerLine(line))) {
+          Object.assign(partBlock, markerFields(flow));
+          markerPlaced = true;
+        }
 
         if ((globalThis as Record<string,unknown>).__LAYOUT_DEBUG__) {
           console.log(

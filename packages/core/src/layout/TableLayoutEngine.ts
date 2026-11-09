@@ -178,7 +178,7 @@ function layoutCellBlocks(
   cellNode: Node,
   box: CellBox,
   ctx: TableRowLayoutContext,
-  lineSpaceProvider?: LineSpaceProvider,
+  lineSpaceIn?: (x: number, width: number) => LineSpaceProvider,
 ): { blocks: LayoutBlock[]; contentBottom: number } {
   // Each block is resolved as the page body resolves it. A page break has no
   // meaning inside a cell.
@@ -196,8 +196,7 @@ function layoutCellBlocks(
       ...(ctx.fontModifiers ? { fontModifiers: ctx.fontModifiers } : {}),
       ...(ctx.inlineRegistry ? { inlineRegistry: ctx.inlineRegistry } : {}),
       ...(ctx.fonts ? { fonts: ctx.fonts } : {}),
-      ...(lineSpaceProvider ? { lineSpaceProvider } : {}),
-    });
+    }, lineSpaceIn);
     blocks.push(childBlock);
     relY += childBlock.spaceBefore + childBlock.height + childBlock.spaceAfter;
   }
@@ -254,8 +253,11 @@ function placeCellFloats(blocks: readonly LayoutBlock[], box: CellBox): CellFloa
   return floats;
 }
 
-/** The cell's lines asked against its wrapping images, in the cell's own coordinates. */
-function wrapAround(floats: readonly CellFloat[], box: CellBox): LineSpaceProvider {
+/**
+ * The cell's lines asked against its wrapping images, answered for the box a
+ * block lays its text in (an indented list item's is narrower than the cell).
+ */
+function wrapAround(floats: readonly CellFloat[], box: CellBox): (x: number, width: number) => LineSpaceProvider {
   const exclusions = new ExclusionManager();
   for (const f of floats) {
     // As in the body, the margin band never reaches above the image's own
@@ -269,11 +271,11 @@ function wrapAround(floats: readonly CellFloat[], box: CellBox): LineSpaceProvid
       exclusions.addFullWidthRect({ page: 1, y: top, bottom, contentX: box.contentX, contentWidth: box.contentWidth, docPos: f.docPos });
     }
   }
-  return (lineY, lineHeight = 1) => {
-    const space = exclusions.getAvailableSegments(1, lineY, lineHeight, box.contentX, box.contentWidth);
-    const segments = space.segments.map((seg) => ({ x: seg.x - box.contentX, width: seg.width }));
+  return (x, width) => (lineY, lineHeight = 1) => {
+    const space = exclusions.getAvailableSegments(1, lineY, lineHeight, x, width);
+    const segments = space.segments.map((seg) => ({ x: seg.x - x, width: seg.width }));
     if (segments.length === 0 && space.skipToY === undefined) {
-      return { segments, skipToY: exclusions.getNextFreeY(1, lineY, lineHeight, box.contentX, box.contentWidth) };
+      return { segments, skipToY: exclusions.getNextFreeY(1, lineY, lineHeight, x, width) };
     }
     return space.skipToY !== undefined ? { segments, skipToY: space.skipToY } : { segments };
   };

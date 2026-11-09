@@ -637,7 +637,14 @@ section is what is true.
   (replacing `listMarkerFont`, approved by the user on 2026-11-09) gives
   canvas and PDF one face and one baseline, past a full-width image's gap; the
   first-line indent goes to the first line below such a gap. Up and Down step
-  over text-less lines across pages too. Known limit: a line's doc position
+  over text-less lines across pages too. In a cell, an image's wrap is asked
+  in each item's own indented box, as the body asks it. A word moved below a
+  float takes the first-line indent (or the push past a wide number) still
+  owed, and a first word the indent alone does not keep off a line beside a
+  float moves below it rather than into it. A number goes on the first part of
+  a split item with a real line, so an item split just below a full-width image
+  keeps it, and the number-alone rule runs below such an image's gap too. Known
+  limit: a line's doc position
   for a gap beside a full-width image mid-paragraph is still its paragraph's
   start, so a click in that gap puts the caret there (as on `main`).
 - **Known gaps in cells, not lists' own:** a cell adds its blocks' margins

@@ -3,7 +3,7 @@ import { DEFAULT_FONT_SIZE_PX, parseFontSizePx } from "../fonts/activeFontSize";
 import type { ResolvedTheme } from "../model/theme";
 import { bulletBox, bulletShape, type BulletShape } from "../model/lists";
 import type { LayoutBlock } from "./BlockLayout";
-import type { LayoutLine } from "./LineBreaker";
+import { isSpacerLine, type LayoutLine } from "./LineBreaker";
 
 /** The face and size a marker is drawn in. */
 export interface ListMarkerFont {
@@ -41,11 +41,6 @@ export interface ListMarker extends ListMarkerFont {
   baseline: number;
 }
 
-/** The gap a full-width float leaves in a block: no spans, no glyph metrics. */
-function isFloatGap(line: LayoutLine): boolean {
-  return line.spans.length === 0 && line.ascent === 0 && line.cursorHeight === 0;
-}
-
 /**
  * How a block's list marker is drawn: in the face layout measured it in, on
  * the baseline of its first line, past any gap a full-width float leaves
@@ -56,7 +51,7 @@ export function listMarkerOf(block: LayoutBlock): ListMarker | null {
   if (block.listMarker === undefined || block.listMarkerX === undefined) return null;
   let top = block.y;
   const numberLine = block.lines.find((line) => {
-    if (!isFloatGap(line)) return true;
+    if (!isSpacerLine(line)) return true;
     top += line.lineHeight;
     return false;
   });

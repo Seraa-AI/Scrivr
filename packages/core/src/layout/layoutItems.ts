@@ -19,7 +19,7 @@ import {
 import { layoutBlock, ownFirstLineIndent, type BlockLayoutOptions, type LayoutBlock } from "./BlockLayout";
 import { nodeLayout } from "./BlockRegistry";
 import { getBlockStyle, type BlockStyle, type FontConfig } from "./FontConfig";
-import type { LayoutLine } from "./LineBreaker";
+import type { LayoutLine, LineSpaceProvider } from "./LineBreaker";
 import type { TextMeasurerLike } from "./TextMeasurer";
 import { markerFaceOf } from "./listMarkers";
 
@@ -328,6 +328,8 @@ export function layoutItem(
   item: LayoutItem,
   box: { x: number; width: number },
   options: Omit<BlockLayoutOptions, "x" | "availableWidth" | "nodePos" | "fontConfig"> & { fontConfig: FontConfig },
+  /** The line space for the box the item's text resolves to, when something wraps it. */
+  lineSpaceIn?: (x: number, width: number) => LineSpaceProvider,
 ): LayoutBlock {
   const resolved = resolveItem(item, box, options.fontConfig);
   const block = layoutBlockWithMarker(item.node, {
@@ -335,6 +337,7 @@ export function layoutItem(
     nodePos: item.nodePos,
     x: resolved.x,
     availableWidth: resolved.width,
+    ...(lineSpaceIn ? { lineSpaceProvider: lineSpaceIn(resolved.x, resolved.width) } : {}),
     ...(item.tableColumns ? { tableColumns: item.tableColumns } : {}),
   }, resolved.marker);
   return {
