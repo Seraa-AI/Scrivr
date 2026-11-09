@@ -205,7 +205,7 @@ describe("a number too wide for its hanging indent (the text follows it after a 
     numberEnd: (block.marker?.x ?? 0) + measureTextWidth(markerText(block), fontOf(block)),
   });
 
-  it("never starts the text over a number that runs past the line's last tab stop", () => {
+  it("never starts the text over a number that runs past the line", () => {
     const text = "letter item with words to wrap";
     const block = blockOf(laidOut([ol(item("top", olFrom(32767, item(text))))]), text);
     const { numberEnd } = textAndNumber(block);
@@ -213,11 +213,10 @@ describe("a number too wide for its hanging indent (the text follows it after a 
     expect(overNumber).toEqual([]);
   });
 
-  it("follows the number with a space when no tab stop leaves the text an inch", () => {
-    // Nine levels deep on a narrow page: the text is held an inch wide, so no
-    // tab stop past the number leaves the text an inch. The number is chosen
-    // by measuring, so that it reaches the text and still leaves room for the
-    // first word after it, on any fonts.
+  it("follows the number with a space nine levels deep on a narrow page", () => {
+    // The text is held an inch wide here. The number is chosen by measuring,
+    // so that it reaches the text and still leaves room for the first word
+    // after it, on any fonts.
     const narrow = { ...defaultPageConfig, pageWidth: 559 };
     const deep = (order: number): Json[] => {
       let nested: Json = olFrom(order, item("deep text"));

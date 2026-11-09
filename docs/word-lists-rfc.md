@@ -230,8 +230,8 @@ MARKER_RIGHT_GAP` (right edge), and `ListItemStrategy` draws with
 `textAlign = "left"`. A marker wider than the hanging less a 4px gap (`viii.`,
 `xviii.`) pushes the first line's text right by the overflow, through the
 first-line offset `layoutBlock` already applies for `textIndent`
-(`BlockLayout.ts:513-532`) — Word moves
-the text to the next tab stop in the same case.
+(`BlockLayout.ts:513-532`). (Superseded: the text now follows the number
+after a space; see D10.)
 
 A table inside a list item keeps today's full-width rows; indenting a table is
 out of scope and pinned as a known gap.
@@ -513,7 +513,7 @@ section is what is true.
   `DocxContext.textWidthTwips` and `BlockLayoutOptions.keepAnchorLine`.
 - **D8 — A float on the item's left moves its number** (2026-11-09,
   found in the playground demo). Word puts the number at the start of the
-  line the float leaves and the text at the next tab stop past it; the
+  line the float leaves and the text after it (a space past it since D10); the
   number was drawn at its hang, under the image. The push now depends on
   where the line starts (`BlockLayoutOptions.firstLineOffsetAt`), the first
   segment records where it started (`AvailableSegment.indentFrom`), and
@@ -560,7 +560,8 @@ section is what is true.
   `listItem`", which also matched a custom `(listItem | paragraph)+`
   container and numbered its loose paragraphs. It now walks the content
   expression and requires every child it allows to be a `listItem`.
-- **A wide number follows Word's tab rule, not "overflow less a gap".** §3
+- **A wide number follows Word's tab rule, not "overflow less a gap".**
+  *Superseded by D10: the text now follows a wide number after a space.* §3
   pushed the text when the number came within 4px of it. Word follows the
   number with a tab: `w:suff` (ECMA-376 Part 1 §17.9, `ST_LevelSuffix`
   `tab | space | nothing`) is "assumed to be tab" when omitted, and "this tab
@@ -642,9 +643,7 @@ section is what is true.
   so wide leaves no room for a list's indent, so the indent shrinks to fit;
   the marker's hanging shrinks with it, so the number never sits over the
   previous column's grid line, and a number that then reaches the text pushes
-  it on. A tab stop is taken only when it leaves an inch of the line for the
-  text (`MIN_TEXT_AFTER_NUMBER`); otherwise the text follows the number after a
-  space. A first word that does not fit after the number, but fits the next
+  it on, a space past the number (D10). A first word that does not fit after the number, but fits the next
   line, wraps to it, leaving the number alone on its line, as Word does
   (`breakIntoLines`' `firstLineMayStayEmpty`, set only for a list number's
   push: a paragraph's own first-line indent keeps its first word, as Word's
