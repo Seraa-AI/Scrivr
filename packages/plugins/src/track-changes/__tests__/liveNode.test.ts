@@ -19,7 +19,7 @@ const content = (...texts: string[]) => ({
   type: "doc",
   content: texts.map((text) => ({
     type: "paragraph",
-    attrs: { nodeId: text },
+    attrs: { nodeId: text || "empty" },
     content: text ? [{ type: "text", text }] : undefined,
   })),
 });
@@ -69,7 +69,7 @@ describe("findLiveNodeById", () => {
   it("finds a moved empty node, which carries no marks to test", () => {
     const editor = build(true, "", "mid");
     move(editor, 0, true);
-    const found = findLiveNodeById(editor.getState().doc, "");
+    const found = findLiveNodeById(editor.getState().doc, "empty");
     expect(found).not.toBeNull();
     expect(found?.pos).toBeGreaterThan(0);
   });

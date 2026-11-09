@@ -258,6 +258,17 @@ describe("the copy a move leaves behind", () => {
       ["Beta", false],
     ]);
   });
+
+  it("is left out of a list whose other items include a paragraph with an empty id", () => {
+    const item = (id: string, paragraph: DocNode): DocNode => ({ type: "listItem", attrs: { nodeId: id }, content: [paragraph] });
+    const { editor, ai } = build([{ type: "bulletList", attrs: { nodeId: "L" }, content: [
+      item("i1", para("a", "Alpha")), item("i2", para("b", "Beta")), item("i3", para("", "Gamma")),
+    ] }]);
+    const list = editor.getState().doc.child(0);
+    const first = list.child(0);
+    editor.applyTransaction(editor.getState().tr.insert(1 + list.content.size, first).delete(1, 1 + first.nodeSize));
+    expect(ai.getRichBlocks()[0]?.parts?.map((part) => part.text)).toEqual(["Beta", "Gamma", "Alpha"]);
+  });
 });
 
 describe("an agent's move, undone and redone", () => {

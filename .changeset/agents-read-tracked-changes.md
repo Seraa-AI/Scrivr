@@ -81,7 +81,8 @@ One-time changes to watch for:
   document saved with duplicates, or after concurrent cut-and-paste of one
   block in collaboration.
 - `blockIdOf(node)` is exported from `@scrivr/core` (approved by the user,
-  2026-11-09): the one answer to which nodes carry a block id.
+  2026-11-09): the one answer to which nodes carry a block id. An empty
+  `nodeId` counts as none, so `UniqueId` now stamps it as it stamps `null`.
 - `ReferenceAttrs` gains `originalNodeId`, the id the block had when a tracked
   split was made. Rejecting the split gives the rejoined block that id back.
 - **Track changes marks its own recording transaction `NORMALIZATION_META`,**

@@ -1,4 +1,4 @@
-import { Extension, IMAGE_NODE_ATTRS, stableStringify } from "@scrivr/core";
+import { blockIdOf, Extension, IMAGE_NODE_ATTRS, stableStringify } from "@scrivr/core";
 import type { IBaseEditor, IEditor, SemanticChange, SemanticImage, SemanticPart, SemanticUnit } from "@scrivr/core";
 import type { ReviewDecisions, ReviewOutcome } from "@scrivr/plugins";
 import { semanticPartRichHash, toSemanticUnits, unitRichHash } from "@scrivr/export-semantic";
@@ -94,35 +94,53 @@ export class AiSuggestionsAPI {
   }
 }
 
+type Placed = { node: PmNode; pos: number };
+
+/**
+ * Pairs each item with the node it was read from: the k-th item under an id
+ * with the k-th node carrying it, in document order. A pending move's two
+ * copies share their ids, so the id alone cannot tell them apart.
+ */
+function placeById<T>(items: readonly T[], idOf: (item: T) => string, nodes: readonly Placed[]): Array<Placed | undefined> {
+  const byId = new Map<string, Placed[]>();
+  for (const placed of nodes) {
+    const id = blockIdOf(placed.node);
+    if (id !== null) byId.set(id, [...(byId.get(id) ?? []), placed]);
+  }
+  const seen = new Map<string, number>();
+  return items.map((item) => {
+    const id = idOf(item);
+    const k = seen.get(id) ?? 0;
+    seen.set(id, k + 1);
+    return byId.get(id)?.[k];
+  });
+}
+
 /**
  * The units an agent reads: one per block. A pending move leaves a copy of the
  * moved block where it was, under the same ids; that copy — inside a move's
  * left-behind range — is left out with its parts. Any other unit stays, a
  * block proposed for deletion included, whatever id it carries.
- *
- * Read with `groupBlocks: false`, unit i is the document's top-level block i,
- * and a unit's parts are its block's id-carrying textblocks in order; a copy is
- * judged by where that block is.
  */
 function unitsToRead(units: SemanticUnit[], doc: PmNode): SemanticUnit[] {
   const moved = moveShadowRanges(doc);
   if (moved.length === 0) return units;
-  const blocks: Array<{ node: PmNode; pos: number }> = [];
+  const blocks: Placed[] = [];
   doc.forEach((node, pos) => blocks.push({ node, pos }));
+  const unitBlocks = placeById(units, (unit) => unit.id, blocks);
   return units.flatMap((unit, i) => {
-    const block = blocks[i];
-    if (!block || block.node.attrs["nodeId"] !== unit.id) return [unit];
+    const block = unitBlocks[i];
+    if (!block) return [unit];
     if (isShadowNode(block.node, block.pos, moved)) return [];
     if (!unit.parts) return [unit];
-    const leaves: Array<{ node: PmNode; pos: number }> = [];
+    const leaves: Placed[] = [];
     block.node.descendants((node, offset) => {
-      if (node.isTextblock && typeof node.attrs["nodeId"] === "string") leaves.push({ node, pos: block.pos + 1 + offset });
+      if (node.isTextblock) leaves.push({ node, pos: block.pos + 1 + offset });
       return !node.isTextblock;
     });
-    const aligned = leaves.length === unit.parts.length && leaves.every((leaf, j) => leaf.node.attrs["nodeId"] === unit.parts?.[j]?.nodeId);
-    if (!aligned) return [unit];
+    const partLeaves = placeById(unit.parts, (part) => part.nodeId, leaves);
     return [{ ...unit, parts: unit.parts.filter((_part, j) => {
-      const leaf = leaves[j];
+      const leaf = partLeaves[j];
       return !leaf || !isShadowNode(leaf.node, leaf.pos, moved);
     }) }];
   });

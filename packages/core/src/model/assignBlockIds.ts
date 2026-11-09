@@ -73,12 +73,12 @@ function walk(node: Node, generate: () => string): Node {
   return node.type.create(attrs, content, node.marks);
 }
 
+/** A block whose schema declares an id, without one `blockIdOf` would read. */
 function needsBlockId(node: Node): boolean {
-  if (!node.isBlock) return false;
-  const attrs = node.type.spec.attrs;
-  if (!attrs || !("nodeId" in attrs)) return false;
-  return node.attrs["nodeId"] === null;
+  return declaresBlockId(node) && blockIdOf(node) === null;
 }
+
+const declaresBlockId = (node: Node) => node.isBlock && "nodeId" in (node.type.spec.attrs ?? {});
 
 /**
  * A single block waiting for an ID, returned by `planBlockIdAssignments`.
@@ -95,9 +95,6 @@ export interface BlockIdAssignment {
  * `UniqueId` plugin). Returns one entry per block that needs an ID, so
  * the caller can emit one `setNodeMarkup` step per block instead of a
  * single whole-doc replace — better grain for history and collab.
- *
- * Both functions share the same `needsBlockId` predicate, so the rule
- * for "which blocks get IDs?" lives in exactly one place.
  */
 export function planBlockIdAssignments(
   doc: Node,
@@ -187,7 +184,7 @@ function firstWordsAt(node: Node, pos: number): number {
  * asks this.
  */
 export function blockIdOf(node: Node): string | null {
-  if (!node.isBlock || !("nodeId" in (node.type.spec.attrs ?? {}))) return null;
+  if (!declaresBlockId(node)) return null;
   const id = node.attrs["nodeId"];
   return typeof id === "string" && id.length > 0 ? id : null;
 }
