@@ -33,8 +33,11 @@ Approved by the user on 2026-11-08.
    free float chase the table down the page until the settle cap, leaving a
    placement off its anchor; the stricter rule decides the chase's end state
    in one step.
-4. **Re-anchoring on drop is out of scope.** Dragging a float keeps its anchor
-   and changes `yOffset`, which matches Word with a locked anchor.
+4. **A drop re-anchors to the nearest paragraph, as in Word.** The new
+   `yOffset` is measured from where layout measures that anchor: the top of
+   the paragraph's first part. A paragraph carried over from the previous page
+   gives way to the nearest paragraph that starts on the drop page, so the
+   image stays on the page it was dropped on.
 5. **Stacking moves the image, not its paragraph** (*approved by the user on
    2026-11-08, confirmed 2026-11-09*). A square float that would overlap one
    placed before it on the page moves below it; its anchor paragraph stays
@@ -58,8 +61,8 @@ Approved by the user on 2026-11-08.
    2026-11-09*). Every scenario is built from measured geometry (inserting
    images, typing, dragging, editing) and holds on any machine's fonts.
    Layouts that only a random document generator reaches are not tests, and
-   solver code that only such layouts needed was removed. The generator is
-   kept as a regression check against `main`, not as a target.
+   solver code that only such layouts needed was removed. During review the
+   generator's documents were checked against `main`; it is not in the repo.
 
 ## Problem
 
@@ -255,7 +258,7 @@ follows the anchor. Taken step by step that is a chase:
   it and the next settle pass finds nothing to do.
 
 Running the chase inside the settle loop would not converge within
-`MAX_ANCHOR_SETTLE_PASSES` and would leave a placement that disagrees with its
+`MAX_SETTLE_PASSES` and would leave a placement that disagrees with its
 anchor. So the reflow evaluates the rule's end state in one step instead. It
 tentatively moves the table, restamps, and keeps the move only if, for every
 float already placed whose anchor follows the table and whose zone reaches
@@ -322,12 +325,9 @@ wrap around the locked object, even if that moves the anchor.
 **The rule.** A float follows its anchor while settling converges. A
 wrapping float is **locked** as soon as one of its placements repeats — an
 oscillation, the same test LibreOffice's `SwOszControl` applies ("position
-already occurred -> oscillation") — or after `MAX_PLACEMENTS_BEFORE_LOCK`
-placements that never repeat (a runaway). Then:
+already occurred -> oscillation"). Then:
 
-- It locks at the state it is returning to. If the sequence was converging
-  rather than cycling, that state is its fixed point and the float ends on its
-  anchor.
+- It locks at the state it is returning to.
 - A locked float keeps its placement and wrap rect; text wraps around it.
   If its anchor would move back to an earlier page, the float holds it at the
   top of its own page, so the two never end on different pages. A table after its anchor clears it like any
@@ -507,7 +507,7 @@ contentWidth`.
 | 30 | Six paragraphs, each with a float that has no fixed point (`yOffset -40`) | No text under a float; each float on its anchor's page, at most one displaced paragraph above `anchor + yOffset`; two layouts agree |
 | 31 | Settle work: 100 vs 400 such paragraphs, counted in `layoutBlock` calls (`FloatSettleWork.test.ts`) | Calls grow less than 6x (linear is 4x, quadratic 16x) |
 | 32 | A restamp inside one reflow leaves another float's rect stale | The table stays at its natural y; no hole |
-| 34 | An anchor whose first line lands on the next page | The float is on its anchor's page at the anchor's y |
+| 34 | Guard: an anchor whose first line lands on the next page | The float is on its anchor's page at the anchor's y |
 | 35 | Pageless with a page height | The table is not moved; nothing after it is laid out as if it had |
 | 36 | Streaming: float and table in different chunks | Pinned gap: the table stays at its natural y |
 | 37 | A float that does not reach back is carried onto the next page | Guard: the table still clears the reaching-back float |
@@ -523,7 +523,7 @@ contentWidth`.
 | 51 | A paragraph split across pages | Its continuation wraps the next page's float |
 | 53 | A heading near the page bottom | The anchor after it lands where it paints |
 | 54 | A paragraph whose first line changes height on re-wrap | It lands where it paints |
-| 55 | A float carried by another float's runaway | It stays on its anchor |
+| 55 | Guard: a float after one that locks | It stays on its anchor |
 
 ## Slices
 
@@ -545,9 +545,8 @@ File:line references outside this RFC's What shipped section point at `main` @ `
 ### The settle loop
 
 `settleFrom` in `layout/AnchoredObjectSolver.ts` re-places floats until no
-anchor moves. A float that cannot settle is locked after
-`MAX_PLACEMENTS_BEFORE_LOCK` placements or on its first repeat, and a settle
-stops after `MAX_SETTLE_PASSES` passes at the latest. A table that moves a
+anchor moves. A float that cannot settle is locked on its first repeated
+placement, and a settle stops after `MAX_SETTLE_PASSES` passes at the latest. A table that moves a
 float's own anchor would chase the float; [Backward anchors](#backward-anchors)
 replaces the chase with a one-step check. Scenarios 12 and 12b assert the
 placement agrees with its anchor after settling; `FloatSettleWork.test.ts`
@@ -642,9 +641,14 @@ bottom against the page's whole manager — and scenarios 20–22 and 27 cover i
   100 blocks make it reachable. Carrying floats across chunks means carrying
   the solver's state in `LayoutResumption`, which is not a small change at
   this seam. Pinned by scenario 36.
-- **Re-anchor on drop.** Dragging a float keeps its anchor and changes
-  `yOffset` (Decision 4). Moving the anchor to the paragraph under the drop
-  point is an existing todo.
+- **A drop on a page no paragraph starts on** (one paragraph longer than the
+  page) is measured from that paragraph's real start, on an earlier page, so
+  the image is clamped onto that page (Decision 4).
+- **One larger word on a line can run about 11px under a square image
+  dragged up beside it.** The line's height is probed from the paragraph's
+  normal size. Same on `main`.
+- **Scrolling during a drag on the same page** is not followed.
+- **Tables in pageless mode** never move for a float (see Pageless above).
 - **Images and horizontal rules.** `leaf` flows are skipped by the same line
   for the same reason. An inline-only image beside a float overlapping it is a
   separate bug with the same fix; it is not in this RFC's scope.
@@ -660,7 +664,7 @@ section is what is true.
 | B | `feat/float-beside-table` (`6ea4cbd`) | The backward-anchor check decides the chase's end state in one step; the zone band became `zoneOf(placement)` so the reflow can ask where a re-placed float would sit. Turned scenario 12 back to green. |
 | Review | `feat/float-beside-table` (`b0d1a21`) | The reflow scans to the page bottom against the whole page's manager and restamps only when a block's end moved; the settle loop re-places every float whose anchor moved; the backward check covers every placed float that reaches back over the table; the table's run stops at the page in both directions. Scenarios 20, 21, 22, 23, 24 and 27 flipped red → green against the Slice B code. |
 | Review 2 | `feat/float-beside-table` (`545c1654`) | Each float owns its placement: one `place()` derives landing, anchor push, stacking and clamp from its anchor flow's natural start, and the stacking offset is the float's, not the flow's. Every restamp re-applies anchor pushes through the floats and stops at the first unmoved flow. The settle loop reflows only the pages a pass changed (old and new band, on either page) and re-places only floats whose anchor moved or that stack on a moved float; its last pass ends by placing. Tables are placed from their natural start against current float placements. Pageless never moves a table. Scenarios 28–35 flipped red → green against the Review code; 36–38 are pins and guards. |
-| No fixed point | `feat/float-beside-table` (`049fa23d`) | A float re-placed `MAX_ANCHOR_SETTLE_PASSES` times in one settle is locked where it stands (Decision 6). Scenarios 39–41 flipped red → green; 30 now asserts the lock's bound instead of anchor agreement. |
+| No fixed point | `feat/float-beside-table` (`049fa23d`) | A float re-placed a fixed number of times in one settle was locked where it stood (Decision 6; since replaced by locking on a repeated placement). Scenarios 39–41 flipped red → green; 30 now asserts the lock's bound instead of anchor agreement. |
 
 Where this differs from the design above:
 
@@ -733,7 +737,7 @@ Where this differs from the design above:
 | `8f6e1f6e`, `56b92a66` | A dragged float lands where it was dropped, stacked or not: the drag starts from the painted offset and re-anchors from the ghost. The placement carries `stackOffset`. |
 | `391c5010` | One `place()` (clamp, stack, overflow check); locked floats overlap a table anchored before them; lines laid where they land; work-count test. |
 | `43e97d47`, `f890352d` | Moves only: the solver to `layout/AnchoredObjectSolver.ts`, flow placement helpers to `layout/FlowPlacement.ts` below both (no runtime cycle). |
-| `43205f17` | One landing rule (`landingAfter`) for pagination, flow stamping and the solver, from the block's re-laid first line. |
+| `43205f17` | One landing rule (`landingAfter`) for pagination, flow stamping and the solver. Scenario 53 red → green; 54 is held by pagination keeping lines laid where the flow sits (`wrapLaidAtY`), red without it. |
 | `9b043e12`, `07338e19`, `095378c3` | Tests are measured layouts a person can make (Decision 7); the lock lost attribution, the later-page preference and stacking against locked floats, which no such layout needed. It keeps holding its anchor on its page: scenario 43 (a tall top-bottom image dragged up in a paragraph near the page bottom, at every paragraph position across the page end) is red without it. |
 | `5ce66fec` | Page exclusions are read-only outside carving; the empty manager is never shared. |
 | `f4b57aef` | DOCX export writes `allowOverlap="0"` on square images. |
@@ -750,7 +754,7 @@ What a person sees:
   lands, the way pagination does.
 - **A heading or a large word near the page bottom no longer leaves its
   paragraph painted somewhere other than where it was laid** (scenarios 53,
-  54, red → green).
+  54, red → green; see the table for what holds each).
 - **A float whose own wrap keeps moving its paragraph locks** instead of
   chasing it (`FloatSettleWork.test.ts`, red with the lock disabled).
 - **Settle work is linear** in the number of such floats
@@ -758,6 +762,16 @@ What a person sees:
 - **Square images do not overlap** (scenario 50) and are exported so Word
   stacks them too.
 
-The generator documents serve only as a regression check: against `main`,
-every category is equal or better, apart from images stacked by design
+During review the generator's documents were checked against `main`: every
+category was equal or better, apart from images stacked by design
 (Decision 5).
+
+### Round 5
+
+| Commit | What it changed |
+|---|---|
+| `cde7dca6` | Flow stamping forces a first line within half a pixel of fitting, as `paginateFlow` does, and such a line ends its page at the bottom: no blank band on the next page, with or without floats. The gap-reaches-the-bottom rule is pinned. `FlowPlacement.test.ts`, red → green. |
+| `3123c331` | Both drop paths measure from the anchor paragraph's first part, and a carried-over paragraph gives way to one starting on the drop page (Decision 4). Three drag tests red → green: mid-paragraph on another page (measured from the line under the pointer, so it landed that many lines too high), on a carried-over paragraph from another page, and on one from the same page (both jumped to the previous page). |
+| `ac2b790f`, `eaf6c781` | Removed, no layout needed them: the re-lay-until-landing-agrees loop with `naturalStartOf`'s re-laid flow parameter, and the runaway cap. Scenarios 34 and 55 are labelled guards. |
+| `d88c1644` | A dragged locked image lands where it was dropped: the same-page re-anchor no longer re-anchors an image into its own paragraph. The clamped clause of the painted offset is pinned. |
+| `b1360fa7` | `FlowPlacement` helpers are imported from there; one empty exclusions reader per solve. |
