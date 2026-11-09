@@ -314,8 +314,9 @@ describe("PointerController — drag UX", () => {
         content: {
           type: "doc",
           content: [
-            { type: "paragraph", content: [{ type: "text", text: `A ${words}` }, image(150)] },
-            { type: "paragraph", content: [{ type: "text", text: "B" }, image(120)] },
+            // Both anchored in one paragraph, so the second overlaps the first
+            // whatever the fonts, and stacks below it.
+            { type: "paragraph", content: [image(150), image(120), { type: "text", text: `A ${words}` }] },
             { type: "paragraph", content: [{ type: "text", text: words }] },
           ],
         },
