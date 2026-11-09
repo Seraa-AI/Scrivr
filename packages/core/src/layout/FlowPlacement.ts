@@ -90,12 +90,13 @@ export function advanceFlowGlobalY(
     const available = pageBottom(page) - cursor;
     let { fitted, rest, fittedHeight } = fitLinesInCapacity(remaining, available);
     if (fitted.length === 0) {
-      if (cursor === top) {
+      const [first] = remaining;
+      if (cursor === top && first) {
         // A line taller than the page — force one to avoid an infinite loop
         // (mirrors paginateFlow's top-of-page guard).
-        fitted = remaining.slice(0, 1);
+        fitted = [first];
         rest = remaining.slice(1);
-        fittedHeight = remaining[0]!.lineHeight;
+        fittedHeight = first.lineHeight;
       } else {
         cursor = pageStart(page + 1);
         continue;
