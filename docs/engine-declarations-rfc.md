@@ -51,24 +51,44 @@ Plain-text paste builds the schema's default textblock
 (`schema.topNodeType.contentMatch.defaultType`), which is `paragraph` in every
 built-in schema, and `mergesIntoNeighbour` asks the same of the node.
 
-### 3. Sections: the break declaration, plus where a section ends
+### 3. Sections: a boundary the sections model owns, not a break
 
-A section break is a page break that sometimes is not one, and it ends a
-section.
+The columns plan (`docs/columns-rfc.md`, `docs/sections-roadmap.md`) settles
+what a section break is: a **boundary** between sections, whose settings
+(`breakType`, `columns`, later orientation and margins) the sections model
+derives (`deriveSections`). `continuous` changes the regions mid-page; the
+other types start the next section on a new, odd or even page. Once columns
+land, pagination at a boundary closes the current section's regions and opens
+the next section's, following the derived transition. A section break is
+therefore not a page break with a condition, and this RFC does not make it
+one.
 
-```ts
-| { kind: "break"; breaks: "line" }
-| { kind: "break"; breaks: "page"; startsOn?: (node: Node) => PageStart | null }
-
-/** Which page the next block starts on; null when this node does not break. */
-type PageStart = "nextPage" | "oddPage" | "evenPage";
-```
-
-- `Sections` declares `{ kind: "break", breaks: "page", startsOn }`, reading its
-  `settings.breakType` (`continuous` → null). The walk's section branch goes.
 - **New:** a node spec may declare `sectionBoundary: true`. `isSectionBreak`
-  reads it instead of the name, and `deriveSections` is unchanged: the
-  settings stay in `attrs.settings`, owned by the sections model.
+  reads it instead of the name; `deriveSections` and the settings in
+  `attrs.settings` are unchanged. The sections model stays core's, as
+  `isListType` does: it says what a node is, and pagination asks it.
+- **Layout items say what they are.** `LayoutItem`'s `isPageBreak` and
+  `pageBreakType` become one field, `boundary`:
+
+  ```ts
+  type LayoutBoundary =
+    | { kind: "break"; breaks: "page" }                       // a node that breaks the page
+    | { kind: "section"; transition: SectionTransition };     // nextPage | oddPage | evenPage | continuous
+  ```
+
+  A continuous section emits a boundary too (today it emits nothing), so the
+  columns work has the place where regions change already in the flow. Until
+  then pagination treats it as it does today: a continuous boundary does not
+  move the flow, the others start the next page as now. Output is unchanged.
+- **Breaks are region advances.** `BreakKind` grows `"column"` when
+  `columnBreak` lands (columns Phase 3): `"page"` advances to the next page's
+  first region, `"column"` to the next region, which on a one-region page is
+  the next page. Nothing is added now; the vocabulary is chosen so that
+  `columnBreak` is a declaration, not an engine change.
+
+This is the shape the region-cursor refactor (columns Phase 1) wants:
+`paginateFlow` reads one `boundary` field, not a page-break flag plus a
+section's type folded into it.
 
 ### 4. Floats: an inline node declares how it is anchored
 
@@ -120,8 +140,10 @@ Breaking, during beta (patch changesets):
   `NormalizedImageAttrs` from core (now `Image`'s / `AnchoredPlacement`);
   `Editor.convertImageToInlineAtVisualPosition` (an `Image` command);
   `defaultFontConfig.heading_N`; `PdfHandlers.outline`.
-- New: `breaks: "page"`'s `startsOn`, `PageStart`; spec fields
-  `sectionBoundary`, `anchored`, `outlineLevel`; `anchoredOf`,
+- Changed: `LayoutItem` / `FlowBlock` `isPageBreak` and `pageBreakType`
+  become `boundary: LayoutBoundary`.
+- New: spec fields `sectionBoundary`, `anchored`, `outlineLevel`;
+  `LayoutBoundary`; `anchoredOf`,
   `AnchoredPlacement`; `addPasteFiles()`; `PdfHandlers.embeds`.
 
 ## How it is checked
@@ -139,7 +161,8 @@ walker.
 One PR per session, smallest first:
 
 1. Marks, default block, style defaults (items 1, 2, 6). No new concept.
-2. Sections (3).
+2. Sections (3): `sectionBoundary` and the `boundary` item, output unchanged;
+   ahead of columns Phase 1, which builds on it.
 3. Outline level on the spec (7).
 4. Floats and images (4, 5). The largest.
 5. Tables: their own RFC.
@@ -148,11 +171,13 @@ The list-number gap fix (user, 2026-11-09) stays the next PR, before 1.
 
 ## Decisions for sign-off
 
-1. The three new spec fields (`sectionBoundary`, `anchored`, `outlineLevel`)
+1. Sections as a boundary item that the columns work extends, rather than a
+   conditional page break.
+2. The three new spec fields (`sectionBoundary`, `anchored`, `outlineLevel`)
    over strategy- or export-lane hooks: they are read outside layout and
    export.
-2. `addPasteFiles()` as a new hook for image file paste.
-3. The order above, one PR each, or one integrated PR.
+3. `addPasteFiles()` as a new hook for image file paste.
+4. The order above, one PR each, or one integrated PR.
 
 ## What shipped
 
