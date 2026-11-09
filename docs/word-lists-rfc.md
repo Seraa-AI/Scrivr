@@ -538,9 +538,10 @@ section is what is true.
   and could not be checked here; the rule chosen keeps the text clear of the
   number. A number that runs past the whole line keeps its text after it,
   overflowing, rather than under it.
-- **The marker's face is the item's first text.** The first text run on the
-  item's first line, past any image or anchor that opens it, as Word sizes a
-  number from the paragraph's text; 14px Arial only when the line has no text.
+- **The marker's face is the item's first text.** The item's first text run,
+  past any image or anchor that opens it and past a line the number stands on
+  alone, as Word sizes a number from the paragraph's text; 14px Arial only when
+  the item has no text. `listMarkerFont` takes the block's lines for this.
   `listMarkerFont` returns the face and its resolution, so layout measures,
   and canvas and PDF draw, the number in one face.
 - **No new `LayoutBlock` field for the bullet shape.** §4 proposed carrying the
@@ -609,15 +610,22 @@ section is what is true.
   previous column's grid line, and a number that then reaches the text pushes
   it on. A tab stop is taken only when it leaves an inch of the line for the
   text (`MIN_TEXT_AFTER_NUMBER`); otherwise the text follows the number after a
-  space. A first word that does not fit after the number wraps to the next
-  line, leaving the number alone on its line, as Word does: the line breaker
-  leaves an indented first line empty when its first word does not fit what
-  the indent leaves (`breakIntoLines`' `firstLineIndent`), and the empty line
-  keeps the word's font so the number has its baseline and face. A wide word
-  split for a full line is wrapped the same way instead of being forced onto
-  the narrowed first line. So in a narrow cell the first word stays inside the
-  cell; only a word wider than the whole cell runs over it, as it does without
-  a number. Our DOCX keeps the number inside the cell too. How Word places a number whose hanging indent does not fit a
+  space. A first word that does not fit after the number, but fits the next
+  line, wraps to it, leaving the number alone on its line, as Word does
+  (`breakIntoLines`' `firstLineMayStayEmpty`, set only for a list number's
+  push: a paragraph's own first-line indent keeps its first word, as Word's
+  behaviour there is unchecked). The wrap goes through the line breaker's one
+  "start the next line" path, so it skips a full-width float like any wrap;
+  trailing spaces hang in the fit check; a word or image that fits the next
+  line no better stays after the number. The line left behind holds no text
+  and no position: it takes the word's height and baseline, any float anchors
+  move down with the word, the caret, Home, End, clicks and selection all sit
+  on the word's line, and Up and Down step over it. A wide word split for a
+  full line is wrapped the same way. So in a narrow cell the first word stays
+  inside the cell; only a word wider than the whole cell runs over it, as it
+  does without a number. Our DOCX keeps the number inside the cell too.
+  Known limit: the first word is judged by its first run, so a word whose
+  letters change font mid-word is judged by its first part. How Word places a number whose hanging indent does not fit a
   cell is not documented and could not be checked here; this keeps it inside
   the box Word draws for the cell.
 - **Known gaps in cells, not lists' own:** a cell adds its blocks' margins

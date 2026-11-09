@@ -23,10 +23,11 @@ Lists lay out, print and export like Word's.
   left-aligned. A number wide enough to reach its text moves the item's first
   line to the next tab stop, as Word's tab after the number does; when the
   next stop would leave less than an inch of the line, the text follows the
-  number after a space, and a first word that still does not fit wraps to the
-  next line, leaving the number alone on its line, as in Word. The text is
-  never drawn over the number. Existing lists move a quarter inch to the
-  right.
+  number after a space, and a first word that still does not fit, but fits a
+  line of its own, wraps to the next line, leaving the number alone on its
+  line, as in Word; the caret, clicks, Home, End and selection keep to the
+  word's line. The text is never drawn over the number. Existing lists move a
+  quarter inch to the right.
 - **Lists inside table cells are drawn.** A list in a cell (pasting one
   there makes one) used to lay out as one empty line, its text never painted
   on canvas or in PDF. A cell now lays out its blocks as the page body does:
@@ -68,7 +69,8 @@ Lists lay out, print and export like Word's.
 
 - `@scrivr/core` exports `isListType` (moved here from track changes, and
   now what the list extension, Clear formatting, the semantic exporter and
-  track changes ask), `bulletShape`, `bulletBox` and `listMarkerFont`, with the
+  track changes ask), `bulletShape`, `bulletBox` and `listMarkerFont` (which
+  takes a block's lines and answers the face of its first text), with the
   types `BulletShape`, `BulletBox` and `ListMarkerFont`.
 - `ListItemStrategy` is removed, and blocks are no longer relabelled
   `blockType: "list_item"`. Core draws a block's list marker itself, over
