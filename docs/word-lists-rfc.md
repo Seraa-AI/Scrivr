@@ -526,7 +526,8 @@ section is what is true.
   stopped after one level, because a nested list hangs off the item above.
   Each list item now has `levelOffset` (default 0): its level is its list's
   level plus its own offset, never past level 8, and a list nested in it sits
-  one level below the item. Tab raises the item's offset; Shift-Tab, and
+  one level below the item's list, not the item, so moving an item never moves
+  what is nested in it. Tab raises the item's offset; Shift-Tab, and
   Backspace at the start of an item below level 0, lower it, then lift as
   before. Items after it keep their levels. An ordered list counts per level,
   as Word does: an item's number follows the last item at its level, and a

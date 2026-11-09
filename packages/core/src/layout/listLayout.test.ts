@@ -661,6 +661,19 @@ describe("Tab takes only that item deeper, as in Word", () => {
     expect(marker(editor, "three")).toBe("•");
   });
 
+  it("leaves a list nested in the item where it is", () => {
+    const editor = new KeyEditor({ extensions: [StarterKit], content: { type: "doc", content: [
+      ol(item("one"), item("two", ol(item("child")))), { type: "paragraph" },
+    ] } });
+    const before = blockOf(laidOut(editor.getState().doc), "child");
+    editor.caretAt("two");
+    editor.press("Tab");
+    const blocks = laidOut(editor.getState().doc);
+    expect(blockOf(blocks, "two").x - blockOf(blocks, "one").x).toBe(HALF_INCH);
+    expect(blockOf(blocks, "child").x).toBe(before.x);
+    expect(blockOf(blocks, "child").listMarker).toBe(before.listMarker);
+  });
+
   it("brings only that item back a level on each Shift-Tab", () => {
     const editor = new KeyEditor({ extensions: [StarterKit], content: threeItems });
     editor.caretAt("two");

@@ -15,6 +15,7 @@ import {
   itemLevel,
   itemLevelOffset,
   listStart,
+  nestedListLevel,
   type ListKind,
 } from "../../model/lists";
 import type { SlashCommandContribution, ToolbarItemSpec } from "../types";
@@ -193,14 +194,14 @@ function makeToggleList(listType: NodeType, itemType: NodeType): Command {
 /** The innermost list item the selection is in, its position, and the level it is drawn at. */
 function itemAtSelection(state: EditorState): { item: PmNode; pos: number; level: number } | null {
   const { $from } = state.selection;
-  let level: number | null = null;
+  let listLevel: number | null = null;
   let found: { item: PmNode; pos: number; level: number } | null = null;
   for (let d = 1; d <= $from.depth; d++) {
     const node = $from.node(d);
     if (!isListType(node.type) || d + 1 > $from.depth) continue;
+    listLevel = nestedListLevel(listLevel);
     const item = $from.node(d + 1);
-    level = itemLevel(item, level);
-    found = { item, pos: $from.before(d + 1), level };
+    found = { item, pos: $from.before(d + 1), level: itemLevel(item, listLevel) };
   }
   return found;
 }
@@ -490,23 +491,22 @@ export const List = Extension.create({
               ...(kind === "ordered" && !top ? { start: listStart(list) } : {}),
             }).numId;
 
-      // Where the walk is: the top list's numbering, the level of the item
-      // it is inside (null outside any), and the list whose items come next.
-      type Scope = { top: { kind: ListKind; numId: number } | null; itemLevel: number | null; listNumId: number | null };
+      // Where the walk is: the top list's numbering, the level of the list
+      // it is in (null outside any), and that list's numId while its items come next.
+      type Scope = { top: { kind: ListKind; numId: number } | null; listLevel: number | null; listNumId: number | null };
       const walk = (node: PmNode, scope: Scope) => {
         const kind = listKind(node);
         let inside: Scope = scope;
         if (kind) {
           const numId = numIdFor(node, kind, scope.top);
-          inside = { top: scope.top ?? { kind, numId }, itemLevel: scope.itemLevel, listNumId: numId };
-        } else if (scope.listNumId !== null && node.type.name === "listItem") {
-          const level = itemLevel(node, scope.itemLevel);
-          itemMap.set(node, { numId: scope.listNumId, ilvl: level });
-          inside = { top: scope.top, itemLevel: level, listNumId: null };
+          inside = { top: scope.top ?? { kind, numId }, listLevel: nestedListLevel(scope.listLevel), listNumId: numId };
+        } else if (scope.listNumId !== null && scope.listLevel !== null && node.type.name === "listItem") {
+          itemMap.set(node, { numId: scope.listNumId, ilvl: itemLevel(node, scope.listLevel) });
+          inside = { ...scope, listNumId: null };
         }
         node.forEach((child) => walk(child, inside));
       };
-      walk(ctx.editor.getState().doc, { top: null, itemLevel: null, listNumId: null });
+      walk(ctx.editor.getState().doc, { top: null, listLevel: null, listNumId: null });
     };
 
     // bulletList / orderedList don't emit their own element — Word lists are

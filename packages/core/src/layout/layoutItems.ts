@@ -17,6 +17,7 @@ import {
   itemLevel,
   levelCounter,
   listStart,
+  nestedListLevel,
 } from "../model/lists";
 import { layoutBlock, ownFirstLineIndent, type BlockLayoutOptions, type LayoutBlock } from "./BlockLayout";
 import { nodeLayout } from "./BlockRegistry";
@@ -57,7 +58,10 @@ const blockIndentOf = (node: Node): number => {
 
 /** Where a block sits in a list. */
 interface ListPlace {
+  /** The level the block is drawn at: its item's. */
   depth: number;
+  /** The level of the list the item is in, which a list nested in it counts from. */
+  listLevel: number;
   /** The item's marker, on its first block only. */
   marker?: string;
 }
@@ -84,7 +88,7 @@ export function collectChildItems(parent: Node, base: number): LayoutItem[] {
   // list place, marker included; the rest take only its depth.
   const walk = (container: Node, start: number, list: ListPlace | null): void => {
     container.forEach((node, relOffset, index) => {
-      walkOne(node, start + relOffset, index === 0 || !list ? list : { depth: list.depth });
+      walkOne(node, start + relOffset, index === 0 || !list ? list : { depth: list.depth, listLevel: list.listLevel });
     });
   };
 
@@ -113,11 +117,11 @@ export function collectChildItems(parent: Node, base: number): LayoutItem[] {
 
     const kind = listKind(node);
     if (kind) {
-      const parentLevel = list ? list.depth : null;
-      const number = levelCounter(parentLevel === null ? 0 : parentLevel + 1, kind === "ordered" ? listStart(node) : 1);
+      const listLevel = nestedListLevel(list ? list.listLevel : null);
+      const number = levelCounter(listLevel, kind === "ordered" ? listStart(node) : 1);
       node.forEach((listItem, itemOffset) => {
-        const depth = itemLevel(listItem, parentLevel);
-        walk(listItem, offset + 1 + itemOffset + 1, { depth, marker: listMarker(kind, depth, number(depth)) });
+        const depth = itemLevel(listItem, listLevel);
+        walk(listItem, offset + 1 + itemOffset + 1, { depth, listLevel, marker: listMarker(kind, depth, number(depth)) });
       });
       return;
     }

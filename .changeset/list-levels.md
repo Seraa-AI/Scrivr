@@ -8,7 +8,8 @@ Lists follow Word's levels and numbering.
 
 - **Tab takes an item deeper, as in Word, and only that item.** Each Tab
   goes one level further, past the item above, up to level 9 (Tab there is
-  consumed without a change); the items after it keep their levels. Shift-Tab
+  consumed without a change); the items after it, and any list nested in it,
+  keep their levels. Shift-Tab
   brings it back a level, then lifts it out as before, and so does Backspace
   at the start of an item below the top level, which no longer joins it into
   the item above. Backspace at the start of a line just below a list joins it

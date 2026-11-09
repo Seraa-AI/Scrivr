@@ -98,12 +98,16 @@ export function itemLevelOffset(item: Node): number {
 }
 
 /**
- * The level an item is drawn at (0 = top): its list's level plus its own
- * `levelOffset`, never past the ninth. A list nested in an item sits one
- * level below it; `parentItemLevel` is that item's level, or null at the top.
+ * A list's own level (0 = top): one below the list it is nested in, whatever
+ * level the item holding it was moved to, so moving an item moves only that
+ * item, as each paragraph keeps its own level in Word.
  */
-export function itemLevel(item: Node, parentItemLevel: number | null): number {
-  const listLevel = parentItemLevel === null ? 0 : parentItemLevel + 1;
+export function nestedListLevel(parentListLevel: number | null): number {
+  return parentListLevel === null ? 0 : parentListLevel + 1;
+}
+
+/** The level an item is drawn at: its list's level plus its own `levelOffset`, never past the ninth. */
+export function itemLevel(item: Node, listLevel: number): number {
   return Math.min(listLevel + itemLevelOffset(item), LIST_LEVEL_COUNT - 1);
 }
 
