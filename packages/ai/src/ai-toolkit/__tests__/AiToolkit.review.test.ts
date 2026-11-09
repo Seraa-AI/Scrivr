@@ -5,6 +5,7 @@
 import { describe, expect, it } from "vitest";
 import { ServerEditor, StarterKit } from "@scrivr/core";
 import type { SemanticUnit } from "@scrivr/core";
+import { redo, undo } from "@scrivr/core/pm";
 import { TrackChanges, TrackChangesStatus, trackChangesPluginKey } from "@scrivr/plugins";
 import { AiToolkit, getAiToolkit, unitRichHash } from "../../index";
 
@@ -225,6 +226,19 @@ describe("an agent's edit lands on the block it read", () => {
     const result = ai.applyRichEdit([rewrite(first, "Alpha2"), ...read.slice(1)]);
     expect(result).toMatchObject({ applied: false, changed: [], rejected: ["p"] });
     expect(editor.getState().doc.eq(before)).toBe(true);
+  });
+});
+
+describe("an agent's move, undone and redone", () => {
+  it("keeps the moved block editable by its id", () => {
+    const { editor, ai } = build([para("a", "Alpha"), para("b", "Beta")]);
+    ai.applySemanticEdits([{ kind: "structural", op: "moveBlock", nodeId: "a", position: "after", anchorNodeId: "b" }], { authorID: "bot" });
+    undo(editor.getState(), (tr) => editor.applyTransaction(tr));
+    redo(editor.getState(), (tr) => editor.applyTransaction(tr));
+    const moved = ai.getRichBlocks().find((u) => u.id === "a");
+    if (!moved) throw new Error("moved block");
+    const result = ai.applyRichEdit([{ ...moved, text: "Alpha2", spans: [{ text: "Alpha2", marks: [] }] }]);
+    expect(result).toMatchObject({ changed: ["a"], rejected: [] });
   });
 });
 

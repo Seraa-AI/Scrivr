@@ -1,6 +1,7 @@
 import { Plugin, type Transaction } from "prosemirror-state";
 import type { Node } from "prosemirror-model";
 import { Mapping } from "prosemirror-transform";
+import { isHistoryTransaction } from "prosemirror-history";
 import { Extension } from "../Extension";
 import { planBlockIdAssignments, planDuplicateIdAssignments, type BlockIdAssignment } from "../../model/assignBlockIds";
 
@@ -55,10 +56,13 @@ export function findNodeById(
  * batch's final document. Judged on the document right after the last authored
  * transaction, so a copy that bookkeeping puts back afterwards (track changes
  * restoring a pending move's left-behind copy, marked `NORMALIZATION_META`)
- * keeps the id it shares by design.
+ * keeps the id it shares by design. Undo and redo are not authored either: they
+ * restore a state where the rule already held, and redo replays the re-key.
  */
 function duplicatesAnEditCreated(transactions: readonly Transaction[], before: Node, after: Node): BlockIdAssignment[] {
-  const lastAuthored = transactions.findLastIndex((tr) => tr.docChanged && !tr.getMeta(NORMALIZATION_META));
+  const lastAuthored = transactions.findLastIndex(
+    (tr) => tr.docChanged && !tr.getMeta(NORMALIZATION_META) && !isHistoryTransaction(tr),
+  );
   const authored = transactions[lastAuthored];
   if (!authored) return [];
   const toAuthored = new Mapping();

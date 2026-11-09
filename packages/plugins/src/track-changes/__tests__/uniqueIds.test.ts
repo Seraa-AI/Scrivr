@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { ServerEditor, StarterKit } from "@scrivr/core";
-import { splitListItem, TextSelection } from "@scrivr/core/pm";
+import { redo, splitListItem, TextSelection, undo } from "@scrivr/core/pm";
 import { changeActs, reviewChanges, TrackChanges, TrackChangesStatus, trackChangesPluginKey } from "@scrivr/plugins";
 
 type DocNode = Record<string, unknown>;
@@ -68,6 +68,48 @@ describe("a tracked Enter in a list", () => {
     });
     expect(ids.every((id) => typeof id === "string")).toBe(true);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+});
+
+describe("a pending move through undo and redo", () => {
+  const moved = () => {
+    const editor = editorWith([para("a", "Alpha"), para("b", "Beta")]);
+    const state = editor.getState();
+    const first = state.doc.child(0);
+    editor.applyTransaction(state.tr.insert(state.doc.content.size, first).delete(0, first.nodeSize));
+    return editor;
+  };
+  const run = (editor: ServerEditor, command: typeof undo) => command(editor.getState(), (tr) => editor.applyTransaction(tr));
+  const copiesOfA = (editor: ServerEditor) => topIds(editor).filter((id) => id === "a").length;
+  const decide = (editor: ServerEditor, decision: "accepted" | "rejected") => {
+    const ids = pendingActs(editor).map((a) => a.primary.id);
+    return reviewChanges(editor, decision === "accepted" ? { accepted: ids, rejected: [] } : { accepted: [], rejected: ids });
+  };
+
+  it("keeps the pair's id after the move is undone and redone", () => {
+    const editor = moved();
+    run(editor, undo);
+    expect(topIds(editor)).toEqual(["a", "b"]);
+    run(editor, redo);
+    expect(copiesOfA(editor)).toBe(2);
+  });
+
+  it("keeps it when an accepted move is undone, then rejected", () => {
+    const editor = moved();
+    expect(decide(editor, "accepted").status).toBe("applied");
+    run(editor, undo);
+    expect(copiesOfA(editor)).toBe(2);
+    expect(decide(editor, "rejected").status).toBe("applied");
+    expect(topIds(editor)).toEqual(["a", "b"]);
+  });
+
+  it("keeps it when a rejected move is undone, then rejected again", () => {
+    const editor = moved();
+    expect(decide(editor, "rejected").status).toBe("applied");
+    run(editor, undo);
+    expect(copiesOfA(editor)).toBe(2);
+    expect(decide(editor, "rejected").status).toBe("applied");
+    expect(topIds(editor)).toEqual(["a", "b"]);
   });
 });
 
