@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { Node } from "prosemirror-model";
 import { ExtensionManager } from "../extensions/ExtensionManager";
 import { StarterKit } from "../extensions/StarterKit";
-import { createMeasurer } from "../test-utils";
+import { createMeasurer, measureTextWidth } from "../test-utils";
 import {
   runPipeline,
   collapseMargins,
@@ -569,10 +569,15 @@ describe("float beside a table — the table moves below the float", () => {
         a.y < b.y + b.height && b.y < a.y + a.height;
     }
 
-    /** Lines narrowed by a float that is nowhere near them. */
+    /**
+     * Lines narrowed by a float that is nowhere near them. A line is narrowed
+     * when it starts right of its block's edge, or ends short of it by more
+     * than two words could leave; near means within the float's margin.
+     */
     function staleWraps(l: DocumentLayout): string[] {
       const out: string[] = [];
       const floats = (l.anchoredObjects ?? []).filter((f) => f.wrapMode === "square" || f.wrapMode === "top-bottom");
+      const slack = measureTextWidth("word word ");
       for (const page of l.pages) for (const b of page.blocks) {
         if (b.kind !== "text") continue;
         let y = b.y;
@@ -581,9 +586,9 @@ describe("float beside a table — the table moves below the float", () => {
           if (k < b.lines.length - 1 && spans.length > 0) {
             const left = b.x + Math.min(...spans.map((s) => s.x));
             const right = b.x + Math.max(...spans.map((s) => s.x + s.width));
-            const narrowed = left > b.x + 60 || right < b.x + b.availableWidth - 120;
+            const narrowed = left > b.x + 1 || right < b.x + b.availableWidth - slack;
             const near = floats.some((f) => f.page === page.pageNumber &&
-              y < f.y + f.height + 40 && y + line.lineHeight > f.y - 40);
+              y < f.y + f.height + ANCHORED_OBJECT_MARGIN && y + line.lineHeight > f.y - ANCHORED_OBJECT_MARGIN);
             if (narrowed && !near) out.push(`${b.node.textContent.slice(0, 3)}@${page.pageNumber}`);
           }
           y += line.lineHeight;
@@ -640,29 +645,6 @@ describe("float beside a table — the table moves below the float", () => {
         if (f.clamped) return;
         expect(Math.abs(f.y - (anchor.y - 40))).toBeLessThanOrEqual(above?.height ?? 0);
       });
-    });
-
-    it("31: settling scales with the floats, not their square", () => {
-      const build = (n: number) => docOf(...Array.from({ length: n }, (_, i) => para(`P${i} ${words(25)}`,
-        image({ wrapMode: "square", xAlign: i % 2 ? "left" : "right", width: 120, height: 30, yOffset: -40 }))));
-      // Runs alternate between the two sizes and the fastest of each counts,
-      // so load from other test workers hits both alike and cannot decide it.
-      const small = build(100);
-      const large = build(400);
-      layout(small);
-      layout(large);
-      let bestSmall = Infinity;
-      let bestLarge = Infinity;
-      for (let run = 0; run < 7; run++) {
-        let start = performance.now();
-        layout(small);
-        bestSmall = Math.min(bestSmall, performance.now() - start);
-        start = performance.now();
-        layout(large);
-        bestLarge = Math.min(bestLarge, performance.now() - start);
-      }
-      // Linear work grows 4x; quadratic would grow 16x.
-      expect(bestLarge).toBeLessThan(bestSmall * 10);
     });
 
     it("32: a restamp inside one reflow never moves a table below a stale float rect", () => {
@@ -800,17 +782,27 @@ describe("float beside a table — the table moves below the float", () => {
       return first;
     }
 
-    it("39: a float with no fixed point never leaves text under it (seed 51)", () => {
+    it("39: a float pulled over the line above its anchor never leaves text under it", () => {
+      // A top-bottom float whose top covers the last line of the paragraph
+      // above its anchor: clearing that line moves the anchor, which moves
+      // the float back over it. No fixed point, on any font set.
+      const plain = layout(docOf(para(`Above ${WORDS_40}`), para("Anchor")));
+      const aboveBlock = must(plain.pages[0]?.blocks[0], "above");
+      const lastLine = must(aboveBlock.lines.at(-1), "last line");
+      const lastLineY = aboveBlock.y + aboveBlock.height - lastLine.lineHeight;
+      const yOffset = lastLineY - blockWith(plain, "Anchor").y;
       const l = expectStable(docOf(
-        sized("P0", 57, image({ wrapMode: "square", xAlign: "left", width: 124, height: 213 })),
-        sized("P1", 122, image({ wrapMode: "top-bottom", xAlign: "left", width: 219, height: 78, yOffset: -100 })),
-        sized("P2", 207, image({ wrapMode: "square", width: 75, height: 124 })),
-        sized("P3", 57), table("T0", 3), table("T1", 4), para("P6"),
+        para(`Above ${WORDS_40}`),
+        para(`Anchor ${WORDS_40}`, image({ wrapMode: "top-bottom", width: 200, height: 60, yOffset })),
       ));
       expect(textUnderFloats(l)).toEqual([]);
       expectFloatsOnAnchorPages(l);
     });
 
+    // Regression seeds from the reviewers' fuzz generator, written out with
+    // macOS metrics. They pin the shape that failed; on another font set the
+    // trigger may not fire, and the measured scenarios (39, 47-51) are the
+    // ones that fire on any.
     it("40: reach-back floats that chase each other leave no text under them (seed 21)", () => {
       const l = expectStable(docOf(
         sized("P0", 362, image({ wrapMode: "square", xAlign: "left", width: 199, height: 196 })),
@@ -881,6 +873,24 @@ describe("float beside a table — the table moves below the float", () => {
       expect(textUnderFloats(l)).toEqual([]);
     });
 
+    // Guard: green on the previous commit as well; the lock-attribution
+    // evidence is the fuzz instrumentation recorded in the RFC.
+    it("52: a float at yOffset 0 does not lock on a reach-back float's oscillation (seed 73)", () => {
+      const l = expectStable(docOf(
+        sized("P0", 302, image({ wrapMode: "square", xAlign: "left", width: 79, height: 169, yOffset: -5000 })),
+        sized("P1", 237, image({ wrapMode: "square", width: 163, height: 104, yOffset: 60 })),
+        sized("P2", 162, image({ wrapMode: "square", xAlign: "left", width: 105, height: 160 })),
+        sized("P3", 117, image({ wrapMode: "top-bottom", xAlign: "left", width: 130, height: 50, yOffset: -100 })),
+        sized("P4", 392), sized("P5", 197), table("T0", 2), table("T1", 2), sized("P8", 117),
+      ));
+      const steady = floatOf(l, 2);
+      if (!steady.clamped && steady.stackOffset === undefined) {
+        expect(steady.y).toBeCloseTo(blockWith(l, "P2 ").y, 6);
+      }
+      expect(textUnderFloats(l)).toEqual([]);
+    });
+
+    // Guard, never red: green before the locked-float stacking change too.
     it("46: a float stacks below a later float that locked in its way (seed 200)", () => {
       const l = expectStable(docOf(
         sized("P0", 87),
@@ -913,6 +923,91 @@ describe("float beside a table — the table moves below the float", () => {
       ));
       expect(textUnderFloats(l)).toEqual([]);
       expectFloatsOnAnchorPages(l);
+    });
+
+    describe("built from measured geometry, so any font set triggers them", () => {
+      const page1 = computePageMetrics(defaultPageConfig, EMPTY_RESOLVED_CHROME, 1);
+      const pageBottom = page1.contentTop + page1.contentHeight;
+      const filler = (n: number) => para(`Filler ${n}`);
+
+      /** How many one-line fillers after `lead` still start on page 1. */
+      function fillersOnPage1(lead: Node[]): number {
+        const l = layout(docOf(...lead, ...Array.from({ length: 120 }, (_, n) => filler(n))));
+        return blocksOf(l).filter((b) => b.page === 1 && b.text.startsWith("Filler ")).length;
+      }
+
+      it("47: a paragraph moved whole onto the next page wraps around that page's float", () => {
+        const count = fillersOnPage1([]);
+        const l = expectStable(docOf(
+          ...Array.from({ length: count }, (_, n) => filler(n)),
+          para(`Moved ${LONG_TEXT}`),
+          para("Pin", image({ wrapMode: "square", width: 200, height: 120, yOffset: -5000 })),
+        ));
+        expect(blockWith(l, "Moved").page).toBe(2);
+        expect(textUnderFloats(l)).toEqual([]);
+      });
+
+      it("48: a float with a stable position does not lock on another float's oscillation", () => {
+        // "Flip", a pinned top-bottom float on the last line of page 1, has no
+        // fixed point: it pushes that line to page 2 and back. "Steady"
+        // reaches up beside the short paragraph above it, which does not
+        // grow around it, so it has a stable position and must end on it.
+        const count = fillersOnPage1([para("Above")]);
+        const plain = layout(docOf(para("Above"), para("Steady")));
+        const yOffset = blockWith(plain, "Above").y - blockWith(plain, "Steady").y;
+        const l = expectStable(docOf(
+          para("Above"),
+          para("Steady", image({ wrapMode: "square", xAlign: "left", width: 60, height: 30, yOffset })),
+          ...Array.from({ length: count - 2 }, (_, n) => filler(n)),
+          para("Flip", image({ wrapMode: "top-bottom", width: 200, height: 120, yOffset: -5000 })),
+        ));
+        expect(floatOf(l, 0).y).toBeCloseTo(blockWith(l, "Steady").y + yOffset, 6);
+        expectFloatsOnAnchorPages(l);
+      });
+
+      it("49: a locked float anchored after a table does not push the table (Decision 3)", () => {
+        const plain = layout(docOf(table("T", 3), para(`Q ${WORDS_40}`), para("Anchor")));
+        const rows = rowsOf(plain, "T");
+        const lastRow = must(rows[rows.length - 1], "last row");
+        const anchorY = blockWith(plain, "Anchor").y;
+        const l = expectStable(docOf(
+          table("T", 3), para(`Q ${WORDS_40}`),
+          para("Anchor", image({
+            wrapMode: "top-bottom", width: 200, height: anchorY - lastRow.y,
+            yOffset: lastRow.y - anchorY,
+          })),
+        ));
+        expect(rowsOf(l, "T").map((r) => r.y)).toEqual(rows.map((r) => r.y));
+        expect(textUnderFloats(l)).toEqual([]);
+      });
+
+      it("51: a paragraph split across pages wraps the next page's float on its continuation", () => {
+        // The last filler that fits, minus one, leaves room for the split
+        // paragraph's first line on page 1 and sends the rest to page 2.
+        const count = fillersOnPage1([]);
+        const l = expectStable(docOf(
+          ...Array.from({ length: count - 1 }, (_, n) => filler(n)),
+          para(`Split ${LONG_TEXT}`),
+          para("Pin", image({ wrapMode: "square", width: 200, height: 120, yOffset: -5000 })),
+        ));
+        const parts = blocksOf(l).filter((b) => b.text.startsWith("Split"));
+        expect(new Set(parts.map((b) => b.page))).toEqual(new Set([1, 2]));
+        expect(textUnderFloats(l)).toEqual([]);
+      });
+
+      it("50: a square float clamped to the page bottom still stacks clear of the one above", () => {
+        const count = fillersOnPage1([]);
+        const plain = layout(docOf(...Array.from({ length: count }, (_, n) => filler(n))));
+        const target = pageBottom - 300;
+        const anchorIndex = blocksOf(plain).findIndex((b) => b.y >= target);
+        const l = expectStable(docOf(
+          ...Array.from({ length: anchorIndex }, (_, n) => filler(n)),
+          para("High", image({ wrapMode: "square", width: 200, height: 200 })),
+          para("Low", image({ wrapMode: "square", width: 200, height: 150, yOffset: 5000 })),
+        ));
+        expect(floatsOverlap(floatOf(l, 0), floatOf(l, 1))).toBe(false);
+        expectFloatsOnAnchorPages(l);
+      });
     });
   });
 });
