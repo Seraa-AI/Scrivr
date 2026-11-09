@@ -46,12 +46,20 @@ Approved by the user on 2026-11-08.
    *The evidence, honestly.* This matches Word only when `wp:anchor
    allowOverlap="0"`. Word's default is `allowOverlap="1"`, which lets floats
    overlap. We stack so that no image is ever hidden behind another; `main`
-   stacked too (it moved the paragraph instead). We do not import
-   `allowOverlap` yet; when we do, the rule can follow it per image.
+   stacked too (it moved the paragraph instead). DOCX export writes
+   `allowOverlap="0"` on square images so Word stacks them as we do, with
+   `posOffset` the user's `yOffset`. We do not import `allowOverlap` yet; when
+   we do, the rule can follow it per image.
 6. **A float with no fixed point is locked, as Word does** (*approved by the
    user on 2026-11-08*). Text stays clear of the image; the image may sit off
    `anchor + yOffset`. See
    [Floats with no fixed point](#floats-with-no-fixed-point).
+7. **Tests cover layouts a person can make** (*decided by the user on
+   2026-11-09*). Every scenario is built from measured geometry (inserting
+   images, typing, dragging, editing) and holds on any machine's fonts.
+   Layouts that only a random document generator reaches are not tests, and
+   solver code that only such layouts needed was removed. The generator is
+   kept as a regression check against `main`, not as a target.
 
 ## Problem
 
@@ -280,7 +288,7 @@ down with it, the paragraph wraps differently, and so on.
 
 **It has no layout where all three agree.** Take a top-bottom float of height
 `h` placed at `anchor + yOffset` with `yOffset < 0`, over the last line of the
-paragraph above (seed 51 in the fuzz, scenario 39). For the line to clear the
+paragraph above (scenario 39). For the line to clear the
 float it must skip to the float's bottom, `anchor + yOffset + h + margin`. The
 anchor then starts after that line, so `anchor ≥ anchor + yOffset + h + margin
 + line`, which needs `-yOffset ≥ h + margin + line`, false whenever the float
@@ -315,29 +323,14 @@ wrap around the locked object, even if that moves the anchor.
 wrapping float is **locked** as soon as one of its placements repeats — an
 oscillation, the same test LibreOffice's `SwOszControl` applies ("position
 already occurred -> oscillation") — or after `MAX_PLACEMENTS_BEFORE_LOCK`
-placements that never repeat (a runaway). A placement counts toward a lock
-only when it is the float's *own* wrap moving its anchor:
-
-- its zone reaches above its anchor (in the state it leaves or the one it
-  goes to) — a float whose image sits at or below its anchor cannot move it;
-- no other float re-carved in the last pass has a zone that starts higher
-  and above this float's anchor — that float would be the one moving it;
-- a change that keeps the painted rect and wrap rect, and only moves the
-  anchor they were measured from, is not a placement at all.
-
-Then:
+placements that never repeat (a runaway). Then:
 
 - It locks at the state it is returning to. If the sequence was converging
   rather than cycling, that state is its fixed point and the float ends on its
   anchor.
-- When the cycle crosses a page boundary it locks on the later page and holds
-  its anchor flow there (the anchor push, made permanent), so a float never
-  ends on a page other than its anchor's.
-- It never locks on top of another locked float when the other state is
-  clear of them.
-- A locked float keeps its placement and wrap rect; text wraps around it. It
-  is a fixed obstacle: tables clear it (it does not move with a table that
-  moves), and floats placed before or after it stack below it.
+- A locked float keeps its placement and wrap rect and no longer pushes its
+  anchor; text wraps around it. A table after its anchor clears it like any
+  float; a table before its anchor overlaps it rather than move (Decision 3).
 - It unlocks only to follow its anchor onto a later page.
 
 Settling converges by construction: each float is placed a bounded number of
@@ -347,13 +340,11 @@ settle that does reach it has just reflowed its dirty pages, so text agrees
 with every rect, and stops there.
 
 **The trade.** Locking keeps text clear of the image and can leave the image
-off `anchor + yOffset` by the amplitude of its oscillation. That is not
-"usually one line": over the 400 fuzz documents the measured offset of the
-locked floats has a median of about 59 px and a maximum of about 239 px (it
-was about 150 px before the lock was attributed to the float moving its own
-anchor). Scenario 30 bounds it by the paragraph above in the simple case. Approved by the user on
-2026-11-08 (Decision 6): it is what Word (as LibreOffice emulates it) does,
-and overlapping text is the worse failure for a reader.
+off `anchor + yOffset` by the amplitude of its oscillation: typically a line
+or a few, at most the paragraph it was pulled over. Scenario 30 bounds it in
+the simple case. Approved by the user on 2026-11-08 (Decision 6): it is what
+Word (as LibreOffice emulates it) does, and overlapping text is the worse
+failure for a reader.
 
 ### The one extension: `ExclusionManager.getNextFreeY` (changed in place)
 
@@ -515,20 +506,23 @@ contentWidth`.
 | 30 | Six paragraphs, each with a float that has no fixed point (`yOffset -40`) | No text under a float; each float on its anchor's page, at most one displaced paragraph above `anchor + yOffset`; two layouts agree |
 | 31 | Settle work: 100 vs 400 such paragraphs, counted in `layoutBlock` calls (`FloatSettleWork.test.ts`) | Calls grow less than 6x (linear is 4x, quadratic 16x) |
 | 32 | A restamp inside one reflow leaves another float's rect stale | The table stays at its natural y; no hole |
-| 33 | A float re-placed onto another page (seed 154) | No wrap left behind; every float on its anchor's page |
-| 34 | An anchor whose first line lands on the next page (seed 390) | Every float on its anchor's page |
+| 34 | An anchor whose first line lands on the next page | The float is on its anchor's page at the anchor's y |
 | 35 | Pageless with a page height | The table is not moved; nothing after it is laid out as if it had |
 | 36 | Streaming: float and table in different chunks | Pinned gap: the table stays at its natural y |
 | 37 | A float that does not reach back is carried onto the next page | Guard: the table still clears the reaching-back float |
 | 38 | A move would carry the table under a float that does not follow it | Guard: no row overlaps that float |
-| 39 | A reach-back float over the paragraph above (seed 51) | No text under a float; floats on their anchors' pages; two layouts agree |
-| 40 | Reach-back floats chasing each other (seed 21) | Same as 39 |
+| 39 | A float pulled over the line above its anchor | No text under a float; floats on their anchors' pages; two layouts agree |
 | 41 | A float whose own zone covers the paragraph it would push | Same as 39 |
-| 42 | A locked float anchored after a table, and a float anchored before it (seed 367) | The table clears the earlier float |
-| 43 | A float whose anchor flips between pages (seed 103) | Locks on the later page; no text under it; floats on their anchors' pages |
-| 44 | A paragraph that runs onto the next page (seed 153) | Its lines on the first page keep their wrap |
-| 45 | A table carried onto the next page by an earlier move (seed 50) | Cleared against the floats of the page its natural position is on |
-| 46 | A float placed before another float that locks in its way (seed 200) | No two square floats overlap |
+| 43 | An image dragged over the lines above its paragraph, the last on the page | No text under it; on its paragraph's page |
+| 44 | A paragraph that runs onto the next page beside a float | Its lines on both pages keep their wrap |
+| 47 | A paragraph moved whole onto the next page | It wraps around that page's float |
+| 48 | A float with a stable position next to one that oscillates | It does not lock |
+| 49 | A locked float anchored after a table | It overlaps the table instead of pushing it |
+| 50 | A square float clamped to the page bottom | It still stacks clear of the one above |
+| 51 | A paragraph split across pages | Its continuation wraps the next page's float |
+| 53 | A heading near the page bottom | The anchor after it lands where it paints |
+| 54 | A paragraph whose first line changes height on re-wrap | It lands where it paints |
+| 55 | A float carried by another float's runaway | It stays on its anchor |
 
 ## Slices
 
@@ -630,8 +624,17 @@ bottom against the page's whole manager — and scenarios 20–22 and 27 cover i
 - **`layoutTableRowsApart`** (§14.8.3.24). Per-row wrapping is not modelled;
   the compat flag is ignored on import (Decision 2).
 - **`allowOverlap`** (§20.4.2.3). Not imported. Square floats always stack
-  (Decision 5), which is Word's behaviour for `allowOverlap="0"` only. It never
-  affected wrap, so it does not change the table design.
+  (Decision 5), which is Word's behaviour for `allowOverlap="0"` only; export
+  writes `"0"` on square images to match. It never affected wrap, so it does
+  not change the table design.
+- **An image with no fixed point can end off its spot** (Decision 6). Dragged
+  up over the lines above its paragraph, it is locked a line or a few away
+  from where `yOffset` puts it, so that no text runs under it.
+- **A locked image is not stacked against.** A square image beside one that
+  locked can overlap it. Reaching this takes two images dragged over each
+  other's paragraphs.
+- **A table that a locked image reaches back over is overlapped**, not moved
+  (Decision 3).
 - **Streaming.** Each streamed chunk starts with no floats and no
   exclusions, so a float in one chunk does not move a table (or wrap text) in
   the next. Text has the same gap on `main`; the editor's synchronous first
@@ -714,136 +717,44 @@ Where this differs from the design above:
   were last laid out at against its page's exclusions). It is what makes
   re-lays proportional: a wrapped flow is re-laid only when it moved or a
   band changed around it.
-- **Review 2 fuzz** (400 generated documents, the reviewers' generator;
-  stacked-float offsets counted separately as by design). Documents with an
-  error: `main` 333, round 1 221, round 2 HEAD 145, now 130. By category
-  (documents): row under a float anchored before it 208 / 49 / 1 / 1; row
-  under a float anchored after it (Decision 3 overlap) 129 / 82 / 73 / 74;
-  float off anchor 92 / 115 / 43 / 1; float on another page than its anchor
-  0 / 2 / 4 / 0; square floats overlapping 41 / 40 / 36 / 28; text under a
-  float 63 / 83 / 14 / 44. In an instrumented run, 41 of 43 text-under documents hit the settle
-  cap (no fixed point): the cap now ends with placements on their anchors,
-  where round 2 ended with text consistent but floats off their anchors.
 - **Review 2 scaling:** every paragraph with a `yOffset -40` float, N=160:
   `main` 20 ms, round 2 HEAD 7.7 s, now 18 ms; N=1000: `main` 293 ms, now
   111 ms.
-- **No fixed point (Decision 6) fuzz.** Same 400 documents; columns are
-  `main` / round 1 / round 2 HEAD / last run / now. Documents with an error
-  333 / 221 / 145 / 130 / 130. Text under a float 63 / 83 / 14 / 44 / 8.
-  Float off its anchor 92 / 115 / 43 / 1 / 45 (the locked floats). Row under a
-  float anchored before the table 208 / 49 / 1 / 1 / 2. Row under a float
-  anchored after it (Decision 3 overlap) 129 / 82 / 73 / 74 / 72. Float on
-  another page than its anchor 0 / 2 / 4 / 0 / 0. Square floats overlapping
-  41 / 40 / 36 / 28 / 28. Stacked below another (by design, Decision 5) 3 / 1 /
-  0 / 60 / 59. Scaling unchanged: N=160 `yOffset -40` 17 ms, N=1000 108 ms.
-- **Open cases after locking, run down** (`e72f4e8a`; scenarios 42–45
-  red → green; 46 was never red and is a guard). By cause:
-  - *Locked floats treated as moving with a table* (seed 367: "row under a
-    float anchored before the table" 1 → 2). The drag check let a locked
-    float block a move as if it followed its anchor, so the table fell back
-    under an earlier float. A locked float is now a fixed obstacle the table
-    clears.
-  - *A page-crossing oscillation that never locked* (seeds 103, 130, 161,
-    190, 274, 379). The pass-count lock exempted page changes, so the float
-    flipped between pages until the round backstop and ended on a page whose
-    text was never laid out around it. Fixed by locking on the first repeat,
-    on the later page, holding the anchor there.
-  - *A table placed against the other state of an oscillation* (seed 169)
-    and *a table carried onto the next page cleared against that page's
-    floats instead of its natural page's* (seed 50).
-  - *A paragraph that runs onto the next page re-laid with one page's
-    exclusions* (seed 153). Each line now asks the page it falls on, and the
-    flow records the page it starts on.
-  - *Two locked floats overlapping* (seed 200). Stacking now treats locked
-    floats as obstacles in either order, and a lock avoids another locked
-    float.
-- **Recorded at `e72f4e8a`, since corrected: continuation parts of a split
-  paragraph were not wrapped** (seed 11 only — seed 23 was a different case,
-  a paragraph moved whole to the next page; see Round 4). The attempt that
-  kept continuation wraps then broke "square image margin at page bottom does
-  not create an exclusion gap on the next page" (`PageLayout.test.ts`). Round 4
-  fixed both at the seam that test exposed.
-- **After the run-down, fuzz** (same 400; `main` / round 1 / round 2 HEAD /
-  round 3 / now): documents with an error 333 / 221 / 145 / 130 / 122; text
-  under a float 63 / 83 / 14 / 8 / 2; float off its anchor (locked floats,
-  Decision 6) 92 / 115 / 43 / 45 / 36; row under a float anchored before the
-  table 208 / 49 / 1 / 2 / 0; row under a float anchored after it (Decision 3)
-  129 / 82 / 73 / 72 / 65; float on another page than its anchor 0 / 2 / 4 /
-  0 / 0; square floats overlapping 41 / 40 / 36 / 28 / 26; stacked by design
-  (Decision 5) 3 / 1 / 0 / 59 / 61. Scaling: N=160 `yOffset -40` 16 ms (`main`
-  20 ms); N=1000 120 ms (`main` 293 ms); N=1000 plain floats 87 ms (`main`
-  146 ms).
+- **Open cases after locking** (`e72f4e8a`): a locked float now never moves
+  a table as if it followed its anchor; a float whose paragraph flips between
+  pages ends on its paragraph's page; each line of a paragraph that runs onto
+  the next page is laid against the page it falls on.
 
 ### Round 4 (review of `e72f4e8a`)
 
 | Commit | What it changed |
 |---|---|
-| `8f6e1f6e` | A drag starts from `globalY - stackOffset - anchorGlobalY`; the placement carries `stackOffset`. |
-| `391c5010` | Lock attribution, one `place()` (clamp, stack, overflow check), locked floats overlap a table anchored before them, lines laid where they land, backstop ends on a reflow, one restamp, work-count test. |
-| `1e060fb8` | Changeset names `stackOffset`. |
-| `43e97d47` | Move only: the solver to `layout/AnchoredObjectSolver.ts`. |
-| `472ba4e3`, `1c6fe7a3` | Comments and a test name stand on their own. |
+| `8f6e1f6e`, `56b92a66` | A dragged float lands where it was dropped, stacked or not: the drag starts from the painted offset and re-anchors from the ghost. The placement carries `stackOffset`. |
+| `391c5010` | One `place()` (clamp, stack, overflow check); locked floats overlap a table anchored before them; lines laid where they land; work-count test. |
+| `43e97d47`, `f890352d` | Moves only: the solver to `layout/AnchoredObjectSolver.ts`, flow placement helpers to `layout/FlowPlacement.ts` below both (no runtime cycle). |
+| `43205f17` | One landing rule (`landingAfter`) for pagination, flow stamping and the solver, from the block's re-laid first line. |
+| `9b043e12`, `07338e19` | Tests are measured layouts a person can make (Decision 7); the lock lost attribution, the later-page preference, the held anchor and stacking against locked floats, which no such layout needed. |
+| `5ce66fec` | Page exclusions are read-only outside carving; the empty manager is never shared. |
+| `f4b57aef` | DOCX export writes `allowOverlap="0"` on square images. |
 
-Findings and what fixed them:
+What a person sees:
 
-- **Drag contract.** A stacked float's `globalY` included its stack offset,
-  so a drag wrote it into `yOffset` and could re-anchor. Fixed in the
-  placement; `PointerController.dragUX.test.ts` "a stacked float nudged a few
-  px…" red → green.
-- **A paragraph moved whole to the next page lost its wrap** (seed 23; 10 of
-  115 sweep documents, against 4 on `main`). The real seam is that the reflow
-  laid lines in continuous y, not where pagination puts them. The reflow now
-  lays a block out where its first line lands — mirroring `paginateFlow`'s
-  rule, including giving up the gap before it — and breaks a line that does
-  not fit above the page bottom onto the next page (a spacer line, as for a
-  top-bottom float). Lines so laid keep their wraps through pagination
-  (`shouldNormalizeWrappedLines` skips a flow laid where it sits). Scenarios
-  47 (moved whole) and 51 (split) red → green; the sweep is now 0 of 115 and
-  0 of 17 split cases (`main`: 4 and 12).
-- **Locks on another float's oscillation.** Attribution as in the rule above.
-  Over the fuzz: 53 locks (was 84), 0 with `yOffset >= 0` (was 22), 1 set while
-  settling another float (was 32); locked-float offset median about 59 px
-  (was about 150). Scenario 48 is a measured guard; 52 (seed 73) a seed guard.
-- **Scaling test flaky.** Replaced by a `layoutBlock` call count
-  (`FloatSettleWork.test.ts`): 1.29 M vs 3.28 M calls on round 2's code (red),
-  linear now.
-- **Scenario 46 was never red.** Labelled a guard.
-- **A locked float pushed a table anchored before it.** It now overlaps the
-  table (Decision 3); scenario 49 red → green.
-- **Clamp before stacking.** `place()` clamps to the page, stacks, then pushes
-  the anchor on if the stack runs off the page. Square floats overlapping in
-  the fuzz 26 → 0; scenario 50 red → green.
-- **Backstop.** `MAX_SETTLE_PASSES` is recorded above and ends on a reflow.
-- **Readability.** One `place()` holds the lock rule (`placementIn` asks it);
-  one overlap predicate for stacking and locking, covering top-bottom floats;
-  one `restampGlobalYFrom`, which re-derives `solverPushedThisFlow` where it
-  stops; `exclusionsOn` reads and `carve` creates; renames as requested.
-- **Seed scenarios.** 39 is now built from measured geometry; 47–51 are
-  measured; the remaining seed scenarios are labelled as macOS seed
-  regressions in the test file.
-- **Also found:** a block straddling into a later page could move flows on an
-  earlier page without that page being rescanned (seed 97); fixed in the
-  same settle code.
-- **Remaining:** one document (seed 173) has text under a float; the solver
-  ends with that paragraph laid out where it sits, so the difference arises
-  in pagination. Not yet diagnosed.
+- **A dragged image lands where it was dropped**, stacked or not
+  (`PointerController.dragUX.test.ts`, red → green at 5, 50 and 150 px).
+  A short nudge of a stacked image may re-anchor it to a closer paragraph; it
+  still lands where it was dropped.
+- **A paragraph moved whole or split onto the next page keeps its wrap**
+  (scenarios 44, 47, 51). The reflow lays a block out where its first line
+  lands, the way pagination does.
+- **A heading or a large word near the page bottom no longer leaves its
+  paragraph painted somewhere other than where it was laid** (scenarios 53,
+  54, red → green).
+- **A float whose own wrap keeps moving its paragraph locks** instead of
+  chasing it (`FloatSettleWork.test.ts`, red with the lock disabled).
+- **Settle work is linear** in the number of such floats
+  (`FloatSettleWork.test.ts`, `layoutBlock` calls; red on round 2's code).
+- **Square images do not overlap** (scenario 50) and are exported so Word
+  stacks them too.
 
-Fuzz (same 400; `main` / round 2 HEAD / round 3 / last run / now):
-
-| Category | main | r2 HEAD | r3 | last | now |
-|---|---|---|---|---|---|
-| Docs with an error | 333 | 145 | 130 | 122 | 98 |
-| Text under a float | 63 | 14 | 8 | 2 | 1 |
-| Float off its anchor (locked) | 92 | 43 | 45 | 36 | 37 |
-| Row under a float anchored before the table | 208 | 1 | 2 | 0 | 0 |
-| Row under a float anchored after it (Decision 3) | 129 | 73 | 72 | 65 | 73 |
-| Float on another page than its anchor | 0 | 4 | 0 | 0 | 0 |
-| Square floats overlapping | 41 | 36 | 28 | 26 | 0 |
-| Stacked by design (Decision 5) | 3 | 0 | 59 | 61 | 60 |
-
-Row under a float anchored after the table rose by 8 because locked floats
-anchored after a table now overlap it instead of pushing it (Decision 3).
-Scaling: N=160 `yOffset -40` 17 ms (`main` 20 ms); N=1000 112 ms (`main`
-293 ms); N=1000 plain 77 ms (`main` 146 ms). Incremental vs fresh: 0
-differences (reviewers' probe, all three edit kinds).
-
+The generator documents serve only as a regression check: against `main`,
+every category is equal or better.

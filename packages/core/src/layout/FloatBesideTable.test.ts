@@ -861,9 +861,9 @@ describe("float beside a table — the table moves below the float", () => {
       // An image dragged up over the lines above its paragraph, when that
       // paragraph is the last on the page: the lines it covers move below it
       // and push the paragraph onto the next page, the image follows, the
-      // lines come back, and so does the paragraph. It locks on the later
-      // page, with its paragraph held there.
-      it("43: an image whose paragraph flips between pages locks on the later page", () => {
+      // lines come back, and so does the paragraph. It must still end on its
+      // paragraph's page, with no text under it.
+      it("43: an image whose paragraph flips between pages ends on its page with no text under it", () => {
         const count = fillersOnPage1([]);
         const plain = layout(docOf(...Array.from({ length: count - 1 }, (_, k) => filler(k)), para("Flip")));
         const flipY = blockWith(plain, "Flip").y;
