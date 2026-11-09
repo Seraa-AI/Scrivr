@@ -965,7 +965,7 @@ describe("float beside a table — the table moves below the float", () => {
         expectFloatsOnAnchorPages(l);
       });
 
-      it("49: a locked float anchored after a table does not push the table (Decision 3)", () => {
+      it("49: a locked float anchored after a table overlaps it instead of pushing it", () => {
         const plain = layout(docOf(table("T", 3), para(`Q ${WORDS_40}`), para("Anchor")));
         const rows = rowsOf(plain, "T");
         const lastRow = must(rows[rows.length - 1], "last row");
