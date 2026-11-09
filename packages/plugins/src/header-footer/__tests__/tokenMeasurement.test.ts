@@ -254,7 +254,7 @@ describe("page-count feedback through pagination", () => {
   }
 
   it("measures against the final count when wrapping crosses another digit boundary", () => {
-    const layout = runPipeline(body(450), options);
+    const layout = runPipeline(body(500), options);
     expect(layout.pages).toHaveLength(100);
     expect(tokenWidth(layout)).toBe(3 * DIGIT_W);
     expect(layout.convergence).toBe("stable");
