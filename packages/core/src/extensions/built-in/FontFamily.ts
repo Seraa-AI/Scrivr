@@ -132,7 +132,7 @@ export const FontFamily = Extension.create<FontFamilyOptions>({
         "fontFamily",
         (parsed: ParsedFont, attrs: Record<string, unknown>) => {
           const family = attrs["family"];
-          if (typeof family === "string") {
+          if (typeof family === "string" && family.trim() !== "") {
             parsed.family = family;
           }
         },

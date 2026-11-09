@@ -12,8 +12,14 @@ before.
 - A mark from any extension that declares a font modifier is measured, asked
   for before layout, and reported by `getActiveFontFamily` and
   `getActiveFontSize` in the font it declares.
-- `collectFontRequests` takes `fontModifiers`; `IBaseEditor.getFontModifiers()`
-  is new.
+- `collectFontRequests` and `prepareDocumentFonts` take the editor's
+  `fontModifiers` and `fontConfig`, so a heading's text and a marked run are
+  installed before first paint in the face they are drawn in.
+  `IBaseEditor.getFontModifiers()` and `getBlockStyles()` are new;
+  `applyPageFont` is exported.
+- A `fontSize` mark that is not a finite size of at least 1px, or a
+  `fontFamily` mark with an empty family, leaves the run in its block's font.
+- A heading `level` stored as text ("2") is styled and drawn as that level.
 - Headers and footers are styled by the editor's block styles, with a
   paragraph's spacing dropped as before, so any block an extension styles
   looks the same in a header as in the body.
@@ -27,6 +33,6 @@ before.
 - `defaultFontConfig` holds only `paragraph`; heading styles come from
   `Heading.addBlockStyles()`.
 - `prepareDocumentFonts(doc, provider, constraints?)` is now
-  `prepareDocumentFonts(doc, provider, { fontModifiers?, constraints? })`.
+  `prepareDocumentFonts(doc, provider, { fontModifiers?, fontConfig?, constraints? })`.
 - `chromeFontConfig` (plugins, internal) is replaced by `chromeFontConfigOf`,
   and `ResolvedHeaderFooter` carries the band's `fontConfig`.

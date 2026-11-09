@@ -12,6 +12,7 @@ import {
   FontConfig,
   defaultFontConfig,
   blockFontOf,
+  blockStyleOf,
   getBlockStyle,
   BlockStyle,
 } from "./FontConfig";
@@ -476,8 +477,7 @@ export function layoutBlock(
   } = options;
 
   const fontConfig = options.fontConfig ?? defaultFontConfig;
-  const level = node.attrs["level"] as number | undefined;
-  const blockStyle = getBlockStyle(fontConfig, node.type.name, level);
+  const blockStyle = blockStyleOf(node, fontConfig);
 
   const baseFont = blockFontOf(node, fontConfig);
 

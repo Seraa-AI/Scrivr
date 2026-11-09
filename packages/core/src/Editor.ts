@@ -1,6 +1,6 @@
 import type { LayoutFontResolver } from "./fonts/layoutResolver";
 import { parseFontSizePx, resolveActiveFontSize } from "./fonts/activeFontSize";
-import { applyPageFont, blockFontOf, getBlockStyle } from "./layout/FontConfig";
+import { applyPageFont, blockFontOf, blockStyleOf } from "./layout/FontConfig";
 import { parseFont, resolveFont, type ParsedFont } from "./layout/StyleResolver";
 import {
 	EditorState,
@@ -1057,25 +1057,31 @@ export class Editor extends BaseEditor implements IEditor {
 	 * through the font modifiers, as layout resolves it. A font control that
 	 * re-derived it would drift from the thing it describes.
 	 */
-	private runFont(marks: readonly Mark[], block: PmNode): ParsedFont {
-		const config = applyPageFont(this.fontConfig, this.pageConfig.fontFamily ?? DEFAULT_FONT_FAMILY);
+	private runFont(marks: readonly Mark[], block: PmNode, config: FontConfig): ParsedFont {
 		return parseFont(resolveFont(blockFontOf(block, config), marks, this.fontModifiers));
 	}
 
 	/**
 	 * The font of every run the selection covers, in order; for a collapsed
-	 * selection, the one the next typed character takes.
+	 * selection, or one that covers no text, the one the next typed character
+	 * takes.
 	 */
 	private selectedRunFonts(): Array<{ font: ParsedFont; block: PmNode }> {
 		const state = this.getActiveState();
 		const { from, to, empty, $from } = state.selection;
-		if (empty) return [{ font: this.runFont(state.storedMarks ?? $from.marks(), $from.parent), block: $from.parent }];
-
+		const config = applyPageFont(this.fontConfig, this.pageConfig.fontFamily ?? DEFAULT_FONT_FAMILY);
 		const runs: Array<{ font: ParsedFont; block: PmNode }> = [];
-		state.doc.nodesBetween(from, to, (node, _pos, parent) => {
-			if (node.isText && parent) runs.push({ font: this.runFont(node.marks, parent), block: parent });
-		});
-		return runs;
+		let firstTextblock: PmNode | null = null;
+		if (!empty) {
+			state.doc.nodesBetween(from, to, (node, _pos, parent) => {
+				if (node.isTextblock) firstTextblock ??= node;
+				if (node.isText && parent) runs.push({ font: this.runFont(node.marks, parent, config), block: parent });
+			});
+		}
+		if (runs.length > 0) return runs;
+		// No text: an empty block, an image, or a whole document of empty blocks.
+		const block = $from.parent.isTextblock ? $from.parent : (firstTextblock ?? $from.parent);
+		return [{ font: this.runFont(state.storedMarks ?? $from.marks(), block, config), block }];
 	}
 
 	/**
@@ -1116,14 +1122,11 @@ export class Editor extends BaseEditor implements IEditor {
 	 * resize the other.
 	 */
 	getActiveFontSize(): number | null {
-		const sizes = this.selectedRunFonts().map(({ font, block }) => {
-			const level = block.attrs["level"];
-			// The textblock itself, not a depth-1 ancestor: layout styles the
-			// leaf, so a heading inside a table cell is styled as a heading
-			// while its ancestor is the table, which has no style of its own.
-			const style = getBlockStyle(this.fontConfig, block.type.name, typeof level === "number" ? level : undefined);
-			return resolveActiveFontSize(parseFontSizePx(font.size) ?? undefined, style);
-		});
+		// The textblock itself, not a depth-1 ancestor: layout styles the leaf,
+		// so a heading inside a table cell is styled as a heading while its
+		// ancestor is the table, which has no style of its own.
+		const sizes = this.selectedRunFonts().map(({ font, block }) =>
+			resolveActiveFontSize(parseFontSizePx(font.size) ?? undefined, blockStyleOf(block, this.fontConfig)));
 		const [first] = sizes;
 		if (first === undefined) return null;
 		return sizes.every((size) => size === first) ? first : null;

@@ -118,8 +118,10 @@ Resolution prefers, in order: the exact face asked for, another weight or slant 
 
 ```ts
 const shortfalls = await prepareDocumentFonts(doc, fonts, {
-	portable: true,
-	embeddable: true,
+	// The editor's, so a bold run or a heading asks for the face it is drawn in.
+	fontModifiers: editor.getFontModifiers(),
+	fontConfig: applyPageFont(editor.getBlockStyles(), "Inter"),
+	constraints: { portable: true, embeddable: true },
 });
 // [{ request:  { family: "Aptos", weight: 700 },
 //    resolved: { family: "Inter", weight: 400 },

@@ -237,10 +237,21 @@ As designed, with these differences:
   provider come from the run's font, a heading's bold included.
 - **`blockFontOf(node, config)`** is the one place a block's base font is
   derived; `layoutBlock` and the editor both use it.
-- **`collectFontRequests` takes `fontModifiers`**, and `prepareDocumentFonts`
-  takes `{ fontModifiers, constraints }`; `IBaseEditor.getFontModifiers()`
-  hands them to the DOCX import. The weight/style mapping is shared with the
+- **`collectFontRequests` takes `fontModifiers` and `fontConfig`** (the block
+  styles, the document's family applied), and `prepareDocumentFonts` takes
+  `{ fontModifiers, fontConfig, constraints }`, so a run is asked for in the
+  face layout draws it in: `blockFontOf` with the marks applied, a heading's
+  bold included. The layout coordinator's pre-reveal gate and the DOCX import
+  pass them; `IBaseEditor.getFontModifiers()` and `getBlockStyles()` are new,
+  and `applyPageFont` is exported. The weight/style mapping is shared with the
   layout resolver (`faceOf`).
+- **`blockStyleOf(node, config)`** reads a block's `level` once, a level
+  stored as text included, for its style and its font alike.
+- **The built-in font modifiers ignore a value that names nothing**: a size
+  that is not a finite number of at least 1px, an empty family. The run then
+  keeps its block's font in layout, the font preflight and the readouts.
+- A selection that covers no text reports the font the next typed character
+  takes, in the first textblock it covers.
 - **Headers and footers use the editor's block styles.** They were laid out
   with a copy of `defaultFontConfig`, so a heading in a header kept its look
   only through the defaults this phase removes. `chromeFontConfigOf` derives

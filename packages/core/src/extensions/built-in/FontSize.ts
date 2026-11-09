@@ -88,8 +88,9 @@ export const FontSize = Extension.create<FontSizeOptions>({
       [
         "fontSize",
         (parsed: ParsedFont, attrs: Record<string, unknown>) => {
+          // A size a run can be drawn at; anything else leaves its block's.
           const size = attrs["size"];
-          if (typeof size === "number") {
+          if (typeof size === "number" && Number.isFinite(size) && size >= 1) {
             parsed.size = `${size}px`;
           }
         },

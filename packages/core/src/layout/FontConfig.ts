@@ -74,12 +74,21 @@ export function getBlockStyle(
 }
 
 /**
+ * A block's style: keyed by its `level` attr when it has one. A level stored
+ * as text ("2", from JSON) reads as the number it spells.
+ */
+export function blockStyleOf(node: Node, config: FontConfig): BlockStyle {
+  const raw = node.attrs["level"];
+  const level = typeof raw === "string" && raw.trim() !== "" ? Number(raw) : raw;
+  return getBlockStyle(config, node.type.name, typeof level === "number" && Number.isFinite(level) ? level : undefined);
+}
+
+/**
  * The font a block's unmarked text is drawn in: its style's, with the block's
  * own `fontFamily` attr in place of the style's family when it names one.
  */
 export function blockFontOf(node: Node, config: FontConfig): string {
-  const level = node.attrs["level"];
-  const style = getBlockStyle(config, node.type.name, typeof level === "number" ? level : undefined);
+  const style = blockStyleOf(node, config);
   const family = node.attrs["fontFamily"];
   return typeof family === "string" && family.length > 0 ? substituteFamily(style.font, family) : style.font;
 }

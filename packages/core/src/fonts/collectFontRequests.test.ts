@@ -10,6 +10,7 @@ import { describe, it, expect } from "vitest";
 import { ServerEditor } from "../ServerEditor";
 import { DefaultFontProvider } from "./DefaultFontProvider";
 import { collectFontRequests, prepareDocumentFonts, usedResolutions } from "./collectFontRequests";
+import { applyPageFont } from "../layout/FontConfig";
 import type { LayoutBlock } from "../layout/BlockLayout";
 import type { DocumentLayout } from "../layout/PageLayout";
 import type { FontResource } from "./types";
@@ -192,6 +193,17 @@ describe("a family set on the block", () => {
 
     const asked = collectFontRequests(doc, fallback, { fontModifiers }).map((r) => `${r.family}/${r.weight}`);
     expect(asked).toContain("Georgia/700");
+  });
+});
+
+describe("a block style that changes the face", () => {
+  it("is asked for in the face layout draws its text in: a heading's bold, in the document's family", () => {
+    const editor = new ServerEditor();
+    const doc = docOf({ type: "doc", content: [{ type: "heading", attrs: { level: 1 }, content: [text("Title")] }] });
+    const fontConfig = applyPageFont(editor.getBlockStyles(), "Georgia");
+
+    const asked = collectFontRequests(doc, fallback, { fontModifiers, fontConfig }).map((r) => `${r.family}/${r.weight}`);
+    expect(asked).toEqual(["Georgia/700"]);
   });
 });
 
