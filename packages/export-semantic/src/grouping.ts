@@ -9,7 +9,7 @@ function isHeading(node: BlockEntry["node"]): boolean {
 }
 /** A plain block: the document's default textblock, a paragraph in every built-in schema. */
 function isParagraph(node: BlockEntry["node"]): boolean {
-  return node.type === node.type.schema.topNodeType.contentMatch.defaultType;
+  return node.isTextblock && !isHeading(node) && node.type === node.type.schema.topNodeType.contentMatch.defaultType;
 }
 function isShort(
   node: BlockEntry["node"],

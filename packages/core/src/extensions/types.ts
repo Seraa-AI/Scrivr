@@ -92,6 +92,7 @@ export type ScrivrNodeSpec = NodeSpec & {
   /**
    * The node's level in the document outline, 1 at the top, or null when it
    * heads no section: read by the PDF bookmarks and the semantic outline.
+   * Called for every block those visit, so it must be pure and must not throw.
    */
   outlineLevel?: (node: Node) => number | null;
 };

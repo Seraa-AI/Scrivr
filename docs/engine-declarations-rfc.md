@@ -317,4 +317,13 @@ As designed, with these details:
   grouping and outline. The lane's part types (paragraph, heading,
   codeBlock) and list/table container labels still name nodes; they are not
   outline rules and move with the floats and tables work.
+- A lede is a textblock that heads no section, as well as the schema's
+  default. `outlineLevel` must be pure and must not throw: it runs for every
+  block the outlines visit.
+- **To check (older than this phase): the two outlines read one declaration
+  but still visit different blocks.** A heading nested in a list, sourced
+  block or table cell is a PDF bookmark but no semantic section; an empty
+  heading is left out of the bookmarks but opens an untitled semantic section,
+  which changes what nests under it; and with grouping on, a semantic
+  section's title includes its lede while its children's breadcrumbs do not.
 

@@ -17,3 +17,6 @@ breadcrumbs as before.
 
 - `addExports().pdf.outline` and `PdfOutlineLevel` are removed: declare
   `outlineLevel` on the node spec instead.
+- A node whose semantic handler returns `{ type: "heading" }` but whose spec
+  declares no `outlineLevel` no longer opens a section in `toDocumentOutline`
+  or heads breadcrumbs: declare `outlineLevel` on its spec.
