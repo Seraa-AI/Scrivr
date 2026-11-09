@@ -639,7 +639,7 @@ describe("SourcedBlock Extension", () => {
 
 			const items = collectLayoutItems(doc);
 
-			expect(items.map(i => i.listMarker)).toEqual(["•", "•"]);
+			expect(items.map(i => i.marker?.data)).toEqual(["•", "•"]);
 			expect(items.map(i => i.node.textContent)).toEqual(["a", "b"]);
 			for (const item of items) {
 				expect(doc.nodeAt(item.nodePos)).toBe(item.node);

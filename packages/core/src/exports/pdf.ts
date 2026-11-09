@@ -155,6 +155,19 @@ export interface PdfRectOp extends PdfBox {
   border?: { color: Rgb; widthPx: number };
 }
 
+export interface PdfEllipseOp {
+  /** Centre, in layout pixels. */
+  center: PdfPoint;
+  radiusX: number;
+  radiusY: number;
+  /** Omit to leave it unfilled. With no border either, nothing is drawn. */
+  color?: Rgb;
+  /** Opacity of both the fill and border. Omit for opaque. */
+  opacity?: number;
+  /** Centred on the outline, as canvas strokes it. */
+  border?: { color: Rgb; widthPx: number };
+}
+
 export interface PdfImageOp extends PdfBox {
   image: PdfImageHandle;
   /** Opacity of the image, or the entire placeholder when it cannot be resolved. */
@@ -170,6 +183,7 @@ export interface PdfDrawSurface {
   text(op: PdfTextOp): void;
   line(op: PdfLineOp): void;
   rect(op: PdfRectOp): void;
+  ellipse(op: PdfEllipseOp): void;
   image(op: PdfImageOp): void;
   /** The box drawn in place of an image that could not be resolved. */
   imagePlaceholder(box: PdfBox): void;
@@ -178,8 +192,8 @@ export interface PdfDrawSurface {
 /** The primitives, plus the one helper that paints a whole block's text. */
 export interface PdfBlockDrawSurface extends PdfDrawSurface {
   /**
-   * Draw every line of a block — its list marker, each text span with its mark
-   * decorations, and the inline atoms sitting in the line.
+   * Draw every line of a block — each text span with its mark decorations,
+   * and the inline atoms sitting in the line.
    */
   lines(block: LayoutBlock, ctx: PdfNodeContext): void;
 }

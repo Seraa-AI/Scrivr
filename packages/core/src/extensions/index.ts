@@ -21,6 +21,8 @@ export { Link } from "./built-in/Link";
 export { Alignment } from "./built-in/Alignment";
 export { Indent, INDENT_STEP, TEXT_INDENT_STEP } from "./built-in/Indent";
 export { List } from "./built-in/List";
+// A list container from another extension declares List's wrapper to be drawn as a list.
+export { listWrap } from "./built-in/listLayout";
 export { Pagination } from "./built-in/Pagination";
 export { Image, prepareDocxImages, IMAGE_PLACEMENT_ATTRS } from "./built-in/Image";
 export { CodeBlock } from "./built-in/CodeBlock";

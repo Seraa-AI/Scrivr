@@ -78,7 +78,7 @@ describe("text a standard font cannot encode", () => {
     const layout = onePage([
       block("paragraph", [textLine("item", { font: "16px Aptos" })], {
         y: 100,
-        listMarker: "", // Word's Symbol-font bullet
+        marker: "", // Word's Symbol-font bullet
       }),
     ]);
     await expect(buildPdf(layout)).resolves.toBeInstanceOf(Uint8Array);

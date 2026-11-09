@@ -342,12 +342,12 @@ export class LineBreaker {
       /**
        * A first word that does not fit the first line, but fits the next,
        * starts the next line and leaves the first holding nothing — as Word
-       * leaves a list number alone on its line.
+       * leaves a marker alone on its line.
        */
       firstLineMayStayEmpty?: boolean;
       /**
        * How far the provider's first line is indented (a first-line indent or
-       * a list number), for a line starting `lineStart` in. Narrowing the
+       * a marker), for a line starting `lineStart` in. Narrowing the
        * indent explains is not a float's, so it never moves a word below one.
        */
       firstLineIndent?: (lineStart: number) => number;
@@ -857,7 +857,7 @@ const noIndent = (): number => 0;
 /**
  * Moves a first line's first segment in by its indent, which may depend on
  * where a float starts the line. An indent wider than the line still moves
- * the text: a list number that runs past the line keeps its text after it,
+ * the text: a marker that runs past the line keeps its text after it,
  * overflowing, rather than drawn over it at the line's start.
  */
 export function indentFirstSegment(segments: AvailableSegment[], indentAt: (lineStart: number) => number): AvailableSegment[] {
@@ -988,7 +988,7 @@ const DEFAULT_CURSOR_HEIGHT = 16;
 /**
  * A line that only reserves height: the gap a full-width float leaves, or a
  * word's step below a float. It has no spans and no glyph metrics, so it is no
- * first line for an indent or a list number.
+ * first line for an indent or a marker.
  */
 export function isSpacerLine(line: LayoutLine): boolean {
   return line.spans.length === 0 && line.ascent === 0 && line.cursorHeight === 0;
@@ -1005,7 +1005,7 @@ function isAnchorSpan(span: LayoutSpan): boolean {
 
 /**
  * @param strutFont — a font the line is sized by though none of its text is
- *   on the line: a line a list number stands alone on.
+ *   on the line: a line a marker stands alone on.
  */
 function buildLine(spans: LayoutSpan[], measurer: TextMeasurerLike, strutFont?: string): LayoutLine {
   // Pass 1: collect text-only metrics.

@@ -20,6 +20,7 @@ export type {
   PdfTextOp,
   PdfLineOp,
   PdfRectOp,
+  PdfEllipseOp,
   PdfImageOp,
   PdfFontHandle,
   PdfImageHandle,
@@ -44,11 +45,12 @@ import {
   chromeBlocks,
   compareAnchoredObjectPaintOrder,
   defaultPdfTheme,
+  markerAnchorOf,
 } from "@scrivr/core";
 import { createDefaultImageResolver } from "./fetchImage";
 import type { ImageResolver } from "./fetchImage";
 import type { PdfNodeHandler, PdfChromeHandler } from "./augmentation";
-import { PT_PER_PX, createDrawHelpers, drawListMarker, parseCssColor } from "./context";
+import { PT_PER_PX, createDrawHelpers, parseCssColor } from "./context";
 import type { PdfContext } from "./context";
 import {
   embedStandardFonts,
@@ -178,6 +180,8 @@ async function writePdf(
     after: Array<(ctx: PdfContext) => void | Promise<void>>;
   } = { before: [], after: [] };
 
+  const markerPainters = editor.getMarkerPainters();
+
   for (const contrib of editor.getExportContributions()) {
     const pdfContrib = contrib.pdf;
     if (!pdfContrib) continue;
@@ -273,7 +277,9 @@ async function writePdf(
       ctx.width = block.width;
       try {
         handler(block, ctx);
-        drawListMarker(getPage(), block, pageHeightPt, fontRegistry, resolvedTheme);
+        // After the block, so its background cannot cover the marker.
+        const marker = markerAnchorOf(block);
+        if (marker) markerPainters.get(marker.painter)?.pdf(marker, ctx);
       } finally {
         // Nested dispatch must return the caller's box, even if a child fails.
         ctx.x = x;

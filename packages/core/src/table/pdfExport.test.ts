@@ -39,6 +39,7 @@ function fakeCtx() {
         rects.push(op);
       },
       text: () => {},
+      ellipse: () => {},
       image: () => {},
       imagePlaceholder: () => {},
       lines(block: LayoutBlock) {
@@ -269,6 +270,7 @@ describe("renderTableRowPdf — cell shading", () => {
         line: () => void order.push("line"),
         rect: () => void order.push("rect"),
         text: () => {},
+        ellipse: () => {},
         image: () => {},
         imagePlaceholder: () => {},
         lines: () => undefined,

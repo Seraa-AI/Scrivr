@@ -376,7 +376,7 @@ describe("float beside a table — the table moves below the float", () => {
       const row = firstRowBlock(l);
       const lineYs: number[] = [];
       const childYs: number[] = [];
-      const record = { text: () => {}, rect: () => {}, image: () => {}, imagePlaceholder: () => {} };
+      const record = { text: () => {}, rect: () => {}, ellipse: () => {}, image: () => {}, imagePlaceholder: () => {} };
       renderTableRowPdf(row, {
         draw: {
           ...record,

@@ -27,6 +27,7 @@ function recordingContext() {
         text: (op: PdfTextOp) => ops.push(op),
         line: () => {},
         rect: () => {},
+        ellipse: () => {},
         image: () => {},
         imagePlaceholder: () => {},
         lines: () => {},

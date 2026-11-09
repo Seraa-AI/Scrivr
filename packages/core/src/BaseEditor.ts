@@ -1,6 +1,7 @@
 import { EditorState, Transaction } from "prosemirror-state";
 import type { FontProvider } from "./fonts/types";
 import type { InlineRegistry } from "./layout/BlockRegistry";
+import type { MarkerPainter } from "./layout/markers";
 import { MarkdownSerializer } from "prosemirror-markdown";
 import { Node, type Schema } from "prosemirror-model";
 
@@ -525,6 +526,10 @@ export class BaseEditor implements IBaseEditor {
 
   getImportContributions(): ImportContributionMap[] {
     return this.manager.getImportContributions();
+  }
+
+  getMarkerPainters(): ReadonlyMap<string, MarkerPainter> {
+    return this.manager.getMarkerPainters();
   }
 
   getDocAttrNames(): string[] {

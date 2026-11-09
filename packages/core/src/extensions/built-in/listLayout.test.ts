@@ -1,24 +1,31 @@
 import { describe, expect, it, vi } from "vitest";
 import { EditorState, TextSelection, type Command } from "prosemirror-state";
 import type { Node } from "prosemirror-model";
-import { runPipeline, defaultPageConfig, type MeasureCacheEntry } from "./PageLayout";
-import { layoutBlock, type BlockLayoutOptions, type LayoutBlock } from "./BlockLayout";
-import type { LayoutLine } from "./LineBreaker";
-import { rangeBandRects } from "../selection/behaviors";
-import { drawListMarker, listMarkerOf } from "./listMarkers";
-import { listMarker } from "../model/lists";
-import { CharacterMap } from "./CharacterMap";
-import { defaultEditorTheme } from "../model/theme";
-import { renderPage } from "../renderer/PageRenderer";
-import { ServerEditor } from "../ServerEditor";
-import { StarterKit } from "../extensions/StarterKit";
-import { Table } from "../extensions/built-in/Table";
-import { ExtensionManager } from "../extensions/ExtensionManager";
-import { Extension } from "../extensions/Extension";
-import { nodeLayout } from "./BlockRegistry";
-import { CELL_PADDING_H } from "./TableLayoutEngine";
-import { ANCHORED_OBJECT_MARGIN } from "./AnchoredObjects";
-import { buildStarterKitContext, createMeasurer, createTestEditor, measureTextWidth } from "../test-utils";
+import { runPipeline, defaultPageConfig, type MeasureCacheEntry } from "../../layout/PageLayout";
+import { layoutBlock, type BlockLayoutOptions, type LayoutBlock } from "../../layout/BlockLayout";
+import type { LayoutLine } from "../../layout/LineBreaker";
+import { rangeBandRects } from "../../selection/behaviors";
+import { markerAnchorOf } from "../../layout/markers";
+import { listMarker } from "./listLevels";
+import { CharacterMap } from "../../layout/CharacterMap";
+import { defaultEditorTheme, type ResolvedTheme } from "../../model/theme";
+import { renderPage } from "../../renderer/PageRenderer";
+import { ServerEditor } from "../../ServerEditor";
+import { StarterKit } from "../StarterKit";
+import { Table } from "./Table";
+import { ExtensionManager } from "../ExtensionManager";
+import { Extension } from "../Extension";
+import { nodeLayout } from "../../layout/BlockRegistry";
+import { CELL_PADDING_H } from "../../layout/TableLayoutEngine";
+import { ANCHORED_OBJECT_MARGIN } from "../../layout/AnchoredObjects";
+import { buildStarterKitContext, createMeasurer, createTestEditor, measureTextWidth } from "../../test-utils";
+import { listWrap } from "../../index";
+
+/** Draws a block's marker with the painter registered for it, as `paintBlock` does. */
+function drawMarker(ctx: CanvasRenderingContext2D, block: LayoutBlock, theme: ResolvedTheme): void {
+  const marker = markerAnchorOf(block);
+  if (marker) new ExtensionManager([StarterKit]).getMarkerPainters().get(marker.painter)?.canvas(ctx, marker, theme);
+}
 
 /**
  * How lists lay out. Geometry follows Word's built-in lists: each level's text
@@ -56,7 +63,9 @@ function blockOf(blocks: LayoutBlock[], text: string): LayoutBlock {
   return found;
 }
 
-const markers = (blocks: LayoutBlock[]) => blocks.map((block) => block.listMarker ?? null);
+const markers = (blocks: LayoutBlock[]) => blocks.map((block) => block.marker?.data ?? null);
+/** The bullet or number a block carries, as text; "" for none. */
+const markerText = (block: LayoutBlock): string => (typeof block.marker?.data === "string" ? block.marker.data : "");
 /** The font of the block's first text, on whichever line it starts. */
 const fontOf = (block: LayoutBlock) => {
   const span = block.lines.flatMap((line) => line.spans).find((candidate) => candidate.kind === "text");
@@ -87,14 +96,14 @@ describe("list geometry (Word's built-in lists)", () => {
   it("puts top-level text half an inch in, with the marker a quarter inch before it", () => {
     const one = blockOf(laidOut([ul(item("one"))]), "one");
     expect(one.x).toBe(defaultPageConfig.margins.left + HALF_INCH);
-    expect(one.listMarkerX).toBe(one.x - QUARTER_INCH);
+    expect(one.marker?.x).toBe(one.x - QUARTER_INCH);
   });
 
   it("left-aligns ordered markers at the same hanging position", () => {
     const blocks = laidOut([ol(item("one"), item("two"))]);
     const [one, two] = [blockOf(blocks, "one"), blockOf(blocks, "two")];
-    expect(one.listMarkerX).toBe(one.x - QUARTER_INCH);
-    expect(two.listMarkerX).toBe(one.listMarkerX);
+    expect(one.marker?.x).toBe(one.x - QUARTER_INCH);
+    expect(two.marker?.x).toBe(one.marker?.x);
   });
 
   it("indents each level half an inch past the one above", () => {
@@ -102,7 +111,7 @@ describe("list geometry (Word's built-in lists)", () => {
     const [a, b, c] = [blockOf(blocks, "a"), blockOf(blocks, "b"), blockOf(blocks, "c")];
     expect(b.x - a.x).toBe(HALF_INCH);
     expect(c.x - b.x).toBe(HALF_INCH);
-    expect(c.listMarkerX).toBe(c.x - QUARTER_INCH);
+    expect(c.marker?.x).toBe(c.x - QUARTER_INCH);
   });
 
   it("narrows the text by its indent", () => {
@@ -153,7 +162,7 @@ describe("a number too wide for its hanging indent (Word: the tab after it goes 
   it("keeps every number in the column, however wide", () => {
     const items = Array.from({ length: 12 }, (_, i) => li(sized(18, `n${i}`)));
     const blocks = laidOut([ol(...items)]);
-    const xs = new Set(blocks.map((block) => block.listMarkerX));
+    const xs = new Set(blocks.map((block) => block.marker?.x));
     expect([...xs]).toEqual([(blocks[0]?.x ?? 0) - QUARTER_INCH]);
   });
 
@@ -167,7 +176,7 @@ describe("a number too wide for its hanging indent (Word: the tab after it goes 
       ],
     };
     const wide = blockOf(laidOut([float, olFrom(100, item(text))]), text);
-    const numberEnd = (wide.listMarkerX ?? 0) + measureTextWidth("100.", fontOf(wide));
+    const numberEnd = (wide.marker?.x ?? 0) + measureTextWidth("100.", fontOf(wide));
     expect(wide.x + firstLineStart(wide)).toBeGreaterThan(numberEnd);
   });
 
@@ -175,7 +184,7 @@ describe("a number too wide for its hanging indent (Word: the tab after it goes 
     const text = "wide ".repeat(60).trim();
     const wide = blockOf(laidOut([olFrom(1000, item(text))]), text);
     const firstTextX = wide.x + firstLineStart(wide);
-    expect(firstTextX).toBeGreaterThan((wide.listMarkerX ?? 0) + measureTextWidth("1000.", fontOf(wide)));
+    expect(firstTextX).toBeGreaterThan((wide.marker?.x ?? 0) + measureTextWidth("1000.", fontOf(wide)));
     expect((firstTextX - defaultPageConfig.margins.left) % HALF_INCH).toBe(0);
     for (const line of wide.lines.slice(1)) expect(line.spans[0]?.x).toBe(0);
   });
@@ -193,7 +202,7 @@ describe("a number too wide for its hanging indent (Word: the tab after it goes 
   /** Where the first line's text starts, and where the number ends, both on the page. */
   const textAndNumber = (block: LayoutBlock) => ({
     textStart: block.x + firstLineStart(block),
-    numberEnd: (block.listMarkerX ?? 0) + measureTextWidth(block.listMarker ?? "", fontOf(block)),
+    numberEnd: (block.marker?.x ?? 0) + measureTextWidth(markerText(block), fontOf(block)),
   });
 
   it("never starts the text over a number that runs past the line's last tab stop", () => {
@@ -250,7 +259,7 @@ describe("a first word that does not fit after its number (Word leaves the numbe
     const floatBottom = 100;
     const width = narrow();
     const block = measured(paragraph(`${WORD} more`), width, {
-      firstLineOffset: NUMBER_PUSH,
+      marker: { offset: NUMBER_PUSH },
       lineSpaceProvider: (y) => (y > 0 && y < floatBottom ? { segments: [], skipToY: floatBottom } : { segments: [{ x: 0, width }] }),
     });
     expect(block.lines.map(textOf).join("")).toBe(`${WORD} more`);
@@ -267,12 +276,12 @@ describe("a first word that does not fit after its number (Word leaves the numbe
   it("stays after the number when the next line has no more room for it", () => {
     const image = { type: "image", attrs: { src: "data:image/png;base64,AA==", width: 300, height: 20 } };
     const wide = schema.nodeFromJSON({ type: "paragraph", content: [image, { type: "text", text: " after" }] });
-    const block = measured(wide, 200, { firstLineOffset: NUMBER_PUSH });
+    const block = measured(wide, 200, { marker: { offset: NUMBER_PUSH } });
     expect(block.lines[0]?.spans[0]?.kind).toBe("object");
   });
 
   it("stays after the number when only its trailing space does not fit, which may hang", () => {
-    const block = measured(paragraph(`${WORD} more`), NUMBER_PUSH + wordWidth() + 0.5, { firstLineOffset: NUMBER_PUSH });
+    const block = measured(paragraph(`${WORD} more`), NUMBER_PUSH + wordWidth() + 0.5, { marker: { offset: NUMBER_PUSH } });
     expect(textOf(block.lines[0]).startsWith(WORD)).toBe(true);
   });
 
@@ -281,7 +290,7 @@ describe("a first word that does not fit after its number (Word leaves the numbe
       { type: "image", attrs: { src: "data:image/png;base64,AA==", width: 40, height: 40, wrapMode: "square" } },
       { type: "text", text: WORD },
     ] });
-    const block = measured(anchored, narrow(), { firstLineOffset: NUMBER_PUSH, keepAnchorLine: true });
+    const block = measured(anchored, narrow(), { marker: { offset: NUMBER_PUSH } });
     const wordLine = block.lines.find((line) => textOf(line).startsWith(WORD));
     expect(wordLine).not.toBe(block.lines[0]);
     expect(block.lines[0]?.ascent).toBe(wordLine?.ascent);
@@ -373,7 +382,7 @@ describe("a first word that does not fit after its number (Word leaves the numbe
         const parts = laidOut(content).filter((block) => block.node.textContent === text);
         const [numberPart, wordPart] = parts;
         if (!numberPart || !wordPart || numberPart.lines.some((line) => line.spans.length > 0)) continue;
-        expect(listMarkerOf(numberPart)?.font).toBe(fontOf(wordPart));
+        expect(markerAnchorOf(numberPart)?.font).toBe(fontOf(wordPart));
         return;
       }
     }
@@ -392,10 +401,10 @@ describe("a first word that does not fit after its number (Word leaves the numbe
     expect(textLineIndex).toBeGreaterThan(0);
     const textTop = block.y + block.lines.slice(0, textLineIndex).reduce((sum, line) => sum + line.lineHeight, 0);
     const textLine = block.lines[textLineIndex];
-    const marker = listMarkerOf(block);
+    const marker = markerAnchorOf(block);
     expect(marker?.baseline).toBeCloseTo(textTop + (textLine?.ascent ?? 0), 6);
     const firstSpan = textLine?.spans.find((span) => span.kind === "text");
-    expect(block.x + (firstSpan?.x ?? 0)).toBeGreaterThan((block.listMarkerX ?? 0) + measureTextWidth("100.", fontOf(block)));
+    expect(block.x + (firstSpan?.x ?? 0)).toBeGreaterThan((block.marker?.x ?? 0) + measureTextWidth("100.", fontOf(block)));
   });
 
   it("moves Down and Up across a full-width image's gap in a plain paragraph", () => {
@@ -435,7 +444,7 @@ describe("a first word that does not fit after its number (Word leaves the numbe
     const blocks = l.pages.flatMap((page) => page.blocks);
     for (const { text, number } of [{ text: "first", number: "1." }, { text: "second", number: "2." }]) {
       const block = blockOf(blocks, text);
-      const marker = listMarkerOf(block);
+      const marker = markerAnchorOf(block);
       const textX = block.x + firstLineStart(block);
       expect(marker?.x).toBeGreaterThanOrEqual(f.x + f.width + ANCHORED_OBJECT_MARGIN - 0.5);
       expect(textX).toBeGreaterThan((marker?.x ?? 0) + measureTextWidth(number, fontOf(block)));
@@ -451,7 +460,7 @@ describe("a first word that does not fit after its number (Word leaves the numbe
     const block = blockOf(laidOut([float, olFrom(100, item(`${word} tail`))]), `${word} tail`);
     const textLine = block.lines.find((line) => line.spans.some((span) => span.kind === "text"));
     const first = textLine?.spans.find((span) => span.kind === "text");
-    expect(block.x + (first?.x ?? 0)).toBeGreaterThan((block.listMarkerX ?? 0) + measureTextWidth("100.", fontOf(block)));
+    expect(block.x + (first?.x ?? 0)).toBeGreaterThan((block.marker?.x ?? 0) + measureTextWidth("100.", fontOf(block)));
   });
 
   it("never lets an indented paragraph's first word run into a float beside it", () => {
@@ -488,7 +497,7 @@ describe("a first word that does not fit after its number (Word leaves the numbe
         const content = [...Array.from({ length: fillers }, (_, i) => p(`Filler ${i}`)), image(height), olFrom(7, item(text))];
         const parts = laidOut(content).filter((block) => block.node.textContent === text);
         if (parts.length > 1) splitSeen = true;
-        const drawn = parts.map((part) => listMarkerOf(part)).filter((marker) => marker !== null);
+        const drawn = parts.map((part) => markerAnchorOf(part)).filter((marker) => marker !== null);
         expect(drawn).toHaveLength(1);
       }
     }
@@ -513,7 +522,7 @@ describe("a first word that does not fit after its number (Word leaves the numbe
       const cell = l.pages[0]?.blocks.find((block) => block.cells)?.cells?.[0];
       const item = cell?.blocks.find((block) => block.node.textContent === text);
       if (!item) throw new Error("no item");
-      const marker = listMarkerOf(item);
+      const marker = markerAnchorOf(item);
       if (!marker) throw new Error("no marker");
       // The number sits on a line of its own or on its text's line, never on
       // the anchor's empty line above the text.
@@ -614,7 +623,7 @@ describe("Tab and Shift-Tab are visible", () => {
 
     const blocks = laidOut(editor.getState().doc);
     const [one, two] = [blockOf(blocks, "one"), blockOf(blocks, "two")];
-    expect(two.listMarker).toBe("◦");
+    expect(two.marker?.data).toBe("◦");
     expect(two.x - one.x).toBe(HALF_INCH);
   });
 
@@ -626,7 +635,7 @@ describe("Tab and Shift-Tab are visible", () => {
 
     const blocks = laidOut(editor.getState().doc);
     const [one, two] = [blockOf(blocks, "one"), blockOf(blocks, "two")];
-    expect(two.listMarker).toBe("•");
+    expect(two.marker?.data).toBe("•");
     expect(two.x).toBe(one.x);
   });
 
@@ -637,7 +646,7 @@ describe("Tab and Shift-Tab are visible", () => {
 
     const blocks = laidOut(editor.getState().doc);
     const [one, two] = [blockOf(blocks, "one"), blockOf(blocks, "two")];
-    expect(two.listMarker).toBeUndefined();
+    expect(two.marker?.data).toBeUndefined();
     expect(two.x).toBe(one.x);
   });
 });
@@ -649,7 +658,7 @@ describe("Tab takes only that item deeper, as in Word", () => {
     const one = blockOf(blocks, "one").x;
     return ["one", "two", "three"].map((text) => (blockOf(blocks, text).x - one) / HALF_INCH);
   };
-  const marker = (editor: KeyEditor, text: string) => blockOf(laidOut(editor.getState().doc), text).listMarker;
+  const marker = (editor: KeyEditor, text: string) => blockOf(laidOut(editor.getState().doc), text).marker?.data;
 
   it("takes an item a level further on each Tab, and leaves the items after it", () => {
     const editor = new KeyEditor({ extensions: [StarterKit], content: threeItems });
@@ -671,7 +680,7 @@ describe("Tab takes only that item deeper, as in Word", () => {
     const blocks = laidOut(editor.getState().doc);
     expect(blockOf(blocks, "two").x - blockOf(blocks, "one").x).toBe(HALF_INCH);
     expect(blockOf(blocks, "child").x).toBe(before.x);
-    expect(blockOf(blocks, "child").listMarker).toBe(before.listMarker);
+    expect(blockOf(blocks, "child").marker?.data).toBe(before.marker?.data);
   });
 
   it("brings only that item back a level on each Shift-Tab", () => {
@@ -737,13 +746,32 @@ describe("Tab takes only that item deeper, as in Word", () => {
   });
 });
 
+describe("a list container from another extension", () => {
+  it("is drawn as a bullet list when it declares List's wrapper", () => {
+    const Checklist = Extension.create({
+      name: "checklist",
+      addNodes() {
+        return { checklist: { group: "block", content: "listItem+", toDOM: () => ["ul", 0], layout: { kind: "transparent", wrap: listWrap } } };
+      },
+    });
+    const custom = new ExtensionManager([StarterKit, Checklist]);
+    const lay = (content: Json[]) => runPipeline(custom.schema.nodeFromJSON({ type: "doc", content }), {
+      pageConfig: defaultPageConfig, measurer: createMeasurer(), fontConfig: custom.buildBlockStyles(),
+    }).pages.flatMap((page) => page.blocks);
+    const checklist = (...items: Json[]): Json => ({ type: "checklist", content: items });
+    const shown = (blocks: LayoutBlock[]) => blocks.map((block) => `${block.node.textContent}:${markerText(block)}@${block.x}`);
+    expect(shown(lay([checklist(item("a", checklist(item("b"))))])))
+      .toEqual(shown(lay([ul(item("a", ul(item("b"))))])));
+  });
+});
+
 describe("drawing markers on the canvas", () => {
   const paint = (block: LayoutBlock) => {
     const ctx = document.createElement("canvas").getContext("2d");
     if (!ctx) throw new Error("no 2d context");
     const calls = { arc: vi.spyOn(ctx, "arc"), fillRect: vi.spyOn(ctx, "fillRect"), fillText: vi.spyOn(ctx, "fillText") };
-    drawListMarker(ctx, block, defaultEditorTheme);
-    const markerText = calls.fillText.mock.calls.filter(([text]) => text === block.listMarker);
+    drawMarker(ctx, block, defaultEditorTheme);
+    const markerText = calls.fillText.mock.calls.filter(([text]) => text === block.marker?.data);
     return { arcs: calls.arc.mock.calls.length, rects: calls.fillRect.mock.calls.length, markerText: markerText.length };
   };
 
@@ -753,6 +781,15 @@ describe("drawing markers on the canvas", () => {
     expect(disc).toMatchObject({ arcs: 1, markerText: 0 });
     expect(circle).toMatchObject({ arcs: 1, markerText: 0 });
     expect(square).toMatchObject({ rects: 1, markerText: 0 });
+  });
+
+  it("draws in the theme's marker colour", () => {
+    const ctx = document.createElement("canvas").getContext("2d");
+    if (!ctx) throw new Error("no 2d context");
+    const fills: unknown[] = [];
+    vi.spyOn(ctx, "fillText").mockImplementation(() => void fills.push(ctx.fillStyle));
+    drawMarker(ctx, blockOf(laidOut([ol(item("a"))]), "a"), { ...defaultEditorTheme, marker: "#ff0000" });
+    expect(fills).toEqual(["#ff0000"]);
   });
 
   it("draws numbers as text", () => {
@@ -784,7 +821,7 @@ describe("incremental layout agrees with a fresh one", () => {
   }
 
   const shown = (blocks: LayoutBlock[]) =>
-    blocks.map((block) => `${block.node.textContent}:${block.listMarker ?? ""}@${block.x}+${firstLineStart(block)}`);
+    blocks.map((block) => `${block.node.textContent}:${block.marker?.data ?? ""}@${block.x}+${firstLineStart(block)}`);
   const longList = (prefix: string, n: number) => Array.from({ length: n }, (_, i) => item(`${prefix} ${i}`));
 
   /**
@@ -890,7 +927,7 @@ describe("how far a block can be indented", () => {
     for (const block of laidOut([ul(nested)], narrow)) {
       expect(block.availableWidth).toBeGreaterThanOrEqual(96);
       expect(block.x + block.availableWidth).toBeLessThanOrEqual(contentRight(narrow));
-      expect(block.listMarkerX ?? narrow.margins.left).toBeGreaterThanOrEqual(narrow.margins.left);
+      expect(block.marker?.x ?? narrow.margins.left).toBeGreaterThanOrEqual(narrow.margins.left);
     }
   });
 
@@ -923,8 +960,8 @@ describe("an item that opens with a floating image", () => {
 
   it("numbers the image's paragraph, and counts on from it", () => {
     const blocks = laidOut([ol(li(floating), item("next"))]);
-    expect(anchorOf(blocks).listMarker).toBe("1.");
-    expect(blockOf(blocks, "next").listMarker).toBe("2.");
+    expect(anchorOf(blocks).marker?.data).toBe("1.");
+    expect(blockOf(blocks, "next").marker?.data).toBe("2.");
   });
 
   it("keeps the image's paragraph a line for its number", () => {
@@ -936,8 +973,8 @@ describe("an item that opens with a floating image", () => {
 
   it("numbers it when the item's text follows in the same item", () => {
     const blocks = laidOut([ul(li(floating, p("text")))]);
-    expect(anchorOf(blocks).listMarker).toBe("•");
-    expect(blockOf(blocks, "text").listMarker).toBeUndefined();
+    expect(anchorOf(blocks).marker?.data).toBe("•");
+    expect(blockOf(blocks, "text").marker?.data).toBeUndefined();
   });
 
   it("numbers it when a table or a nested list follows", () => {
@@ -950,9 +987,9 @@ describe("an item that opens with a floating image", () => {
     ] });
     const blocks = runPipeline(docNode, { pageConfig: defaultPageConfig, measurer: createMeasurer(), fontConfig: manager.buildBlockStyles() })
       .pages.flatMap((page) => page.blocks);
-    const anchors = blocks.filter((block) => block.node.type.name === "paragraph" && block.listMarker !== undefined && block.node.textContent === "");
-    expect(anchors.map((block) => block.listMarker)).toEqual(["1.", "2."]);
-    expect(blockOf(blocks, "child").listMarker).toBe("a.");
+    const anchors = blocks.filter((block) => block.node.type.name === "paragraph" && block.marker?.data !== undefined && block.node.textContent === "");
+    expect(anchors.map((block) => block.marker?.data)).toEqual(["1.", "2."]);
+    expect(blockOf(blocks, "child").marker?.data).toBe("a.");
   });
 
   it("takes no space outside a list", () => {
@@ -967,7 +1004,7 @@ describe("streamed layout of lists", () => {
     while (layout.resumption) layout = runPipeline(docNode, { ...options, resumption: layout.resumption });
     return layout.pages.flatMap((page) => page.blocks);
   }
-  const shown = (blocks: LayoutBlock[]) => blocks.map((block) => `${block.node.textContent}:${block.listMarker ?? ""}@${block.x}`);
+  const shown = (blocks: LayoutBlock[]) => blocks.map((block) => `${block.node.textContent}:${block.marker?.data ?? ""}@${block.x}`);
 
   it("lays lists out the same in chunks of any size as in one pass", () => {
     const docNode = schema.nodeFromJSON({ type: "doc", content: [
@@ -998,11 +1035,11 @@ describe("a list inside a table cell", () => {
 
   it("lays out every item, numbered and nested, at its level's indent", () => {
     const blocks = cellBlocks([ol(item("first"), item("second", ul(item("nested"))))]);
-    expect(blocks.map((block) => `${block.node.textContent}:${block.listMarker ?? ""}`))
+    expect(blocks.map((block) => `${block.node.textContent}:${block.marker?.data ?? ""}`))
       .toEqual(["first:1.", "second:2.", "nested:◦"]);
     const [first, nested] = [blockOf(blocks, "first"), blockOf(blocks, "nested")];
     expect(nested.x - first.x).toBe(HALF_INCH);
-    expect(first.listMarkerX).toBe(first.x - QUARTER_INCH);
+    expect(first.marker?.x).toBe(first.x - QUARTER_INCH);
   });
 
   it("keeps the cell's text, with each item's own lines", () => {
@@ -1055,7 +1092,7 @@ describe("a list inside a table cell", () => {
         const word = block.lines[lineIndex]?.spans.find((span) => span.kind === "text" && span.text.trim() !== "" && span.text !== "\u200b");
         if (!word) throw new Error("no word");
         const wordStart = block.x + word.x;
-        const numberEnd = (block.listMarkerX ?? 0) + measureTextWidth(block.listMarker ?? "", fontOf(block));
+        const numberEnd = (block.marker?.x ?? 0) + measureTextWidth(markerText(block), fontOf(block));
         const cellRight = cell.x + cell.width;
         const wordFitsCell = word.width <= cell.width - 2 * CELL_PADDING_H;
         const where = `${columns} columns, order ${order}`;
@@ -1080,7 +1117,7 @@ describe("a list inside a table cell", () => {
     const cell = row?.cells?.[0];
     if (!cell) throw new Error("no cell");
     const first = blockOf(cell.blocks, "first");
-    const markerX = first.listMarkerX ?? Number.NEGATIVE_INFINITY;
+    const markerX = first.marker?.x ?? Number.NEGATIVE_INFINITY;
     expect(markerX).toBeGreaterThanOrEqual(cell.x);
     expect(first.x + firstLineStart(first)).toBeGreaterThan(markerX + measureTextWidth("1.", fontOf(first)));
   });
@@ -1101,7 +1138,7 @@ describe("a block container that is not a list", () => {
     const blocks = runPipeline(docNode, { pageConfig: defaultPageConfig, measurer: createMeasurer(), fontConfig: manager.buildBlockStyles() })
       .pages.flatMap((page) => page.blocks);
     expect(blocks.map((block) => block.node.textContent)).toEqual(["in an item", "loose"]);
-    expect(blocks.map((block) => block.listMarker)).toEqual([undefined, undefined]);
+    expect(blocks.map((block) => block.marker?.data)).toEqual([undefined, undefined]);
   });
 
   it("is what nodeLayout reports: transparent when undeclared, its own box when declared", () => {

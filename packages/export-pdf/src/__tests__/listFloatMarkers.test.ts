@@ -45,7 +45,7 @@ const layoutOf = (content: Json[]): DocumentLayout =>
   runPipeline(schema.nodeFromJSON({ type: "doc", content }), { pageConfig: PAGE_CONFIG, measurer, fontConfig });
 
 const markersIn = (layout: DocumentLayout) =>
-  layout.pages.flatMap((page) => page.blocks).flatMap((block) => (block.listMarker ? [block.listMarker] : []));
+  layout.pages.flatMap((page) => page.blocks).flatMap((block) => (typeof block.marker?.data === "string" ? [block.marker.data] : []));
 
 async function markersDrawn(layout: DocumentLayout): Promise<string[]> {
   const ops = await recordDrawOps(() => buildPdf(layout, exportEditor));
