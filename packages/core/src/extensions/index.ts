@@ -24,7 +24,7 @@ export { List } from "./built-in/List";
 // A list container from another extension declares List's wrapper to be drawn as a list.
 export { listWrap } from "./built-in/listLayout";
 export { Pagination } from "./built-in/Pagination";
-export { Image, prepareDocxImages, IMAGE_PLACEMENT_ATTRS } from "./built-in/Image";
+export { Image, prepareDocxImages, IMAGE_PLACEMENT_ATTRS, INLINE_IMAGE_ATTRS } from "./built-in/Image";
 export { CodeBlock } from "./built-in/CodeBlock";
 export { HorizontalRule } from "./built-in/HorizontalRule";
 export { PageBreak } from "./built-in/PageBreak";

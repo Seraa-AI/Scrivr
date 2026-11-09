@@ -6,7 +6,7 @@ import {
   hitHandle,
   computeNewSize,
 } from "./ResizeController";
-import { normalizeImageAttrs, type AnchoredObjectPlacement } from "../layout/AnchoredObjects";
+import { anchoredOf, type AnchoredObjectPlacement } from "../layout/AnchoredObjects";
 import type { CellSubBlock, LayoutBlock } from "../layout/BlockLayout";
 import { CELL_PADDING_H } from "../layout/TableLayoutEngine";
 import { resolvePointOwner, type PointOwner } from "../layout/pointOwnership";
@@ -34,7 +34,7 @@ const RE_ANCHOR_THRESHOLD_PX = 24;
  */
 function paintedYOffset(placement: AnchoredObjectPlacement): number {
   const moved = placement.clamped === true || placement.stackOffset !== undefined;
-  return moved ? placement.globalY - placement.anchorGlobalY : normalizeImageAttrs(placement.node).yOffset;
+  return moved ? placement.globalY - placement.anchorGlobalY : (anchoredOf(placement.node)?.yOffset ?? 0);
 }
 
 /**
@@ -984,14 +984,11 @@ export class PointerController {
     const HORIZONTAL_THRESHOLD = 3;
     if (Math.abs(dx) < HORIZONTAL_THRESHOLD) return null;
 
-    const node = editor.getState().doc.nodeAt(this.anchoredDrag.docPos);
-    if (!node) return null;
-
+    // The painted width snapshotted at pointerdown, as the rest of the drag
+    // reads its geometry.
     const { pageWidth } = editor.layout.pageConfig;
-    const attrs = normalizeImageAttrs(node);
-
     const proposedX = this.anchoredDrag.startImageX + dx;
-    const clampedX = Math.max(0, Math.min(proposedX, pageWidth - attrs.width));
+    const clampedX = Math.max(0, Math.min(proposedX, pageWidth - this.anchoredDrag.rect.width));
     return clampedX;
   }
 

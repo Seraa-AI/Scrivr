@@ -1,4 +1,5 @@
 import { Extension } from "../Extension";
+import { imagePlacementOf } from "./imagePlacement";
 import type { PdfNodeHandler } from "../../exports/pdf";
 import { NodeSelection, type Command } from "prosemirror-state";
 import type { InlineStrategy } from "../../layout/BlockRegistry";
@@ -612,6 +613,16 @@ const imagePdf: PdfNodeHandler = (block, ctx) => {
  */
 export const IMAGE_PLACEMENT_ATTRS: readonly string[] = ["xAlign", "x", "yOffset", "floatOffset"];
 
+/** The attrs that put an image back in its line, legacy placement cleared. */
+export const INLINE_IMAGE_ATTRS: Readonly<Record<string, unknown>> = {
+  wrapMode: "inline",
+  wrappingMode: "inline",
+  xAlign: "left",
+  x: null,
+  yOffset: 0,
+  floatOffset: { x: 0, y: 0 },
+};
+
 export const Image = Extension.create({
   name: "image",
 
@@ -622,6 +633,7 @@ export const Image = Extension.create({
   addNodes() {
     return {
       image: {
+        anchored: imagePlacementOf,
         inline: true,
         group: "inline",
         attrs: {
@@ -651,10 +663,10 @@ export const Image = Extension.create({
           zIndex: { default: 0 },
           /** Wrap-zone breathing room in px (Word's ~0.13" Square default). */
           margin: { default: 12 },
-          // ── Legacy attrs (read-side compat — see normalizeImageAttrs) ────
+          // ── Legacy attrs (read-side compat — see imagePlacementOf) ────
           /** @deprecated — replaced by `wrapMode` + `xAlign`. Mapped on read. */
           wrappingMode: { default: "inline" },
-          /** @deprecated — `floatOffset.y` is read-side mapped to `yOffset` by normalizeImageAttrs. */
+          /** @deprecated — `floatOffset.y` is read-side mapped to `yOffset` by imagePlacementOf. */
           floatOffset: { default: { x: 0, y: 0 } },
         },
         parseDOM: [
@@ -847,9 +859,9 @@ declare module "@scrivr/core" {
       yOffset: number;
       zIndex: number;
       margin: number;
-      /** @deprecated read-side compat — mapped by normalizeImageAttrs */
+      /** @deprecated read-side compat — mapped by imagePlacementOf */
       wrappingMode: string;
-      /** @deprecated read-side compat — mapped by normalizeImageAttrs */
+      /** @deprecated read-side compat — mapped by imagePlacementOf */
       floatOffset: { x: number; y: number };
     };
   }

@@ -1,4 +1,4 @@
-import { IMAGE_NODE_ATTRS, normalizeImageAttrs, type IBaseEditor } from "@scrivr/core";
+import { IMAGE_NODE_ATTRS, anchoredOf, type IBaseEditor } from "@scrivr/core";
 import { findLiveNodeById, proposedForDeletion, trackAsSuggestion } from "@scrivr/plugins";
 import type { SemanticImageAttrs } from "../schema/edit";
 
@@ -36,7 +36,8 @@ export function applyImageLayout(editor: IBaseEditor, edits: ImageLayoutEdit[], 
     if (!image) continue;
     // A legacy `wrappingMode` outranks `wrapMode`/`xAlign`: write out what it
     // meant and retire it, so the layout the agent sets is the one that shows.
-    const placed = normalizeImageAttrs(image);
+    const placed = anchoredOf(image);
+    if (!placed) continue;
     const legacy = image.attrs["wrappingMode"] !== "inline"
       ? { wrapMode: placed.wrapMode, xAlign: placed.xAlign, wrappingMode: "inline" }
       : {};

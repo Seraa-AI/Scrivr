@@ -13,11 +13,9 @@ import {
   ANCHORED_OBJECT_MARGIN,
   anchorsInLines,
   clearOfEarlier,
-  normalizeImageAttrs,
   resolveImageX,
   type AnchoredObjectPlacement,
   type AnchorRef,
-  type NormalizedImageAttrs,
 } from "./AnchoredObjects";
 import type { PageGeometry } from "./PageMetrics";
 import { advanceFlowGlobalY, collapseMargins, landingAfter, pageLocalYForGlobalY } from "./FlowPlacement";

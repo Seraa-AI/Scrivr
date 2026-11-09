@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { createImageMenu } from "@scrivr/core";
+import { INLINE_IMAGE_ATTRS, createImageMenu } from "@scrivr/core";
 import type { Editor, ImageMenuInfo } from "@scrivr/core";
 import { useFloatingPosition } from "./useFloatingPosition";
 
@@ -89,7 +89,7 @@ export function useImageMenu(editor: Editor | null) {
   function setWrapMode(mode: ImageWrappingMode) {
     setWrappingMode(mode);
     if (mode === "inline" && wrappingMode !== "inline") {
-      if (info) editor?.convertImageToInlineAtVisualPosition(info.docPos);
+      if (info) editor?.placeInlineAtVisualPosition(info.docPos, INLINE_IMAGE_ATTRS);
       return;
     }
     applyAttr({ wrapMode: mode, wrappingMode: "inline" });

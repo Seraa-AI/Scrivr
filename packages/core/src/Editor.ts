@@ -9,6 +9,7 @@ import {
 	type Selection,
 } from "prosemirror-state";
 import { SelectionController } from "./SelectionController";
+import { anchoredOf } from "./layout/AnchoredObjects";
 import type {
 	FontModifier,
 	MarkDecorator,
@@ -909,24 +910,16 @@ export class Editor extends BaseEditor implements IEditor {
 	}
 
 	/**
-	 * Convert a floating image back to inline content at its current painted
-	 * location. Floating modes treat docPos as ownership and attrs as geometry;
-	 * inline mode is the opposite, so this is the one place where visual X/Y is
-	 * resolved back to a document insertion point.
+	 * Put a floating object back into its text, at its current painted
+	 * location, with `inlineAttrs` — the attrs its extension writes to make it
+	 * inline (Image's `INLINE_IMAGE_ATTRS`). Floating modes treat docPos as
+	 * ownership and attrs as geometry; inline mode is the opposite, so this is
+	 * the one place where visual X/Y is resolved back to a document position.
 	 */
-	convertImageToInlineAtVisualPosition(docPos: number): boolean {
+	placeInlineAtVisualPosition(docPos: number, inlineAttrs: Readonly<Record<string, unknown>>): boolean {
 		const state = this.getActiveState();
 		const node = state.doc.nodeAt(docPos);
-		if (!node || node.type.name !== "image") return false;
-
-		const inlineAttrs: Record<string, unknown> = {
-			wrapMode: "inline",
-			wrappingMode: "inline",
-			xAlign: "left",
-			x: null,
-			yOffset: 0,
-			floatOffset: { x: 0, y: 0 },
-		};
+		if (!node || !anchoredOf(node)) return false;
 
 		const rect = this.getNodeRect(docPos);
 		if (!rect) {
@@ -954,7 +947,7 @@ export class Editor extends BaseEditor implements IEditor {
 			if (this.debug?.drag) {
 				// eslint-disable-next-line no-console
 				console.warn(
-					"[convertImageToInlineAtVisualPosition] moveAndUpdateNode rejected — falling back to attrs-only update",
+					"[placeInlineAtVisualPosition] moveAndUpdateNode rejected — falling back to attrs-only update",
 					{ from, to, targetPos },
 				);
 			}

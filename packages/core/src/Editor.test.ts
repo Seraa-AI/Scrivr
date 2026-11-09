@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { Editor } from "./Editor";
 import { StarterKit } from "./extensions/StarterKit";
 import { Extension } from "./extensions/Extension";
+import { INLINE_IMAGE_ATTRS } from "./extensions/built-in/Image";
 import { NodeSelection } from "prosemirror-state";
 import type { EditorState } from "prosemirror-state";
 import { createTestEditor } from "./test-utils";
@@ -425,7 +426,7 @@ describe("Editor.moveNode", () => {
   });
 });
 
-describe("Editor.convertImageToInlineAtVisualPosition", () => {
+describe("Editor.placeInlineAtVisualPosition", () => {
   it("moves a floating image to the visual insertion point and clears placement attrs", () => {
     const { editor, cleanup } = makeEditor();
     const schema = editor.schema;
@@ -454,7 +455,7 @@ describe("Editor.convertImageToInlineAtVisualPosition", () => {
     expect(imagePos).toBeGreaterThan(0);
 
     const posAtCoords = vi.spyOn(editor.charMap, "posAtCoords").mockReturnValue(1);
-    expect(editor.convertImageToInlineAtVisualPosition(imagePos)).toBe(true);
+    expect(editor.placeInlineAtVisualPosition(imagePos, INLINE_IMAGE_ATTRS)).toBe(true);
 
     const firstParagraph = editor.getState().doc.child(0);
     const movedImage = firstParagraph.child(0);

@@ -24,7 +24,7 @@ export type {
   PositionMode,
   XAlign,
   LegacyWrappingMode,
-  NormalizedImageAttrs,
+  AnchoredPlacement,
   AnchoredObjectInput,
   AnchoredObjectPlacement,
   WrapZone,
@@ -32,7 +32,9 @@ export type {
 } from "./AnchoredObjects";
 export {
   ANCHORED_OBJECT_MARGIN,
-  normalizeImageAttrs,
+  anchoredOf,
+  floats,
+  isXAlignValue,
   resolveImageX,
   isWrapModeValue,
   isLegacyWrappingMode,

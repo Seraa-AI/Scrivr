@@ -1,5 +1,5 @@
 /**
- * normalizeImageAttrs / resolveImageX tests.
+ * imagePlacementOf / resolveImageX tests.
  *
  * The legacy `wrappingMode` attr is preserved on PM nodes for round-trip;
  * read-side normalization maps it to the new `wrapMode` + `xAlign` model.
@@ -9,8 +9,8 @@
  * legacy mapping shadows the new value and the image never moves.
  */
 import { describe, it, expect } from "vitest";
+import { imagePlacementOf } from "../extensions/built-in/imagePlacement";
 import {
-  normalizeImageAttrs,
   resolveImageX,
   compareAnchoredObjectPaintOrder,
   compareAnchoredObjectHitOrder,
@@ -34,7 +34,7 @@ interface ImageAttrs {
 const { schema: skSchema } = buildStarterKitContext();
 
 /**
- * Build a real PM `image` node — `normalizeImageAttrs` reads attrs from the
+ * Build a real PM `image` node — `imagePlacementOf` reads attrs from the
  * raw node, so schema defaults for unset fields exactly match the production
  * read-path. Equivalent attrs in/out compared to the previous fake.
  */
@@ -42,7 +42,7 @@ function makeImageNode(attrs: ImageAttrs): Node {
   return skSchema.nodes["image"]!.create(attrs);
 }
 
-describe("normalizeImageAttrs — legacy → new model", () => {
+describe("imagePlacementOf — legacy → new model", () => {
   describe("untouched legacy attrs", () => {
     it("legacy square-right with no explicit xAlign → xAlign:right", () => {
       const node = makeImageNode({
@@ -50,7 +50,7 @@ describe("normalizeImageAttrs — legacy → new model", () => {
         height: 200,
         wrappingMode: "square-right",
       });
-      const out = normalizeImageAttrs(node);
+      const out = imagePlacementOf(node);
       expect(out.wrapMode).toBe("square");
       expect(out.xAlign).toBe("right");
       expect(out.x).toBeNull();
@@ -62,7 +62,7 @@ describe("normalizeImageAttrs — legacy → new model", () => {
         height: 200,
         wrappingMode: "square-left",
       });
-      const out = normalizeImageAttrs(node);
+      const out = imagePlacementOf(node);
       expect(out.wrapMode).toBe("square");
       expect(out.xAlign).toBe("left");
     });
@@ -81,7 +81,7 @@ describe("normalizeImageAttrs — legacy → new model", () => {
         xAlign: "custom",
         x: 120,
       });
-      const out = normalizeImageAttrs(node);
+      const out = imagePlacementOf(node);
       expect(out.wrapMode).toBe("square");
       expect(out.xAlign).toBe("custom");
       expect(out.x).toBe(120);
@@ -94,7 +94,7 @@ describe("normalizeImageAttrs — legacy → new model", () => {
         wrappingMode: "square-right",
         xAlign: "center",
       });
-      expect(normalizeImageAttrs(node).xAlign).toBe("center");
+      expect(imagePlacementOf(node).xAlign).toBe("center");
     });
 
     it("legacy square-left + xAlign:custom → xAlign:custom", () => {
@@ -105,7 +105,7 @@ describe("normalizeImageAttrs — legacy → new model", () => {
         xAlign: "custom",
         x: 80,
       });
-      const out = normalizeImageAttrs(node);
+      const out = imagePlacementOf(node);
       expect(out.xAlign).toBe("custom");
       expect(out.x).toBe(80);
     });
@@ -119,7 +119,7 @@ describe("normalizeImageAttrs — legacy → new model", () => {
         wrapMode: "square",
         xAlign: "right",
       });
-      const out = normalizeImageAttrs(node);
+      const out = imagePlacementOf(node);
       expect(out.wrapMode).toBe("square");
       expect(out.xAlign).toBe("right");
     });
@@ -132,24 +132,24 @@ describe("normalizeImageAttrs — legacy → new model", () => {
         xAlign: "custom",
         x: 200,
       });
-      const out = normalizeImageAttrs(node);
+      const out = imagePlacementOf(node);
       expect(out.xAlign).toBe("custom");
       expect(out.x).toBe(200);
     });
   });
 });
 
-describe("normalizeImageAttrs — yOffset migration (Phase 1)", () => {
+describe("imagePlacementOf — yOffset migration (Phase 1)", () => {
   it("default yOffset is 0", () => {
     const node = makeImageNode({ width: 100, height: 100, wrapMode: "square" });
-    expect(normalizeImageAttrs(node).yOffset).toBe(0);
+    expect(imagePlacementOf(node).yOffset).toBe(0);
   });
 
   it("explicit yOffset wins", () => {
     const node = makeImageNode({
       width: 100, height: 100, wrapMode: "square", yOffset: 42,
     });
-    expect(normalizeImageAttrs(node).yOffset).toBe(42);
+    expect(imagePlacementOf(node).yOffset).toBe(42);
   });
 
   it("legacy floatOffset.y migrates to yOffset when yOffset absent", () => {
@@ -157,7 +157,7 @@ describe("normalizeImageAttrs — yOffset migration (Phase 1)", () => {
       width: 100, height: 100, wrapMode: "square",
       floatOffset: { x: 0, y: 60 },
     });
-    expect(normalizeImageAttrs(node).yOffset).toBe(60);
+    expect(imagePlacementOf(node).yOffset).toBe(60);
   });
 
   it("explicit yOffset overrides legacy floatOffset.y", () => {
@@ -166,7 +166,7 @@ describe("normalizeImageAttrs — yOffset migration (Phase 1)", () => {
       yOffset: 10,
       floatOffset: { x: 0, y: 60 },
     });
-    expect(normalizeImageAttrs(node).yOffset).toBe(10);
+    expect(imagePlacementOf(node).yOffset).toBe(10);
   });
 
   it("malformed floatOffset (string) → 0", () => {
@@ -174,7 +174,7 @@ describe("normalizeImageAttrs — yOffset migration (Phase 1)", () => {
       width: 100, height: 100, wrapMode: "square",
       floatOffset: "not an object",
     });
-    expect(normalizeImageAttrs(node).yOffset).toBe(0);
+    expect(imagePlacementOf(node).yOffset).toBe(0);
   });
 
   it("malformed floatOffset (null) → 0", () => {
@@ -182,7 +182,7 @@ describe("normalizeImageAttrs — yOffset migration (Phase 1)", () => {
       width: 100, height: 100, wrapMode: "square",
       floatOffset: null,
     });
-    expect(normalizeImageAttrs(node).yOffset).toBe(0);
+    expect(imagePlacementOf(node).yOffset).toBe(0);
   });
 
   it("floatOffset without .y → 0", () => {
@@ -190,7 +190,7 @@ describe("normalizeImageAttrs — yOffset migration (Phase 1)", () => {
       width: 100, height: 100, wrapMode: "square",
       floatOffset: { x: 5 },
     });
-    expect(normalizeImageAttrs(node).yOffset).toBe(0);
+    expect(imagePlacementOf(node).yOffset).toBe(0);
   });
 
   it("floatOffset.y non-numeric → 0", () => {
@@ -198,7 +198,7 @@ describe("normalizeImageAttrs — yOffset migration (Phase 1)", () => {
       width: 100, height: 100, wrapMode: "square",
       floatOffset: { x: 0, y: "twenty" },
     });
-    expect(normalizeImageAttrs(node).yOffset).toBe(0);
+    expect(imagePlacementOf(node).yOffset).toBe(0);
   });
 });
 

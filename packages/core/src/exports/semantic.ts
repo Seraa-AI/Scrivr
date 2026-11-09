@@ -12,7 +12,7 @@
  */
 
 import type { Node as PmNode, Mark as PmMark, Schema } from "prosemirror-model";
-import { normalizeImageAttrs, type WrapMode, type XAlign } from "../layout/AnchoredObjects";
+import { anchoredOf, type WrapMode, type XAlign } from "../layout/AnchoredObjects";
 
 // ── The unit ──────────────────────────────────────────────────────────────
 
@@ -188,16 +188,17 @@ export const IMAGE_NODE_ATTRS: Record<keyof SemanticImage, string> = {
 };
 
 /**
- * The image a node is, as an agent reads it, or null when it is not an image.
- * Use it wherever an image is reported — a unit's `image`, or the image a
- * change inserts or deletes — so both read the same.
+ * The image a node is, as an agent reads it, or null when it is not one: an
+ * anchored object (its spec declares `anchored`) with a `src`. Use it wherever
+ * an image is reported — a unit's `image`, or the image a change inserts or
+ * deletes — so both read the same.
  */
 export function semanticImage(node: PmNode): SemanticImage | null {
-  if (node.type.name !== "image") return null;
-  const placed = normalizeImageAttrs(node);
+  const placed = anchoredOf(node);
   const { src, alt } = node.attrs;
+  if (!placed || typeof src !== "string") return null;
   return {
-    src: typeof src === "string" ? src : "",
+    src,
     alt: typeof alt === "string" ? alt : "",
     width: placed.width,
     height: placed.height,

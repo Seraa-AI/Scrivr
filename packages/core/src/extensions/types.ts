@@ -50,6 +50,7 @@ import type { InputRule } from "prosemirror-inputrules";
 import type { CharacterMap } from "../layout/CharacterMap";
 import type { PageConfig, DocumentLayout } from "../layout/PageLayout";
 import type { BlockStrategy, InlineStrategy, NodeLayout } from "../layout/BlockRegistry";
+import type { AnchoredPlacement } from "../layout/AnchoredObjects";
 import type { MarkerPainter } from "../layout/markers";
 import type { BlockStyle, FontConfig } from "../layout/FontConfig";
 import type { ParsedFont } from "../layout/StyleResolver";
@@ -95,6 +96,12 @@ export type ScrivrNodeSpec = NodeSpec & {
    * Called for every block those visit, so it must be pure and must not throw.
    */
   outlineLevel?: (node: Node) => number | null;
+  /**
+   * How an inline node is placed as an anchored object: floated beside or
+   * around the text, or `wrapMode: "inline"` to sit in its line. Read through
+   * `anchoredOf` by layout, hit-testing, drag and the exporters.
+   */
+  anchored?: (node: Node) => AnchoredPlacement | null;
 };
 
 // ── Overlay render handler ─────────────────────────────────────────────────────
