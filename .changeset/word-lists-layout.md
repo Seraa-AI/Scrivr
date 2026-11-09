@@ -70,8 +70,9 @@ Lists lay out, print and export like Word's.
 - `@scrivr/core` exports `isListType` (moved here from track changes, and
   now what the list extension, Clear formatting, the semantic exporter and
   track changes ask), `bulletShape`, `bulletBox` and `listMarkerOf` (which
-  answers how a block's marker is drawn: the face layout measured it in and
-  the baseline of its first line, past any gap a full-width image leaves),
+  answers how a block's marker is drawn: the face layout measured it in, the
+  baseline of its first line, past any gap a full-width image leaves, and
+  its `x`, past an image on the item's left that moves its line),
   with the types `BulletShape`, `BulletBox`, `ListMarker` and
   `ListMarkerFont`. `LayoutBlock.listMarkerFace` (new) carries the marker's
   face on every part of a split item, so a number left alone at a page
@@ -93,12 +94,17 @@ Lists lay out, print and export like Word's.
 - `LayoutBlock.listMarkerX` is now the marker's **left** edge (it was the
   right edge of a right-aligned marker).
 - `BlockLayoutOptions.firstLineOffset` (new) adds to a node's own
-  `textIndent` on the first line; `BlockLayoutOptions.keepAnchorLine` (new)
-  keeps a line for a paragraph holding only floating images' anchors.
+  `textIndent` on the first line, and `firstLineOffsetAt` (new) gives it for
+  a first line a float moves in, where Word puts the number at the line's
+  start and the text at the next tab stop past it;
+  `BlockLayoutOptions.keepAnchorLine` (new) keeps a line for a paragraph
+  holding only floating images' anchors. `AvailableSegment.indentFrom` (new)
+  records where a first line started before its indent moved it.
 - `LineBreaker.breakIntoLines` takes `firstLineMayStayEmpty` (new: a first
   word that fits only the next line leaves the first line empty, as a list
   number's push does) and `firstLineIndent` (new: how far the provider's first
-  line is indented, so a float's narrowing is told apart from the indent's).
+  line is indented, for a line a float starts some way in, so a float's
+  narrowing is told apart from the indent's).
 - Up and Down step over a line that holds no text: a number left alone on
   its line, and the gap a full-width image leaves in any paragraph, on the
   same page or across one.

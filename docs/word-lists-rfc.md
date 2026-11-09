@@ -509,6 +509,14 @@ section is what is true.
   lost on a table row or a nested list, or drawn on a code block.
 - **D7 — New API approved** (user, 2026-11-08): `paintBlock`,
   `DocxContext.textWidthTwips` and `BlockLayoutOptions.keepAnchorLine`.
+- **D8 — A float on the item's left moves its number** (2026-11-09,
+  found in the playground demo). Word puts the number at the start of the
+  line the float leaves and the text at the next tab stop past it; the
+  number was drawn at its hang, under the image. The push now depends on
+  where the line starts (`BlockLayoutOptions.firstLineOffsetAt`), the first
+  segment records where it started (`AvailableSegment.indentFrom`), and
+  `listMarkerOf` gives the number's `x` from it, for canvas and PDF alike.
+  Wrapped lines beside the float start at its edge, as Word wraps them.
 
 ### Where the code differs from the design above
 

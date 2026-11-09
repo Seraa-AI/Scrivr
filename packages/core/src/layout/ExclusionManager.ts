@@ -28,6 +28,8 @@ export interface AvailableSegment {
   x: number;
   /** Usable inline width in CSS pixels. */
   width: number;
+  /** On a first line's first segment: where the line started before its first-line indent moved it to `x`. */
+  indentFrom?: number;
 }
 
 export interface LineSpace {

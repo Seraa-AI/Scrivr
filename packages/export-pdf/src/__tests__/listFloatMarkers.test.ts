@@ -104,3 +104,20 @@ describe("a list inside a table cell, in the PDF", () => {
     expect(ops.filter((op) => op.op === "ellipse")).toHaveLength(1);
   });
 });
+
+describe("a list beside an image on its left, in the PDF", () => {
+  it("draws each number past the image, where the canvas draws it", async () => {
+    const leftImage: Json = { type: "paragraph", content: [
+      { type: "image", attrs: { src: "data:image/png;base64,AA==", width: 150, height: 200, wrapMode: "square", xAlign: "left" } },
+      { type: "text", text: "anchor" },
+    ] };
+    const layout = layoutOf([leftImage, ordered(item(p("first")), item(p("second")))]);
+    const image = layout.anchoredObjects?.[0];
+    if (!image) throw new Error("no image");
+    const ops = await recordDrawOps(() => buildPdf(layout, exportEditor));
+    for (const number of ["1.", "2."]) {
+      const op = ops.find((candidate) => candidate.op === "text" && candidate["value"] === number);
+      expect(Number(op?.["x"]) / PT_PER_PX).toBeGreaterThanOrEqual(image.x + image.width);
+    }
+  });
+});

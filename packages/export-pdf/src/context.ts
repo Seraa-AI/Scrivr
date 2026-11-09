@@ -151,7 +151,7 @@ export function drawListMarker(
   theme: ResolvedTheme,
 ): void {
   const marker = listMarkerOf(block);
-  if (!marker || !block.listMarker || block.listMarkerX === undefined) return;
+  if (!marker || !block.listMarker) return;
   const baselinePx = marker.baseline;
   const color = parseCssColor(theme.listMarker);
   // A bullet takes only its line's size: it is drawn as the canvas's shape, so
@@ -161,7 +161,7 @@ export function drawListMarker(
     const box = bulletBox(marker.size);
     BULLET_PAINTERS[shape]({
       page,
-      left: block.listMarkerX * PT_PER_PX,
+      left: marker.x * PT_PER_PX,
       centerY: flipY(baselinePx - box.centerAboveBaseline, pageHeightPt),
       box,
       color,
@@ -170,7 +170,7 @@ export function drawListMarker(
   }
   const markerFont = fontRegistry.resolve(marker.font, marker.resolution);
   page.drawText(fontRegistry.isUnicode(markerFont) ? stripInvisible(block.listMarker) : sanitizeForWinAnsi(block.listMarker), {
-    x: block.listMarkerX * PT_PER_PX,
+    x: marker.x * PT_PER_PX,
     y: flipY(baselinePx, pageHeightPt),
     size: marker.size * PT_PER_PX,
     font: markerFont,

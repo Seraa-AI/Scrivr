@@ -39,6 +39,8 @@ export function markerFaceOf(lines: readonly LayoutLine[]): ListMarkerFont {
 export interface ListMarker extends ListMarkerFont {
   /** Page-local y of the baseline the marker is drawn on. */
   baseline: number;
+  /** Absolute x of the marker's left edge: `listMarkerX`, or past a float that moves the number's line. */
+  x: number;
 }
 
 /**
@@ -55,7 +57,12 @@ export function listMarkerOf(block: LayoutBlock): ListMarker | null {
   const numberLine = block.lines[index];
   const top = block.y + block.lines.slice(0, index).reduce((sum, line) => sum + line.lineHeight, 0);
   if (!numberLine) return null;
-  return { ...(block.listMarkerFace ?? markerFaceOf(block.lines)), baseline: top + numberLine.ascent };
+  const lineStart = numberLine.segments?.[0]?.indentFrom ?? 0;
+  return {
+    ...(block.listMarkerFace ?? markerFaceOf(block.lines)),
+    baseline: top + numberLine.ascent,
+    x: lineStart > 0 ? Math.max(block.listMarkerX, block.x + lineStart) : block.listMarkerX,
+  };
 }
 
 type BulletPainter = (ctx: CanvasRenderingContext2D, left: number, centerY: number, fontSize: number) => void;
@@ -82,24 +89,24 @@ const BULLET_PAINTERS: Record<BulletShape, BulletPainter> = {
 };
 
 /**
- * Draws a block's list marker, with its left edge at `listMarkerX` on the
+ * Draws a block's list marker, with its left edge at its `x` on the
  * first line's baseline: a bullet as a shape, a number as text. Whatever
  * painter draws the block, the marker is drawn the same way.
  */
 export function drawListMarker(ctx: CanvasRenderingContext2D, block: LayoutBlock, theme: ResolvedTheme): void {
   const marker = listMarkerOf(block);
-  if (!marker || block.listMarker === undefined || block.listMarkerX === undefined) return;
-  const { font, size, baseline } = marker;
+  if (!marker || block.listMarker === undefined) return;
+  const { font, size, baseline, x } = marker;
   ctx.save();
   ctx.fillStyle = theme.listMarker;
   ctx.strokeStyle = theme.listMarker;
   const shape = bulletShape(block.listMarker);
   if (shape) {
-    BULLET_PAINTERS[shape](ctx, block.listMarkerX, baseline - bulletBox(size).centerAboveBaseline, size);
+    BULLET_PAINTERS[shape](ctx, x, baseline - bulletBox(size).centerAboveBaseline, size);
   } else {
     ctx.font = font;
     ctx.textAlign = "left";
-    ctx.fillText(block.listMarker, block.listMarkerX, baseline);
+    ctx.fillText(block.listMarker, x, baseline);
   }
   ctx.restore();
 }

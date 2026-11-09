@@ -77,6 +77,75 @@ function steps(items: string[]) {
   };
 }
 
+// ── List builders ─────────────────────────────────────────────────────────────
+
+type Block = Record<string, unknown>;
+
+/** A list item: its first paragraph, then any further paragraphs or nested lists. */
+function item(text: string | Block, ...rest: Block[]) {
+  return { type: "listItem", content: [typeof text === "string" ? para(text) : text, ...rest] };
+}
+
+function bullets(...items: Block[]) {
+  return { type: "bulletList", content: items };
+}
+
+function numbered(order: number, ...items: Block[]) {
+  return { type: "orderedList", attrs: { order }, content: items };
+}
+
+/** A paragraph that anchors a floating image before its text. */
+function withImage(image: Record<string, unknown>, text: string) {
+  return {
+    type: "paragraph",
+    attrs: { align: "left" as const },
+    content: [{ type: "image", attrs: image }, ...(text ? [{ type: "text", text }] : [])],
+  };
+}
+
+/** A two-column table whose wide cell holds a numbered list beside an image. */
+function listInCellTable() {
+  return {
+    type: "table",
+    attrs: { layout: "fixed", grid: [150, 360] },
+    content: [
+      {
+        type: "tableRow",
+        attrs: { repeatHeader: true },
+        content: [headerCell("Phase"), headerCell("Checklist")],
+      },
+      {
+        type: "tableRow",
+        content: [
+          bodyCell("Launch"),
+          {
+            type: "tableCell",
+            content: [
+              withImage(
+                { src: "https://picsum.photos/seed/listcell/90/90", alt: "Image in a list cell", width: 90, height: 90, wrapMode: "square", xAlign: "right" },
+                "Before the release:",
+              ),
+              numbered(
+                1,
+                item("Freeze the schema and tag the build"),
+                item("Run the layout suite on every supported font", bullets(item("macOS"), item("Linux"))),
+                item("Publish the notes"),
+              ),
+            ],
+          },
+        ],
+      },
+      {
+        type: "tableRow",
+        content: [
+          { type: "tableCell", content: [numbered(1000, item("Unbelievably"), item("Long words"))] },
+          bodyCell("In a narrow cell no tab stop past 1000. leaves the text room, so, as in Word, the text follows the number after a space."),
+        ],
+      },
+    ],
+  };
+}
+
 /**
  * Initial document loaded in the playground.
  * Showcases the full range of Scrivr formatting capabilities
@@ -456,99 +525,103 @@ const DEMO_DOC = {
       attrs: { level: 2, align: "left" },
       content: [{ type: "text", text: "Lists" }],
     },
+    para("Lists follow Word: each level is indented half an inch, the marker hangs a quarter inch before the text, and bullets and numbers change with depth. Press Tab to nest an item and Shift-Tab to lift it back out."),
+    bullets(
+      item(
+        "Canvas renders each page independently — no browser reflow",
+        bullets(
+          item(
+            "Second level uses a hollow bullet",
+            bullets(item("Third level uses a square"), item("and the pattern repeats as you nest deeper")),
+          ),
+          item("Back on the second level"),
+        ),
+      ),
+      item(
+        "An item can hold more than one paragraph",
+        para("This second paragraph belongs to the same item. It lines up with the text above and carries no marker of its own, like a continuation paragraph in Word."),
+      ),
+      item("Layout engine computes exact line breaks and page boundaries"),
+    ),
+    numbered(
+      1,
+      item(
+        "Write your document",
+        numbered(
+          1,
+          item("Numbers at the second level are letters", numbered(1, item("and roman numerals at the third"), item("counting on from there"))),
+          item("Each level counts on its own"),
+        ),
+      ),
+      item("Scrivr paginates automatically", bullets(item("Bullets can sit under a number"), item("and the outer count carries on after them"))),
+      item("Export to PDF or Word — the numbers, faces and indents match the screen"),
+    ),
     {
-      type: "bulletList",
-      content: [
-        {
-          type: "listItem",
-          content: [
-            {
-              type: "paragraph",
-              attrs: { align: "left" },
-              content: [
-                {
-                  type: "text",
-                  text: "Canvas renders each page independently — no browser reflow",
-                },
-              ],
-            },
-          ],
-        },
-        {
-          type: "listItem",
-          content: [
-            {
-              type: "paragraph",
-              attrs: { align: "left" },
-              content: [
-                {
-                  type: "text",
-                  text: "ProseMirror manages the document model, history, and schema",
-                },
-              ],
-            },
-          ],
-        },
-        {
-          type: "listItem",
-          content: [
-            {
-              type: "paragraph",
-              attrs: { align: "left" },
-              content: [
-                {
-                  type: "text",
-                  text: "Layout engine computes exact line breaks and page boundaries",
-                },
-              ],
-            },
-          ],
-        },
-      ],
+      type: "heading",
+      attrs: { level: 3, align: "left" },
+      content: [{ type: "text", text: "Wide numbers and marker faces" }],
     },
+    para("This list starts at 98. Once the number grows wider than its quarter-inch hang, the first line moves to the next tab stop instead of running into it, as in Word."),
+    numbered(
+      98,
+      item("Ninety-eight fits in the hang"),
+      item("Ninety-nine still fits"),
+      item("One hundred is wider than the hang, so this line steps to the next tab stop while the lines that wrap below it keep the item's indent, the way Word lays out a hanging indent."),
+    ),
+    numbered(
+      1,
+      item({
+        type: "paragraph",
+        attrs: { align: "left" },
+        content: [{ type: "text", marks: [{ type: "bold" }, { type: "fontSize", attrs: { size: 20 } }], text: "A number takes the face of its item's first text" }],
+      }),
+      item({
+        type: "paragraph",
+        attrs: { align: "left" },
+        content: [{ type: "text", marks: [{ type: "fontFamily", attrs: { family: "Georgia" } }], text: "This number is drawn in Georgia, on canvas and in the PDF" }],
+      }),
+    ),
     {
-      type: "orderedList",
-      attrs: { order: 1 },
-      content: [
-        {
-          type: "listItem",
-          content: [
-            {
-              type: "paragraph",
-              attrs: { align: "left" },
-              content: [{ type: "text", text: "Write your document" }],
-            },
-          ],
-        },
-        {
-          type: "listItem",
-          content: [
-            {
-              type: "paragraph",
-              attrs: { align: "left" },
-              content: [
-                { type: "text", text: "Scrivr paginates automatically" },
-              ],
-            },
-          ],
-        },
-        {
-          type: "listItem",
-          content: [
-            {
-              type: "paragraph",
-              attrs: { align: "left" },
-              content: [
-                {
-                  type: "text",
-                  text: "Export to PDF with a single command",
-                },
-              ],
-            },
-          ],
-        },
-      ],
+      type: "heading",
+      attrs: { level: 3, align: "left" },
+      content: [{ type: "text", text: "Lists beside images" }],
     },
+    numbered(
+      1,
+      item(
+        withImage(
+          { src: "https://picsum.photos/seed/listsquare/150/130", alt: "Square image beside a list", width: 150, height: 130, wrapMode: "square", xAlign: "left" },
+          "A square image anchored in a list item pushes the item, number and all, to its right: the number starts at the image's edge and the text at the next tab stop past it, as in Word.",
+        ),
+      ),
+      item("The next items stay beside the image until it ends, each with its number in front of its own text."),
+      item(
+        withImage(
+          { src: "https://picsum.photos/seed/listbreak/420/90", alt: "Top-and-bottom image in a list item", width: 420, height: 90, wrapMode: "top-bottom", xAlign: "center" },
+          "This item anchors a top-and-bottom image. Its number sits on the first line of text below the image, not in the gap beside it.",
+        ),
+      ),
+      item(withImage({ src: "https://picsum.photos/seed/listonly/100/70", alt: "Image alone in a list item", width: 100, height: 70, wrapMode: "square", xAlign: "right" }, "")),
+      item("The item above holds only a floating image. As in Word, it still keeps one line for its number."),
+    ),
+    {
+      type: "heading",
+      attrs: { level: 3, align: "left" },
+      content: [{ type: "text", text: "Lists in tables" }],
+    },
+    para("A list in a cell is numbered, nested and indented as it is in the body, and wraps around an image in that cell."),
+    listInCellTable(),
+    {
+      type: "heading",
+      attrs: { level: 3, align: "left" },
+      content: [{ type: "text", text: "Try it" }],
+    },
+    steps([
+      "Put the caret in a list item and press Tab, then Shift-Tab. The marker changes with depth (•, ◦, ▪ and 1., a., i.).",
+      "Change the font or size of an item's first word. Its number follows.",
+      "Drag the square image beside the list up or down. The numbers move past it and back, and the text follows them.",
+      "Export to PDF and to Word, and open the Word file. Levels, numbers, faces and indents match the screen.",
+    ]),
 
     // ── Tables ──────────────────────────────────────────────────────────────────
     {

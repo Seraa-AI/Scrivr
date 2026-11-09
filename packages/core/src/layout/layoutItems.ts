@@ -191,6 +191,15 @@ export function listMarkerXOf(textX: number, marker: MarkerPlacement): number {
   return textX - marker.hanging;
 }
 
+/**
+ * Where the marker starts, from the item's content-box edge: at its hang, or
+ * at the line's start on a first line a float moves `lineStart` in past the
+ * text's edge, and so past the hang.
+ */
+function markerStartOf(marker: MarkerPlacement, lineStart: number): number {
+  return lineStart > 0 ? marker.indentLeft + lineStart : marker.indentLeft - marker.hanging;
+}
+
 /** An item placed in a content box: where its text goes, its marker, and the style it is spaced by. */
 export interface ResolvedItem {
   /** The item's indent, bounded so an inch of the box is left for its text. */
@@ -256,6 +265,7 @@ export function itemSpacing(
  * leave less than `MIN_TEXT_AFTER_NUMBER` of the line, the text follows the
  * number after a space instead, as Word's `w:suff="space"` places it; what
  * Word does with a tab past the line's last usable stop is not documented.
+ * A float that moves the line `lineStart` in moves the number with it.
  */
 function markerFirstLineOffset(
   marker: MarkerPlacement,
@@ -263,13 +273,14 @@ function markerFirstLineOffset(
   measurer: TextMeasurerLike,
   ownIndent: number,
   blockWidth: number,
+  lineStart: number,
 ): number {
   const { font, size } = markerFaceOf(lines);
   const width = bulletShape(marker.text)
     ? bulletBox(size).size
     : measurer.measureWidth(marker.text, font);
-  const textStart = marker.indentLeft + ownIndent;
-  const markerEnd = marker.indentLeft - marker.hanging + width;
+  const textStart = marker.indentLeft + lineStart + ownIndent;
+  const markerEnd = markerStartOf(marker, lineStart) + width;
   if (markerEnd < textStart) return 0;
   const nextStop = (Math.floor(markerEnd / DEFAULT_TAB_STOP) + 1) * DEFAULT_TAB_STOP;
   const lineEnd = marker.indentLeft + blockWidth;
@@ -284,7 +295,7 @@ function markerFirstLineOffset(
  * block (around a float, on another page) reuses them, so its first line
  * keeps clear of the number and keeps a line for it.
  */
-export type FirstLineSettings = Pick<BlockLayoutOptions, "firstLineOffset" | "keepAnchorLine">;
+export type FirstLineSettings = Pick<BlockLayoutOptions, "firstLineOffset" | "firstLineOffsetAt" | "keepAnchorLine">;
 
 /**
  * Lays a block out with its list marker. The marker is sized by the first
@@ -299,12 +310,17 @@ export function measureWithMarker(
   marker: MarkerPlacement | undefined,
 ): { block: LayoutBlock; firstLine?: FirstLineSettings } {
   if (!marker) return { block: layoutBlock(node, options) };
-  const settingsFor = (firstLineOffset: number): FirstLineSettings =>
-    firstLineOffset > 0 ? { keepAnchorLine: true, firstLineOffset } : { keepAnchorLine: true };
-  const first = layoutBlock(node, { ...options, ...settingsFor(0) });
-  const offset = markerFirstLineOffset(marker, first.lines, options.measurer, ownFirstLineIndent(node), options.availableWidth);
-  const firstLine = settingsFor(offset);
-  const measured = offset > 0 ? layoutBlock(node, { ...options, ...firstLine }) : first;
+  const first = layoutBlock(node, { ...options, keepAnchorLine: true });
+  const offsetAt = (lineStart: number) =>
+    markerFirstLineOffset(marker, first.lines, options.measurer, ownFirstLineIndent(node), options.availableWidth, lineStart);
+  const offset = offsetAt(0);
+  const firstLine: FirstLineSettings = {
+    keepAnchorLine: true,
+    firstLineOffsetAt: offsetAt,
+    ...(offset > 0 ? { firstLineOffset: offset } : {}),
+  };
+  // A float beside the item can move its first line, and the push with it.
+  const measured = offset > 0 || options.lineSpaceProvider ? layoutBlock(node, { ...options, ...firstLine }) : first;
   return {
     block: { ...measured, listMarker: marker.text, listMarkerX: listMarkerXOf(options.x, marker), listMarkerFace: markerFaceOf(measured.lines) },
     firstLine,

@@ -422,6 +422,27 @@ describe("a first word that does not fit after its number (Word leaves the numbe
     editor.destroy();
   });
 
+  it("moves the number past a float on the item's left, and the text to the tab stop after it", () => {
+    const float: Json = { type: "paragraph", content: [
+      { type: "image", attrs: { src: "data:image/png;base64,AA==", width: 150, height: 200, wrapMode: "square", xAlign: "left" } },
+      { type: "text", text: "anchor" },
+    ] };
+    const l = runPipeline(schema.nodeFromJSON({ type: "doc", content: [float, ol(item("first"), item("second"))] }), {
+      pageConfig: defaultPageConfig, measurer: createMeasurer(), fontConfig,
+    });
+    const f = l.anchoredObjects?.[0];
+    if (!f) throw new Error("no float");
+    const blocks = l.pages.flatMap((page) => page.blocks);
+    for (const { text, number } of [{ text: "first", number: "1." }, { text: "second", number: "2." }]) {
+      const block = blockOf(blocks, text);
+      const marker = listMarkerOf(block);
+      const textX = block.x + firstLineStart(block);
+      expect(marker?.x).toBeGreaterThanOrEqual(f.x + f.width + ANCHORED_OBJECT_MARGIN - 0.5);
+      expect(textX).toBeGreaterThan((marker?.x ?? 0) + measureTextWidth(number, fontOf(block)));
+      expect((textX - defaultPageConfig.margins.left) % HALF_INCH).toBe(0);
+    }
+  });
+
   it("keeps the push past a wide number when a float moves the first word below it", () => {
     const word = "w".repeat(30);
     const float: Json = { type: "paragraph", content: [

@@ -347,15 +347,15 @@ export class LineBreaker {
       firstLineMayStayEmpty?: boolean;
       /**
        * How far the provider's first line is indented (a first-line indent or
-       * a list number). Narrowing the indent explains is not a float's, so it
-       * never moves a word below one.
+       * a list number), for a line starting `lineStart` in. Narrowing the
+       * indent explains is not a float's, so it never moves a word below one.
        */
-      firstLineIndent?: number;
+      firstLineIndent?: (lineStart: number) => number;
     },
   ): LayoutLine[] {
     if (!spans.length) return [];
 
-    const { defaultFontFamily, defaultFontSize, map, pageContext, lineSpaceProvider, startY = 0, firstLineMayStayEmpty = false, firstLineIndent = 0 } = options;
+    const { defaultFontFamily, defaultFontSize, map, pageContext, lineSpaceProvider, startY = 0, firstLineMayStayEmpty = false, firstLineIndent = noIndent } = options;
 
     const lines: LayoutLine[] = [];
     let currentLine: LayoutSpan[] = [];
@@ -445,13 +445,11 @@ export class LineBreaker {
       const fits = (segments: AvailableSegment[]) => segments.some((segment) => fitWidth <= segment.width);
       // The first line indent is still owed while no line holds text; a word
       // the indent alone keeps off the line stays, as a plain indent's does.
-      const indent = lines.some((line) => line.spans.some((span) => span.kind === "text")) ? 0 : firstLineIndent;
-      if (!currentLine.every(isAnchorSpan) || !currentLinePositioned || fitWidth > maxWidth - indent || fits(currentLineSegments)) return;
+      const indentAt = lines.some((line) => line.spans.some((span) => span.kind === "text")) ? noIndent : firstLineIndent;
+      if (!currentLine.every(isAnchorSpan) || !currentLinePositioned || fitWidth > maxWidth - indentAt(0) || fits(currentLineSegments)) return;
       // The provider spent the indent on the line the word leaves; the line it
       // moves to takes it instead.
-      const indented = (segments: AvailableSegment[]) => indent > 0
-        ? segments.map((segment, i) => i === 0 ? { x: segment.x + indent, width: Math.max(1, segment.width - indent) } : segment)
-        : segments;
+      const indented = (segments: AvailableSegment[]) => indentFirstSegment(segments, indentAt);
       // Look ahead for the first line with room, then jump there in one
       // spacer. Space that never opens (a fixed narrow column) leaves the
       // word where it is, to overflow as before.
@@ -853,6 +851,21 @@ interface BreakToken {
 }
 
 type Token = TextToken | ObjectToken | BreakToken;
+
+const noIndent = (): number => 0;
+
+/**
+ * Moves a first line's first segment in by its indent, which may depend on
+ * where a float starts the line. An indent wider than the line still moves
+ * the text: a list number that runs past the line keeps its text after it,
+ * overflowing, rather than drawn over it at the line's start.
+ */
+export function indentFirstSegment(segments: AvailableSegment[], indentAt: (lineStart: number) => number): AvailableSegment[] {
+  return segments.map((segment, index) => {
+    const indent = index === 0 ? indentAt(segment.x) : 0;
+    return indent > 0 ? { x: segment.x + indent, width: Math.max(1, segment.width - indent), indentFrom: segment.x } : segment;
+  });
+}
 
 function resolveLineSpace(
   provider: LineSpaceProvider | undefined,

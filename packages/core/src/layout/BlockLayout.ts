@@ -6,7 +6,7 @@ import type { FontModifier } from "../extensions/types";
 import type { TextMeasurerLike } from "./TextMeasurer";
 import type { InlineRegistry } from "./BlockRegistry";
 import { normalizeImageAttrs, type WrapMode } from "./AnchoredObjects";
-import { LineBreaker, LayoutLine, InputSpan, spanEndDocPos, computeObjectRenderY, type InlineObjectVerticalAlign, type LineSpaceProvider } from "./LineBreaker";
+import { LineBreaker, LayoutLine, InputSpan, indentFirstSegment, spanEndDocPos, computeObjectRenderY, type InlineObjectVerticalAlign, type LineSpaceProvider } from "./LineBreaker";
 import { CharacterMap } from "./CharacterMap";
 import {
   FontConfig,
@@ -278,6 +278,11 @@ export interface BlockLayoutOptions {
    */
   firstLineOffset?: number;
   /**
+   * The first-line offset for a first line a float moves `lineStart` in from
+   * the block's left; `firstLineOffset` holds where nothing moves it.
+   */
+  firstLineOffsetAt?: (lineStart: number) => number;
+  /**
    * A paragraph holding only floating images' anchors still takes one line.
    * Set for a list item's first block, whose number sits on that line.
    */
@@ -467,6 +472,7 @@ export function layoutBlock(
     inlineRegistry,
     fonts,
     firstLineOffset = 0,
+    firstLineOffsetAt,
     keepAnchorLine = false,
   } = options;
 
@@ -560,12 +566,15 @@ export function layoutBlock(
   const breaker = new LineBreaker(measurer);
 
   // First-line indent: reduce first line's width so text wraps earlier.
-  const firstLineIndent = ownFirstLineIndent(node) + firstLineOffset;
+  const ownIndent = ownFirstLineIndent(node);
+  const firstLineIndentAt = (lineStart: number): number =>
+    ownIndent + (lineStart > 0 && firstLineOffsetAt ? firstLineOffsetAt(lineStart) : firstLineOffset);
+  const indentsFirstLine = ownIndent + firstLineOffset > 0 || firstLineOffsetAt !== undefined;
 
   // Wrap the line-space provider to apply the indent on the first line.
   let firstLineConsumed = false;
   const indentAwareLineSpace: LineSpaceProvider | undefined =
-    firstLineIndent > 0
+    indentsFirstLine
       ? (lineY: number, lineHeight: number) => {
           // Forward the real line height so the float-exclusion probe inside the
           // provider tests the line's true vertical extent (a 1px probe leaves a
@@ -575,17 +584,7 @@ export function layoutBlock(
           // to the first line below it that holds text.
           if (!firstLineConsumed && base.segments.length > 0) {
             firstLineConsumed = true;
-            return {
-              ...base,
-              // An indent wider than the line still moves the text: a list
-              // number that runs past the line keeps its text after it,
-              // overflowing, rather than drawn over it at the line's start.
-              segments: base.segments.map((segment, index) =>
-                index === 0
-                  ? { x: segment.x + firstLineIndent, width: Math.max(1, segment.width - firstLineIndent) }
-                  : segment,
-              ),
-            };
+            return { ...base, segments: indentFirstSegment(base.segments, firstLineIndentAt) };
           }
           return base;
         }
@@ -602,8 +601,8 @@ export function layoutBlock(
       defaultFontFamily: parsedBase.family,
       defaultFontSize: parseFloat(parsedBase.size),
       ...(indentAwareLineSpace ? { lineSpaceProvider: indentAwareLineSpace, startY: y } : {}),
-      ...(firstLineOffset > 0 ? { firstLineMayStayEmpty: true } : {}),
-      ...(firstLineIndent > 0 ? { firstLineIndent } : {}),
+      ...(firstLineOffset > 0 || firstLineOffsetAt ? { firstLineMayStayEmpty: true } : {}),
+      ...(indentsFirstLine ? { firstLineIndent: firstLineIndentAt } : {}),
     },
   );
 
