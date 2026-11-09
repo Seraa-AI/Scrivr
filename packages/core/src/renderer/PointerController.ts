@@ -7,7 +7,8 @@ import {
   computeNewSize,
 } from "./ResizeController";
 import { normalizeImageAttrs, type AnchoredObjectPlacement } from "../layout/AnchoredObjects";
-import type { LayoutBlock } from "../layout/BlockLayout";
+import type { CellSubBlock, LayoutBlock } from "../layout/BlockLayout";
+import { CELL_PADDING_H } from "../layout/TableLayoutEngine";
 import { resolvePointOwner, type PointOwner } from "../layout/pointOwnership";
 import {
   type PageFlowMetrics,
@@ -112,6 +113,8 @@ export class PointerController {
     startYOffset: number;
     /** wrapMode at pointerdown. */
     wrapMode: string;
+    /** The table cell the image is laid out in at pointerdown; absent in the body. */
+    cellPos?: number;
     /** Image's docPos rect at drag start (for posBelow / posAbove fallback). */
     rect: { x: number; y: number; width: number; height: number; page: number };
     /** Pointer position relative to the image's top-left at pointerdown. */
@@ -375,9 +378,12 @@ export class PointerController {
     const resizeHit = this.hitHandleAt(hit.docX, hit.docY, hit.page);
     if (resizeHit) return resizeHit.cursor;
 
-    return this.ownerAt(hit.docX, hit.docY, hit.page).kind === "text"
-      ? "text"
-      : "move";
+    const owner = this.ownerAt(hit.docX, hit.docY, hit.page);
+    if (owner.kind === "text") return "text";
+    // A behind image under a table leaves the point to the cell, as a press does.
+    const underTable = owner.kind === "anchored" && owner.object.wrapMode === "behind" &&
+      this.deps.editor.resolveHitTarget(hit.docX, hit.docY, hit.page) !== null;
+    return underTable ? "text" : "move";
   }
 
 
@@ -430,7 +436,14 @@ export class PointerController {
     // precedes body hit testing.
     if (!editor.readOnly && this.deps.onPageClick?.(page, docX, docY, this.clickCount)) return;
 
-    const semanticHit = editor.resolveHitTarget(docX, docY, page);
+    // An image painted over the point owns it, as the hover cursor promised;
+    // resize handles are chrome over the selected node. Either outranks the
+    // block underneath, a table cell included. A behind image paints under
+    // the table, so the cell keeps the click.
+    const owner = this.ownerAt(docX, docY, page);
+    const resizeHit = this.hitHandleAt(docX, docY, page);
+    const paintedOver = owner.kind === "anchored" && owner.object.wrapMode !== "behind";
+    const semanticHit = paintedOver || resizeHit ? null : editor.resolveHitTarget(docX, docY, page);
     if (semanticHit) {
       // Pass the authoritative click count — `event.detail` isn't reliable on
       // pointerdown, so a gesture that treats double/triple-click specially (a
@@ -444,7 +457,6 @@ export class PointerController {
     }
 
     // Resize handle — mutation, block in read-only
-    const resizeHit = this.hitHandleAt(docX, docY, page);
     if (resizeHit) {
       if (editor.readOnly) return;
       const sel = this.activeSelection();
@@ -471,9 +483,8 @@ export class PointerController {
     // horizontal movement updates `xAlign: "custom"` + `x`; vertical
     // movement updates the docPos. Diagonal drag commits both atomically
     // via Editor.moveAndUpdateNode.
-    // Resolved once for this pointerdown and reused below, so the anchored and
+    // `owner` is resolved once for this pointerdown, so the anchored and
     // inline branches cannot reach different conclusions about the same point.
-    const owner = this.ownerAt(docX, docY, page);
     const anchoredHit = owner.kind === "anchored" ? owner.object : null;
     if (anchoredHit) {
       if (editor.readOnly) return;
@@ -493,6 +504,7 @@ export class PointerController {
         startImageGlobalY: anchoredHit.globalY,
         startYOffset: paintedYOffset(anchoredHit),
         wrapMode: anchoredHit.wrapMode,
+        ...(anchoredHit.cellPos !== undefined ? { cellPos: anchoredHit.cellPos } : {}),
         rect: {
           x: anchoredHit.x,
           y: anchoredHit.y,
@@ -840,6 +852,8 @@ export class PointerController {
       return;
     }
 
+    if (finalHit && this.commitContainerChange(finalHit)) return;
+
     const { docPos, startYOffset } = this.anchoredDrag;
     const sourcePage = this.anchoredDrag.rect.page;
     const samePage = !finalHit || finalHit.page === sourcePage;
@@ -875,7 +889,7 @@ export class PointerController {
       const attrs: Record<string, unknown> = {};
       if (!horizontallyStill && newX !== null) {
         attrs["xAlign"] = "custom";
-        attrs["x"] = newX;
+        attrs["x"] = this.contentRelativeX(newX);
       }
       if (!verticallyStill) {
         attrs["yOffset"] = newYOffset;
@@ -929,7 +943,7 @@ export class PointerController {
     if (!horizontallyStill && !verticallyStill && newX !== null && drop) {
       editor.moveAndUpdateNode(docPos, drop.docPos, {
         xAlign: "custom",
-        x: newX,
+        x: this.contentRelativeX(newX),
         yOffset: crossPageYOffset,
       });
       commitPath = "moveAndUpdateNode";
@@ -937,7 +951,7 @@ export class PointerController {
       editor.moveAndUpdateNode(docPos, drop.docPos, { yOffset: crossPageYOffset });
       commitPath = "moveAndUpdateNode";
     } else if (newX !== null) {
-      editor.setNodeAttrs(docPos, { xAlign: "custom", x: newX });
+      editor.setNodeAttrs(docPos, { xAlign: "custom", x: this.contentRelativeX(newX) });
       commitPath = "setNodeAttrs";
     } else {
       return;
@@ -979,6 +993,71 @@ export class PointerController {
     const proposedX = this.anchoredDrag.startImageX + dx;
     const clampedX = Math.max(0, Math.min(proposedX, pageWidth - attrs.width));
     return clampedX;
+  }
+
+  /**
+   * A drop over a table cell anchors the image in that cell's paragraph
+   * nearest the drop, laid out inside the cell as Word does; a drop outside
+   * every table takes an image out of its cell into the body. In both, the
+   * image lands where it was dropped. Returns false only for a body image
+   * dropped in the body, which the body's own drop rules handle.
+   */
+  private commitContainerChange(hit: { page: number; docX: number; docY: number }): boolean {
+    if (!this.anchoredDrag) return false;
+    const { editor } = this.deps;
+    const { docPos, grabOffsetX, grabOffsetY } = this.anchoredDrag;
+    const ghostX = hit.docX - grabOffsetX;
+    const ghostY = hit.docY - grabOffsetY;
+    const ownParagraph = editor.getState().doc.resolve(docPos).start();
+
+    const target = this.cellAt(hit.page, hit.docX, hit.docY);
+    if (target) {
+      // A cell with no paragraph (only a nested table) cannot take the image.
+      const paragraph = nearestCellParagraph(target.row, target.cell, ghostY);
+      if (!paragraph) return true;
+      const attrs = {
+        xAlign: "custom",
+        x: ghostX - (target.cell.x + CELL_PADDING_H),
+        yOffset: ghostY - (target.row.y + paragraph.y),
+      };
+      const anchorPos = paragraph.nodePos + 1;
+      if (anchorPos === ownParagraph) editor.setNodeAttrs(docPos, attrs);
+      else editor.moveAndUpdateNode(docPos, anchorPos, attrs);
+      dragDebugLog(editor, "commit", { commitPath: "cell", docPos, newDocPos: anchorPos, cellPos: target.cell.cellPos });
+      return true;
+    }
+
+    if (this.anchoredDrag.cellPos === undefined) return false;
+    // An image leaving its cell needs a body paragraph on the drop page; with
+    // none, the drop does nothing rather than move it inside its cell.
+    const ghostGlobalY = this.pageLocalYToGlobal(hit.page, ghostY);
+    const nearest = this.nearestAnchorStartingOn(hit.page, ghostGlobalY, () => false);
+    if (!nearest) return true;
+    editor.moveAndUpdateNode(docPos, nearest.docPos, {
+      xAlign: "custom",
+      x: this.contentRelativeX(ghostX),
+      yOffset: ghostGlobalY - nearest.globalY,
+    });
+    dragDebugLog(editor, "commit", { commitPath: "leaveCell", docPos, newDocPos: nearest.docPos });
+    return true;
+  }
+
+  /**
+   * A body image's custom `x` is measured from the content area's left edge,
+   * Word's `relativeFrom="column"`; drag math works in page-local x.
+   */
+  private contentRelativeX(pageX: number): number {
+    return pageX - this.deps.editor.layout.pageConfig.margins.left;
+  }
+
+  /** The table row and cell under a page-local point, if any. */
+  private cellAt(pageNumber: number, x: number, y: number): { row: LayoutBlock; cell: CellSubBlock } | null {
+    for (const row of this.deps.editor.layout.pages?.[pageNumber - 1]?.blocks ?? []) {
+      if (row.kind !== "tableRow" || y < row.y || y >= row.y + row.height) continue;
+      const cell = row.cells?.find((c) => x >= c.x && x < c.x + c.width);
+      if (cell) return { row, cell };
+    }
+    return null;
   }
 
   private resolveSamePageReanchor(
@@ -1305,4 +1384,14 @@ export class PointerController {
     }
   }
 
+}
+
+/** The paragraph in a cell whose top is nearest a page-local y; an image anchors only in a textblock. */
+function nearestCellParagraph(row: LayoutBlock, cell: CellSubBlock, y: number): LayoutBlock | null {
+  let best: LayoutBlock | null = null;
+  for (const block of cell.blocks) {
+    if (!block.node.isTextblock) continue;
+    if (!best || Math.abs(row.y + block.y - y) < Math.abs(row.y + best.y - y)) best = block;
+  }
+  return best;
 }

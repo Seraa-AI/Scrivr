@@ -560,3 +560,34 @@ describe("LineBreaker — hardBreak", () => {
     }
   });
 });
+
+describe("LineBreaker — a word too wide for the gap beside a float", () => {
+  // A float takes the left 250px of a 300px column from y=25 to y=100,
+  // leaving a 50px gap on its right.
+  const lineSpaceProvider = (y: number, lineHeight = 1) =>
+    y + lineHeight > 25 && y < 100 ? { segments: [{ x: 250, width: 50 }] } : { segments: [{ x: 0, width: 300 }] };
+  const lineTops = (lines: ReturnType<LineBreaker["breakIntoLines"]>) => {
+    let top = 0;
+    return lines.map((line) => { const at = top; top += line.lineHeight; return { at, line }; });
+  };
+
+  it.each([
+    ["starts a line", "extraordinarily tail"],
+    ["soft-wraps onto a line", "aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq extraordinarily tail"],
+  ])("goes below the float when it %s, never into the gap", (_, text) => {
+    const lb = new LineBreaker(makeMeasurer());
+    const lines = lb.breakIntoLines(
+      [{ kind: "text" as const, text, font: "14px serif", docPos: 1 }],
+      300,
+      { defaultFontFamily: "serif", defaultFontSize: 14, lineSpaceProvider },
+    );
+    for (const { at, line } of lineTops(lines)) {
+      for (const span of line.spans) {
+        if (span.kind !== "text" || !span.text.startsWith("extraordinarily")) continue;
+        expect(at + line.lineHeight <= 25 || at >= 100).toBe(true);
+        expect(span.x + span.width).toBeLessThanOrEqual(300);
+      }
+    }
+  });
+});
+

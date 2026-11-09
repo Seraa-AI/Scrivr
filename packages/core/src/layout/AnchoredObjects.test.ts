@@ -231,25 +231,23 @@ describe("resolveImageX", () => {
     ).toBe(contentX + (contentWidth - width) / 2);
   });
 
-  it("xAlign:custom + x inside content → returns x unchanged", () => {
+  it("xAlign:custom + x → measured from the content area's left edge, as Word's column is", () => {
     expect(
       resolveImageX({ width, xAlign: "custom", x: 100 }, contentX, contentWidth, pageWidth),
-    ).toBe(100);
+    ).toBe(contentX + 100);
   });
 
-  it("xAlign:custom + x in left margin → allowed (extends into margin)", () => {
-    // 20 is inside [0, contentX=40] — i.e., left margin band. Word allows it.
+  it("xAlign:custom + negative x → allowed into the left margin", () => {
     expect(
-      resolveImageX({ width, xAlign: "custom", x: 20 }, contentX, contentWidth, pageWidth),
-    ).toBe(20);
+      resolveImageX({ width, xAlign: "custom", x: -20 }, contentX, contentWidth, pageWidth),
+    ).toBe(contentX - 20);
   });
 
-  it("xAlign:custom + x in right margin → allowed (extends into margin)", () => {
-    // 480 + 300 = 780, inside [pageWidth - margin = 760, pageWidth = 800]
-    // → image extends into right margin but stays within page.
+  it("xAlign:custom + x reaching the right margin → allowed (extends into margin)", () => {
+    // contentX + 440 + 300 = 780, inside [pageWidth - margin = 760, pageWidth = 800].
     expect(
-      resolveImageX({ width, xAlign: "custom", x: 480 }, contentX, contentWidth, pageWidth),
-    ).toBe(480);
+      resolveImageX({ width, xAlign: "custom", x: 440 }, contentX, contentWidth, pageWidth),
+    ).toBe(contentX + 440);
   });
 
   it("xAlign:custom + x past page right edge → clamped to pageWidth - width", () => {

@@ -541,7 +541,7 @@ const imageDocxHandler: DocxNodeHandler = (node, _children, ctx) => {
     yOffset: typeof node.attrs["yOffset"] === "number" ? node.attrs["yOffset"] : 0,
     marginPx: typeof node.attrs["margin"] === "number" ? node.attrs["margin"] : 12,
   };
-  if (typeof node.attrs["x"] === "number") anchor.xCustom = node.attrs["x"];
+  if (anchor.xAlign === "custom" && typeof node.attrs["x"] === "number") anchor.xCustom = node.attrs["x"];
 
   return xml("w:r", undefined, [
     buildAnchoredDrawing(ctx, record.filename, relId, width, height, anchor),

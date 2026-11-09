@@ -29,6 +29,7 @@ import {
 } from "../test-utils";
 import type { PointerControllerSetup } from "../test-utils";
 import type { AnchoredObjectPlacement } from "../layout/AnchoredObjects";
+import { StarterKit } from "../extensions/StarterKit";
 
 // ── Local test fixtures ──────────────────────────────────────────────────────
 
@@ -307,7 +308,7 @@ describe("PointerController — drag UX", () => {
       const words = "word ".repeat(40).trim();
       const image = (height: number) => ({
         type: "image",
-        attrs: { src: "x", wrapMode: "square", xAlign: "left", width: 150, height },
+        attrs: { src: "x", wrapMode: "square", xAlign: "left", width: 400, height },
       });
       setup = makePointerControllerSetup({
         content: {
@@ -605,6 +606,137 @@ describe("PointerController — drag UX", () => {
       mousedown(setup.container, SQUARE_RECT.x + 40, SQUARE_RECT.y + 40);
       expect(setup.controller.pendingAnchoredDrag).not.toBeNull();
       expect(selectNode).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe("a drop over a table anchors the image in the cell under it, as Word does", () => {
+    const cell = (text: string) => ({ type: "tableCell", content: [{ type: "paragraph", content: [{ type: "text", text }] }] });
+    const tableRows = Array.from({ length: 4 }, (_, r) => ({
+      type: "tableRow",
+      content: [cell(`Row ${r} first`), cell(`Row ${r} second`)],
+    }));
+    const image = { type: "image", attrs: { src: "x", wrapMode: "square", xAlign: "left", width: 80, height: 60 } };
+
+    function cellUnder(x: number, y: number) {
+      for (const block of setup.editor.layout.pages[0]?.blocks ?? []) {
+        if (block.kind !== "tableRow" || y < block.y || y >= block.y + block.height) continue;
+        const hit = block.cells?.find((c) => x >= c.x && x < c.x + c.width);
+        if (hit) return { block, cell: hit };
+      }
+      throw new Error("no cell there");
+    }
+
+    function drag(from: AnchoredObjectPlacement, toX: number, toY: number): void {
+      const grabX = from.x + 10;
+      const grabY = from.y + 10;
+      mousedown(setup.container, grabX, grabY);
+      mousemove(toX, toY);
+      mouseup(toX, toY);
+    }
+
+    it("a body image dropped on a cell is laid out in that cell, where it was dropped", () => {
+      setup = makePointerControllerSetup({
+        extensions: [StarterKit.configure({ table: true })],
+        content: {
+          type: "doc",
+          content: [
+            { type: "paragraph", content: [{ type: "text", text: "Lead" }, image] },
+            { type: "paragraph", content: [{ type: "text", text: "Spacer ".repeat(30) }] },
+            { type: "table", content: tableRows },
+          ],
+        },
+      });
+      const before = setup.editor.layout.anchoredObjects?.[0];
+      if (!before) throw new Error("no image");
+      const target = cellUnder(400, (setup.editor.layout.pages[0]?.blocks.at(-2)?.y ?? 0) + 5);
+      const dropX = target.cell.x + target.cell.width / 2;
+      const dropY = target.block.y + 20;
+      drag(before, dropX, dropY);
+
+      const after = setup.editor.layout.anchoredObjects?.[0];
+      if (!after) throw new Error("image vanished");
+      expect(after.cellPos).toBe(cellUnder(dropX, dropY).cell.cellPos);
+      expect(after.page).toBe(before.page);
+      expect(after.y).toBeCloseTo(dropY - 10, 6);
+      expect(after.x).toBeCloseTo(dropX - 10, 6);
+    });
+
+    it("a drop on a cell with no paragraph of its own leaves the image as it was", () => {
+      const nested = { type: "table", content: [{ type: "tableRow", content: [cell("Inner a"), cell("Inner b")] }] };
+      setup = makePointerControllerSetup({
+        extensions: [StarterKit.configure({ table: true })],
+        content: {
+          type: "doc",
+          content: [
+            { type: "table", content: [
+              { type: "tableRow", content: [{ type: "tableCell", content: [{ type: "paragraph", content: [{ type: "text", text: "In cell" }, image] }] }, cell("Other")] },
+              { type: "tableRow", content: [{ type: "tableCell", content: [nested] }, cell("Beside nested")] },
+            ] },
+          ],
+        },
+      });
+      const before = setup.editor.layout.anchoredObjects?.[0];
+      if (!before?.cellPos) throw new Error("image not in a cell");
+      const docBefore = setup.editor.getState().doc;
+      const rows = (setup.editor.layout.pages[0]?.blocks ?? []).filter((b) => b.kind === "tableRow");
+      const nestedRow = rows.find((b) => b.node.textContent.includes("Beside nested"));
+      const nestedCell = nestedRow?.cells?.[0];
+      if (!nestedRow || !nestedCell) throw new Error("no nested cell");
+      drag(before, nestedCell.x + 20, nestedRow.y + nestedRow.height - 3);
+
+      const after = setup.editor.layout.anchoredObjects?.[0];
+      expect(after?.docPos).toBe(before.docPos);
+      expect(after?.node.attrs).toEqual(before.node.attrs);
+      expect(setup.editor.getState().doc.textContent).toBe(docBefore.textContent);
+    });
+
+    it("an image dragged out of a cell into the body is anchored in the body again", () => {
+      setup = makePointerControllerSetup({
+        extensions: [StarterKit.configure({ table: true })],
+        content: {
+          type: "doc",
+          content: [
+            { type: "table", content: [{ type: "tableRow", content: [{ type: "tableCell", content: [{ type: "paragraph", content: [{ type: "text", text: "In cell" }, image] }] }, cell("Other")] }, ...tableRows] },
+            { type: "paragraph", content: [{ type: "text", text: "After ".repeat(60) }] },
+          ],
+        },
+      });
+      const before = setup.editor.layout.anchoredObjects?.[0];
+      if (!before?.cellPos) throw new Error("image not in a cell");
+      const after = setup.editor.layout.pages[0]?.blocks.at(-1);
+      if (!after) throw new Error("no paragraph after");
+      drag(before, before.x + 10, after.y + 30);
+
+      const landed = setup.editor.layout.anchoredObjects?.[0];
+      if (!landed) throw new Error("image vanished");
+      expect(landed.cellPos).toBeUndefined();
+      // The emptied row shrinks and the text below moves up; the image keeps
+      // its place relative to the paragraph it was dropped on.
+      expect(landed.globalY - landed.anchorGlobalY).toBeCloseTo(after.y + 30 - 10 - after.y, 6);
+    });
+  });
+
+  describe("a sideways drag stores x from the content area's left edge, as Word's column does", () => {
+    it("the stored x plus the left margin is where the image paints", () => {
+      setup = makePointerControllerSetup({
+        content: {
+          type: "doc",
+          content: [{ type: "paragraph", content: [
+            { type: "text", text: "Lead " },
+            { type: "image", attrs: { src: "x", wrapMode: "square", xAlign: "left", width: 80, height: 60 } },
+          ] }],
+        },
+      });
+      const before = setup.editor.layout.anchoredObjects?.[0];
+      if (!before) throw new Error("no image");
+      mousedown(setup.container, before.x + 10, before.y + 10);
+      mousemove(before.x + 110, before.y + 10);
+      mouseup(before.x + 110, before.y + 10);
+
+      const after = setup.editor.layout.anchoredObjects?.[0];
+      if (!after) throw new Error("image vanished");
+      expect(after.x).toBeCloseTo(before.x + 100, 6);
+      expect(after.node.attrs["x"]).toBeCloseTo(after.x - setup.editor.layout.pageConfig.margins.left, 6);
     });
   });
 });

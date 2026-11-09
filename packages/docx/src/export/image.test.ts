@@ -191,6 +191,17 @@ describe("image DOCX export", () => {
     expect(documentXml).not.toContain("<wp:align>");
   });
 
+  it("a named alignment wins over a leftover x, as layout reads it", async () => {
+    const editor = new ServerEditor();
+    setImageDoc(editor, { wrapMode: "square", xAlign: "right", x: 200 });
+
+    const { bytes } = await exportDocx(editor);
+    const documentXml = readText(readZip(bytes), "word/document.xml");
+
+    expect(documentXml).toContain("<wp:align>right</wp:align>");
+    expect(documentXml).not.toContain("<wp:posOffset>1905000</wp:posOffset>");
+  });
+
   it("dedupes identical srcs — only one media part + rel per unique src", async () => {
     const editor = new ServerEditor();
     editor.setContent({

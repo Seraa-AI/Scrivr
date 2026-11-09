@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import type { Node, Schema } from "prosemirror-model";
 import {
   runPipeline,
   buildBlockFlow,
@@ -1137,6 +1138,13 @@ describe("runPipeline — pageConfig.fontFamily", () => {
 
 // ── Float layout (wrapping mode) ───────────────────────────────────────────────
 
+/** An image node from the StarterKit schema. */
+function imageNode(schema: Schema, attrs: Record<string, unknown>): Node {
+  const type = schema.nodes["image"];
+  if (!type) throw new Error("no image node");
+  return type.create(attrs);
+}
+
 describe("runPipeline — float image wrapping", () => {
   // Long text to force several wrapped lines in the constrained content width.
   const longText = "word ".repeat(60).trim(); // 60 words × 5 chars = ~300 chars, ~6+ lines
@@ -1599,13 +1607,13 @@ describe("runPipeline — float image wrapping", () => {
     expect(cachedTail.y).toBe(freshTail.y);
   });
 
-  it("float stacking: two same-side floats do not overlap each other", () => {
+  it("float stacking: with no room beside it, a second same-side float goes below the first", () => {
     // Fix 1: downward scan. A second square-left float anchored near the first
     // must be pushed below it, not placed at the same Y.
     const { schema, fontConfig } = buildStarterKitContext();
     const measurer = createMeasurer();
-    const img1 = schema.nodes["image"]!.create({ src: "", width: 150, height: 100, wrappingMode: "square-left" });
-    const img2 = schema.nodes["image"]!.create({ src: "", width: 150, height: 100, wrappingMode: "square-left" });
+    const img1 = imageNode(schema, { src: "", width: 400, height: 100, wrappingMode: "square-left" });
+    const img2 = imageNode(schema, { src: "", width: 400, height: 100, wrappingMode: "square-left" });
     // Both anchors are in adjacent paragraphs — without the fix they'd both
     // land at approximately the same Y and visually overlap.
     const para1 = schema.node("paragraph", null, [img1, schema.text("first float text here")]);
@@ -1619,6 +1627,30 @@ describe("runPipeline — float image wrapping", () => {
     const [f1, f2] = floats as [typeof floats[0], typeof floats[0]];
     // The second float must start at or below the bottom of the first.
     expect(f2!.y).toBeGreaterThanOrEqual(f1!.y + f1!.height - 0.001);
+  });
+
+  it("float stacking: with room beside it, a second same-side float sits beside the first, as Word does", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const img1 = imageNode(schema, { src: "", width: 150, height: 100, wrapMode: "square", xAlign: "left" });
+    const img2 = imageNode(schema, { src: "", width: 150, height: 100, wrapMode: "square", xAlign: "left" });
+    const para = schema.node("paragraph", null, [img1, img2, schema.text("text beside both images")]);
+    const layout = runPipeline(schema.node("doc", null, [para]), { pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer() });
+    const [f1, f2] = layout.anchoredObjects ?? [];
+    if (!f1 || !f2) throw new Error("expected two floats");
+    expect(f2.globalY).toBe(f1.globalY);
+    expect(f2.x).toBe(f1.x + f1.width);
+  });
+
+  it("float stacking: a right-aligned float moves left of the one it would cover", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const img1 = imageNode(schema, { src: "", width: 150, height: 100, wrapMode: "square", xAlign: "right" });
+    const img2 = imageNode(schema, { src: "", width: 150, height: 100, wrapMode: "square", xAlign: "right" });
+    const para = schema.node("paragraph", null, [img1, img2, schema.text("text beside both images")]);
+    const layout = runPipeline(schema.node("doc", null, [para]), { pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer() });
+    const [f1, f2] = layout.anchoredObjects ?? [];
+    if (!f1 || !f2) throw new Error("expected two floats");
+    expect(f2.globalY).toBe(f1.globalY);
+    expect(f2.x + f2.width).toBe(f1.x);
   });
 
   it("float Y reconciliation: float y tracks anchor block after Pass 3 yDelta shift", () => {
@@ -1683,9 +1715,10 @@ describe("runPipeline — float image wrapping", () => {
       pageHeight: 300,
       margins: { top: 20, right: 20, bottom: 20, left: 20 },
     };
-    // pageBottom = 300 - 20 = 280. Two floats each 160px tall stacked = 20 + 160 + 160 = 340 > 280.
-    const img1 = schema.nodes["image"]!.create({ src: "", width: 100, height: 160, wrappingMode: "square-left" });
-    const img2 = schema.nodes["image"]!.create({ src: "", width: 100, height: 160, wrappingMode: "square-left" });
+    // pageBottom = 300 - 20 = 280. Two floats each 160px tall stacked = 20 + 160 + 160 = 340 > 280,
+    // and too wide to sit side by side in the 260px column.
+    const img1 = imageNode(schema, { src: "", width: 160, height: 160, wrappingMode: "square-left" });
+    const img2 = imageNode(schema, { src: "", width: 160, height: 160, wrappingMode: "square-left" });
     const para1 = schema.node("paragraph", null, [img1, schema.text("first paragraph text")]);
     const para2 = schema.node("paragraph", null, [img2, schema.text("second paragraph text")]);
     const layout = runPipeline(
@@ -1719,8 +1752,8 @@ describe("runPipeline — float image wrapping", () => {
       pageHeight: 300,
       margins: { top: 20, right: 20, bottom: 20, left: 20 },
     };
-    const img1 = schema.nodes["image"]!.create({ src: "", width: 100, height: 160, wrappingMode: "square-left" });
-    const img2 = schema.nodes["image"]!.create({ src: "", width: 100, height: 160, wrappingMode: "square-left" });
+    const img1 = imageNode(schema, { src: "", width: 160, height: 160, wrappingMode: "square-left" });
+    const img2 = imageNode(schema, { src: "", width: 160, height: 160, wrappingMode: "square-left" });
     const para1 = schema.node("paragraph", null, [img1, schema.text("first para")]);
     const para2 = schema.node("paragraph", null, [img2, schema.text("second para")]);
     const layout = runPipeline(
@@ -2054,12 +2087,8 @@ describe("runPipeline — yOffset (Phase 1)", () => {
     // anchor-bottom against anchor-bottom. With image1.yOffset=100, image2
     // should stack against image1's painted bottom (anchor + 100 + height),
     // not its anchor bottom.
-    const img1 = schema.nodes["image"]!.create({
-      src: "", width: 100, height: 80, wrapMode: "square", yOffset: 100,
-    });
-    const img2 = schema.nodes["image"]!.create({
-      src: "", width: 100, height: 80, wrapMode: "square",
-    });
+    const img1 = imageNode(schema, { src: "", width: 400, height: 80, wrapMode: "square", yOffset: 100 });
+    const img2 = imageNode(schema, { src: "", width: 400, height: 80, wrapMode: "square" });
     const para1 = schema.node("paragraph", null, [img1, schema.text("first")]);
     const para2 = schema.node("paragraph", null, [img2, schema.text("second")]);
     const layout = runPipeline(

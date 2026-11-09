@@ -186,7 +186,7 @@ describe("float beside a table — the table moves below the float", () => {
   it("6: a float wholly in the page margin leaves the table in place", () => {
     const width = defaultPageConfig.margins.left - ANCHORED_OBJECT_MARGIN - 8;
     const l = layout(docOf(
-      para("Anchor", image({ wrapMode: "square", xAlign: "custom", x: 0, width })),
+      para("Anchor", image({ wrapMode: "square", xAlign: "custom", x: -defaultPageConfig.margins.left, width })),
       table("T", 3),
     ));
     const first = must(rowsOf(l, "T")[0], "first row");
@@ -393,7 +393,7 @@ describe("float beside a table — the table moves below the float", () => {
 
   // Known gap, pinned: a float anchored inside a cell is not resolved as a
   // float, because a row's own lines are empty and cells are not scanned.
-  it("15: a square float anchored in a cell is not placed yet", () => {
+  it("15: a square float anchored in a cell is laid out in its cell (CellFloats.test.ts)", () => {
     const inCell = schema.node("table", { grid: [100, 100] }, [
       schema.node("tableRow", null, [
         schema.node("tableCell", null, [para("Cell", image({ wrapMode: "square" }))]),
@@ -401,7 +401,10 @@ describe("float beside a table — the table moves below the float", () => {
       ]),
     ]);
     const l = layout(docOf(para("Before"), inCell));
-    expect(l.anchoredObjects ?? []).toHaveLength(0);
+    const row = must(rowsOf(l, "Cell")[0], "row");
+    const f = floatOf(l);
+    expect(f.cellPos).toBeDefined();
+    expect(row.y + row.height).toBeGreaterThanOrEqual(f.y + f.height);
   });
 
   describe("every float on the page still holds after a later float moves content", () => {
@@ -453,8 +456,8 @@ describe("float beside a table — the table moves below the float", () => {
   // overlap, and its paragraph stays where the text puts it.
   it("27: re-wrapping text that did not change height keeps a stacked float below the other", () => {
     const l = layout(docOf(
-      para("Lead", image({ wrapMode: "square", height: 100 })),
-      para("Stacked", image({ wrapMode: "square", height: 100 })),
+      para("Lead", image({ wrapMode: "square", width: 400, height: 100 })),
+      para("Stacked", image({ wrapMode: "square", width: 400, height: 100 })),
       para("Pinned", image({ wrapMode: "square", xAlign: "left", width: 100, height: 30, yOffset: -5000 })),
     ));
     const a = floatOf(l, 0);

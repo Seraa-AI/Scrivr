@@ -11,9 +11,12 @@ import type { LineSpaceProvider } from "./LineBreaker";
 import { ExclusionManager, type ExclusionRect } from "./ExclusionManager";
 import {
   ANCHORED_OBJECT_MARGIN,
+  anchorsInLines,
+  clearOfEarlier,
   normalizeImageAttrs,
   resolveImageX,
   type AnchoredObjectPlacement,
+  type AnchorRef,
   type NormalizedImageAttrs,
 } from "./AnchoredObjects";
 import type { PageGeometry } from "./PageMetrics";
@@ -65,25 +68,6 @@ function restampGlobalYFrom(
     to = i + 1;
   }
   return { from: startIndex, to };
-}
-
-interface AnchorRef {
-  docPos: number;
-  node: Node;
-  attrs: NormalizedImageAttrs;
-}
-
-function getAnchoredObjectAnchors(flow: FlowBlock): AnchorRef[] {
-  const anchors: AnchorRef[] = [];
-  for (const line of flow.lines) {
-    for (const span of line.spans) {
-      if (span.kind !== "object" || span.width !== 0) continue;
-      const attrs = normalizeImageAttrs(span.node);
-      if (attrs.wrapMode === "inline") continue;
-      anchors.push({ docPos: span.docPos, node: span.node, attrs });
-    }
-  }
-  return anchors;
 }
 
 interface PageBarrierProvider {
@@ -310,7 +294,7 @@ export function resolveAnchoredObjects(
   for (let i = 0; i < flows.length; i++) {
     const flow = flows[i];
     if (!flow) continue;
-    for (const anchor of getAnchoredObjectAnchors(flow)) {
+    for (const anchor of anchorsInLines(flow.lines)) {
       const start = floatSet.startOf(i, naturalStartOf(flows, i, pageConfig, geometry));
       const float = createPlacedFloat(anchor, i, placed.length, start);
       placed.push(float);
@@ -366,30 +350,27 @@ export function resolveAnchoredObjects(
     // Square stacking: a square float that would overlap one
     // placed before it on the page moves down below it;
     // its anchor paragraph stays where it is.
-    const stackBelowOthers = (painted: number, page: number): number => {
-      if (wrapMode !== "square") return painted;
-      const obstacles = placed
+    // A square image clear of the square images placed before it on its page.
+    const clearOfOthers = (painted: number, page: number): { x: number; globalY: number } => {
+      if (wrapMode !== "square") return { x, globalY: painted };
+      const earlier = placed
         .slice(0, order)
         .map((other) => other.placement)
-        .filter((p) => p.wrapMode === "square")
-        .sort((a, b) => a.globalY - b.globalY);
-      let top = painted;
-      for (const p of obstacles) {
-        if (paintedOverlap(p, { page, x, width, globalY: top, height })) {
-          top = Math.max(top, p.globalY + p.height + ANCHORED_OBJECT_MARGIN);
-        }
-      }
-      return top;
+        .filter((p) => p.wrapMode === "square" && p.page === page)
+        .sort((a, b) => a.globalY - b.globalY)
+        .map((p) => ({ x: p.x, y: p.globalY, width: p.width, height: p.height }));
+      const spot = clearOfEarlier({ x, y: painted, width, height }, earlier, contentX, contentRight, ANCHORED_OBJECT_MARGIN);
+      return { x: spot.x, globalY: spot.y };
     };
 
     const placeFresh = (anchorFlowStart: number): FloatPlace => {
       let anchorStart = nextPageIfTooTall(anchorFlowStart) ?? anchorFlowStart;
       let page = barriers.pageForGlobalY(anchorStart);
       let atOffset = clampToPage(anchorStart + yOffset, page);
-      let painted = stackBelowOthers(atOffset, page);
+      let spot = clearOfOthers(atOffset, page);
       // Stacking can push the image off its page; then the anchor moves on,
       // when the next page can hold the image.
-      if (painted !== atOffset && clampToPage(painted, page) !== painted) {
+      if (spot.globalY !== atOffset && clampToPage(spot.globalY, page) !== spot.globalY) {
         const pushed = wraps && !pageConfig.pageless && height <= barriers.contentHeight(page + 1)
           ? barriers.pageStartGlobal(page + 1)
           : undefined;
@@ -397,10 +378,11 @@ export function resolveAnchoredObjects(
           anchorStart = pushed;
           page = barriers.pageForGlobalY(anchorStart);
           atOffset = clampToPage(anchorStart + yOffset, page);
-          painted = stackBelowOthers(atOffset, page);
+          spot = clearOfOthers(atOffset, page);
         }
-        painted = clampToPage(painted, page);
+        spot = { ...spot, globalY: clampToPage(spot.globalY, page) };
       }
+      const painted = spot.globalY;
       const clamped = atOffset !== anchorStart + yOffset;
       const stackOffset = painted - atOffset;
       return {
@@ -408,7 +390,7 @@ export function resolveAnchoredObjects(
         placement: {
           docPos: anchor.docPos,
           page,
-          x,
+          x: spot.x,
           y: barriers.localYForGlobalY(page, painted),
           width,
           height,
@@ -452,7 +434,7 @@ export function resolveAnchoredObjects(
     const exclusionOf = (at: AnchoredObjectPlacement): ExclusionRect => {
       const zone = zoneOf(at);
       return wrapMode === "square"
-        ? { page: at.page, x: x - margin, right: x + width + margin, y: zone.top, bottom: zone.bottom, side: "left", docPos: anchor.docPos }
+        ? { page: at.page, x: at.x - margin, right: at.x + width + margin, y: zone.top, bottom: zone.bottom, side: "left", docPos: anchor.docPos }
         : { page: at.page, x: contentX, right: contentRight, y: zone.top, bottom: zone.bottom, side: "full", docPos: anchor.docPos };
     };
 
@@ -470,18 +452,8 @@ export function resolveAnchoredObjects(
   }
 }
 
-/** Two painted image rects on the same page that intersect. */
-function paintedOverlap(
-  a: Pick<AnchoredObjectPlacement, "page" | "x" | "width" | "globalY" | "height">,
-  b: Pick<AnchoredObjectPlacement, "page" | "x" | "width" | "globalY" | "height">,
-): boolean {
-  return a.page === b.page &&
-    a.x < b.x + b.width && b.x < a.x + a.width &&
-    a.globalY < b.globalY + b.height && b.globalY < a.globalY + a.height;
-}
-
 function samePlacement(a: AnchoredObjectPlacement, b: AnchoredObjectPlacement): boolean {
-  return a.page === b.page && a.globalY === b.globalY && a.anchorGlobalY === b.anchorGlobalY;
+  return a.page === b.page && a.x === b.x && a.globalY === b.globalY && a.anchorGlobalY === b.anchorGlobalY;
 }
 
 /**

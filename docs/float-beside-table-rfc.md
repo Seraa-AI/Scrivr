@@ -38,21 +38,27 @@ Approved by the user on 2026-11-08.
    the paragraph's first part. A paragraph carried over from the previous page
    gives way to the nearest paragraph that starts on the drop page, so the
    image stays on the page it was dropped on.
-5. **Stacking moves the image, not its paragraph** (*approved by the user on
-   2026-11-08, confirmed 2026-11-09*). A square float that would overlap one
-   placed before it on the page moves below it; its anchor paragraph stays
-   where the text puts it. The offset belongs to the float and is carried on
-   the placement as `stackOffset`, so a drag starts from the user's `yOffset`
-   (the public `AnchoredObjectPlacement.stackOffset` field was *approved by the
-   user on 2026-11-09*).
+5. **Overlapping square images keep apart; the image moves, not its
+   paragraph** (*approved by the user on 2026-11-08; changed on 2026-11-09 to
+   Word's placement*). A square float that would overlap one placed before it
+   on the page moves beside it, on the side it is aligned from, while the
+   column has room, and below it otherwise. Its anchor paragraph stays where
+   the text puts it. A vertical move is carried on the placement as
+   `stackOffset`, so a drag starts from the user's `yOffset` (the public
+   `AnchoredObjectPlacement.stackOffset` field was *approved by the user on
+   2026-11-09*).
 
-   *The evidence, honestly.* This matches Word only when `wp:anchor
-   allowOverlap="0"`. Word's default is `allowOverlap="1"`, which lets floats
-   overlap. We stack so that no image is ever hidden behind another; `main`
-   stacked too (it moved the paragraph instead). DOCX export writes
-   `allowOverlap="0"` on square images so Word stacks them as we do, with
-   `posOffset` the user's `yOffset`. We do not import `allowOverlap` yet; when
-   we do, the rule can follow it per image.
+   *The evidence.* Word only keeps floats apart under `wp:anchor
+   allowOverlap="0"`; its default `allowOverlap="1"` lets them overlap. DOCX
+   export writes `allowOverlap="0"` on square images, with `posOffset` the
+   user's `yOffset`. The user exported the playground demo unedited
+   (`scrivr-demo (17) copy.docx`) and opened it in Word. Word put the second
+   of two left-aligned images *beside* the first, where we had stacked it
+   below, so the rule changed to match. Word also lifted those two images,
+   anchored in the paragraph right after a table, above the table's last row
+   and pushed that row down. We do not copy that: the images stay at their
+   paragraph (Decision 3). We do not import `allowOverlap` yet.
+
 6. **A float with no fixed point is locked, as Word does** (*approved by the
    user on 2026-11-08*). Text stays clear of the image; the image may sit off
    `anchor + yOffset`. See
@@ -63,6 +69,104 @@ Approved by the user on 2026-11-08.
    Layouts that only a random document generator reaches are not tests, and
    solver code that only such layouts needed was removed. During review the
    generator's documents were checked against `main`; it is not in the repo.
+
+## Images inside table cells (approved by the user on 2026-11-09)
+
+*Direction change, decided by the user on 2026-11-09 after a live test:*
+"handle things like Word". Dragging an image over the demo table let it
+cover the rows, and the image could not be clicked again. Word does neither.
+
+**What Word does.** The user dragged three images over a table in Word and
+exported the file (`scrivr-demo (17).docx`). Every image ended up anchored in
+the paragraph of the cell under the drop, written as `<wp:anchor
+layoutInCell="1" allowOverlap="0">` with `positionH relativeFrom="column"` and
+`positionV relativeFrom="paragraph"`. No row has a fixed height, and Word
+grew each row to hold its image. The image wraps that cell's text. Rows never
+move below it, and it never covers rows it does not belong to. ECMA-376
+Part 1 §20.4.2.3 (`layoutInCell="true"`): the object is positioned within the
+table cell that holds its anchor.
+
+**Decision 8: an image anchored in a cell is laid out in that cell.**
+
+- **8a. Dropping onto a table anchors in the cell.** A drop over a table cell
+  re-anchors the image to the paragraph under the drop in that cell. A drop
+  outside every table follows Decision 4, unchanged. Dragging an image out of
+  a cell anchors it back in the body.
+- **8b. Position.** `yOffset` is measured from the top of its paragraph in the
+  cell and clamped so the image never rises above the cell's top. `xAlign`
+  (left, centre, right, custom `x`) is measured inside the cell's content box,
+  and the image is kept inside the cell horizontally. Word lets an image hang
+  over the next column; we keep it inside the cell so it never covers a
+  neighbouring cell's text (*approved as drafted*). A custom `x` in a cell is
+  measured from the cell's content box, which is Word's `relativeFrom="column"`
+  in a cell.
+- **8c. Wrap.** Square wraps that cell's own text around the image.
+  Top-and-bottom moves that cell's text below it. Behind and in front of text
+  paint inside the cell and wrap nothing.
+- **8d. The row grows.** A row is as tall as its tallest cell, and a square
+  or top-and-bottom image counts towards its cell's height down to its bottom
+  edge, as the rows in Word's file do. Behind and in-front images do not grow the row. An image moves with
+  its row, onto the next page too.
+- **8e. Cells are their own space.** An image in a cell never moves body text,
+  never moves table rows under Decision 1 and never stacks with body images.
+  Two images in the same cell keep apart under Decision 5.
+- **8f. One list.** In-cell placements join `layout.anchoredObjects` in page
+  coordinates (the row's final `y` plus the in-cell offset), so paint,
+  hit-testing, selection, drag and PDF read them as they read body images. A
+  painted image always takes the click over the cell under it, matching the
+  hover cursor (fixed 2026-11-09).
+- **8g. DOCX.** Export writes `layoutInCell="1"` with the column and paragraph
+  frames for an image in a cell. Import keeps an image anchored in a cell
+  paragraph where it is, so it lays out in the cell.
+
+**At the seam.** `layoutTableRowCells` (`TableLayoutEngine.ts`) already lays
+out each cell's blocks in row-relative `y`, independent of the page. Each cell
+runs the same steps the body uses on a smaller scale:
+1. place its images;
+2. carve their rectangles into a cell-local `ExclusionManager`;
+3. lay its blocks out through the existing `lineSpaceProvider`;
+4. take the image bottoms into the cell's height.
+
+Nothing new is added beyond the cell-relative placement the row block carries.
+The cell's measure cache stays position-independent because everything is
+row-relative.
+
+**Supersedes.** This closes the known gap "A float anchored in a table cell"
+and scenario 15, which pinned it. Decision 3 still governs a body image
+anchored after a table whose offset reaches back over it (imported documents);
+a drag can no longer produce that case, because a drop over a table anchors
+in the cell.
+
+**Scenarios (relations only):**
+1. A square image anchored in a cell: the cell's text wraps beside it and the
+   row is at least the image's bottom plus its margin.
+2. A top-and-bottom image in a cell: the cell's text starts below it.
+3. Behind and front images in a cell: the row height is unchanged.
+4. A large negative `yOffset` in a cell: the image top equals the cell top.
+5. Neighbouring cells and the rows above and below keep their x and widths.
+6. A drag from the body onto a cell: anchored in that cell's paragraph, and
+   lands where dropped unless clamped.
+7. A drag from a cell back into the body: anchored in a body paragraph.
+8. Clicking the image selects it, and clicking the cell's text beside it
+   places the caret.
+9. A row with an image carried onto the next page keeps the image with it.
+10. PDF export draws the image at the same rectangle as the canvas.
+11. DOCX export then import round-trips the cell anchor.
+12. Word's own file (`scrivr-demo (17).docx`) imports with each image in its
+    cell and each row grown to hold it.
+
+**Decision 9: one meaning for a dragged image's `x`** (*approved by the user on
+2026-11-09*). A custom `x` is measured from the left edge of the content box
+that holds the image: the page's content area in the body, the cell's content
+box in a table. That is what the schema always documented and what DOCX writes
+(`relativeFrom="column"`). Layout and drag used the page's left edge, so an
+exported image sat one margin off in Word. Accepted cost: a body image dragged
+sideways in an older document moves right by the left margin.
+
+**Words beside an image** (found in the live test, 2026-11-09). A word that
+fits the column but no gap a square image leaves beside it goes below the
+image, as Word wraps it. Before, the line breaker let it overflow past the gap,
+which in a narrow cell ran into the next cell.
 
 ## Problem
 
@@ -644,6 +748,24 @@ bottom against the page's whole manager — and scenarios 20–22 and 27 cover i
 - **A drop on a page no paragraph starts on** (one paragraph longer than the
   page) is measured from that paragraph's real start, on an earlier page, so
   the image is clamped onto that page (Decision 4).
+- **A Word image positioned from the page edge** (`positionH
+  relativeFrom="page"`) imports its offset as if it were from the column, so it
+  sits one left margin further right. Import does not read the page margins
+  (`w:pgMar`) yet; Word's own drag writes `relativeFrom="column"`, which imports
+  exactly.
+- **A cell image with a very large offset.** Only the top of a cell clamps an
+  image. A behind or front image offset far down (from an imported file) paints
+  below its row, and a square one grows the row by the offset. A drag computes
+  the offset from the drop cell, so it stays inside the row.
+- **Images in cells and row or column resizing.** Rows and columns cannot be
+  resized yet; the polish that depends on it waits for that table work.
+- **To check: a wrapping image dropped on carried-over text.** Dropped near
+  the top of a page that opens with a paragraph carried over from the page
+  before, a square or top-and-bottom image anchors to the next paragraph that
+  starts on that page. Its wrap then pushes that anchor down, so in a test
+  layout it lands about 19px (square) or 90px (top-and-bottom) below the drop.
+  Not reproduced in the playground yet; the "Images beside tables" demo lists
+  it as a step to check.
 - **One larger word on a line can run about 11px under a square image
   dragged up beside it.** The line's height is probed from the paragraph's
   normal size. Same on `main`.
@@ -739,7 +861,7 @@ Where this differs from the design above:
 | `43e97d47`, `f890352d` | Moves only: the solver to `layout/AnchoredObjectSolver.ts`, flow placement helpers to `layout/FlowPlacement.ts` below both (no runtime cycle). |
 | `43205f17` | One landing rule (`landingAfter`) for pagination, flow stamping and the solver. Scenario 53 red → green; 54 is held by pagination keeping lines laid where the flow sits (`wrapLaidAtY`), red without it. |
 | `9b043e12`, `07338e19`, `095378c3` | Tests are measured layouts a person can make (Decision 7); the lock lost attribution, the later-page preference and stacking against locked floats, which no such layout needed. It keeps holding its anchor on its page: scenario 43 (a tall top-bottom image dragged up in a paragraph near the page bottom, at every paragraph position across the page end) is red without it. |
-| `5ce66fec` | Page exclusions are read-only outside carving; the empty manager is never shared. |
+| `5ce66fec` | Page exclusions are read-only outside carving; a page with no floats reads one shared, read-only empty set. |
 | `f4b57aef` | DOCX export writes `allowOverlap="0"` on square images. |
 | `2fc058b1` | The header page-count test in `@scrivr/plugins` reached 100 pages only through uneven paragraph spacing that the single landing rule removed; its fixture is now 500 paragraphs. |
 

@@ -399,6 +399,46 @@ export function clampPlacementsToPages(
   );
 }
 
+/**
+ * Images laid out inside table cells, in page coordinates. A row carries its
+ * images row-relative, so they are read off the rows where pagination put them.
+ */
+function cellFloatPlacements(
+  pages: readonly LayoutPage[],
+  geometry: PageGeometry,
+): AnchoredObjectPlacement[] {
+  const placements: AnchoredObjectPlacement[] = [];
+  for (const page of pages) {
+    const toGlobal = (localY: number) =>
+      geometry.startOf(page.pageNumber) + localY - geometry.metricsFor(page.pageNumber).contentTop;
+    for (const block of page.blocks) {
+      for (const cell of block.cells ?? []) {
+        for (const f of cell.floats ?? []) {
+          const y = block.y + f.y;
+          placements.push({
+            docPos: f.docPos,
+            page: page.pageNumber,
+            x: f.x,
+            y,
+            width: f.width,
+            height: f.height,
+            wrapMode: f.wrapMode,
+            zIndex: f.zIndex,
+            node: f.node,
+            anchorGlobalY: toGlobal(block.y + f.anchorY),
+            anchorPage: page.pageNumber,
+            globalY: toGlobal(y),
+            cellPos: cell.cellPos,
+            ...(f.clamped ? { clamped: true } : {}),
+            ...(f.stackOffset ? { stackOffset: f.stackOffset } : {}),
+          });
+        }
+      }
+    }
+  }
+  return placements;
+}
+
 function pageRectsDigest(rects: readonly AnchoredObjectPlacement[] | undefined): string {
   if (!rects || rects.length === 0) return "";
   return rects
@@ -652,8 +692,11 @@ export function runFlowPipeline(
   // chunk's placements. Without this, resumed layouts overwrite the
   // accumulated anchoredObjects list — placements from earlier chunks
   // disappear from rendering, hit testing, and PDF export.
+  // In-cell images are read off the rows after pagination, so only body
+  // placements carry over or decide whether the cached tail still holds.
+  const previousBodyPlacements = (previousLayout?.anchoredObjects ?? []).filter((p) => p.cellPos === undefined);
   const carriedPlacements = cursor
-    ? (previousLayout?.anchoredObjects ?? []).filter(
+    ? previousBodyPlacements.filter(
         (p) => !anchoredFlow.placements.some((q) => q.docPos === p.docPos),
       )
     : [];
@@ -666,7 +709,7 @@ export function runFlowPipeline(
   const canReuseCachedTail =
     previousLayout && !previousLayout.isPartial &&
     previousLayout.metrics?.every((metrics) => samePageMetrics(metrics, metricsFor(metrics.pageNumber))) &&
-    pageRectsDigest(previousLayout.anchoredObjects) === pageRectsDigest(mergedPlacements);
+    pageRectsDigest(previousBodyPlacements) === pageRectsDigest(mergedPlacements);
   const previousLayoutForPagination = canReuseCachedTail ? previousLayout : undefined;
 
   const pr = paginateFlow(
@@ -707,6 +750,7 @@ export function runFlowPipeline(
       prevPageCount: pr.pages.length,
     };
     const partialPages = [...pr.pages, pr.currentPage];
+    const partialPlacements = [...mergedPlacements, ...cellFloatPlacements(partialPages, geometry)];
     // Intentionally NOT clamped: the partial layout's anchoredObjects gets
     // carried forward to the next chunk as `previousLayout?.anchoredObjects`,
     // and earlier chunks are never re-solved. Clamping a partial would
@@ -730,13 +774,16 @@ export function runFlowPipeline(
       runId,
       convergence: "stable",
       iterationCount: 1,
-      anchoredObjects: mergedPlacements,
+      anchoredObjects: partialPlacements,
     };
-    return { layout, isPartial: true, ...context, y: pr.y, anchoredObjects: mergedPlacements };
+    return { layout, isPartial: true, ...context, y: pr.y, anchoredObjects: partialPlacements };
   }
 
   const allPages = pr.earlyTerminated ? pr.pages : [...pr.pages, pr.currentPage];
-  const clampedFinal = clampPlacementsToPages(mergedPlacements, allPages.length);
+  const clampedFinal = clampPlacementsToPages(
+    [...mergedPlacements, ...cellFloatPlacements(allPages, geometry)],
+    allPages.length,
+  );
   const layout: DocumentLayout = {
     pages: allPages,
     pageConfig,
