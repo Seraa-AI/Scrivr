@@ -6,7 +6,7 @@ import {
   hitHandle,
   computeNewSize,
 } from "./ResizeController";
-import { normalizeImageAttrs } from "../layout/AnchoredObjects";
+import { normalizeImageAttrs, type AnchoredObjectPlacement } from "../layout/AnchoredObjects";
 import { resolvePointOwner, type PointOwner } from "../layout/pointOwnership";
 import {
   type PageFlowMetrics,
@@ -24,6 +24,16 @@ const EDGE_BAND_PX = 12;
 const DRAG_THRESHOLD_PX = 3;
 const AXIS_STILL_THRESHOLD_PX = 3;
 const RE_ANCHOR_THRESHOLD_PX = 24;
+
+/**
+ * The image's painted offset from its anchor. That is the user's `yOffset`
+ * unless the solver moved the image — clamped onto the page or stacked below
+ * another float — in which case it is where the image actually is.
+ */
+function paintedYOffset(placement: AnchoredObjectPlacement): number {
+  const moved = placement.clamped === true || placement.stackOffset !== undefined;
+  return moved ? placement.globalY - placement.anchorGlobalY : normalizeImageAttrs(placement.node).yOffset;
+}
 
 /**
  * Minimal view of a tile entry — PointerController only needs access to
@@ -93,7 +103,11 @@ export class PointerController {
     anchorGlobalY: number;
     /** Image's painted globalY at gesture start. Used to derive yOffset on commit. */
     startImageGlobalY: number;
-    /** The image's offset from its anchor at pointerdown, stacking excluded. */
+    /**
+     * Where the image paints relative to its anchor at pointerdown. A drop
+     * commits this plus the drag, so the image lands where it was dropped;
+     * stacking re-applies only if it still overlaps another float.
+     */
     startYOffset: number;
     /** wrapMode at pointerdown. */
     wrapMode: string;
@@ -476,7 +490,7 @@ export class PointerController {
         startImageX: anchoredHit.x,
         anchorGlobalY: anchoredHit.anchorGlobalY,
         startImageGlobalY: anchoredHit.globalY,
-        startYOffset: anchoredHit.globalY - (anchoredHit.stackOffset ?? 0) - anchoredHit.anchorGlobalY,
+        startYOffset: paintedYOffset(anchoredHit),
         wrapMode: anchoredHit.wrapMode,
         rect: {
           x: anchoredHit.x,

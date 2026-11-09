@@ -323,6 +323,8 @@ export interface PointerControllerSetupOptions {
   tileHeight?: number;
   slotHeight?: number;
   pageConfig?: PageConfig;
+  /** Document JSON to load instead of the default one-page document. */
+  content?: EditorOptions["content"];
 }
 
 export interface PointerControllerSetup {
@@ -363,7 +365,7 @@ export function makePointerControllerSetup(
 
   const editor = createTestEditor({
     pageConfig,
-    content: makeNPageDoc(1),
+    content: opts.content ?? makeNPageDoc(1),
   });
 
   const container = document.createElement("div");

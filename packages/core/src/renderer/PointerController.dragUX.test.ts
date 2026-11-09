@@ -302,35 +302,37 @@ describe("PointerController — drag UX", () => {
       expect(setNodeAttrs).not.toHaveBeenCalled();
     });
 
-    it("a stacked float nudged a few px changes its yOffset by exactly that, and keeps its anchor", () => {
-      setup = makePointerControllerSetup({ isPageless: true });
-      // Anchor paragraph at y=50; the float stacked 112px below where its
-      // yOffset (0) puts it, beside the next paragraph.
-      const stackOffset = 112;
-      const sourceBlock = { nodePos: 4, y: 50, height: 100 };
-      const besideBlock = { nodePos: 20, y: 150, height: 100 };
-      const stacked: AnchoredObjectPlacement = {
-        ...makePlacement(setup, { y: SQUARE_RECT.y + stackOffset }),
-        anchorGlobalY: SQUARE_RECT.y,
-        stackOffset,
-      };
-      overrideLayout(setup.editor, {
-        anchoredObjects: [stacked],
-        pages: [
-          { pageNumber: 1, blocks: [sourceBlock, besideBlock] },
-        ] satisfies { pageNumber: number; blocks: LayoutBlockFixture[] }[],
+    it.each([5, 50, 150])("a stacked float dragged %ipx lands where it was dropped", (dy) => {
+      const words = "word ".repeat(40).trim();
+      const image = (height: number) => ({
+        type: "image",
+        attrs: { src: "x", wrapMode: "square", xAlign: "left", width: 150, height },
       });
-      vi.spyOn(setup.editor.charMap, "posAtCoords").mockReturnValue(5);
-      const setNodeAttrs = vi.spyOn(setup.editor, "setNodeAttrs").mockImplementation(() => {});
-      const moveAndUpdateNode = vi.spyOn(setup.editor, "moveAndUpdateNode").mockReturnValue(true);
+      setup = makePointerControllerSetup({
+        content: {
+          type: "doc",
+          content: [
+            { type: "paragraph", content: [{ type: "text", text: `A ${words}` }, image(150)] },
+            { type: "paragraph", content: [{ type: "text", text: "B" }, image(120)] },
+            { type: "paragraph", content: [{ type: "text", text: words }] },
+          ],
+        },
+      });
+      const editor = setup.editor;
+      const stacked = editor.layout.anchoredObjects?.[1];
+      if (!stacked) throw new Error("no stacked float");
+      expect(stacked.stackOffset ?? 0).toBeGreaterThan(0);
 
+      const grabX = stacked.x + 30;
       const grabY = stacked.y + 30;
-      mousedown(setup.container, SQUARE_RECT.x + 30, grabY);
-      mousemove(SQUARE_RECT.x + 30, grabY + 5);
-      mouseup(SQUARE_RECT.x + 30, grabY + 5);
+      mousedown(setup.container, grabX, grabY);
+      mousemove(grabX, grabY + dy);
+      mouseup(grabX, grabY + dy);
 
-      expect(setNodeAttrs).toHaveBeenCalledWith(5, { yOffset: 5 });
-      expect(moveAndUpdateNode).not.toHaveBeenCalled();
+      const landed = editor.layout.anchoredObjects?.find((p) => p.node.attrs["height"] === 120);
+      if (!landed) throw new Error("float vanished");
+      expect(landed.page).toBe(stacked.page);
+      expect(landed.globalY).toBeCloseTo(stacked.globalY + dy, 6);
     });
 
     it("no closer paragraph → keeps the original anchor (setNodeAttrs path)", () => {

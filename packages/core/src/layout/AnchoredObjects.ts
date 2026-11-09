@@ -288,9 +288,10 @@ export interface AnchoredObjectPlacement {
   globalY: number;
   /**
    * How far the solver moved the image down so it does not overlap a square
-   * float placed before it. It is the image's own, not the user's: a drag
-   * starts from `globalY - stackOffset - anchorGlobalY`, never from
-   * `globalY - anchorGlobalY`. Absent when the image is not stacked.
+   * float placed before it; the user's `yOffset` does not include it. A drag
+   * commits where the image was dropped, so the stack offset is absorbed
+   * there and re-applies only if the image still overlaps. Absent when the
+   * image is not stacked.
    */
   stackOffset?: number;
   /**
