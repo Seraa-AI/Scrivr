@@ -328,8 +328,9 @@ placements that never repeat (a runaway). Then:
 - It locks at the state it is returning to. If the sequence was converging
   rather than cycling, that state is its fixed point and the float ends on its
   anchor.
-- A locked float keeps its placement and wrap rect and no longer pushes its
-  anchor; text wraps around it. A table after its anchor clears it like any
+- A locked float keeps its placement and wrap rect; text wraps around it.
+  If its anchor would move back to an earlier page, the float holds it at the
+  top of its own page, so the two never end on different pages. A table after its anchor clears it like any
   float; a table before its anchor overlaps it rather than move (Decision 3).
 - It unlocks only to follow its anchor onto a later page.
 
@@ -513,7 +514,7 @@ contentWidth`.
 | 38 | A move would carry the table under a float that does not follow it | Guard: no row overlaps that float |
 | 39 | A float pulled over the line above its anchor | No text under a float; floats on their anchors' pages; two layouts agree |
 | 41 | A float whose own zone covers the paragraph it would push | Same as 39 |
-| 43 | An image dragged over the lines above its paragraph, the last on the page | No text under it; on its paragraph's page |
+| 43 | A tall top-bottom image dragged up in a paragraph near the page bottom, the paragraph swept across the page end | No text under it; on its paragraph's page |
 | 44 | A paragraph that runs onto the next page beside a float | Its lines on both pages keep their wrap |
 | 47 | A paragraph moved whole onto the next page | It wraps around that page's float |
 | 48 | A float with a stable position next to one that oscillates | It does not lock |
@@ -733,9 +734,10 @@ Where this differs from the design above:
 | `391c5010` | One `place()` (clamp, stack, overflow check); locked floats overlap a table anchored before them; lines laid where they land; work-count test. |
 | `43e97d47`, `f890352d` | Moves only: the solver to `layout/AnchoredObjectSolver.ts`, flow placement helpers to `layout/FlowPlacement.ts` below both (no runtime cycle). |
 | `43205f17` | One landing rule (`landingAfter`) for pagination, flow stamping and the solver, from the block's re-laid first line. |
-| `9b043e12`, `07338e19` | Tests are measured layouts a person can make (Decision 7); the lock lost attribution, the later-page preference, the held anchor and stacking against locked floats, which no such layout needed. |
+| `9b043e12`, `07338e19`, `095378c3` | Tests are measured layouts a person can make (Decision 7); the lock lost attribution, the later-page preference and stacking against locked floats, which no such layout needed. It keeps holding its anchor on its page: scenario 43 (a tall top-bottom image dragged up in a paragraph near the page bottom, at every paragraph position across the page end) is red without it. |
 | `5ce66fec` | Page exclusions are read-only outside carving; the empty manager is never shared. |
 | `f4b57aef` | DOCX export writes `allowOverlap="0"` on square images. |
+| `2fc058b1` | The header page-count test in `@scrivr/plugins` reached 100 pages only through uneven paragraph spacing that the single landing rule removed; its fixture is now 500 paragraphs. |
 
 What a person sees:
 
@@ -757,4 +759,5 @@ What a person sees:
   stacks them too.
 
 The generator documents serve only as a regression check: against `main`,
-every category is equal or better.
+every category is equal or better, apart from images stacked by design
+(Decision 5).
