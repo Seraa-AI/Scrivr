@@ -995,6 +995,40 @@ describe("float beside a table — the table moves below the float", () => {
         expect(textUnderFloats(l)).toEqual([]);
       });
 
+      // The gap before a block can carry its start past the page bottom;
+      // pagination then drops the gap and paints the block at the next page's
+      // top. Every count of fillers near the bottom walks through that case.
+      it("53: a heading near the page bottom keeps the anchor after it where it paints", () => {
+        const count = fillersOnPage1([]);
+        for (let n = count - 4; n <= count; n++) {
+          const l = expectStable(docOf(
+            ...Array.from({ length: n }, (_, k) => filler(k)),
+            schema.node("heading", { level: 2 }, [schema.text("Title")]),
+            para(`Anchor ${WORDS_40}`, image({ wrapMode: "top-bottom", width: 200, height: 300, yOffset: -160 })),
+          ));
+          expect(textUnderFloats(l), `${n} fillers`).toEqual([]);
+          expectFloatsOnAnchorPages(l);
+        }
+      });
+
+      // A large word makes a paragraph's first line taller than the rest; when
+      // the paragraph is re-wrapped, its first line can change, and so can
+      // whether it fits at the page bottom.
+      it("54: a paragraph whose first line changes height on re-wrap lands where it paints", () => {
+        const count = fillersOnPage1([]);
+        const big = schema.text("BIG", [schema.mark("fontSize", { size: 48 })]);
+        for (let n = count - 4; n <= count; n++) {
+          for (const lead of [4, 8]) {
+            const l = expectStable(docOf(
+              ...Array.from({ length: n }, (_, k) => filler(k)),
+              schema.node("paragraph", null, [schema.text(`Big ${words(lead)} `), big, schema.text(` ${LONG_TEXT}`)]),
+              para(`Pin ${words(10)}`, image({ wrapMode: "square", xAlign: "left", width: 300, height: 200, yOffset: -5000 })),
+            ));
+            expect(textUnderFloats(l), `${n} fillers, ${lead} words`).toEqual([]);
+          }
+        }
+      });
+
       it("50: a square float clamped to the page bottom still stacks clear of the one above", () => {
         const count = fillersOnPage1([]);
         const plain = layout(docOf(...Array.from({ length: count }, (_, n) => filler(n))));

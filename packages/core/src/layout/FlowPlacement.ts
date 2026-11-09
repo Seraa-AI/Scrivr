@@ -131,6 +131,46 @@ export function flowCursorAfter(
 }
 
 /**
+ * Whether a first line `lineHeight` tall fits when the gap before it is given
+ * up and it starts right where its predecessor ended.
+ */
+export function fitsWithoutGap(pageBottom: number, prevEnd: number, lineHeight: number): boolean {
+  return pageBottom - prevEnd >= lineHeight - 0.5;
+}
+
+/**
+ * Where a flow starts when its predecessor ends at `prevEnd` and the collapsed
+ * gap before it is `gap` — where `paginateFlow` paints it:
+ * - a gap that reaches the bottom of the page the predecessor ended on is
+ *   dropped, and the flow starts the next page;
+ * - a first line that does not fit gives up the gap if that is enough,
+ *   and otherwise starts the next page.
+ * The first line is the flow's own, so a flow laid out again is landed again.
+ */
+export function landingAfter(
+  flow: FlowBlock,
+  prevEnd: number,
+  gap: number,
+  pageConfig: PageConfig,
+  geometry: PageGeometry,
+): number {
+  const start = prevEnd + gap;
+  if (pageConfig.pageless || flow.isPageBreak) {
+    return advanceFlowGlobalY(flow, start, pageConfig, geometry).startGlobalY;
+  }
+  let page = geometry.pageAt(prevEnd);
+  if (page > 1 && geometry.startOf(page) === prevEnd) page -= 1;
+  const bottom = geometry.bottomOf(page);
+  if (start >= bottom) return geometry.startOf(page + 1);
+
+  const firstLine = flow.kind === "text" ? flow.lines[0] : undefined;
+  if (!firstLine) return advanceFlowGlobalY(flow, start, pageConfig, geometry).startGlobalY;
+  if (start === geometry.startOf(page) || start + firstLine.lineHeight <= bottom) return start;
+  if (gap > 0 && fitsWithoutGap(bottom, prevEnd, firstLine.lineHeight)) return prevEnd;
+  return geometry.startOf(page + 1);
+}
+
+/**
  * Stamp each flow with its continuous-flow Y.
  *
  * Omitting `initialSpaceAfter` means the document's first flow, whose leading
@@ -152,8 +192,8 @@ export function assignGlobalY(
   return flows.map((flow, index) => {
     const gap = index === 0 && initialSpaceAfter === undefined
       ? 0 : collapseMargins(prevSpaceAfter, flow.spaceBefore);
-    const { startGlobalY } = advanceFlowGlobalY(flow, y + gap, pageConfig, geometry);
-    ({ y, prevSpaceAfter } = flowCursorAfter(flow, y + gap, pageConfig, geometry));
+    const startGlobalY = landingAfter(flow, y, gap, pageConfig, geometry);
+    ({ y, prevSpaceAfter } = flowCursorAfter(flow, startGlobalY, pageConfig, geometry));
     return { ...flow, globalY: startGlobalY, originalGlobalY: startGlobalY };
   });
 }

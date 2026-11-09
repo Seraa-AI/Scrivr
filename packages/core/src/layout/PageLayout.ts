@@ -37,6 +37,7 @@ import { fitLinesInCapacity } from "./splitLines";
 import {
   assignGlobalY,
   collapseMargins,
+  fitsWithoutGap,
   flowCursorAfter,
   pageLocalYForGlobalY,
   targetPageNumber,
@@ -1091,7 +1092,7 @@ export function paginateFlow(
               console.log(`    → linesFit=0 FORCE 1 line (top-of-page / sub-pixel guard)`);
             }
             linesFit = 1;
-          } else if (splitMetrics.contentBottom - y >= remainingLines[0]!.lineHeight - 0.5) {
+          } else if (fitsWithoutGap(splitMetrics.contentBottom, y, remainingLines[0]!.lineHeight)) {
             // Inter-block gap pushed targetY into dead zone. Suppress and retry.
             if ((globalThis as Record<string,unknown>).__LAYOUT_DEBUG__) {
               console.log(`    → linesFit=0 GAP SUPPRESS: retry at y=${y.toFixed(1)}`);
