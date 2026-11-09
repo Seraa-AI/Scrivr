@@ -1,6 +1,7 @@
 import { Fragment, Slice } from "@scrivr/core/pm";
 import { EditorState, Transaction } from "@scrivr/core/pm";
 import { ReplaceStep } from "@scrivr/core/pm";
+import { blockIdOf } from "@scrivr/core";
 
 import { ChangeStep, TrTrackingContext } from "../types";
 import { getAction, TrackChangesAction } from "../actions";
@@ -112,11 +113,13 @@ export function trackReplaceStep(
           // new paragraph ("lo" from splitting "hel|lo") is NOT marked as a
           // new trackedInsert. Only the structural node_split/reference marks
           // are added; the carried text stays untracked, matching Google Docs.
+          const splitBlock = tr.docs[i]?.resolve(step.from).parent;
           fragment = setFragmentAsNodeSplit(
             newTr.doc.resolve(step.from),
             newTr,
             newSliceContent,
             attrs,
+            splitBlock ? blockIdOf(splitBlock) : null,
           );
         } else if (moveID) {
           const indentationType = getAction(

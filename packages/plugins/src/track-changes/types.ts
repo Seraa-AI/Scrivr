@@ -155,6 +155,8 @@ export type ListChangeAttrs = Omit<InsertDeleteAttrs, "operation"> & {
 export type ReferenceAttrs = Omit<InsertDeleteAttrs, "operation"> & {
   operation: CHANGE_OPERATION.reference;
   referenceId: string;
+  /** The id the split block had, which it takes back when the split is rejected. */
+  originalNodeId?: string;
 };
 
 export type NodeMoveAttrs = Omit<InsertDeleteAttrs, "operation"> & {

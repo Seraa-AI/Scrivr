@@ -82,5 +82,7 @@ One-time changes to watch for:
   block in collaboration.
 - `blockIdOf(node)` is exported from `@scrivr/core` (approved by the user,
   2026-11-09): the one answer to which nodes carry a block id.
+- `ReferenceAttrs` gains `originalNodeId`, the id the block had when a tracked
+  split was made. Rejecting the split gives the rejoined block that id back.
 - **Track changes marks its own recording transaction `NORMALIZATION_META`,**
   as bookkeeping nobody authored.

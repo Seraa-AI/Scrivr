@@ -9,7 +9,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === "object" && !Array.isArray(value);
 
 /** Re-key track-change identity while preserving all internal links. */
-export const cloneTrackedChanges: CloneHandler = ({ doc, newId, recordId }) => {
+export const cloneTrackedChanges: CloneHandler = ({ doc, idMap, newId, recordId }) => {
   const trackedIdMap = new Map<string, string>();
   const remap = (oldId: string): string => {
     let replacement = trackedIdMap.get(oldId);
@@ -35,6 +35,13 @@ export const cloneTrackedChanges: CloneHandler = ({ doc, newId, recordId }) => {
       if (!Array.isArray(ids)) continue;
       next ??= { ...entry };
       next[field] = ids.map(id => typeof id === "string" ? remap(id) : id);
+    }
+    // A block id, re-keyed by core with the block it names.
+    const originalNodeId = entry["originalNodeId"];
+    const clonedNodeId = typeof originalNodeId === "string" ? idMap.get(originalNodeId) : undefined;
+    if (clonedNodeId !== undefined) {
+      next ??= { ...entry };
+      next["originalNodeId"] = clonedNodeId;
     }
     return next ?? value;
   };

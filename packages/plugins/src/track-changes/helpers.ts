@@ -67,6 +67,7 @@ export type NewMoveAttrs = Omit<TrackedAttrs, "id" | "operation"> & {
 export type NewReferenceAttrs = Omit<TrackedAttrs, "id" | "operation"> & {
   operation: CHANGE_OPERATION.reference;
   referenceId: string;
+  originalNodeId?: string;
 };
 
 export type NewTrackedAttrs = NewInsertAttrs | NewDeleteAttrs | NewUpdateAttrs | NewMoveAttrs;
@@ -87,8 +88,13 @@ export function createNewJoinAttrs(attrs: NewEmptyAttrs): NewJoinAttrs {
   return { ...attrs, operation: CHANGE_OPERATION.node_join };
 }
 
-export function createNewReferenceAttrs(attrs: NewEmptyAttrs, id: string): NewReferenceAttrs {
-  return { ...attrs, operation: CHANGE_OPERATION.reference, referenceId: id };
+export function createNewReferenceAttrs(attrs: NewEmptyAttrs, id: string, originalNodeId: string | null): NewReferenceAttrs {
+  return {
+    ...attrs,
+    operation: CHANGE_OPERATION.reference,
+    referenceId: id,
+    ...(originalNodeId !== null ? { originalNodeId } : {}),
+  };
 }
 
 export function createNewDeleteAttrs(attrs: NewEmptyAttrs): NewDeleteAttrs {

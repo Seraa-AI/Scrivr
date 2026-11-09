@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { ServerEditor, StarterKit } from "@scrivr/core";
-import { redo, Slice, splitListItem, TextSelection, undo } from "@scrivr/core/pm";
+import { redo, Slice, splitBlock, splitListItem, TextSelection, undo } from "@scrivr/core/pm";
 import { changeActs, reviewChanges, TrackChanges, TrackChangesStatus, trackChangesPluginKey } from "@scrivr/plugins";
 
 type DocNode = Record<string, unknown>;
@@ -84,6 +84,53 @@ describe("a tracked Enter at the start of a paragraph", () => {
     expect(reviewChanges(editor, { accepted: [], rejected: pendingActs(editor).map((a) => a.primary.id) }).status).toBe("applied");
     expect(editor.getState().doc.childCount).toBe(1);
     expect(idOfText(editor, "Hello")).toBe("p");
+  });
+});
+
+describe("a rejected Enter gives the paragraph back the id it had", () => {
+  const rejectAll = (editor: ServerEditor) =>
+    reviewChanges(editor, { accepted: [], rejected: pendingActs(editor).map((a) => a.primary.id) }).status;
+  const enterAt = (editor: ServerEditor, from: number, to = from) => {
+    editor.applyTransaction(editor.getState().tr.setSelection(TextSelection.create(editor.getState().doc, from, to)));
+    splitBlock(editor.getState(), (tr) => editor.applyTransaction(tr));
+  };
+  const onlyBlock = (editor: ServerEditor) => {
+    const doc = editor.getState().doc;
+    return { count: doc.childCount, text: doc.child(0).textContent, id: doc.child(0).attrs["nodeId"] };
+  };
+
+  it("after typing into the empty line Enter at its start opened", () => {
+    const editor = editorWith([para("p", "Hello")]);
+    enterAt(editor, 1);
+    editor.applyTransaction(editor.getState().tr.insertText("New", 1));
+    expect(rejectAll(editor)).toBe("applied");
+    expect(onlyBlock(editor)).toEqual({ count: 1, text: "Hello", id: "p" });
+  });
+
+  it("after Enter replaced a selection at its start", () => {
+    const editor = editorWith([para("p", "Hello")]);
+    enterAt(editor, 1, 3);
+    expect(rejectAll(editor)).toBe("applied");
+    expect(onlyBlock(editor)).toEqual({ count: 1, text: "Hello", id: "p" });
+  });
+
+  it("after the words before the break, the author's own, were taken out again", () => {
+    const editor = editorWith([para("p", "Hello")]);
+    editor.applyTransaction(editor.getState().tr.insertText("AB", 1));
+    enterAt(editor, 3);
+    editor.applyTransaction(editor.getState().tr.delete(1, 3));
+    expect(rejectAll(editor)).toBe("applied");
+    expect(onlyBlock(editor)).toEqual({ count: 1, text: "Hello", id: "p" });
+  });
+
+  it("whichever order the extensions are registered in", () => {
+    const editor = new ServerEditor({
+      extensions: [TrackChanges.configure({ userID: "alice", initialStatus: TrackChangesStatus.enabled, canAcceptReject: true }), StarterKit],
+      content: { type: "doc", content: [para("p", "Hello")] },
+    });
+    enterAt(editor, 1);
+    expect(rejectAll(editor)).toBe("applied");
+    expect(onlyBlock(editor)).toEqual({ count: 1, text: "Hello", id: "p" });
   });
 });
 

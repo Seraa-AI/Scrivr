@@ -67,12 +67,16 @@ export function setFragmentAsMoveChange(fragment: Fragment, moveAttrs: NewMoveAt
   return Fragment.from(content);
 }
 
-/** Add split change to the source node parent, and to the last child which is the split content. */
+/**
+ * Add split change to the source node parent, and to the last child which is
+ * the split content. `originalNodeId` is the id the block had before the split.
+ */
 export function setFragmentAsNodeSplit(
   $pos: ResolvedPos,
   newTr: Transaction,
   inserted: Fragment,
   attrs: NewEmptyAttrs,
+  originalNodeId: string | null,
 ) {
   const lastChild = inserted.lastChild!;
   const referenceId = genId();
@@ -84,7 +88,7 @@ export function setFragmentAsNodeSplit(
     ...parent.attrs,
     dataTracked: [
       ...oldDataTracked.filter(c => c.operation !== "reference"),
-      { ...addTrackIdIfDoesntExist(createNewReferenceAttrs({ ...attrs, status: CHANGE_STATUS.pending }, referenceId)) },
+      { ...addTrackIdIfDoesntExist(createNewReferenceAttrs({ ...attrs, status: CHANGE_STATUS.pending }, referenceId, originalNodeId)) },
     ],
   });
 

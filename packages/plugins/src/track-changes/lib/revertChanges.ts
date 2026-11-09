@@ -23,9 +23,7 @@ export function revertSplitNodeChange(tr: Transaction, change: IncompleteChange)
 
   const splitOff = tr.doc.nodeAt(live.from)!;
   // The rejoined block is the paragraph that was split, under the id it had.
-  // That id stays with the half holding its content (as `UniqueId` assigns it):
-  // after a break at its very start, the first half is the new empty line.
-  const sourceWasEmpty = tr.doc.nodeAt(source.from)?.childCount === 0;
+  const originalNodeId = "originalNodeId" in source.dataTracked && typeof source.dataTracked.originalNodeId === "string" ? source.dataTracked.originalNodeId : undefined;
   const carriedReference = current.find(
     c => c.from === live.from && c.dataTracked.operation === "reference",
   );
@@ -51,7 +49,7 @@ export function revertSplitNodeChange(tr: Transaction, change: IncompleteChange)
     undefined,
     {
       ...sourceNode.attrs,
-      ...(sourceWasEmpty ? { nodeId: splitOff.attrs["nodeId"] } : {}),
+      ...(originalNodeId !== undefined ? { nodeId: originalNodeId } : {}),
       dataTracked: records.length ? records : null,
     },
     sourceNode.marks,
