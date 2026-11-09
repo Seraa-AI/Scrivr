@@ -20,17 +20,14 @@ import type { PageGeometry } from "./PageMetrics";
 import { advanceFlowGlobalY, collapseMargins, landingAfter, pageLocalYForGlobalY } from "./FlowPlacement";
 import type { FlowBlock, MeasureContext, PageConfig } from "./PageLayout";
 
-/**
- * Where flow `index` starts when only its predecessor decides. `flow`, when
- * given, is that flow laid out anew: its own first line decides the landing.
- */
+/** Where flow `index` starts when only its predecessor decides. */
 function naturalStartOf(
   flows: readonly FlowBlock[],
   index: number,
   pageConfig: PageConfig,
   geometry: PageGeometry,
-  flow: FlowBlock | undefined = flows[index],
 ): number {
+  const flow = flows[index];
   const prev = flows[index - 1];
   if (!flow) return 0;
   if (!prev) return flow.originalGlobalY ?? flow.globalY ?? 0;
@@ -592,10 +589,10 @@ function reflowFlowsAgainstExclusions(
       return space.skipToY !== undefined ? { segments, skipToY: space.skipToY } : { segments };
     };
 
-    const layAt = (y: number) => layoutBlock(flow.node, {
+    const reflowed = layoutBlock(flow.node, {
       nodePos: flow.nodePos,
       x: blockContentX,
-      y,
+      y: flowY,
       availableWidth: flow.availableWidth,
       page,
       measurer,
@@ -605,24 +602,12 @@ function reflowFlowsAgainstExclusions(
       ...(inlineRegistry ? { inlineRegistry } : {}),
       ...(fonts ? { fonts } : {}),
     });
-    // A block paints where its new first line lands, and that line depends on
-    // where it is laid out: lay it out again until the two agree (the landing
-    // only moves among start, start without the gap, and the next page).
-    let laidAt = flowY;
-    let reflowed = layAt(laidAt);
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const landing = floats.startOf(idx, naturalStartOf(flows, idx, pageConfig, geometry, { ...flow, lines: reflowed.lines }));
-      if (landing === laidAt) break;
-      laidAt = landing;
-      reflowed = layAt(laidAt);
-    }
 
     const nextFlow: FlowBlock = {
       ...flow,
       overlapsWrapZone: true,
-      globalY: laidAt,
-      wrapZonePage: pageConfig.pageless ? page : geometry.pageAt(laidAt),
-      wrapLaidAtY: laidAt,
+      wrapZonePage: pageConfig.pageless ? page : geometry.pageAt(flowY),
+      wrapLaidAtY: flowY,
       lines: reflowed.lines,
       height: reflowed.height,
       blockType: reflowed.blockType,
@@ -634,7 +619,7 @@ function reflowFlowsAgainstExclusions(
     // Restamping re-derives later flows from their predecessors; only do it
     // when this block's end actually moved.
     const endBefore = advanceFlowGlobalY(flow, flowY, pageConfig, geometry).endGlobalY;
-    const endAfter = advanceFlowGlobalY(nextFlow, laidAt, pageConfig, geometry).endGlobalY;
+    const endAfter = advanceFlowGlobalY(nextFlow, flowY, pageConfig, geometry).endGlobalY;
     if (endAfter !== endBefore) {
       noteMoved(restampGlobalYFrom(flows, idx + 1, pageConfig, geometry, floats.startOf));
     }
