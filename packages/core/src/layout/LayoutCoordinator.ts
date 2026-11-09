@@ -242,6 +242,7 @@ export class LayoutCoordinator {
     // layout refines — but the first page is not held waiting on it.
     const fromDocument = collectFontRequests(this.opts.getDoc(), provider.defaultRequest(), {
       maxBlocks: LayoutCoordinator.INITIAL_BLOCKS,
+      fontModifiers: this.opts.fontModifiers,
     });
     const fromLayout = [...(this.fontResolverValue?.table().values() ?? [])].map((r) => r.request);
     // Duplicates are free: `installFaces` keys by resource id.

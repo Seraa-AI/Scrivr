@@ -31,6 +31,9 @@ const DEFAULT_PARAGRAPH_LINE_HEIGHT = createMeasurer().getFontMetrics(
 ).lineHeight;
 
 
+/** StarterKit's block styles and font modifiers: what styles a heading. */
+const starter = buildStarterKitContext();
+
 function h1(text: string) {
   return heading(1, text);
 }
@@ -102,6 +105,7 @@ describe("runPipeline — multiple blocks", () => {
     const layout = runPipeline(doc(h1("Title"), p("Body")), {
       pageConfig: defaultPageConfig,
       measurer: createMeasurer(),
+      fontConfig: starter.fontConfig,
     });
     const [heading, para] = layout.pages[0]!.blocks;
     const gap = para!.y - (heading!.y + heading!.height);
@@ -1028,10 +1032,10 @@ describe("runPipeline — gap suppression at page boundary", () => {
     // heading_1's font to paragraph's so both blocks share the same line
     // height — the only varying signal is spaceBefore.
     const fontConfig: typeof defaultFontConfig = {
-      ...defaultFontConfig,
+      ...starter.fontConfig,
       heading_1: {
-        ...defaultFontConfig.heading_1!,
-        font: defaultFontConfig.paragraph!.font,
+        ...starter.fontConfig.heading_1!,
+        font: starter.fontConfig.paragraph!.font,
       },
     };
     const oneLineIntro = "aaaaaaaaa";
@@ -1075,9 +1079,9 @@ describe("runPipeline — gap suppression at page boundary", () => {
 
   it("drops a large collapsed margin when a natural page break starts a fresh page", () => {
     const fontConfig = {
-      ...defaultFontConfig,
+      ...starter.fontConfig,
       heading_1: {
-        ...defaultFontConfig.heading_1!,
+        ...starter.fontConfig.heading_1!,
         spaceBefore: 50,
       },
     };

@@ -9,6 +9,7 @@ import { ExtensionManager } from "./extensions/ExtensionManager";
 import { StarterKit } from "./extensions/StarterKit";
 import type { Extension } from "./extensions/Extension";
 import type {
+  FontModifier,
   IBaseEditor,
   MarkdownParserTokenSpec,
   SlashCommandSpec,
@@ -530,6 +531,10 @@ export class BaseEditor implements IBaseEditor {
 
   getMarkerPainters(): ReadonlyMap<string, MarkerPainter> {
     return this.manager.getMarkerPainters();
+  }
+
+  getFontModifiers(): ReadonlyMap<string, FontModifier> {
+    return this.manager.buildFontModifiers();
   }
 
   getDocAttrNames(): string[] {

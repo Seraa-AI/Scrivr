@@ -1,10 +1,11 @@
+import type { Node } from "prosemirror-model";
 import { substituteFamily } from "./StyleResolver";
 
 /**
  * FontConfig — maps block node types to their base font and spacing.
  *
- * Flat map keyed by node type name. For nodes with a `level` attribute
- * (headings), styles are keyed as `{nodeType}_{level}` — e.g. "heading_1".
+ * Flat map keyed by node type name. For nodes with a `level` attribute,
+ * styles are keyed as `{nodeType}_{level}`.
  * getBlockStyle() handles the compound key lookup automatically.
  *
  * Extensions contribute their own block styles via addBlockStyles().
@@ -38,47 +39,10 @@ export const DEFAULT_FONT_FAMILY = "Arial, sans-serif";
  * Default font config.
  * Font strings contain only size/weight/style — NO family.
  * The family is injected at layout time via applyPageFont(config, pageConfig.fontFamily ?? DEFAULT_FONT_FAMILY).
- *
- * Heading levels use compound keys: "heading_1", "heading_2", etc.
+ * Every other block's style comes from its extension (`addBlockStyles`).
  */
 export const defaultFontConfig: FontConfig = {
   paragraph: { font: "14px", spaceBefore: 0, spaceAfter: 10, align: "left" },
-  heading_1: {
-    font: "bold 28px",
-    spaceBefore: 24,
-    spaceAfter: 12,
-    align: "left",
-  },
-  heading_2: {
-    font: "bold 22px",
-    spaceBefore: 20,
-    spaceAfter: 10,
-    align: "left",
-  },
-  heading_3: {
-    font: "bold 18px",
-    spaceBefore: 16,
-    spaceAfter: 8,
-    align: "left",
-  },
-  heading_4: {
-    font: "bold 16px",
-    spaceBefore: 14,
-    spaceAfter: 6,
-    align: "left",
-  },
-  heading_5: {
-    font: "bold 14px",
-    spaceBefore: 12,
-    spaceAfter: 4,
-    align: "left",
-  },
-  heading_6: {
-    font: "italic 14px",
-    spaceBefore: 10,
-    spaceAfter: 4,
-    align: "left",
-  },
 };
 
 /**
@@ -107,6 +71,17 @@ export function getBlockStyle(
       align: "left" as const,
     }
   );
+}
+
+/**
+ * The font a block's unmarked text is drawn in: its style's, with the block's
+ * own `fontFamily` attr in place of the style's family when it names one.
+ */
+export function blockFontOf(node: Node, config: FontConfig): string {
+  const level = node.attrs["level"];
+  const style = getBlockStyle(config, node.type.name, typeof level === "number" ? level : undefined);
+  const family = node.attrs["fontFamily"];
+  return typeof family === "string" && family.length > 0 ? substituteFamily(style.font, family) : style.font;
 }
 
 /**

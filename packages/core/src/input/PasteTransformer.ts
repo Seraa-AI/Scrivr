@@ -3,7 +3,7 @@ import {
   Fragment,
   Slice,
 } from "prosemirror-model";
-import type { Schema, Node } from "prosemirror-model";
+import type { NodeType, Schema, Node } from "prosemirror-model";
 import type { EditorState, Transaction } from "prosemirror-state";
 import { MarkdownParser } from "prosemirror-markdown";
 import type MarkdownIt from "markdown-it";
@@ -294,21 +294,20 @@ export class PasteTransformer {
   /** Plain text */
 
   /**
-   * Insert text verbatim. Line breaks become paragraph breaks, matching
-   * Word/Docs — a run of text pasted into a document is a run of paragraphs,
-   * not one paragraph holding newline characters the canvas cannot render.
+   * Insert text verbatim. Line breaks become block breaks, matching
+   * Word/Docs — a run of text pasted into a document is a run of the schema's
+   * default blocks (paragraphs), not one holding newline characters the canvas
+   * cannot render.
    * The slice stays open at both ends so the outer lines merge with the text
    * already around the cursor.
    */
   private fromPlainText(state: EditorState, text: string): Transaction | null {
-    const paragraph = this.schema.nodes["paragraph"];
-    if (!paragraph || !/\r?\n/.test(text)) return insertText(state, text);
+    const block = defaultTextblock(this.schema);
+    if (!block || !/\r?\n/.test(text)) return insertText(state, text);
 
     const blocks = text
       .split(/\r?\n/)
-      .map((line) =>
-        paragraph.create(null, line ? this.schema.text(line) : null),
-      );
+      .map((line) => block.create(null, line ? this.schema.text(line) : null));
     return state.tr.replaceSelection(
       this.applyPasteTransforms(new Slice(Fragment.from(blocks), 1, 1)),
     );
@@ -555,13 +554,19 @@ function buildSlice(
   );
 }
 
+/** The block a document holds by default, when it holds text: a paragraph, in every built-in schema. */
+function defaultTextblock(schema: Schema): NodeType | null {
+  const type = schema.topNodeType.contentMatch.defaultType;
+  return type?.isTextblock ? type : null;
+}
+
 /**
- * A default-attr paragraph has no identity of its own to preserve. Compared
- * against a freshly-created paragraph: `sameMarkup` ignores content and, given
- * the same marks, reduces to "are all attrs still their defaults?".
+ * A default-attr default block has no identity of its own to preserve.
+ * Compared against a freshly-created one: `sameMarkup` ignores content and,
+ * given the same marks, reduces to "are all attrs still their defaults?".
  */
 function mergesIntoNeighbour(node: Node | null | undefined): boolean {
-  if (!node || node.type.name !== "paragraph") return false;
+  if (!node || node.type !== defaultTextblock(node.type.schema)) return false;
   return node.sameMarkup(node.type.create(null, null, node.marks));
 }
 

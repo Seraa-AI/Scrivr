@@ -28,6 +28,7 @@ import { createNapiCanvasContext } from "./test/createNapiCanvasContext";
 import type { Node } from "prosemirror-model";
 import type { Schema } from "prosemirror-model";
 import type { FontConfig } from "./layout/FontConfig";
+import type { FontModifier } from "./extensions/types";
 import type { PageConfig } from "./layout/PageLayout";
 import type { SectionSettings } from "./model/sections";
 
@@ -161,6 +162,8 @@ export interface FullEditorContext {
   schema: Schema;
   /** Merged FontConfig from StarterKit — block styles for all built-in node types. */
   fontConfig: FontConfig;
+  /** StarterKit's font modifiers — how bold, italic, size and family marks change a run's font. */
+  fontModifiers: Map<string, FontModifier>;
 }
 
 /**
@@ -178,6 +181,7 @@ export function buildStarterKitContext(): FullEditorContext {
   return {
     schema: manager.schema,
     fontConfig: manager.buildBlockStyles(),
+    fontModifiers: manager.buildFontModifiers(),
   };
 }
 

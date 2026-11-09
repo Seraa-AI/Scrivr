@@ -170,6 +170,8 @@ export interface IBaseEditor {
   getImportContributions(): ImportContributionMap[];
   /** Marker painters from all extensions, by key; a later extension's replaces an earlier one's. */
   getMarkerPainters(): ReadonlyMap<string, MarkerPainter>;
+  /** Font modifiers from all extensions, by mark name: how each mark changes a run's face. */
+  getFontModifiers(): ReadonlyMap<string, FontModifier>;
   /**
    * Names of doc-level attributes declared by extensions via `addDocAttrs()`.
    *

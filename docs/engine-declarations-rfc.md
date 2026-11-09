@@ -224,4 +224,35 @@ The list-number gap fix (user, 2026-11-09) stays the next PR, before 1.
 
 ## What shipped
 
-Nothing yet.
+### Phase 1 — marks, default block, style defaults
+
+As designed, with these differences:
+
+- **The editor's font queries stay on `Editor`**, but read the font the way
+  layout does instead of moving to `FontFamily` and `FontSize`: one private
+  `runFont(marks, block)` (the block's font, `blockFontOf`, with the marks
+  applied through the font modifiers). `getActiveFontFamily`, its `mixed`
+  check and `getActiveFontSize` all ask it, so a custom mark that changes the
+  family or size is reported, and the weight and style handed to the font
+  provider come from the run's font, a heading's bold included.
+- **`blockFontOf(node, config)`** is the one place a block's base font is
+  derived; `layoutBlock` and the editor both use it.
+- **`collectFontRequests` takes `fontModifiers`**, and `prepareDocumentFonts`
+  takes `{ fontModifiers, constraints }`; `IBaseEditor.getFontModifiers()`
+  hands them to the DOCX import. The weight/style mapping is shared with the
+  layout resolver (`faceOf`).
+- **Headers and footers use the editor's block styles.** They were laid out
+  with a copy of `defaultFontConfig`, so a heading in a header kept its look
+  only through the defaults this phase removes. `chromeFontConfigOf` derives
+  the band's styles from the editor's (a paragraph's spacing dropped, as
+  before); the payload carries them so a band re-laid out while edited is
+  styled as it was measured.
+- **The default block** is `schema.topNodeType.contentMatch.defaultType` when
+  it is a textblock, for plain-text paste and for which pasted block merges
+  into its neighbours.
+- `getBlockStyle` still falls back to the `paragraph` style for a node with
+  none; that fallback moves with the next style work, not this phase.
+- The vocabulary guard holds: no font mark read by name (`name ===`, `case`,
+  `includes(`, `marks[`) under `layout/`, `renderer/`, `fonts/` or in
+  `Editor.ts`; no `heading` style key under `layout/`; no `paragraph` literal
+  under `input/`.

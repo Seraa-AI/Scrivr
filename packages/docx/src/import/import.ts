@@ -231,7 +231,7 @@ export async function importDocx(
     // does not. Asking before anything is measured is the only point at which
     // the answer is still cheap to act on.
     if (editor.fonts) {
-      for (const shortfall of await prepareDocumentFonts(doc, editor.fonts)) {
+      for (const shortfall of await prepareDocumentFonts(doc, editor.fonts, { fontModifiers: editor.getFontModifiers() })) {
         ctx.diagnostics.warn({
           code: "font-substituted",
           message:
