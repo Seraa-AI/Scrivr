@@ -17,14 +17,8 @@ import {
   type NormalizedImageAttrs,
 } from "./AnchoredObjects";
 import type { PageGeometry } from "./PageMetrics";
-import {
-  advanceFlowGlobalY,
-  collapseMargins,
-  pageLocalYForGlobalY,
-  type FlowBlock,
-  type MeasureContext,
-  type PageConfig,
-} from "./PageLayout";
+import { advanceFlowGlobalY, collapseMargins, pageLocalYForGlobalY } from "./FlowPlacement";
+import type { FlowBlock, MeasureContext, PageConfig } from "./PageLayout";
 
 /** Where flow `index` starts when only its predecessor decides. */
 function naturalStartOf(
