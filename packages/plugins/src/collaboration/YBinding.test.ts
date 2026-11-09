@@ -1,8 +1,10 @@
 import { describe, it, expect } from "vitest";
 import * as Y from "yjs";
-import { TextSelection } from "@scrivr/core/pm";
+import { Slice, TextSelection } from "@scrivr/core/pm";
 import { ServerEditor, Extension, StarterKit } from "@scrivr/core";
 import { DOC_ATTRS_MAP_NAME, YBinding } from "./YBinding";
+import { TrackChanges } from "../track-changes/TrackChanges";
+import { TrackChangesStatus } from "../track-changes/types";
 import type { DocAttrEnvelope } from "./YBinding";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -497,6 +499,63 @@ describe("YBinding — a split's new id is assigned once, by its author", () => 
 
     const ids = blockIds(a.editor);
     expect(ids).toHaveLength(2);
+    expect(new Set(ids).size).toBe(2);
+    expect(blockIds(b.editor)).toEqual(ids);
+
+    unpair();
+    a.binding.destroy();
+    b.binding.destroy();
+  });
+
+  // Known limitation, pinned: two peers that cut and paste the same block while
+  // apart each paste a copy under its id, and the merge keeps both. No peer
+  // re-keys a synced change, so the duplicate stays; agent writes refuse it.
+  it("concurrent cut-and-paste of one block on two peers leaves two live copies of its id", () => {
+    const a = makePeer();
+    const b = makePeer();
+    a.binding.markSynced();
+    b.binding.markSynced();
+    const exchange = () => {
+      Y.applyUpdate(b.ydoc, Y.encodeStateAsUpdate(a.ydoc), "test-relay");
+      Y.applyUpdate(a.ydoc, Y.encodeStateAsUpdate(b.ydoc), "test-relay");
+    };
+    a.editor.applyTransaction(a.editor.getState().tr.insertText("One", 1));
+    a.editor.applyTransaction(a.editor.getState().tr.split(4));
+    a.editor.applyTransaction(a.editor.getState().tr.insertText("Two", 6));
+    exchange();
+
+    const pastes: Array<[ReturnType<typeof makePeer>, boolean]> = [[a, true], [b, false]];
+    for (const [peer, atEnd] of pastes) {
+      const doc = peer.editor.getState().doc;
+      const one = doc.child(0);
+      peer.editor.applyTransaction(peer.editor.getState().tr.delete(0, one.nodeSize).setMeta("uiEvent", "cut"));
+      const at = atEnd ? peer.editor.getState().doc.content.size : 0;
+      peer.editor.applyTransaction(peer.editor.getState().tr.replace(at, at, new Slice(doc.slice(0, one.nodeSize).content, 0, 0)).setMeta("uiEvent", "paste"));
+    }
+    exchange();
+
+    const ids = blockIds(a.editor);
+    expect(blockIds(b.editor)).toEqual(ids);
+    expect(new Set(ids).size).toBeLessThan(ids.length);
+
+    a.binding.destroy();
+    b.binding.destroy();
+  });
+
+  it("with track changes on: the split is recorded, its new half filled once, and synced as is", () => {
+    const tracked = () => makePeer({ extensions: [StarterKit, TrackChanges.configure({ userID: "alice", initialStatus: TrackChangesStatus.enabled })] });
+    const a = tracked();
+    const b = tracked();
+    const unpair = pairDocs(a.ydoc, b.ydoc);
+    a.binding.markSynced();
+    b.binding.markSynced();
+
+    a.editor.applyTransaction(a.editor.getState().tr.insertText("AlphaBeta", 1));
+    a.editor.applyTransaction(a.editor.getState().tr.split(6));
+
+    const ids = blockIds(a.editor);
+    expect(ids).toHaveLength(2);
+    expect(ids.every((id) => typeof id === "string")).toBe(true);
     expect(new Set(ids).size).toBe(2);
     expect(blockIds(b.editor)).toEqual(ids);
 

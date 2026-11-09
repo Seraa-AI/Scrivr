@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { ServerEditor, StarterKit } from "@scrivr/core";
-import { redo, splitListItem, TextSelection, undo } from "@scrivr/core/pm";
+import { redo, Slice, splitListItem, TextSelection, undo } from "@scrivr/core/pm";
 import { changeActs, reviewChanges, TrackChanges, TrackChangesStatus, trackChangesPluginKey } from "@scrivr/plugins";
 
 type DocNode = Record<string, unknown>;
@@ -115,6 +115,22 @@ describe("a tracked paste of a copy", () => {
       expect(ids.filter((id) => id === "leaf")).toHaveLength(1);
       expect(new Set(ids).size).toBe(ids.length);
     }
+  });
+});
+
+describe("a tracked cut and paste of a whole block", () => {
+  it("is recorded as a move, so the pasted block keeps its id", () => {
+    const editor = editorWith([para("a", "Alpha"), para("b", "Beta")]);
+    const doc = editor.getState().doc;
+    const first = doc.child(0);
+    editor.applyTransaction(editor.getState().tr.delete(0, first.nodeSize).setMeta("uiEvent", "cut"));
+    const end = editor.getState().doc.content.size;
+    editor.applyTransaction(editor.getState().tr.replace(end, end, new Slice(doc.slice(0, first.nodeSize).content, 0, 0)).setMeta("uiEvent", "paste"));
+    const pasted = editor.getState().doc.lastChild;
+    expect(pasted?.textContent).toBe("Alpha");
+    expect(pasted?.attrs["nodeId"]).toBe("a");
+    const moves = pendingActs(editor).filter((act) => act.records.some((r) => r.dataTracked.moveId || r.dataTracked.moveNodeId));
+    expect(moves).toHaveLength(1);
   });
 });
 
