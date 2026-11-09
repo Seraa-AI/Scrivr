@@ -65,6 +65,8 @@ export type {
   ScrivrNodeSpec,
   PasteTransform,
   PasteHtmlTransform,
+  PasteFileHandler,
+  PasteFileSpec,
   InitialDocContext,
   IBaseEditor,
   IEditor,

@@ -150,6 +150,7 @@ export class Extension<Options extends object = object> {
       inputHandlers: config.addInputHandlers?.call(p1) ?? {},
       pasteTransforms: config.addPasteTransforms?.call(p1) ?? [],
       pasteHtmlTransforms: config.addPasteHtmlTransforms?.call(p1) ?? [],
+      pasteFiles: config.addPasteFiles?.call(p1) ?? {},
       inputRules: schema ? (config.addInputRules?.call(p2) ?? []) : [],
       markdownParserTokens: config.addMarkdownParserTokens?.call(p1) ?? {},
       markdownSerializerRules: config.addMarkdownSerializerRules?.call(p1) ?? {},

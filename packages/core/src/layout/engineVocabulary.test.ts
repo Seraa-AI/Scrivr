@@ -15,12 +15,15 @@ const LIST_WORDS = /bullet|numbered|\blists\b|\b(a|the|nested|ordered) list\b|li
  */
 const FONT_MARKS = /(name ?[!=]==? ?|case |includes\(|marks\[)["'`](bold|italic|fontSize|fontFamily)["'`]/;
 
+/** A node read by name as an image: compared, or looked up in the schema. */
+const IMAGE_NODE = /name ?[!=]==? ?["'`]image["'`]|nodes\[["'`]image["'`]\]/;
+
 /** Nodes and marks that declare what they do, through their spec, tokens, styles or font modifiers. */
 const NODE_NAMES: Record<string, RegExp> = {
-  layout: new RegExp(`\\b(pageBreak|hardBreak|sectionBreak)\\b|["'\`]heading(_\\d)?["'\`]|${FONT_MARKS.source}`),
-  renderer: new RegExp(`\\b(pageBreak|hardBreak)\\b|${FONT_MARKS.source}`),
+  layout: new RegExp(`${IMAGE_NODE.source}|\\b(pageBreak|hardBreak|sectionBreak)\\b|["'\`]heading(_\\d)?["'\`]|${FONT_MARKS.source}`),
+  renderer: new RegExp(`${IMAGE_NODE.source}|\\b(pageBreak|hardBreak)\\b|${FONT_MARKS.source}`),
   fonts: FONT_MARKS,
-  input: /["'`](paragraph|heading|bulletList|orderedList|listItem)["'`]/,
+  input: new RegExp(`${IMAGE_NODE.source}|["'\`](paragraph|heading|bulletList|orderedList|listItem)["'\`]`),
 };
 
 const sourceFiles = (dir: string): string[] =>
@@ -46,6 +49,11 @@ describe("the engine's vocabulary", () => {
 
   it("the sections model finds a section boundary by its declaration, not its name", () => {
     const named = readFileSync(join(__dirname, "..", "model", "sections.ts"), "utf8").split("\n").filter((line) => /["'`]sectionBreak["'`]/.test(line));
+    expect(named).toEqual([]);
+  });
+
+  it.each(["Editor.ts", "SelectionController.ts"])("%s finds a floating object by its declaration, not by name", (file) => {
+    const named = readFileSync(join(__dirname, "..", file), "utf8").split("\n").filter((line) => IMAGE_NODE.test(line));
     expect(named).toEqual([]);
   });
 

@@ -347,3 +347,29 @@ heading heads nothing.
 - **A section is titled by its heading**, not by the unit's text, which with
   grouping on includes the lede.
 
+**Floats and images.** As designed (items 4 and 5), with these differences:
+
+- **`anchored(node)` on the spec, read through `anchoredOf` and `floats`.**
+  `AnchoredPlacement` is `NormalizedImageAttrs` renamed. Image declares it
+  with `imagePlacementOf` (its own module), which owns the legacy attr mapping
+  `normalizeImageAttrs` held; core no longer exports either. Span building,
+  page layout, anchor collection, selection, pointer drag, the debug overlay,
+  `semanticImage` (an anchored object with a `src`) and Paragraph read it.
+- **Inline conversion stays on `Editor`, generic**: `placeInlineAtVisualPosition(docPos,
+  inlineAttrs)` for any anchored node, with Image's `INLINE_IMAGE_ATTRS`. A
+  command cannot reach the painted rect and hit-testing it needs, so only the
+  attrs moved to Image.
+- **A horizontal drag clamps with the width snapshotted at pointerdown**, as
+  the rest of the drag reads its geometry, not by re-reading the node.
+- **`addPasteFiles()`** returns `PasteFileSpec`s keyed by node type:
+  `accepts(file)`, the placeholder's attrs and how to recognise it, and the
+  resolved attrs. Core keeps reading or uploading the bytes, the URL gate and
+  measuring; Image declares the image's.
+- **`pdf.embeds`** (`PdfEmbedSource`) says where a node's embedded file lives;
+  the exporter fetches every declared source, anchored objects included.
+- The vocabulary guards keep `image` read by name out of `layout/`,
+  `renderer/`, `input/`, `Editor.ts`, `SelectionController.ts` and
+  `export-pdf/src`.
+- Still naming nodes, for later passes: `sanitizeDocUrls`' per-node URL gates,
+  the semantic lane's part types and container labels, and tables.
+

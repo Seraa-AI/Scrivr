@@ -3,6 +3,7 @@ import "./augmentation";
 
 export { PdfExport } from "./PdfExport";
 export type { PdfHandlers, PdfNodeHandler, PdfChromeHandler } from "./augmentation";
+export type { PdfEmbedSource } from "@scrivr/core";
 // The handler contract lives in core so an extension can describe its node and
 // its mark without depending on this package; re-exported for consumers already
 // importing it from here.
@@ -33,6 +34,7 @@ export type { ImageResolver, ImageBytes } from "./fetchImage";
 import { PDFDocument, type PDFPage, type PDFImage } from "pdf-lib";
 import type { Node as PmNode } from "@scrivr/core/pm";
 import type {
+  PdfEmbedSource,
   PdfMarkHandler,
   IEditor,
   IBaseEditor,
@@ -183,6 +185,7 @@ async function writePdf(
 
   const markerPainters = editor.getMarkerPainters();
   const removers: Array<(node: PmNode) => boolean> = [];
+  const embedSources = new Map<string, PdfEmbedSource>();
 
   for (const contrib of editor.getExportContributions()) {
     const remover = proposedRemoverOf(contrib);
@@ -194,6 +197,9 @@ async function writePdf(
     }
     for (const [name, handler] of Object.entries(pdfContrib.marks ?? {})) {
       markHandlers.set(name, handler);
+    }
+    for (const [name, source] of Object.entries(pdfContrib.embeds ?? {})) {
+      embedSources.set(name, source);
     }
     for (const [name, handler] of Object.entries(pdfContrib.chrome ?? {})) {
       chromeHandlers.set(name, handler);
@@ -241,6 +247,7 @@ async function writePdf(
     pdfDoc,
     layout,
     options?.resolveImage ?? createDefaultImageResolver(options?.onImageRefused),
+    (node) => embedSources.get(node.type.name)?.(node) ?? null,
   );
 
   // Mutable page ref — updated per page in the loop. Draw helpers read lazily.
@@ -418,30 +425,25 @@ async function embedImages(
   pdfDoc: PDFDocument,
   layout: DocumentLayout,
   resolveImage: ImageResolver,
+  embedOf: (node: PmNode) => string | null,
 ): Promise<Map<string, PDFImage | null>> {
   const srcs = new Set<string>();
-
-  for (const object of layout.anchoredObjects ?? []) {
-    const src = object.node.attrs["src"] as string | undefined;
+  const add = (node: PmNode): void => {
+    const src = embedOf(node);
     if (src) srcs.add(src);
-  }
+  };
+
+  for (const object of layout.anchoredObjects ?? []) add(object.node);
 
   const collectFromBlock = (block: DocumentLayout["pages"][0]["blocks"][number]) => {
     for (const cell of block.cells ?? []) {
       for (const child of cell.blocks) collectFromBlock(child);
     }
 
-    if (block.node.type.name === "image") {
-      const src = block.node.attrs["src"] as string | undefined;
-      if (src) srcs.add(src);
-    }
-
+    add(block.node);
     for (const line of block.lines) {
       for (const span of line.spans) {
-        if (span.kind === "object" && span.node.type.name === "image") {
-          const src = span.node.attrs["src"] as string | undefined;
-          if (src) srcs.add(src);
-        }
+        if (span.kind === "object") add(span.node);
       }
     }
   };

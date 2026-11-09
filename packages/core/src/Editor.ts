@@ -692,6 +692,7 @@ export class Editor extends BaseEditor implements IEditor {
 			{
 				pasteTransforms: this.manager.buildPasteTransforms(),
 				pasteHtmlTransforms: this.manager.buildPasteHtmlTransforms(),
+				pasteFiles: this.manager.buildPasteFiles(),
 				...(uploadPastedImage ? { uploadImage: uploadPastedImage } : {}),
 			},
 		);

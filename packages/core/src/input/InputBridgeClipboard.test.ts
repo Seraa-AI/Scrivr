@@ -63,6 +63,7 @@ function mountEditor(initialText = "Hello world"): Harness {
     pasteTransformer: new PasteTransformer(
       schema,
       manager.buildMarkdownParserTokens(),
+      { pasteFiles: manager.buildPasteFiles() },
     ),
     onFocus: () => {},
     onBlur: () => {},

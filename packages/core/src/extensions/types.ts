@@ -479,6 +479,29 @@ export type PasteTransform = (slice: Slice) => Slice;
 export type PasteHtmlTransform = (root: HTMLElement) => void;
 
 /**
+ * How pasted files of one kind become a node, declared by the extension that
+ * owns the node (`addPasteFiles`, keyed by node type name). Core reads or
+ * uploads each file to a `src`, gates it as an image URL and measures it; a
+ * placeholder holds its place meanwhile.
+ */
+export interface PasteFileSpec {
+  /** Whether this node takes a pasted file. */
+  accepts(file: File): boolean;
+  /** The placeholder's attrs while the file resolves; `id` marks it. */
+  pending(id: string): Record<string, unknown>;
+  /** The placeholder's `id`, or null for any other node. */
+  pendingIdOf(node: Node): string | null;
+  /** The node's attrs once the file has a `src` and a size. */
+  resolved(file: { src: string; width: number; height: number }): Record<string, unknown>;
+}
+
+/** A node type and the pasted files it takes. */
+export interface PasteFileHandler {
+  node: string;
+  spec: PasteFileSpec;
+}
+
+/**
  * Describes a toolbar button declared by an extension.
  * Core data only — no React, no DOM.
  */
@@ -1090,6 +1113,12 @@ export interface ExtensionConfig<Options = object> {
   addPasteHtmlTransforms?(this: Phase1Context<Options>): PasteHtmlTransform[];
 
   /**
+   * Pasted files this extension's nodes take, keyed by node type name: which
+   * files, and the attrs of the placeholder and of the resolved node.
+   */
+  addPasteFiles?(this: Phase1Context<Options>): Record<string, PasteFileSpec>;
+
+  /**
    * ProseMirror input rules (auto-format while typing).
    * Collected by ExtensionManager and wrapped in a single inputRules() plugin.
    * Phase 2 — schema is available via this.schema.
@@ -1227,6 +1256,7 @@ export interface ResolvedExtension {
   inputHandlers: Record<string, InputHandler>;
   pasteTransforms: PasteTransform[];
   pasteHtmlTransforms: PasteHtmlTransform[];
+  pasteFiles: Record<string, PasteFileSpec>;
   inputRules: InputRule[];
   markdownParserTokens: Record<string, MarkdownParserTokenSpec>;
   markdownSerializerRules: MarkdownSerializerRules;

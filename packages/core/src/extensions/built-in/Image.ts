@@ -1,6 +1,6 @@
 import { Extension } from "../Extension";
 import { imagePlacementOf } from "./imagePlacement";
-import type { PdfNodeHandler } from "../../exports/pdf";
+import type { PdfEmbedSource, PdfNodeHandler } from "../../exports/pdf";
 import { NodeSelection, type Command } from "prosemirror-state";
 import type { InlineStrategy } from "../../layout/BlockRegistry";
 import type { IEditor } from "../types";
@@ -613,6 +613,15 @@ const imagePdf: PdfNodeHandler = (block, ctx) => {
  */
 export const IMAGE_PLACEMENT_ATTRS: readonly string[] = ["xAlign", "x", "yOffset", "floatOffset"];
 
+/** A 1×1 transparent GIF: what a pasted image shows while its bytes are read or uploaded. */
+const PENDING_IMAGE_SRC = "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=";
+
+/** Where an image's bytes live, for the PDF to fetch and embed. */
+const imageEmbed: PdfEmbedSource = (node) => {
+  const src = node.attrs["src"];
+  return typeof src === "string" && src !== "" ? src : null;
+};
+
 /** The attrs that put an image back in its line, legacy placement cleared. */
 export const INLINE_IMAGE_ATTRS: Readonly<Record<string, unknown>> = {
   wrapMode: "inline",
@@ -722,6 +731,20 @@ export const Image = Extension.create({
     return { image: createInlineImageStrategy() };
   },
 
+  addPasteFiles() {
+    return {
+      image: {
+        accepts: (file) => file.type.startsWith("image/"),
+        pending: (id) => ({ src: PENDING_IMAGE_SRC, alt: "Uploading image…", pendingPasteId: id }),
+        pendingIdOf: (node) => {
+          const id = node.attrs["pendingPasteId"];
+          return typeof id === "string" ? id : null;
+        },
+        resolved: ({ src, width, height }) => ({ src, width, height, alt: "", pendingPasteId: null }),
+      },
+    };
+  },
+
   onViewReady(editor: IEditor) {
     // View-only: when an `<img>` load fires, request a repaint so the
     // image swaps in. Headless editors don't run this hook at all.
@@ -776,7 +799,7 @@ export const Image = Extension.create({
         nodes: { image: imageDocxHandler },
       },
       semantic: { nodes: { image: semanticHandler } },
-      pdf: { nodes: { image: imagePdf } },
+      pdf: { nodes: { image: imagePdf }, embeds: { image: imageEmbed } },
     };
   },
 
