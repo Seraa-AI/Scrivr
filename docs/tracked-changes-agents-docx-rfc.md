@@ -437,56 +437,91 @@ each reader patches the symptom; the fix belongs where ids are assigned.
 **The rule.** *A block that an authored local edit creates never carries an id
 another block in the document already carries.* After a batch of local,
 authored transactions, `UniqueId`'s `appendTransaction` finds every id carried
-by more than one block. The copies that were already there before the batch —
-the old positions of that id mapped through the batch — keep it; any copy the
-batch created gets a fresh id, in the same appended transaction that fills
-empty ids (`NORMALIZATION_META`, nobody's edit). So:
+by more than one block. A copy that was already there before the batch keeps
+it — on the copy now holding its content: where the original's content start
+mapped through the batch (a leaf, which has no content, by its own position).
+Any copy the batch created gets a fresh id, in the same appended transaction
+that fills empty ids (`NORMALIZATION_META`, nobody's edit). Which nodes carry a
+block id, and what counts as one, is one predicate, core's `blockIdOf`, leaves
+included. So:
 
-- a split or a list Enter: the first half was there, the split-off half is new
-  and gets a fresh id;
-- pasting a copy of a block into the same document: the pasted copy gets a
-  fresh id;
+- a split or a list Enter: the half holding the original content keeps the id
+  and the other half is new. Enter at the very start of a paragraph leaves the
+  paragraph its id and makes the empty line before it the new block, as Word
+  inserts an empty paragraph;
+- pasting a copy of a block — a horizontal rule or page break included — into
+  the same document: the pasted copy gets a fresh id;
 - a move inside one transaction (delete at the old place, insert at the new)
   leaves one copy and changes nothing.
+
+**Not authored: bookkeeping and history.** `UniqueId` de-duplicates only after
+authored transactions. Two kinds are not:
+
+- *Track changes' recording transaction*, marked `NORMALIZATION_META`.
+- *Undo and redo* (`isHistoryTransaction`). They restore a state where the rule
+  already held, and redo replays the original re-key step. Counting them as
+  authored would rename a pending move's copy when a move, an accept or a
+  reject is undone.
 
 **Pending moves keep their shared id.** Track changes records a move by
 putting the moved block back where it was as a deleted copy — the left-behind
 copy — under the same id, so the two read as one block with a pending
-decision. That copy is written by the tracking engine's own transaction, which
-is bookkeeping, not an authored edit: the engine marks it `NORMALIZATION_META`,
-and `UniqueId` only de-duplicates after authored transactions. On every later
-edit both copies were there before the batch, so neither is renamed. Accepting
-or rejecting the move removes one copy. This is the only sharing the rule
-allows, and core still knows nothing about tracking: it asks only who authored
-the transaction.
+decision. On every later edit both copies were there before the batch, so
+neither is renamed. Accepting or rejecting the move removes one copy. A cut
+pasted elsewhere is tracked as a move, as Word tracks it, so the pasted block
+keeps its id too. This is the only sharing the rule allows.
+
+**Why track changes also clears ids when it writes back.** Recording an edit,
+the engine undoes the author's step and writes it again from the step's
+original slice — which still carries the ids the step copied (a split's second
+half carries its source's id; a paste carries the original's). `UniqueId` may
+already have re-keyed that copy, and the replay would put the stale id back.
+Core cannot tell from the document which written content is a move's
+left-behind copy and must keep its id; only track changes knows. So the engine
+clears, in what it writes, any block id the document already carries — except
+for moved content — and `UniqueId`'s fill gives each cleared block its own.
+Core owns the rule and the predicate; the engine applies it to the content it
+writes.
 
 **Collaboration.** Exactly as the existing fill: only the client that made the
 split assigns the new id, in its own appended transaction, which syncs to the
 others. A change that arrives through sync (`COLLAB_SYNC_META`) is never
 re-keyed on the receiving client, so every client converges on the author's
-ids. Concurrent splits on two clients each mint their own ids for their own new
-blocks.
+ids — tested with two Yjs peers, untracked and with track changes on.
 
-**Existing documents.** Reads never assign ids (`ServerEditor` never fabricates
-one on load), so nothing is fixed on load. A document saved with duplicates
-keeps them until an authored edit creates another copy of that id; `UniqueId`
+*Known limitation.* Collaboration can still produce two live blocks with one
+id: two peers cutting and pasting the same block while apart each paste a copy
+under its id, and the merge keeps both (a test pins this); and a peer's own Y
+undo after another peer's paste is applied as a sync, so `UniqueId` skips it.
+Repairing these deterministically on every peer is a design change and is not
+part of this work. Agents stay safe: every agent write path refuses an id two
+live blocks carry.
+
+**Existing documents.** Decided by the user on 2026-11-08: documents saved with
+duplicate ids are **not repaired**. Reads never assign ids (`ServerEditor`
+never fabricates one on load), and edits never repair them either: `UniqueId`
 cannot tell an old duplicate from a pending move's pair without knowing about
-tracking, and renaming a move's copy would break the move. Readers stay correct
-on such a document: the agent's view matches a unit by its id and whether it is
-proposed for deletion (`SemanticUnit.proposedForDeletion`), and a write by id
-goes to the live copy (`findLiveNodeById`). Two *live* copies of one id in an
-old document stay ambiguous, as they were; a tracked repair is a follow-up.
+tracking, and renaming a move's copy would break the move. Repair is a
+follow-up. Readers stay correct on such a document: an agent's unit is matched
+by its id and whether it is proposed for deletion
+(`SemanticUnit.proposedForDeletion`), a write by id goes to the live copy, and
+an id two *live* blocks carry is refused by every agent write path — rich edits
+and structural ops alike.
 
-**What it removes.** With ids unique at the source, `findLiveNodeById` is exact
-and the copy-counting in `@scrivr/ai` goes: no nth-copy matching, no
-last-copy-wins maps. `unitsToRead` leaves out a move's left-behind copy by its
-position, and `applyRichEdit` matches a handed-back unit by id and by whether
-it is proposed for deletion.
+**Header and footer surfaces.** Their editors (`surfaces.ts`) do not run
+`UniqueId`, so an Enter there still duplicates an id. Nothing reads header or
+footer block ids today; PR B's DOCX revisions will, and must close this gap.
 
-**Track-changes splits.** A tracked split already records itself by record ids
-— `node_split` on the second half, `reference` on the first, pointing at the
-split's record id — never by `nodeId`. Rejecting a split joins the halves and
-the first keeps its identity; accepting keeps both, now with distinct ids.
+**What it removes.** With ids unique at the source, the copy-counting in
+`@scrivr/ai` goes: no nth-copy matching, no last-copy-wins maps. `unitsToRead`
+leaves out a move's left-behind copy by where its block is, and `applyRichEdit`
+matches a handed-back unit by id and by whether it is proposed for deletion.
+
+**Track-changes splits.** A tracked split records itself by record ids —
+`node_split` on the second half, `reference` on the first, pointing at the
+split's record id — never by `nodeId`. Accepting keeps both halves with
+distinct ids. Rejecting rejoins them under the paragraph's own id: the first
+half's, or the second's when the break was at the paragraph's very start.
 
 ### PR B: DOCX revisions
 
@@ -899,13 +934,20 @@ Added in the third review round, approved by the user on 2026-11-08:
   block an authored local edit creates under an id another block carries;
   track changes marks its recording transaction `NORMALIZATION_META` and, when
   it writes a split or an insertion back, clears ids the document already has
-  so `UniqueId` fills them. A move keeps the moved block's id (it is written
-  through the move path, which keeps it). Verified with a two-peer Yjs sync:
-  the receiving peer gets the author's ids and mints none.
-- **`applyRichEdit` matches a handed-back unit by its id and whether it was
-  read as proposed for deletion** — no copy counting. An id that names two
-  live blocks (only in a document saved before D13) is refused, not guessed.
-  `unitsToRead` leaves out a move's left-behind copy by position.
+  so `UniqueId` fills them. A move — a cut pasted elsewhere included — keeps
+  the moved block's id. Undo and redo are not authored, so they never rename a
+  pending move's copy. The copy holding a split's original content keeps the
+  id (Enter at a paragraph's start makes the empty line the new block), and a
+  rejected split rejoins under the paragraph's own id. One predicate,
+  `blockIdOf`, decides which nodes carry an id, leaves included. Tested with
+  two Yjs peers, untracked and tracked: the receiving peer gets the author's
+  ids and mints none.
+- **Every agent write path refuses an id two live blocks carry** — rich edits
+  and structural ops alike. That happens in a document saved before D13, and
+  in the collaboration cases D13 lists as a known limitation. `applyRichEdit`
+  matches a handed-back unit by its id and whether it was read as proposed for
+  deletion — no copy counting — and `unitsToRead` leaves out a move's
+  left-behind copy by where its block is.
 - **`findChanges` and the paint colours look operations up in maps**, guarded
   on a string, so a synced record naming `""`, `"toString"` or `"__proto__"`
   neither breaks loading nor paints a bogus frame.
@@ -917,10 +959,15 @@ Added in the third review round, approved by the user on 2026-11-08:
 
 ### Not shipped in PR A
 
-- Documents saved with duplicate ids keep them until an edit creates another
-  copy: `UniqueId` cannot tell an old duplicate from a pending move's pair
-  without knowing about tracking. Agents can still read and edit such a
-  document safely, as above.
+- Documents saved with duplicate ids keep them; edits never repair them
+  (decided by the user, 2026-11-08). `UniqueId` cannot tell an old duplicate
+  from a pending move's pair without knowing about tracking. Agents can still
+  read and edit such a document safely, as above. Repair is a follow-up.
+- Collaboration can still produce live duplicates (concurrent cut-and-paste of
+  one block; a peer's own Y undo after another's paste). Deterministic repair
+  across peers is a follow-up.
+- Header and footer surfaces do not run `UniqueId`; PR B must close this before
+  it reads their ids.
 - Deleting text across a hard break ("b⏎c") reads as three changes, because
   the engine records three acts, and a reviewer decides three. The lane follows
   `changeActs`.

@@ -182,9 +182,11 @@ behind is left out of `getRichBlocks`: an agent reads one unit per id, the live
 one. A block proposed for deletion has no live copy, so it stays in
 `getRichBlocks`. It reads `text: ""` and `proposedForDeletion: true`, with its
 deletion in `changes`, and it cannot be edited (an edit to it comes back
-`rejected`). A split or a list Enter can leave it sharing its id with a live
-block; `applyRichEdit` matches each unit handed back with the copy it was
-read as. Block markers and
+`rejected`). Block ids are unique: a split, a list Enter or a paste gives the
+new block its own id. In a document saved before that held, or after
+concurrent cut-and-paste of one block in collaboration, two live blocks can
+share an id; every agent write by that id is refused rather than guessed.
+Block markers and
 citations still reach it, since it is on screen, struck through, until someone
 decides it.
 

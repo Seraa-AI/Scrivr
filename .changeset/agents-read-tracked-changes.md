@@ -66,14 +66,20 @@ One-time changes to watch for:
 - **`markdown` is omitted on units with any pending change,** not only those
   with pending deletions.
 - **Block ids are now unique after a split.** `UniqueId` gives the block an
-  edit creates — a split's second half, a list Enter's new item, a pasted copy
-  — a fresh id when another block already carries its id; the original keeps
-  it. Only the author's client assigns it; a change arriving through sync is
-  never re-keyed. A pending move's two copies still share their id. Documents
-  saved with duplicates keep them until edited (reads never assign ids).
-- **An edit to a block proposed for deletion is rejected** by `applyRichEdit`,
-  and an edit by an id that names two live blocks — only possible in a
-  document saved before ids were unique — is rejected rather than written to
-  the first.
+  edit creates — a split's new half, a list Enter's new item, a pasted copy
+  (rules and page breaks included) — a fresh id when another block already
+  carries its id. The copy holding the original content keeps it: Enter at a
+  paragraph's start makes the empty line before it the new block. Only the
+  author's client assigns it; a change arriving through sync is never
+  re-keyed, and undo and redo never rename. A pending move's two copies — a
+  tracked cut pasted elsewhere included — still share their id. Documents
+  saved with duplicates keep them; edits never repair them.
+- **An agent's edit to a block proposed for deletion is rejected**, and every
+  agent write path — `applyRichEdit` and the structural ops — rejects an id
+  two live blocks carry rather than acting on the first. That can happen in a
+  document saved with duplicates, or after concurrent cut-and-paste of one
+  block in collaboration.
+- `blockIdOf(node)` is exported from `@scrivr/core`: the one answer to which
+  nodes carry a block id.
 - **Track changes marks its own recording transaction `NORMALIZATION_META`,**
   as bookkeeping nobody authored.
