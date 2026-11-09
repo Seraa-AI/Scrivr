@@ -7,12 +7,12 @@ import {
   buildBlockFlow,
   runPipeline,
   paginateFlow,
-  assignGlobalY,
   buildFragments,
   defaultPageConfig,
   type DocumentLayout,
   type MeasureCacheEntry,
 } from "./PageLayout";
+import { assignGlobalY } from "./FlowPlacement";
 import {
   createPageGeometry,
   EMPTY_RESOLVED_CHROME,

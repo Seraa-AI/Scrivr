@@ -172,8 +172,11 @@ In Scrivr, the `ExclusionManager` implements this:
 - `addRect(rect)` — register an exclusion zone
 - `getAvailableSegments(page, y, lineHeight, contentX, contentWidth)` —
   query all usable inline segments at a given Y position
-- `hasExclusionsOnPage(page)` / `getNextFreeY(page, y)` — page-level
-  checks and full-width exclusion skipping
+- `hasExclusionsOnPage(page)` — page-level check
+- `getNextFreeY(page, y, height, contentX, contentWidth)` — the first y where
+  a band `height` tall keeps the whole content width free, stepping past side
+  and full-width rects alike; what a table (which cannot wrap) and a fully
+  blocked line use to clear the page's floats
 
 ### 5.2 Page Boundaries as Constraints
 
