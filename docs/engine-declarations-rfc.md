@@ -27,6 +27,36 @@ extension's own module):
 `model/lists.ts` (`isListType`, `listKind`) stays: the wrapper layout RFC kept
 it in core's model on purpose.
 
+## The future this lands into
+
+Two approved plans shape where these declarations are read:
+
+- **Resumable layout** (`docs/resumable-layout-rfc.md`, #222): "a region
+  supplies geometry; a block consumes source content; pagination only decides
+  which region the block receives next." A **region cursor** owns page, column
+  and section progression; **producers** (paragraph, table) consume regions
+  through `layoutNext(prepared, continuation, region)`; a **geometry
+  coordinator** owns anchor placement and exclusions. Its Phase 1 is the region
+  cursor: one region per page, page/Y/spacing advancement in one place.
+- **Columns and sections** (`docs/columns-rfc.md`, `docs/sections-roadmap.md`):
+  regions come from section settings; a section boundary closes one section's
+  regions and opens the next.
+
+So each declaration here names which of those owners reads it:
+
+| Declaration | Read by |
+|---|---|
+| `breaks: "line"` (#239) | The paragraph producer: hard-break semantics are a paragraph's |
+| `breaks: "page"` (#239), later `"column"` | The region cursor: a forced advance |
+| `sectionBoundary` and the `boundary` item (3) | The region cursor: a section transition |
+| `anchored` (4) | The geometry coordinator: placement and exclusions |
+| Font modifiers (1) | Inline preparation, before any producer runs |
+| `outlineLevel` (7) | Exports, after layout |
+
+Nothing here builds the region cursor or a producer. It makes sure that when
+they are built, they read declarations and never a node's name, and that
+pagination already receives transitions through one field.
+
 ## Design
 
 Each item builds on a declaration that exists, except two marked **New**.
@@ -86,9 +116,10 @@ one.
   the next page. Nothing is added now; the vocabulary is chosen so that
   `columnBreak` is a declaration, not an engine change.
 
-This is the shape the region-cursor refactor (columns Phase 1) wants:
-`paginateFlow` reads one `boundary` field, not a page-break flag plus a
-section's type folded into it.
+This is the input the region cursor (resumable layout Phase 1, columns
+Phase 1) consumes: `RegionCursorState` carries the active page, column and
+section, and advances on exactly these boundaries. Until it exists,
+`paginateFlow` reads the same field.
 
 ### 4. Floats: an inline node declares how it is anchored
 
@@ -155,6 +186,16 @@ the vocabulary guards grow so `sectionBreak`, `image`, `bold`, `italic`,
 `fontSize`, `fontFamily`, `paragraph` and `heading` cannot come back into
 `layout/`, `renderer/`, `input/`, `fonts/`, `export-pdf/src` or the semantic
 walker.
+
+## Tables, as a producer
+
+The tables RFC that follows should not start from `"tableRow"` as a
+`LayoutBlockKind`. Resumable layout already names the table a **producer**
+(cell regions, collective row-fragment acceptance, Phase 5 row splitting). The
+seam to design there is how an extension declares its producer — a paragraph
+is the default, `Table` declares its own — so the engine walks producers, not
+`tableRow`s. That is the same step this RFC takes for breaks and floats, one
+level up, and it is why tables get their own RFC.
 
 ## Order
 
