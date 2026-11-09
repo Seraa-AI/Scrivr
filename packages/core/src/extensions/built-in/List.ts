@@ -271,11 +271,6 @@ const joinOntoListAbove: Command = (state, dispatch) => {
 
 const listPdf: PdfNodeHandler = (block, ctx) => ctx.draw.lines(block, ctx);
 
-interface ListOptions {
-  /** Colour of bullets and numbers, on canvas and in PDF; null takes the theme's text colour. */
-  markerColor: string | null;
-}
-
 /**
  * List — bullet and ordered list support.
  *
@@ -293,12 +288,8 @@ interface ListOptions {
  *   • Bullet list
  *   1. Ordered list
  */
-export const List = Extension.create<ListOptions>({
+export const List = Extension.create({
   name: "list",
-
-  defaultOptions: {
-    markerColor: null,
-  },
 
   // Enter must reach `splitListItem` before Paragraph's `splitBlockInheritAttrs`
   // — which is also the last link in List's own Enter chain, so Paragraph
@@ -389,7 +380,7 @@ export const List = Extension.create<ListOptions>({
   },
 
   addMarkerPainters() {
-    return { [LIST_MARKER_PAINTER]: listMarkerPainter(this.options.markerColor) };
+    return { [LIST_MARKER_PAINTER]: listMarkerPainter };
   },
 
   addBlockStyles() {

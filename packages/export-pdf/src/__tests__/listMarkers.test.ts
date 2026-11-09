@@ -131,3 +131,17 @@ describe("the marker's face", () => {
     expect(faceOf("1.")).toBe(faceOf("clause"));
   });
 });
+
+describe("the marker's colour", () => {
+  const numbered = () => onePage([block("paragraph", [textLine("item", { font: "16px Helvetica" })], { y: 100, marker: "1.", markerX: MARKER_X })]);
+  const colourOf = (ops: DrawOp[]) => ops.find((op) => op.op === "text" && op["value"] === "1.")?.["color"];
+
+  it("is the export theme's marker colour", async () => {
+    const ops = await recordDrawOps(() => buildPdfWithEditor(numbered(), exportEditor, { theme: { marker: "#ff0000" } }));
+    expect(colourOf(ops)).toBe("rgb(1, 0, 0)");
+  });
+
+  it("is black by default, whatever the canvas theme", async () => {
+    expect(colourOf(await recordDrawOps(() => buildPdfWithEditor(numbered(), exportEditor)))).toBe("rgb(0, 0, 0)");
+  });
+});

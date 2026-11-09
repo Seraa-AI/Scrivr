@@ -43,6 +43,7 @@
 	--scrivr-img-placeholder-bg: #eef1f4;
 	--scrivr-img-placeholder-border: #c7ced8;
 	--scrivr-img-placeholder-text: var(--scrivr-paper-muted);
+	--scrivr-marker: var(--scrivr-paper-text);
 	--scrivr-hr: #ccd2dc;
 	--scrivr-resize-handle: var(--scrivr-app-accent);
 

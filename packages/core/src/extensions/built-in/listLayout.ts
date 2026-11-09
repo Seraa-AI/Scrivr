@@ -151,39 +151,37 @@ const centerOf = (marker: PlacedMarker): number => marker.baseline - bulletBox(m
 
 /**
  * Draws a bullet as its shape and a number as text, with its left edge at the
- * marker's `x` on its baseline. `color` null takes the theme's text colour.
+ * marker's `x` on its baseline, in each surface's own theme `marker` colour.
  */
-export function listMarkerPainter(color: string | null): MarkerPainter {
-  return {
-    canvas(ctx, marker, theme) {
-      if (typeof marker.data !== "string") return;
-      ctx.fillStyle = color ?? theme.defaultText;
-      ctx.strokeStyle = color ?? theme.defaultText;
-      const shape = bulletShape(marker.data);
-      if (shape) {
-        CANVAS_BULLETS[shape](ctx, marker.x, centerOf(marker), marker.size);
-        return;
-      }
-      ctx.font = marker.font;
-      ctx.textAlign = "left";
-      ctx.fillText(marker.data, marker.x, marker.baseline);
-    },
-    pdf(marker, ctx) {
-      if (typeof marker.data !== "string") return;
-      const fill = pdfColor(color ?? ctx.theme.defaultText);
-      const shape = bulletShape(marker.data);
-      if (shape) {
-        PDF_BULLETS[shape](ctx.draw, marker.x, centerOf(marker), marker.size, fill);
-        return;
-      }
-      ctx.draw.text({
-        text: marker.data,
-        x: marker.x,
-        baselineY: marker.baseline,
-        sizePx: marker.size,
-        font: { cssFont: marker.font, ...(marker.resolution !== undefined ? { resolution: marker.resolution } : {}) },
-        color: fill,
-      });
-    },
-  };
-}
+export const listMarkerPainter: MarkerPainter = {
+  canvas(ctx, marker, theme) {
+    if (typeof marker.data !== "string") return;
+    ctx.fillStyle = theme.marker;
+    ctx.strokeStyle = theme.marker;
+    const shape = bulletShape(marker.data);
+    if (shape) {
+      CANVAS_BULLETS[shape](ctx, marker.x, centerOf(marker), marker.size);
+      return;
+    }
+    ctx.font = marker.font;
+    ctx.textAlign = "left";
+    ctx.fillText(marker.data, marker.x, marker.baseline);
+  },
+  pdf(marker, ctx) {
+    if (typeof marker.data !== "string") return;
+    const fill = pdfColor(ctx.theme.marker);
+    const shape = bulletShape(marker.data);
+    if (shape) {
+      PDF_BULLETS[shape](ctx.draw, marker.x, centerOf(marker), marker.size, fill);
+      return;
+    }
+    ctx.draw.text({
+      text: marker.data,
+      x: marker.x,
+      baselineY: marker.baseline,
+      sizePx: marker.size,
+      font: { cssFont: marker.font, ...(marker.resolution !== undefined ? { resolution: marker.resolution } : {}) },
+      color: fill,
+    });
+  },
+};

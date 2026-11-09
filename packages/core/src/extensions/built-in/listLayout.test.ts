@@ -19,6 +19,7 @@ import { nodeLayout } from "../../layout/BlockRegistry";
 import { CELL_PADDING_H } from "../../layout/TableLayoutEngine";
 import { ANCHORED_OBJECT_MARGIN } from "../../layout/AnchoredObjects";
 import { buildStarterKitContext, createMeasurer, createTestEditor, measureTextWidth } from "../../test-utils";
+import { listWrap } from "../../index";
 
 /** Draws a block's marker with the painter registered for it, as `paintBlock` does. */
 function drawMarker(ctx: CanvasRenderingContext2D, block: LayoutBlock, theme: ResolvedTheme): void {
@@ -745,6 +746,25 @@ describe("Tab takes only that item deeper, as in Word", () => {
   });
 });
 
+describe("a list container from another extension", () => {
+  it("is drawn as a bullet list when it declares List's wrapper", () => {
+    const Checklist = Extension.create({
+      name: "checklist",
+      addNodes() {
+        return { checklist: { group: "block", content: "listItem+", toDOM: () => ["ul", 0], layout: { kind: "transparent", wrap: listWrap } } };
+      },
+    });
+    const custom = new ExtensionManager([StarterKit, Checklist]);
+    const lay = (content: Json[]) => runPipeline(custom.schema.nodeFromJSON({ type: "doc", content }), {
+      pageConfig: defaultPageConfig, measurer: createMeasurer(), fontConfig: custom.buildBlockStyles(),
+    }).pages.flatMap((page) => page.blocks);
+    const checklist = (...items: Json[]): Json => ({ type: "checklist", content: items });
+    const shown = (blocks: LayoutBlock[]) => blocks.map((block) => `${block.node.textContent}:${markerText(block)}@${block.x}`);
+    expect(shown(lay([checklist(item("a", checklist(item("b"))))])))
+      .toEqual(shown(lay([ul(item("a", ul(item("b"))))])));
+  });
+});
+
 describe("drawing markers on the canvas", () => {
   const paint = (block: LayoutBlock) => {
     const ctx = document.createElement("canvas").getContext("2d");
@@ -761,6 +781,15 @@ describe("drawing markers on the canvas", () => {
     expect(disc).toMatchObject({ arcs: 1, markerText: 0 });
     expect(circle).toMatchObject({ arcs: 1, markerText: 0 });
     expect(square).toMatchObject({ rects: 1, markerText: 0 });
+  });
+
+  it("draws in the theme's marker colour", () => {
+    const ctx = document.createElement("canvas").getContext("2d");
+    if (!ctx) throw new Error("no 2d context");
+    const fills: unknown[] = [];
+    vi.spyOn(ctx, "fillText").mockImplementation(() => void fills.push(ctx.fillStyle));
+    drawMarker(ctx, blockOf(laidOut([ol(item("a"))]), "a"), { ...defaultEditorTheme, marker: "#ff0000" });
+    expect(fills).toEqual(["#ff0000"]);
   });
 
   it("draws numbers as text", () => {

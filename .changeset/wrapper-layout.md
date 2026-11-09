@@ -16,14 +16,13 @@ Lists look and export exactly as before.
 - **`addMarkerPainters()`** returns `{ [key]: { canvas, pdf } }`, side by side
   so a marker never ships on one surface only. Canvas and PDF draw from the
   same anchor, `markerAnchorOf(block)` (`PlacedMarker`).
-- **`List`'s `markerColor` option** colours bullets and numbers on canvas and
-  in PDF; null (the default) takes the theme's text colour, which is what
-  `listMarker` defaulted to on both surfaces.
+- **A list container from another extension** declares List's wrapper,
+  `layout: { kind: "transparent", wrap: listWrap }`, to be drawn as a list.
 - **`PdfDrawSurface` gains `ellipse(op: PdfEllipseOp)`**, which a marker painter
   needs for a disc or ring.
 - New: `WrapperLayout`, `WrapPlacement`, `WrapScope`, `BlockMarker`,
   `LaidMarker`, `MarkerFace`, `MarkerPainter`, `PlacedMarker`, `MarkerLine`,
-  `markerAnchorOf`, `PdfEllipseOp`; `LayoutBlock.marker`;
+  `markerAnchorOf`, `listWrap`, `PdfEllipseOp`; `LayoutBlock.marker`;
   `BlockLayoutOptions.marker`; `BlockRegistry.registerMarkerPainter` and
   `markerPainter`; `IBaseEditor.getMarkerPainters()`.
 
@@ -37,6 +36,9 @@ Lists look and export exactly as before.
 - Removed `BlockLayoutOptions.firstLineOffset`, `firstLineOffsetAt` and
   `keepAnchorLine`; pass `marker: { offset, offsetAt }`, whose presence keeps
   an anchor-only block's line.
-- Removed the `listMarker` theme token from `EditorTheme` and `ResolvedTheme`;
-  configure `List`'s `markerColor` instead.
+- The `listMarker` theme token is renamed `marker`: the colour of any block
+  marker, a list's included. Same defaults, still resolved per surface, so the
+  PDF keeps its own print theme.
+- A container holding only `listItem`s that does not declare `listWrap` is no
+  longer drawn as a bullet list; its items lay out as plain blocks.
 - A custom `PdfDrawSurface` must implement `ellipse`.

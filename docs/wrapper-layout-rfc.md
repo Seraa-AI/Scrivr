@@ -182,9 +182,15 @@ differences:
 - **Canvas painters are registered on `BlockRegistry`**, which every surface
   already passes to `paintBlock`; the PDF exporter reads
   `editor.getMarkerPainters()`.
-- **`markerColor: null` takes the theme's text colour.** Both old
-  `listMarker` defaults equalled `defaultText`, so nothing changes by default,
-  and a dark theme's markers follow its text.
+- **The marker colour stays in the theme, as a generic `marker` token**
+  (user, 2026-11-09), not a `List` option as decided above. An extension option
+  is never resolved, so it could not take `var(--…)` or follow `setTheme`, and
+  one value would have coloured both the canvas and the PDF, which keeps its
+  own print theme. Renamed from `listMarker`, with the same defaults.
+- **A list container is one that declares `listWrap`** (user, 2026-11-09),
+  exported for other extensions. Layout used to treat any node holding only
+  `listItem`s as a bullet list; an item's `enter` sees the item, not its
+  container, so that structural fallback could not move into `List`.
 - The level table and painters live in `extensions/built-in/listLevels.ts` and
   `listLayout.ts`. Two tests hold the RFC's grep check: no source file under
   `layout/`, `renderer/` or `export-pdf/src` uses list vocabulary.
