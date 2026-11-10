@@ -63,7 +63,7 @@ import type { RecloneOptions } from "./model/assignBlockIds";
 import type { PageConfig, DocumentLayout } from "./layout/PageLayout";
 import type { FontConfig } from "./layout/FontConfig";
 import { LayoutCoordinator } from "./layout/LayoutCoordinator";
-import type { CharacterMap, ObjectRectEntry } from "./layout/CharacterMap";
+import type { CharacterMap, ObjectRectEntry, RangeRect } from "./layout/CharacterMap";
 import { InputBridge } from "./input/InputBridge";
 import { PasteTransformer } from "./input/PasteTransformer";
 import { BaseEditor } from "./BaseEditor";
@@ -1190,9 +1190,8 @@ export class Editor extends BaseEditor implements IEditor {
 	 * the cell's own rect for a table cell. `getNodeRect` stays the
 	 * image-only lookup.
 	 *
-	 * Read from the body's layout, so they place body positions only. While a
-	 * header or footer is edited, a position is that surface's, and the body
-	 * node sharing its number is not it.
+	 * Read from the body's layout, so they place body positions only; see
+	 * `getNodeRect`.
 	 */
 	private getNodeRects(docPos: number): ObjectRectEntry[] {
 		if (this.surfaces?.activeSurface) return [];
@@ -1202,11 +1201,18 @@ export class Editor extends BaseEditor implements IEditor {
 	}
 
 	getRangeViewportRects(from: number, to: number): DOMRect[] {
-		// Body geometry places body positions only, as `getNodeRects` says.
+		// Body geometry places body positions only, as `getNodeRect` says.
 		if (this.surfaces?.activeSurface) return [];
 		this.lc.ensureLayout();
+		const rects: RangeRect[] = this.lc.charMap.rangeRects(from, to);
+		// A floating image is painted off its line: its box is its placement,
+		// as a DOM range gives a replaced element's.
+		for (const object of this.lc.current.anchoredObjects ?? []) {
+			if (object.docPos >= from && object.docPos < to) rects.push(object);
+		}
+		rects.sort((a, b) => a.page - b.page || a.y - b.y);
 		const out: DOMRect[] = [];
-		for (const rect of this.lc.charMap.rangeRects(from, to)) {
+		for (const rect of rects) {
 			const page = this.ib.lookupPageScreenRect(rect.page);
 			if (!page) continue;
 			out.push(new DOMRect(page.screenLeft + rect.x, page.screenTop + rect.y, rect.width, rect.height));
@@ -1240,6 +1246,10 @@ export class Editor extends BaseEditor implements IEditor {
 	 * resize drag pivots on the wrong corner.
 	 */
 	getNodeRect(docPos: number): ObjectRectEntry | undefined {
+		// Body layout places body positions only. While a header or footer is
+		// edited a position is that surface's, and the body image sharing its
+		// number is not it — its handles, drag and menu must not land there.
+		if (this.surfaces?.activeSurface) return undefined;
 		this.lc.ensureLayout();
 		const anchored = this.lc.current.anchoredObjects?.find(
 			o => o.docPos === docPos,

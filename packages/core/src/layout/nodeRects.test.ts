@@ -157,19 +157,26 @@ describe("CharacterMap.rangeRects", () => {
   });
 });
 
-describe("CharacterMap.rangeRects over an object", () => {
-  it("gives a floating image its own box, as it has no glyph of any width", () => {
-    const editor = makeEditor([{
-      type: "paragraph",
-      content: [
-        { type: "text", text: "text" },
-        { type: "image", attrs: { src: "x.png", width: 80, height: 60, wrapMode: "square" } },
-      ],
-    }]);
-    const rect = editor.getNodeRect(5);
-    if (!rect) throw new Error("no image rect");
-    expect(editor.charMap.rangeRects(5, 6)).toEqual([
-      { page: rect.page, x: rect.x, y: rect.y, width: rect.width, height: rect.height },
-    ]);
+describe("a floating image in a range", () => {
+  function rangeAndNodeRects(content: unknown[], pos: number): { range: DOMRect[]; node: DOMRect[] } {
+    const editor = makeEditor(content);
+    editor.setPageTopLookup(() => ({ screenLeft: 0, screenTop: 0 }));
+    // Every page, in order: a later page's anchor glyph must not move the box.
+    for (let page = 1; page <= editor.layout.pages.length; page++) editor.ensurePagePopulated(page);
+    return { range: editor.getRangeViewportRects(pos, pos + 1), node: editor.getNodeViewportRects(pos) };
+  }
+  const image = { type: "image", attrs: { src: "x.png", width: 80, height: 100, wrapMode: "square" } };
+
+  it("is the image's own box, as the image menu places it", () => {
+    const { range, node } = rangeAndNodeRects([{ type: "paragraph", content: [{ type: "text", text: "text" }, image] }], 5);
+    expect(node).toHaveLength(1);
+    expect(range).toEqual(node);
+  });
+
+  it("stays the image's box when its paragraph runs on past the page it sits on", () => {
+    const text = "word ".repeat(1100);
+    const { range, node } = rangeAndNodeRects([{ type: "paragraph", content: [{ type: "text", text }, image, { type: "text", text: "tail" }] }], 1 + text.length);
+    expect(node).toHaveLength(1);
+    expect(range).toEqual(node);
   });
 });

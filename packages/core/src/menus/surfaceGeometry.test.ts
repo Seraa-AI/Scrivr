@@ -59,4 +59,15 @@ describe("node geometry while a surface is edited", () => {
     registerActiveSurface(e);
     expect(e.getRangeViewportRects(1, 3)).toEqual([]);
   });
+
+  it("places no body image for a surface position, for resize handles as for menus", () => {
+    const e = createTestEditor({
+      content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "image", attrs: { src: "x.png", width: 80, height: 60 } }] }] },
+    });
+    editor = e;
+    e.ensurePagePopulated(1);
+    expect(e.getNodeRect(1)).toBeDefined();
+    registerActiveSurface(e);
+    expect(e.getNodeRect(1)).toBeUndefined();
+  });
 });

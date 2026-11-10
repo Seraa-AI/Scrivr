@@ -516,11 +516,18 @@ menu anchors to `getNodeViewportRect`. The link popover anchors to the line of
 the link the pointer rests on (a peek) or the caret is on (full), from
 `getRangeViewportRects(from, to)` — one rect per line, `Range.getClientRects()`
 for the canvas — and to the first line still on screen when that one has
-scrolled away; a caret just past the link reads its last character. A
-floating image's link anchors to the image's box, as a DOM range gives a
-replaced element's. Body geometry places body positions only: while a header
-or footer is edited, node and range lookups answer nothing rather than the
-body content that shares the numbers. Fragments are found inside table cells too, so a table nested in
+scrolled away; a caret just past the link reads its last character. The
+anchor is the part holding that character's own rect, the tightest one, so a
+tall floating image beside the text never takes a line it only overlaps. A
+floating image in a range adds its box from its layout placement — the one
+source `getNodeRect` reads — as a DOM range gives a replaced element's; the
+character map's anchor glyph has no width and sits on whichever page the
+paragraph reaches. Body geometry places body positions only: while a header
+or footer is edited, `getNodeRect` and the node and range lookups answer
+nothing rather than the body content that shares the numbers, so resize
+handles, drags and menus all decline. A header or footer image has no menu
+yet; surfaces have no popover geometry. Starting or ending surface editing
+refreshes every anchored popover (`subscribeViewUpdates`). Fragments are found inside table cells too, so a table nested in
 another table's cell gets its own menu.
 
 **Deviation: hover positions are mapped.** §1 says positions go stale on the

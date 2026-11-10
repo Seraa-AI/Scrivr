@@ -12,7 +12,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { StepMap } from "prosemirror-transform";
 import { subscribeViewUpdates } from "./subscribeViewUpdates";
-import { createTestEditor } from "../test-utils";
+import { createTestEditor, registerActiveSurface } from "../test-utils";
 import type { Editor } from "../Editor";
 
 let editor: Editor | null = null;
@@ -32,6 +32,21 @@ describe("subscribeViewUpdates", () => {
     expect(cb).toHaveBeenCalledTimes(1);
 
     editor.emit("viewport", undefined);
+    expect(cb).toHaveBeenCalledTimes(2);
+  });
+
+  it("fires when the edited surface changes: what a popover anchors to is gone or back", () => {
+    editor = createTestEditor();
+    const cb = vi.fn();
+    const off = subscribeViewUpdates(editor, cb);
+
+    registerActiveSurface(editor);
+    expect(cb).toHaveBeenCalledTimes(1);
+    editor.surfaces.activate(null);
+    expect(cb).toHaveBeenCalledTimes(2);
+
+    off();
+    registerActiveSurface(editor, "test:other");
     expect(cb).toHaveBeenCalledTimes(2);
   });
 

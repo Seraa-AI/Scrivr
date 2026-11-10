@@ -104,10 +104,12 @@ export function createLinkPopover(editor: IEditor, options: LinkPopoverOptions):
     const parts = editor
       .getRangeViewportRects(link.from, link.to)
       .filter((part) => isAnchorInsideContainer(part, container));
-    const caret = editor.getViewportRect(at, at);
-    const middle = caret ? caret.top + caret.height / 2 : null;
-    const onLine = middle === null ? undefined : parts.find((part) => middle >= part.top && middle < part.bottom);
-    return onLine ?? parts[0] ?? null;
+    // The part holding the character itself: its text line, or the image's
+    // own box when the character is a floating image. The tightest wins, so a
+    // tall image beside the text never takes a line it only overlaps.
+    const char = editor.getRangeViewportRects(at, at + 1)[0];
+    const holding = char ? parts.filter((part) => holds(part, char)).sort((a, b) => area(a) - area(b))[0] : undefined;
+    return holding ?? parts[0] ?? null;
   }
 
   function update() {
@@ -171,4 +173,14 @@ export function createLinkPopover(editor: IEditor, options: LinkPopoverOptions):
     if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
     hide();
   };
+}
+
+const EDGE = 0.5;
+function holds(outer: DOMRect, inner: DOMRect): boolean {
+  return inner.left >= outer.left - EDGE && inner.right <= outer.right + EDGE
+    && inner.top >= outer.top - EDGE && inner.bottom <= outer.bottom + EDGE;
+}
+
+function area(r: DOMRect): number {
+  return r.width * r.height;
 }

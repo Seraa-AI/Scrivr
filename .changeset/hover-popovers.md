@@ -70,6 +70,12 @@ Escape or typing closes a peek at once, even under the pointer, with
 included, does not. Moving onto another link while a peek is open swaps after
 the grace period, so crossing it on the way into the peek keeps the peek.
 
+While a header or footer is edited, body geometry answers nothing for a
+surface position — `getNodeRect` included — so a header image's resize
+handles and menu never land on the body image at the same number.
+`subscribeViewUpdates` also fires when editing moves between the body and a
+header or footer, so popovers hide and return with it.
+
 `resolvePointOwner` takes a required `regionAt`: a `behind` image under a
 table no longer owns points in the table's cells, for hover as for click. A
 linked inline image is hovered as a link too.

@@ -400,10 +400,12 @@ describe("hover popovers", () => {
       const lineOne = rect(100, 300, 200, 16);
       const lineTwo = rect(120, 72, 80, 16);
 
-      function twoLineEditor(caretTop: number, lines = [lineOne, lineTwo]): Editor {
+      /** The link's parts are `lines`; any one character's own rect sits at `charTop`. */
+      function twoLineEditor(charTop: number, lines = [lineOne, lineTwo]): Editor {
         const editor = makeEditor();
-        vi.spyOn(editor, "getRangeViewportRects").mockReturnValue(lines);
-        vi.spyOn(editor, "getViewportRect").mockReturnValue(rect(caretTop, 80, 1, 16));
+        const charLeft = lines.find((line) => line.top === charTop)?.left ?? 80;
+        vi.spyOn(editor, "getRangeViewportRects").mockImplementation((from, to) =>
+          to - from === 1 ? [rect(charTop, charLeft, 8, 16)] : lines);
         return editor;
       }
 
@@ -420,7 +422,7 @@ describe("hover popovers", () => {
 
       it("peeks under the line the pointer moved to while it waited", () => {
         const editor = twoLineEditor(lineTwo.top);
-        const caretAt = vi.spyOn(editor, "getViewportRect");
+        const charAt = vi.spyOn(editor, "getRangeViewportRects");
         const onShow = vi.fn<(r: DOMRect, i: LinkPopoverInfo) => void>();
         cleanup = createLinkPopover(editor, { onShow, onHide: () => {}, onMove: () => {} });
 
@@ -429,7 +431,7 @@ describe("hover popovers", () => {
         hover(editor, { ...linkTarget(), at: 8 });
         vi.advanceTimersByTime(200);
         flushRaf();
-        expect(caretAt).toHaveBeenLastCalledWith(8, 8);
+        expect(charAt).toHaveBeenLastCalledWith(8, 9);
         expect(onShow.mock.calls[0]![0].top).toBe(lineTwo.top);
       });
 
@@ -445,12 +447,48 @@ describe("hover popovers", () => {
 
       it("shows full under the last line when the caret sits just past the link", () => {
         const editor = twoLineEditor(lineTwo.top);
-        const caretAt = vi.spyOn(editor, "getViewportRect");
+        const charAt = vi.spyOn(editor, "getRangeViewportRects");
         cleanup = createLinkPopover(editor, { onShow: () => {}, onHide: () => {}, onMove: () => {} });
 
         editor.selection.moveCursorTo(9);
         flushRaf();
-        expect(caretAt).toHaveBeenLastCalledWith(8, 8);
+        expect(charAt).toHaveBeenLastCalledWith(8, 9);
+      });
+
+      describe("with a floating image in the link", () => {
+        const image = rect(100, 72, 80, 60);
+        const lineBeside = rect(120, 160, 200, 16);
+
+        function withImage(): Editor {
+          const editor = makeEditor();
+          vi.spyOn(editor, "getRangeViewportRects").mockImplementation((from, to) => {
+            if (to - from !== 1) return [image, rect(100, 160, 200, 16), lineBeside];
+            return from === 6 ? [image] : [rect(lineBeside.top, 200, 8, 16)];
+          });
+          return editor;
+        }
+
+        it("peeks under the text line the pointer is on, not the image beside it", () => {
+          const editor = withImage();
+          const onShow = vi.fn<(r: DOMRect, i: LinkPopoverInfo) => void>();
+          cleanup = createLinkPopover(editor, { onShow, onHide: () => {}, onMove: () => {} });
+
+          hover(editor, { ...linkTarget(), at: 8 });
+          vi.advanceTimersByTime(400);
+          flushRaf();
+          expect(onShow.mock.calls[0]![0]).toEqual(lineBeside);
+        });
+
+        it("peeks under the image when the pointer is on it", () => {
+          const editor = withImage();
+          const onShow = vi.fn<(r: DOMRect, i: LinkPopoverInfo) => void>();
+          cleanup = createLinkPopover(editor, { onShow, onHide: () => {}, onMove: () => {} });
+
+          hover(editor, { ...linkTarget(), at: 6 });
+          vi.advanceTimersByTime(400);
+          flushRaf();
+          expect(onShow.mock.calls[0]![0]).toEqual(image);
+        });
       });
 
       it("shows on the part still on screen when the hovered part scrolled away", () => {
