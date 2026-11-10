@@ -1,5 +1,5 @@
-import { blockIdOf, Extension, IMAGE_NODE_ATTRS, stableStringify } from "@scrivr/core";
-import type { IBaseEditor, IEditor, SemanticChange, SemanticImage, SemanticPart, SemanticUnit } from "@scrivr/core";
+import { blockIdOf, Extension, findNodeById, IMAGE_NODE_ATTRS, stableStringify } from "@scrivr/core";
+import type { IBaseEditor, IEditor, SemanticChange, SemanticImage, SemanticPart, SemanticTextView, SemanticUnit } from "@scrivr/core";
 import type { ReviewDecisions, ReviewOutcome } from "@scrivr/plugins";
 import { semanticPartRichHash, toSemanticUnits, unitRichHash } from "@scrivr/export-semantic";
 import { SemanticImageAttrsSchema, type SemanticEdit, type StructuralSemanticEdit } from "../schema/edit";
@@ -114,6 +114,54 @@ function placeById<T>(items: readonly T[], idOf: (item: T) => string, nodes: rea
     seen.set(id, k + 1);
     return byId.get(id)?.[k];
   });
+}
+
+/**
+ * The rich hash of the top-level unit holding a block, as the agent read it —
+ * a list item or row is judged by its unit. Units are read once per batch.
+ */
+function unitHashResolver(editor: IBaseEditor): (nodeId: string) => string | null {
+  const doc = editor.getState().doc;
+  const hashes = new Map(toSemanticUnits(editor, { groupBlocks: false }).map((unit) => [unit.id, unitRichHash(unit)]));
+  return (nodeId) => {
+    const found = findNodeById(doc, nodeId);
+    const top = found ? blockIdOf(doc.child(doc.resolve(found.pos).index(0))) : null;
+    return top === null ? null : hashes.get(top) ?? null;
+  };
+}
+
+/** The ids a structural op names by hash whose units changed since the agent read them. */
+function staleIn(edit: StructuralSemanticEdit, hashHolding: (nodeId: string) => string | null): string[] {
+  const stale: string[] = [];
+  if ("expectedContentHash" in edit && edit.expectedContentHash !== undefined && hashHolding(edit.nodeId) !== edit.expectedContentHash) {
+    stale.push(edit.nodeId);
+  }
+  if ("anchorContentHash" in edit && edit.anchorContentHash !== undefined && hashHolding(edit.anchorNodeId) !== edit.anchorContentHash) {
+    stale.push(edit.anchorNodeId);
+  }
+  return stale;
+}
+
+/** What `applySemanticEdits` did with a batch, by id. */
+export interface SemanticEditResult {
+  applied: boolean;
+  changed: string[];
+  /** Edits whose target or anchor changed since the agent read it; nothing written for them. */
+  stale: string[];
+  notFound: string[];
+  rejected: string[];
+  /** Blocks a delete named that another author already proposed for deletion; that proposal stands. */
+  alreadyProposed: string[];
+  /** Anchors proposed for deletion, which disappear on Accept; the op needs another anchor. */
+  anchorProposedForDeletion: string[];
+}
+
+/** What `getRichBlocks` reads: a position range, and which view. */
+export interface RichBlocksOptions {
+  from?: number;
+  to?: number;
+  /** @default "proposed" */
+  view?: SemanticTextView;
 }
 
 /**
@@ -434,15 +482,24 @@ export class AiToolkitAPI {
    * A block proposed for deletion is included, reading `text: ""` with its
    * deletion; the copy a pending move leaves behind is not.
    *
-   * Pass `from` / `to` to restrict to blocks overlapping a position range.
+   * Pass `from` / `to` to restrict to blocks overlapping a position range, and
+   * `view: "original"` to read the document as agreed before every pending
+   * proposal — no `changes`, and not editable: `applyRichEdit` refuses its units.
    *
    * @example
    * const units = ai.getRichBlocks();
    * const edited = await llm.rewrite(units); // returns edited units
    * ai.applyRichEdit(edited);
    */
-  getRichBlocks(from?: number, to?: number): SemanticUnit[] {
-    const units = unitsToRead(toSemanticUnits(this.editor, { groupBlocks: false }), this.editor.getState().doc);
+  getRichBlocks(options: RichBlocksOptions): SemanticUnit[];
+  getRichBlocks(from?: number, to?: number): SemanticUnit[];
+  getRichBlocks(fromOrOptions?: number | RichBlocksOptions, toPos?: number): SemanticUnit[] {
+    const { from, to, view = "proposed" } = typeof fromOrOptions === "object"
+      ? fromOrOptions
+      : { from: fromOrOptions, to: toPos };
+    const all = toSemanticUnits(this.editor, { groupBlocks: false, view });
+    // Nothing is pending in the original view, so no move left a copy behind.
+    const units = view === "proposed" ? unitsToRead(all, this.editor.getState().doc) : all;
     if (from === undefined || to === undefined) return units;
     const allowed = new Set<string>();
     this.editor.getState().doc.forEach((node, offset) => {
@@ -485,7 +542,7 @@ export class AiToolkitAPI {
   applyRichEdit(
     edits: RichBlockEdit[] | SemanticUnit[],
     options: { authorID?: string } = {},
-  ): { applied: boolean; changed: string[]; stale: string[]; notFound: string[]; rejected: string[] } {
+  ): { applied: boolean; changed: string[]; stale: string[]; notFound: string[]; rejected: string[]; wrongView: string[] } {
     const authorID = options.authorID ?? "AI Assistant";
 
     // The units as they stand — the freshness base for both auto-diff (which
@@ -503,6 +560,9 @@ export class AiToolkitAPI {
     // An image unit has no words to diff; its layout is set as image attrs.
     const imageLayouts: ImageLayoutEdit[] = [];
     const rejected: string[] = [];
+    // Units read in a view other than the proposed one: editing the original
+    // would rewrite text others have proposed changes to.
+    const wrongView: string[] = [];
     // Only the fields that change are checked: an image placed by drag reads
     // `align: "custom"`, which an agent cannot set but may hand back untouched.
     const queueImageLayout = (nodeId: string, current: SemanticUnit, proposed: unknown) => {
@@ -516,6 +576,10 @@ export class AiToolkitAPI {
       if (isSemanticUnit(item)) {
         const nodeId = item.nodeIds[0];
         if (!nodeId) continue;
+        if (item.view !== "proposed") {
+          wrongView.push(nodeId);
+          continue;
+        }
         const named = unitsById.get(nodeId);
         const candidates = meant(named, !!item.proposedForDeletion);
         if (candidates.length === 0) {
@@ -595,7 +659,7 @@ export class AiToolkitAPI {
     const laidOut = imageLayouts.length > 0 ? applyImageLayout(this.editor, imageLayouts, authorID) : [];
     rejected.push(...imageLayouts.map((edit) => edit.nodeId).filter((nodeId) => !laidOut.includes(nodeId)));
     if (resolved.length === 0) {
-      return { applied: laidOut.length > 0, changed: [...changed, ...laidOut], stale, notFound, rejected };
+      return { applied: laidOut.length > 0, changed: [...changed, ...laidOut], stale, notFound, rejected, wrongView };
     }
 
     const result = applyRichDiffAsSuggestion(
@@ -610,6 +674,7 @@ export class AiToolkitAPI {
       stale,
       notFound: [...notFound, ...result.notFound],
       rejected: [...rejected, ...result.rejected],
+      wrongView,
     };
   }
 
@@ -630,7 +695,7 @@ export class AiToolkitAPI {
   applySemanticEdits(
     edits: SemanticEdit[],
     options: { authorID?: string } = {},
-  ): { applied: boolean; changed: string[]; stale: string[]; notFound: string[]; rejected: string[] } {
+  ): SemanticEditResult {
     const rich: RichBlockEdit[] = [];
     const structural: StructuralSemanticEdit[] = [];
     for (const edit of edits) {
@@ -646,25 +711,35 @@ export class AiToolkitAPI {
       }
     }
 
+    // Judged against the document the agent read, before any op of this
+    // batch moves it: a hash names the content the agent saw, not what an
+    // earlier op in its own batch left.
+    const hashHolding = unitHashResolver(this.editor);
+    const staleIds = structural.flatMap((edit) => staleIn(edit, hashHolding));
+    const current = structural.filter((edit) => staleIn(edit, hashHolding).length === 0);
+
     const richResult = rich.length > 0
       ? this.applyRichEdit(rich, options)
       : { applied: false, changed: [], stale: [], notFound: [], rejected: [] };
-    if (structural.length === 0) return richResult;
+    const empty = { changed: [], notFound: [], rejected: [], alreadyProposed: [], anchorProposedForDeletion: [] };
 
     // One transaction: the structural batch is one undo step.
     const tr = trackAsSuggestion(this.editor.getState().tr, options.authorID ?? "AI Assistant");
-    const structuralResult = applyStructuralEdits(tr, structural);
+    const structuralResult = current.length > 0 ? applyStructuralEdits(tr, current) : empty;
     const touched = tr.docChanged;
     if (touched) this.editor.applyTransaction(tr);
 
     return {
       applied: richResult.applied || touched,
       changed: [...richResult.changed, ...structuralResult.changed],
-      stale: richResult.stale,
+      stale: [...richResult.stale, ...staleIds],
       notFound: [...richResult.notFound, ...structuralResult.notFound],
       rejected: [...richResult.rejected, ...structuralResult.rejected],
+      alreadyProposed: structuralResult.alreadyProposed,
+      anchorProposedForDeletion: structuralResult.anchorProposedForDeletion,
     };
   }
+
 
   // ── Streaming ──────────────────────────────────────────────────────────────
 

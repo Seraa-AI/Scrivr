@@ -28,6 +28,7 @@ import { planReviewIn } from "./reviewChanges";
 import { changeActs } from "./reviewPlan";
 import type { ChangeSet } from "./ChangeSet";
 import { cloneTrackedChanges } from "./cloneTrackedChanges";
+import { documentIn } from "./originalView";
 import { dropDeleted, isMarkRemoved, keepInserted, nodeChanges } from "./semanticChanges";
 
 declare module "@scrivr/core" {
@@ -253,6 +254,7 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
         isRemoved: proposedForDeletion,
         nodeChanges,
         isMarkRemoved,
+        documentIn,
       },
     };
   },

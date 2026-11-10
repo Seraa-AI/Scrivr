@@ -1,6 +1,6 @@
 # RFC: Agent review views, structural staleness, and suggestion previews
 
-Status: draft for sign-off (2026-11-10). Covers what is left of
+Status: approved by the user on 2026-11-10, including D1–D8. Covers what is left of
 [Scrivr#207](https://github.com/Seraa-AI/Scrivr/issues/207) (asks 3 and 4)
 and the "previews for structural and rich edits" step of Seraa's plan 155.
 
@@ -87,8 +87,14 @@ A view is that decision, made per record kind:
 | node attribute change | the new attrs | `oldAttrs` (already on `suggestedAttrs`) |
 | move | at its destination | at its source |
 
-`changes` are reported in both views, placed by offset into that view's text,
-so an agent reading the original still sees what is proposed against it.
+**Built by the engine's reject (decided 2026-11-10).** The table above is
+what the engine's own Reject does to each record kind. Rather than restate it
+in every semantic handler — a second copy of reject semantics to keep in step
+with the engine — the original view walks the document the engine's reject-all
+produces, run on a copy. It is therefore correct for every record kind by
+construction, and carries no `changes`: there is nothing pending left in it.
+An agent reads what is proposed from the proposed view, which places each
+change in its text.
 
 This is the projection RFC's `rejected` lens applied to the semantic lane; the
 proposed view is `accepted`. One rule, two readers: when `projectRevisions`
@@ -194,4 +200,26 @@ Columns, also on plan 155's later list, is its own RFC
 
 ## What shipped
 
-Nothing yet. Each phase updates this section as it lands.
+### Phase 1 — views and the structural guard
+
+- **The original view** — `toSemanticUnits(editor, { view: "original" })` and
+  `ai.getRichBlocks({ view: "original" })`. As decided above, it walks the
+  document the engine's reject-all leaves, supplied by TrackChanges through a
+  new `SemanticHandlers.documentIn(doc, view)`; its units carry `view:
+  "original"` and no `changes`. Without TrackChanges, or with nothing pending,
+  it is the document itself. `getRichBlocks` keeps its `(from, to)` form
+  beside the new options object.
+- **D2** — `applyRichEdit` reports a unit read in another view under a new
+  `wrongView` list and writes nothing for it.
+- **D3** — `unitRichInput` covers `view` only when it is not `"proposed"`, so
+  every existing proposed-view hash is unchanged.
+- **D4** — `expectedContentHash` (target) and `anchorContentHash` (anchor) on
+  the structural ops' schemas. `applySemanticEdits` judges them against the
+  document as the agent read it, before any op of the batch runs, by the
+  top-level unit holding the block; a stale op writes nothing and its id is in
+  `stale`.
+- **D5, D6 — deviation.** #207's double-marking was already closed before
+  this phase: an id that resolves only to content proposed for deletion was
+  refused, inside the generic `rejected`. This phase names the reasons apart:
+  `alreadyProposed` for a delete's target, `anchorProposedForDeletion` for an
+  anchor. One existing test moved its anchors from `rejected` to the new list.

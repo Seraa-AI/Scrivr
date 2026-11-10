@@ -14,6 +14,7 @@ import {
   type SemanticChange,
   type SemanticImage,
   type SemanticPart,
+  type SemanticTextView,
   type SemanticUnit,
   type TableCells,
 } from "@scrivr/core";
@@ -101,6 +102,8 @@ export interface UnitRichInput {
   image?: SemanticImage;
   /** Pending review changes; absent when there are none, so those hashes stay as they were. */
   changes?: SemanticChange[];
+  /** The view read, when not the proposed one; absent there, so those hashes stay as they were. */
+  view?: SemanticTextView;
 }
 
 /**
@@ -124,6 +127,8 @@ export function unitRichInput(unit: SemanticUnit): UnitRichInput {
     // Accepting or rejecting a change can leave the text as it was; this is
     // what tells a stale-edit guard that a reviewer acted.
     ...(unit.changes?.length ? { changes: unit.changes } : {}),
+    // A unit read in another view never guards an edit to the proposed one.
+    ...(unit.view !== "proposed" ? { view: unit.view } : {}),
   };
 }
 
