@@ -1,16 +1,7 @@
 import type { IBaseEditor } from "../extensions/types";
+import { POPOVER_MARKER } from "../hover/types";
 
-/**
- * Fallback marker attribute. The primary "is focus inside the popover"
- * check is the `getPopoverElement` option passed by the controller — this
- * attribute only matters for vanilla / third-party popovers that don't
- * have access to their own root element accessor.
- *
- * Convention: set the attribute to the popover's name (e.g. `bubble-menu`,
- * `link-popover`, `slash-menu`). The helper checks for presence, not value,
- * but a meaningful value makes DOM inspection self-documenting.
- */
-export const POPOVER_MARKER = "data-scrivr-popover";
+export { POPOVER_MARKER };
 
 export interface SubscribeEditorFocusOutsideOptions {
   /**

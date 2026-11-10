@@ -62,6 +62,7 @@ import type { SelectionController } from "../SelectionController";
 import type { CursorManager } from "../renderer/CursorManager";
 import type { ResolvedTheme } from "../model/theme";
 import type { CloneIdMap } from "../model/assignBlockIds";
+import type { HoverResolver, HoverTarget } from "../hover/types";
 import type {
   SelectionBehavior,
   HitTester,
@@ -312,13 +313,27 @@ export interface IEditor extends IBaseEditor {
    */
   getViewportRect(from: number, to: number): DOMRect | null;
   /**
-   * Returns the full visual viewport rect of the inline object at docPos
-   * (image, widget). Unlike getViewportRect, this uses the actual object
-   * render bounds — not the cursor-sized glyph — so the rect height matches
-   * the real image height and rect.bottom is the correct anchor for a popover.
-   * Returns null if the object has not been rendered yet.
+   * The first of `getNodeViewportRects(docPos)`, or null when the node has no
+   * fragment on a mounted page. For an image this is its full render bounds —
+   * not the cursor-sized glyph `getViewportRect` gives — so rect.bottom is the
+   * correct anchor for a popover.
    */
   getNodeViewportRect(docPos: number): DOMRect | null;
+  /**
+   * Viewport rects for every painted fragment of the node at `docPos`, in page
+   * order — a table split across pages has one per page. Image-like nodes have
+   * one. Empty when the node is not laid out.
+   */
+  getNodeViewportRects(docPos: number): DOMRect[];
+  /**
+   * Viewport rects for each line the range `[from, to)` paints on, in page and
+   * line order — `Range.getClientRects()` for the canvas. A link wrapped onto
+   * two lines, or across a page, has one per line. Empty when nothing in the
+   * range is painted on a mounted page.
+   */
+  getRangeViewportRects(from: number, to: number): DOMRect[];
+  /** What the pointer is over, innermost first. Empty when over nothing. */
+  getHoverTargets(): readonly HoverTarget[];
   /**
    * Current viewport DOMRect of the scrollable container, or null when no
    * scroll container is attached. Popover controllers use this to hide when
@@ -1117,6 +1132,13 @@ export interface ExtensionConfig<Options = object> {
   addHitTester?(this: Phase1Context<Options>): HitTester[];
 
   /**
+   * Hover resolvers — claim a mark (link) or a node (table cell) under the
+   * pointer as a `HoverTarget`. Unlike hit testers, every claim is kept: the
+   * pointer over a link in a cell is over the link, the cell and the table.
+   */
+  addHoverResolvers?(this: Phase1Context<Options>): HoverResolver[];
+
+  /**
    * Pointer-gesture providers — begin a drag for a `HitTarget` this extension
    * owns (e.g. cell drag-select). Kept separate from `addSelectionBehavior` so
    * non-pointer selection kinds need not implement one.
@@ -1302,6 +1324,7 @@ export interface ResolvedExtension {
   nodeActions: NodeActionContribution[];
   selectionBehaviors: SelectionBehavior[];
   hitTesters: HitTester[];
+  hoverResolvers: HoverResolver[];
   selectionGestures: SelectionGestureProvider[];
   inputHandlers: Record<string, InputHandler>;
   pasteTransforms: PasteTransform[];

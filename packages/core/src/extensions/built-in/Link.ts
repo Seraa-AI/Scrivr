@@ -1,3 +1,4 @@
+import type { HoverResolver } from "../../hover/types";
 import { Extension } from "../Extension";
 import {
   xml,
@@ -77,6 +78,20 @@ function firstLinkIn(doc: Node, from: number, to: number, linkType: MarkType): M
  */
 export const Link = Extension.create({
   name: "link",
+
+  addHoverResolvers(): HoverResolver[] {
+    return [
+      {
+        mark: "link",
+        // The character at `pos` is in the link a caret just after it is in, so
+        // hover and the caret agree on where a link starts and ends.
+        range: (doc, pos) => {
+          const linkType = doc.type.schema.marks["link"];
+          return linkType ? linkAt(doc, pos + 1, linkType) : null;
+        },
+      },
+    ];
+  },
 
   addMarks() {
     return {

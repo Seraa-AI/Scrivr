@@ -710,15 +710,21 @@ export class BaseEditor implements IBaseEditor {
    */
   protected applyState(tr: Transaction): void {
     this.editorState = this.editorState.apply(tr);
-    if (tr.docChanged && this.pendingAnchors.size > 0) {
-      for (const anchor of this.pendingAnchors) {
-        if (anchor.pos === null) continue;
-        const mapped = tr.mapping.mapResult(anchor.pos);
-        anchor.pos = mapped.deleted ? null : mapped.pos;
-      }
-    }
-    this.emit("update", { docChanged: tr.docChanged });
+    if (tr.docChanged) this.mapThroughEdit(tr);
+    this.emit("update", { docChanged: tr.docChanged, mapping: tr.mapping });
     this.notifyListeners();
+  }
+
+  /**
+   * Carry the positions the editor holds through an edit, before anything
+   * hears of it: whoever wakes on `"update"` reads them against the new doc.
+   */
+  protected mapThroughEdit(tr: Transaction): void {
+    for (const anchor of this.pendingAnchors) {
+      if (anchor.pos === null) continue;
+      const mapped = tr.mapping.mapResult(anchor.pos);
+      anchor.pos = mapped.deleted ? null : mapped.pos;
+    }
   }
 
   /**

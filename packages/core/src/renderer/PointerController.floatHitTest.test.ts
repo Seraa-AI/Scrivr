@@ -72,7 +72,6 @@ function setup(wrapMode: string, json: Record<string, unknown> = docWithFloat(wr
     slotHeight: () => 1224,
     tileHeight: () => 1200,
     isPageless: () => false,
-    visualYToDocY: (y) => ({ page: Math.floor(y / 1224) + 1, docY: y - Math.floor(y / 1224) * 1224 }),
     scheduleUpdate: () => {},
   };
   const controller = new PointerController(deps);
@@ -268,7 +267,6 @@ describe("a short line's empty tail", () => {
     const deps: PointerControllerDeps = {
       editor, tilesContainer: container, pool: [],
       slotHeight: () => 1224, tileHeight: () => 1200, isPageless: () => false,
-      visualYToDocY: (y) => ({ page: Math.floor(y / 1224) + 1, docY: y - Math.floor(y / 1224) * 1224 }),
       scheduleUpdate: () => {},
     };
     const controller = new PointerController(deps);
@@ -363,18 +361,30 @@ describe("clicking an anchored image painted over a table", () => {
 });
 
 describe("a behind image reaching over a table", () => {
+  /** A point inside the image where no cell text is painted. */
+  function emptyCellPointOver(h: ReturnType<typeof setup>): { x: number; y: number } {
+    const float = h.float();
+    for (let y = float.y + 2; y < float.y + float.height; y += 4) {
+      for (let x = float.x + float.width - 2; x > float.x; x -= 4) {
+        if (!h.editor.charMap.hasTextAt(x, y, 1)) return { x, y };
+      }
+    }
+    throw new Error("no empty point inside the image");
+  }
+
+  it("is hovered as the cell and the table, as a click there selects the cell", () => {
+    const h = setup("behind", docWithFloatOverTable("behind"));
+    clean = h.cleanup;
+    const { x, y } = emptyCellPointOver(h);
+    const kinds = h.editor.resolveHoverTargets({ page: 1, x, y, region: "content" }).map((t) => t.kind);
+    expect(kinds).not.toContain("image");
+    expect(kinds).toEqual(expect.arrayContaining(["table-cell", "table"]));
+  });
+
   it("leaves the click in empty cell space to the cell, because it paints under the table", () => {
     const h = setup("behind", docWithFloatOverTable("behind"));
     clean = h.cleanup;
-    const float = h.float();
-    // A point inside the image where no cell text is painted.
-    let point: { x: number; y: number } | null = null;
-    for (let y = float.y + 2; y < float.y + float.height && !point; y += 4) {
-      for (let x = float.x + float.width - 2; x > float.x; x -= 4) {
-        if (!h.editor.charMap.hasTextAt(x, y, 1)) { point = { x, y }; break; }
-      }
-    }
-    if (!point) throw new Error("no empty point inside the image");
+    const point = emptyCellPointOver(h);
     h.hoverAt(point.x, point.y);
     expect(h.cursor()).toBe("text");
     h.clickAt(point.x, point.y);
