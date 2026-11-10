@@ -31,6 +31,6 @@ describe("a selection's own clipboard forms", () => {
   });
 
   it("fall back to the document's HTML when they are not text", () => {
-    expect(serializeSelectionToHtml(state, schema)).toContain("Hello");
+    expect(serializeSelectionToHtml(state, schema, manager.buildCopyHtmlTransforms())).toContain("Hello");
   });
 });

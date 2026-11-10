@@ -11,6 +11,7 @@ import { StarterKit } from "./extensions/StarterKit";
 import type { Extension } from "./extensions/Extension";
 import type {
   BlockInfo,
+  CopyHtmlTransform,
   FontModifier,
   IBaseEditor,
   MarkdownParserTokenSpec,
@@ -543,6 +544,10 @@ export class BaseEditor implements IBaseEditor {
 
   getBlockStyles(): FontConfig {
     return this.manager.buildBlockStyles();
+  }
+
+  getCopyHtmlTransforms(): CopyHtmlTransform[] {
+    return this.manager.buildCopyHtmlTransforms();
   }
 
   getDocAttrNames(): string[] {

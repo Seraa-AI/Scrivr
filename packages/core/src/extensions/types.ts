@@ -196,6 +196,11 @@ export interface IBaseEditor {
   /** Block styles from all extensions, by style key, before the document's family is applied. */
   getBlockStyles(): FontConfig;
   /**
+   * Rewrites of copied markup from all extensions, in registration order:
+   * pass them to `serializeSelectionToHtml` to serialize what a copy would.
+   */
+  getCopyHtmlTransforms(): CopyHtmlTransform[];
+  /**
    * Names of doc-level attributes declared by extensions via `addDocAttrs()`.
    *
    * Used by collab bindings as a whitelist of syncable attrs — attrs not in
@@ -482,7 +487,10 @@ export type PasteHtmlTransform = (root: HTMLElement) => void;
 
 /**
  * Rewrites copied HTML in place, before it reaches the clipboard. Contributed
- * via `addCopyHtmlTransforms`; leave the tree untouched to decline.
+ * via `addCopyHtmlTransforms`; leave the tree untouched to decline. `root`
+ * wraps the copied markup: edit what it holds, since a selection that writes
+ * its own form (a cell selection's table) is copied without the wrapper.
+ * Must not throw — copy has already claimed the clipboard when it runs.
  */
 export type CopyHtmlTransform = (root: HTMLElement) => void;
 

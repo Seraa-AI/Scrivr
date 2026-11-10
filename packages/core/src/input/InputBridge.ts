@@ -52,7 +52,7 @@ export interface InputBridgeOptions {
   /** Schema — used by ClipboardSerializer for copy/cut. */
   getSchema: () => Schema;
   /** Extensions' rewrites of copied markup, run on copy and cut. */
-  copyHtmlTransforms?: readonly CopyHtmlTransform[];
+  copyHtmlTransforms: readonly CopyHtmlTransform[];
   /** Viewport rect for a doc-position range — used to position the textarea. */
   getViewportRect: (from: number, to: number) => DOMRect | null;
   /** CharacterMap — used by scrollCursorIntoView for cursor coordinates. */

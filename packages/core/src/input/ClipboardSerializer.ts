@@ -27,13 +27,13 @@ export const SLICE_DATA_ATTR = "data-pm-slice";
  * etc. round-trip into Word / Google Docs / Notion automatically.
  *
  * The markup then passes through the extensions' copy transforms
- * (`addCopyHtmlTransforms`). Returns null when the selection is collapsed
+ * (`editor.getCopyHtmlTransforms()`). Returns null when the selection is collapsed
  * (nothing to copy).
  */
 export function serializeSelectionToHtml(
   state: EditorState,
   schema: Schema,
-  copyHtmlTransforms: readonly CopyHtmlTransform[] = [],
+  copyHtmlTransforms: readonly CopyHtmlTransform[],
 ): string | null {
   const sel = state.selection;
   if (sel.empty) return null;

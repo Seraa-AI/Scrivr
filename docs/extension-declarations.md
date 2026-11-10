@@ -44,8 +44,10 @@ Two things hold the rule in place:
 Contracts worth knowing:
 
 - A declaration's callbacks (`outlineLevel`, `anchored.read/write`,
-  `regions`, font modifiers) run for every block they apply to: they must be
-  pure and must not throw.
+  `regions`, font modifiers, paste and copy transforms) run for every block
+  or clipboard event they apply to: they must be pure and must not throw.
+- A copy transform edits what its `root` holds; a selection that writes its
+  own form (a cell selection's table) is copied without the wrapper.
 - A break and a section boundary are honoured only on a leaf; a node that
   holds content and declares one lays out as what it is.
 - A composite's `units()` should return at least one unit, and a region node

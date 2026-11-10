@@ -365,6 +365,30 @@ describe("clipboard round-trip — tables", () => {
     expect(html).not.toContain("data-vmerge");
   });
 
+  // A range from partway into a row copies that row without the cells before
+  // it; the merge still belongs to the column it is in.
+  it("keeps a merge in its column when the copied range starts partway into a row", () => {
+    const { schema, plugins, copyTransforms } = tableContext();
+    const cell = (text: string, attrs: Record<string, unknown> = {}) =>
+      schema.nodes["tableCell"]!.create(attrs, para(schema, text));
+    const row = (kids: PMNode[]) => schema.nodes["tableRow"]!.create(null, kids);
+    const table = schema.nodes["table"]!.create({ grid: [100, 100, 100] }, [
+      row([cell("A1"), cell("B1", { vMerge: "restart" }), cell("C1")]),
+      row([cell("A2"), cell("", { vMerge: "continue" }), cell("C2")]),
+    ]);
+    const state = stateWith(schema, plugins, [table, para(schema, "after")]);
+    let insideB1 = -1;
+    state.doc.descendants((node, pos) => {
+      if (node.isText && node.text === "B1") insideB1 = pos + 1;
+    });
+    const html = copy(select(state, insideB1, state.doc.content.size - 1), schema, copyTransforms)["text/html"] ?? "";
+    const container = document.createElement("div");
+    container.innerHTML = html;
+    const cells = Array.from(container.querySelectorAll("td")).map((td) => `${td.textContent}:${td.getAttribute("rowspan") ?? 1}`);
+
+    expect(cells).toEqual(["1:2", "C1:1", "A2:1", "C2:1"]);
+  });
+
   it("pastes its own merged table back unchanged", () => {
     const { schema, plugins, transformer, copyTransforms } = tableContext();
     const original = stateWith(schema, plugins, [mergedTable(schema)]);
