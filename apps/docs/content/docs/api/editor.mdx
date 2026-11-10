@@ -202,7 +202,7 @@ attrs.fontSize?.size; // 18
 ```ts
 getBlockInfo(): BlockInfo // { blockType, blockAttrs, ancestors }
 ```
-Type name and attributes of the textblock containing the cursor, and the nodes around it (`{ type, attrs }`), innermost first.
+Type name and attributes of the node holding the selection's start (its textblock for a text selection), and the nodes around it (`{ type, attrs }`), innermost first.
 
 ### `getMarkdown()`
 ```ts

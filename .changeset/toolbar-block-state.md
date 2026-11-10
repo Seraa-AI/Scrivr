@@ -21,5 +21,7 @@ paragraph in a list shows as centred.
   `SelectionSnapshot` is a `ToolbarState`, so a toolbar you render yourself
   can pass `item.isActive(editor.getSelectionSnapshot())`.
 - Inside a list, `blockType` is now `"paragraph"` (or `"heading"`), not
-  `"bulletList"`. Use `editor.isActive("bulletList")` to ask whether the
-  caret is in a list, at any depth.
+  `"bulletList"`. `editor.isActive("bulletList")` asks whether the caret is
+  inside a bullet list at any depth; for toolbar state, call the item's
+  `isActive(editor.getSelectionSnapshot())`, which presses only the list
+  the paragraph belongs to.

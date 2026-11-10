@@ -73,6 +73,11 @@ describe("list buttons", () => {
     expect(pressedAt([table(cell(bullets(item(p("in cell")))))], "in cell")).toContain("toggleBulletList");
   });
 
+  it("show nothing for a cell paragraph of a table inside a list item", () => {
+    const pressed = pressedAt([bullets(item(p("lead"), table(cell(p("cell text")))))], "cell text");
+    expect(pressed).not.toContain("toggleBulletList");
+  });
+
   it("show nothing for a plain paragraph in a table cell", () => {
     const pressed = pressedAt([table(cell(p("plain")))], "plain");
     expect(pressed).not.toContain("toggleBulletList");

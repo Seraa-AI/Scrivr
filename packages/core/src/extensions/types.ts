@@ -535,13 +535,17 @@ export interface ToolbarItemSpec {
   isActive: (state: ToolbarState) => boolean;
 }
 
-/** A node around the caret's textblock: its type name and attrs. */
+/** A node around the caret's block: its type name and attrs. */
 export interface BlockAncestor {
   type: string;
   attrs: Record<string, unknown>;
 }
 
-/** The caret's textblock and the nodes around it, innermost first. */
+/**
+ * The node holding the selection's start — its textblock for a text
+ * selection, the cell for a cell selection — and the nodes around it,
+ * innermost first.
+ */
 export interface BlockInfo {
   blockType: string;
   blockAttrs: Record<string, unknown>;
@@ -550,9 +554,9 @@ export interface BlockInfo {
 
 /**
  * What a toolbar item reads to show itself pressed: the marks at the caret
- * (on every character of a range) and its block. `blockType`/`blockAttrs` are
- * the caret's own textblock; `ancestors` the nodes around it, innermost first
- * (a list item, its list, a table cell…).
+ * (on every character of a range) and its block: `blockType`/`blockAttrs` the
+ * caret's own textblock, `ancestors` the nodes around it, innermost first (a
+ * list item, its list, a table cell…).
  */
 export interface ToolbarState extends BlockInfo {
   activeMarks: string[];

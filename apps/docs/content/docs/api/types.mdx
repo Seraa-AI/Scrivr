@@ -114,9 +114,9 @@ interface SelectionSnapshot {
   activeMarks: string[];
   /** Attrs of each active mark, keyed by mark name */
   activeMarkAttrs: Record<string, Record<string, unknown>>;
-  /** Node type name of the textblock containing the cursor */
+  /** Node type name of the block holding the selection's start: its textblock for a text selection */
   blockType: string;
-  /** Attrs of that textblock */
+  /** Attrs of that block */
   blockAttrs: Record<string, unknown>;
   /** The nodes around it, innermost first: a list item, its list, a table cell… */
   ancestors: { type: string; attrs: Record<string, unknown> }[];

@@ -645,7 +645,10 @@ export class BaseEditor implements IBaseEditor {
     return result;
   }
 
-  /** The textblock holding the selection's start, and the nodes around it up to the doc. */
+  /**
+   * The node holding the selection's start — its textblock for a text
+   * selection — and the nodes around it up to the doc, innermost first.
+   */
   getBlockInfo(): BlockInfo {
     const { $from } = this.getActiveState().selection;
     const ancestors: BlockInfo["ancestors"] = [];
