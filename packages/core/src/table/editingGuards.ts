@@ -2,7 +2,8 @@ import { Selection } from "prosemirror-state";
 import type { Command, EditorState, Transaction } from "prosemirror-state";
 import type { ResolvedPos } from "prosemirror-model";
 import { tableStructureCommands } from "./commands";
-import { clearCells, selectedCells, enclosingCell, type ResolvedCellRange } from "./cellSelection";
+import { CellSelection, enclosingCell } from "./cellSelection";
+import { deleteSelection } from "../model/commands";
 
 /**
  * Table editing-UX commands (Phase 5) — the layer that sits on top of the
@@ -63,16 +64,6 @@ export const tabToPreviousCell: Command = (state, dispatch) =>
 
 // ── Backspace / Delete guards ────────────────────────────────────────────────
 
-/**
- * Empty every cell in `range` — a cell selection's, or a text selection's that
- * runs across cells — as `CellSelection.replace` does. Null when every cell
- * was already empty.
- */
-function clearCellsTr(state: EditorState, range: ResolvedCellRange): Transaction | null {
-  const tr = state.tr;
-  clearCells(tr, range.cellPositions);
-  return tr.docChanged ? tr.scrollIntoView() : null;
-}
 
 /**
  * The caret is at the very start of a cell when it sits at offset 0 of its
@@ -110,26 +101,23 @@ function atCellEnd(state: EditorState): boolean {
  * handles it.
  */
 export const guardBackspace: Command = (state, dispatch) => {
-  const range = selectedCells(state);
-  if (range) {
-    if (dispatch) {
-      const tr = clearCellsTr(state, range);
-      if (tr) dispatch(tr);
-    }
-    return true;
-  }
+  if (state.selection instanceof CellSelection) return clearSelected(state, dispatch);
   return atCellStart(state); // swallow at the boundary; else defer
 };
 
 /** Delete guard: mirror of {@link guardBackspace} at the cell's tail. */
 export const guardDelete: Command = (state, dispatch) => {
-  const range = selectedCells(state);
-  if (range) {
-    if (dispatch) {
-      const tr = clearCellsTr(state, range);
-      if (tr) dispatch(tr);
-    }
-    return true;
-  }
+  if (state.selection instanceof CellSelection) return clearSelected(state, dispatch);
   return atCellEnd(state);
+};
+
+/**
+ * A cell selection deletes itself (`CellSelection.replace`). The key is
+ * handled even when every cell was already empty, so it never falls through
+ * to a deletion that would join cells.
+ */
+const clearSelected: Command = (state, dispatch) => {
+  const tr = deleteSelection(state);
+  if (tr && dispatch) dispatch(tr.scrollIntoView());
+  return true;
 };

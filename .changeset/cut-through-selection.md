@@ -3,8 +3,13 @@
 ---
 
 A cell selection deletes itself: `CellSelection.replace` empties each cell to
-a paragraph, keeps the grid and leaves the caret in the top-left cell, with
-what was typed there. Cut, Delete, typing and `tr.deleteSelection()` all go
-through it, so clipboard cut no longer special-cases tables. Before, a plain
-`deleteSelection` on a cell selection left the caret at the end of the last
-cell. `clearSelectedCellsTr` is gone; `deleteSelection` covers it.
+its default block (a paragraph), keeps the grid and leaves the caret in the
+top-left cell, with whatever was typed or pasted there. Cut, Delete,
+Backspace, typing and `tr.deleteSelection()` all go through it, so clipboard
+cut no longer special-cases tables.
+
+What changes for a reader: typing over a cell selection writes into the
+top-left cell, as Word does, not the cell the drag ended in; a cell holding
+only a horizontal rule or page break is emptied like any other; and cutting
+cells that are already empty does nothing, keeping the selection, as Delete
+does. `deleteSelection` returns null when nothing was deleted.
