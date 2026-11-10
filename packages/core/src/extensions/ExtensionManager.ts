@@ -15,6 +15,8 @@ import type {
   InputHandler,
   PasteTransform,
   PasteHtmlTransform,
+  PasteFileHandler,
+  PasteFileSpec,
   MarkdownParserTokenSpec,
   MarkdownSerializerRules,
   MarkdownNodeSerializer,
@@ -705,6 +707,23 @@ export class ExtensionManager {
    */
   buildPasteHtmlTransforms(): PasteHtmlTransform[] {
     return this.resolved.flatMap((ext) => ext.pasteHtmlTransforms);
+  }
+
+  /**
+   * The pasted files each node type takes, most recently registered first: a
+   * file goes to the first that accepts it, so a later extension takes a file
+   * an earlier one would, and its declaration for a node replaces an earlier
+   * one's.
+   */
+  buildPasteFiles(): PasteFileHandler[] {
+    const byNode = new Map<string, PasteFileSpec>();
+    for (const ext of this.resolved) {
+      for (const [node, spec] of Object.entries(ext.pasteFiles)) {
+        byNode.delete(node);
+        byNode.set(node, spec);
+      }
+    }
+    return [...byNode].reverse().map(([node, spec]) => ({ node, spec }));
   }
 
   /**

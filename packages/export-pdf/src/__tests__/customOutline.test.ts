@@ -96,4 +96,30 @@ describe("an outline block from outside core", () => {
       { title: "Next", children: [] },
     ]);
   });
+
+  it("leaves out a heading whose text the proposed view removes, as the semantic outline does", async () => {
+    // A mark the proposed view leaves out, as a tracked deletion is; declared
+    // on the semantic lane, which says what the proposed view removes.
+    const Struck = Extension.create({
+      name: "struck",
+      addMarks() {
+        return { struck: { toDOM: () => ["s", 0] } };
+      },
+      addExports() {
+        const lanes = { pdf: {}, semantic: { isRemoved: (node: { marks: readonly { type: { name: string } }[] }) => node.marks.some((mark) => mark.type.name === "struck") } };
+        return lanes;
+      },
+    });
+    expect(await outlineOf([StarterKit, Struck], [
+      titled("heading", "One", { level: 1 }),
+      { type: "heading", attrs: { level: 2 }, content: [{ type: "text", text: "Gone", marks: [{ type: "struck" }] }] },
+      titled("heading", "Two", { level: 2 }),
+    ])).toEqual([{ title: "One", children: [{ title: "Two", children: [] }] }]);
+  });
+
+  it("titles a bookmark as the semantic outline does: a line break as a space, trimmed", async () => {
+    expect(await outlineOf([StarterKit], [
+      { type: "heading", attrs: { level: 1 }, content: [{ type: "text", text: "  Terms" }, { type: "hardBreak" }, { type: "text", text: "and Conditions " }] },
+    ])).toEqual([{ title: "Terms and Conditions", children: [] }]);
+  });
 });

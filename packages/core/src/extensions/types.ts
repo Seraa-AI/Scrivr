@@ -50,6 +50,7 @@ import type { InputRule } from "prosemirror-inputrules";
 import type { CharacterMap } from "../layout/CharacterMap";
 import type { PageConfig, DocumentLayout } from "../layout/PageLayout";
 import type { BlockStrategy, InlineStrategy, NodeLayout } from "../layout/BlockRegistry";
+import type { AnchoredSpec } from "../layout/AnchoredObjects";
 import type { MarkerPainter } from "../layout/markers";
 import type { BlockStyle, FontConfig } from "../layout/FontConfig";
 import type { ParsedFont } from "../layout/StyleResolver";
@@ -95,6 +96,14 @@ export type ScrivrNodeSpec = NodeSpec & {
    * Called for every block those visit, so it must be pure and must not throw.
    */
   outlineLevel?: (node: Node) => number | null;
+  /**
+   * How an inline node is placed as an anchored object, both ways: `read`
+   * gives its placement (floated beside or around the text, or `wrapMode:
+   * "inline"` to sit in its line), `write` the attrs that store a placement
+   * patch. Read through `anchoredOf` and written through `placementAttrs` by
+   * layout, hit-testing, drag, resize and the exporters.
+   */
+  anchored?: AnchoredSpec;
 };
 
 // ── Overlay render handler ─────────────────────────────────────────────────────
@@ -470,6 +479,29 @@ export type PasteTransform = (slice: Slice) => Slice;
  * via `addPasteHtmlTransforms`; leave the tree untouched to decline.
  */
 export type PasteHtmlTransform = (root: HTMLElement) => void;
+
+/**
+ * How pasted files of one kind become a node, declared by the extension that
+ * owns the node (`addPasteFiles`, keyed by node type name). Core reads or
+ * uploads each file to a `src`, gates it as an image URL and measures it; a
+ * placeholder holds its place meanwhile.
+ */
+export interface PasteFileSpec {
+  /** Whether this node takes a pasted file. */
+  accepts(file: File): boolean;
+  /** The placeholder's attrs while the file resolves; `id` marks it. */
+  pending(id: string): Record<string, unknown>;
+  /** The placeholder's `id`, or null for any other node. */
+  pendingIdOf(node: Node): string | null;
+  /** The node's attrs once the file has a `src` and a size. */
+  resolved(file: { src: string; width: number; height: number }): Record<string, unknown>;
+}
+
+/** A node type and the pasted files it takes. */
+export interface PasteFileHandler {
+  node: string;
+  spec: PasteFileSpec;
+}
 
 /**
  * Describes a toolbar button declared by an extension.
@@ -1083,6 +1115,12 @@ export interface ExtensionConfig<Options = object> {
   addPasteHtmlTransforms?(this: Phase1Context<Options>): PasteHtmlTransform[];
 
   /**
+   * Pasted files this extension's nodes take, keyed by node type name: which
+   * files, and the attrs of the placeholder and of the resolved node.
+   */
+  addPasteFiles?(this: Phase1Context<Options>): Record<string, PasteFileSpec>;
+
+  /**
    * ProseMirror input rules (auto-format while typing).
    * Collected by ExtensionManager and wrapped in a single inputRules() plugin.
    * Phase 2 — schema is available via this.schema.
@@ -1220,6 +1258,7 @@ export interface ResolvedExtension {
   inputHandlers: Record<string, InputHandler>;
   pasteTransforms: PasteTransform[];
   pasteHtmlTransforms: PasteHtmlTransform[];
+  pasteFiles: Record<string, PasteFileSpec>;
   inputRules: InputRule[];
   markdownParserTokens: Record<string, MarkdownParserTokenSpec>;
   markdownSerializerRules: MarkdownSerializerRules;

@@ -16,7 +16,7 @@ import { LineBreaker, isSpacerLine, type InputSpan, type LayoutLine } from "./Li
 import type { MarkerLine } from "./BlockLayout";
 import type { LaidMarker, MarkerFace } from "./markers";
 import {
-  normalizeImageAttrs,
+  floats,
   type AnchoredObjectPlacement,
   type WrapMode,
 } from "./AnchoredObjects";
@@ -1324,11 +1324,7 @@ function blockHasAnchoredObject(lines: LayoutLine[]): boolean {
   for (const line of lines) {
     for (const span of line.spans) {
       if (span.kind !== "object" || span.width !== 0) continue;
-      // Read through normalizeImageAttrs so both the canonical `wrapMode`
-      // attr and the legacy `wrappingMode` shorthand are honoured. Reading
-      // legacy alone misses nodes set via the new ImageMenu (which writes
-      // `wrapMode: "square", wrappingMode: "inline"`).
-      if (normalizeImageAttrs(span.node).wrapMode !== "inline") return true;
+      if (floats(span.node)) return true;
     }
   }
   return false;

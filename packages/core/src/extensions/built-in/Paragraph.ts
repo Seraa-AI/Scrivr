@@ -11,7 +11,7 @@ import {
 import { semanticImage, type SemanticNodeHandler } from "../../exports/semantic";
 import type { PdfNodeHandler } from "../../exports/pdf";
 import type { Node as PmNode } from "prosemirror-model";
-import { normalizeImageAttrs } from "../../layout/AnchoredObjects";
+import { floats } from "../../layout/AnchoredObjects";
 
 /**
  * The single image a paragraph holds with nothing else but whitespace, or null.
@@ -22,7 +22,7 @@ function soleImage(node: PmNode, isRemoved: (node: PmNode) => boolean): PmNode |
   let other = 0;
   node.forEach((child) => {
     if (isRemoved(child)) return;
-    if (child.type.name === "image") images.push(child);
+    if (semanticImage(child)) images.push(child);
     else if (!child.isText || (child.text ?? "").trim() !== "") other += 1;
   });
   return images.length === 1 && other === 0 ? images[0] ?? null : null;
@@ -91,8 +91,7 @@ const splitParagraph = splitBlockAs((parent, _atEnd, $from) => {
 function isAnchoredObjectSelected(state: EditorState): boolean {
   const { selection } = state;
   if (!(selection instanceof NodeSelection)) return false;
-  if (selection.node.type.name !== "image") return false;
-  return normalizeImageAttrs(selection.node).wrapMode !== "inline";
+  return floats(selection.node);
 }
 
 export const splitBlockInheritAttrs: Command = (state, dispatch) => {

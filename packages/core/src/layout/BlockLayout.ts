@@ -5,7 +5,7 @@ import type { FontResolutionId, LayoutFontResolver } from "../fonts/layoutResolv
 import type { FontModifier } from "../extensions/types";
 import type { TextMeasurerLike } from "./TextMeasurer";
 import { breakOf, type InlineRegistry } from "./BlockRegistry";
-import { normalizeImageAttrs, type WrapMode } from "./AnchoredObjects";
+import { anchoredOf, type WrapMode } from "./AnchoredObjects";
 import { LineBreaker, LayoutLine, InputSpan, indentFirstSegment, spanEndDocPos, computeObjectRenderY, type InlineObjectVerticalAlign, type LineSpaceProvider } from "./LineBreaker";
 import { CharacterMap } from "./CharacterMap";
 import {
@@ -810,18 +810,15 @@ function extractSpans(
     if (child.isLeaf && !child.isText) {
       const w = child.attrs["width"] as number | null | undefined;
       const h = child.attrs["height"] as number | null | undefined;
-      const claimed = inlineRegistry?.get(child.type.name) !== undefined;
+      const placement = anchoredOf(child);
+      const claimed = inlineRegistry?.get(child.type.name) !== undefined || placement !== null;
       if (claimed || typeof w === "number" || typeof h === "number") {
-        // Anchored-object anchor span: when the image's resolved wrapMode is
+        // Anchored-object anchor span: when the node's declared placement is
         // anything other than "inline", emit a zero-width/zero-height object
         // span. This keeps the doc position in the line box but contributes
         // no line width or height — PageLayout's resolveAnchoredObjects pass
-        // places the visible image at its xAlign/x and creates the wrap
-        // zone. Read through normalizeImageAttrs so both new (`wrapMode`)
-        // and legacy (`wrappingMode`) attribute sets are honoured.
-        const isFloat =
-          child.type.name === "image" &&
-          normalizeImageAttrs(child).wrapMode !== "inline";
+        // places the visible object at its xAlign/x and creates the wrap zone.
+        const isFloat = placement !== null && placement.wrapMode !== "inline";
 
         if (isFloat) {
           spans.push({
@@ -846,8 +843,9 @@ function extractSpans(
           rawAlign === "text-bottom"
             ? rawAlign
             : "baseline";
-        let objWidth = typeof w === "number" ? w : 200;
-        let objHeight = typeof h === "number" ? h : 200;
+        // A node that declares its placement is the size it declares there.
+        let objWidth = placement ? placement.width : typeof w === "number" ? w : 200;
+        let objHeight = placement ? placement.height : typeof h === "number" ? h : 200;
 
         // An atom sized from a font — a page number, a date — inherits the
         // run's, and a renderer that paints it needs the same one the box was

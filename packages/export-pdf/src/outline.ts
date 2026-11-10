@@ -6,7 +6,8 @@ import {
   type PDFDocument,
   type PDFRef,
 } from "pdf-lib";
-import { outlineLevelOf, type DocumentLayout, type LayoutBlock } from "@scrivr/core";
+import { outlineLevelOf, outlineTitleOf, type DocumentLayout, type LayoutBlock } from "@scrivr/core";
+import type { Node } from "@scrivr/core/pm";
 import { PT_PER_PX } from "./context";
 
 /**
@@ -20,8 +21,8 @@ import { PT_PER_PX } from "./context";
  * Must run after every page has been added: each bookmark's destination names
  * the page object it jumps to.
  */
-export function addOutline(pdfDoc: PDFDocument, layout: DocumentLayout): void {
-  const entries = collectEntries(layout);
+export function addOutline(pdfDoc: PDFDocument, layout: DocumentLayout, isRemoved: (node: Node) => boolean): void {
+  const entries = collectEntries(layout, isRemoved);
   const tree = nest(entries);
   const first = tree.roots[0];
   const last = tree.roots[tree.roots.length - 1];
@@ -123,7 +124,7 @@ interface OutlineEntry {
   topPt: number;
 }
 
-function collectEntries(layout: DocumentLayout): OutlineEntry[] {
+function collectEntries(layout: DocumentLayout, isRemoved: (node: Node) => boolean): OutlineEntry[] {
   const pageHeightPt = layout.pageConfig.pageHeight * PT_PER_PX;
   const entries: OutlineEntry[] = [];
   const visit = (blocks: readonly LayoutBlock[], pageIndex: number, originY: number): void => {
@@ -132,7 +133,7 @@ function collectEntries(layout: DocumentLayout): OutlineEntry[] {
       // Pagination repeats the source node in every visual fragment. Only
       // its first fragment owns a bookmark; equal titles in distinct source
       // blocks must remain distinct entries.
-      const entry = block.isContinuation ? null : entryOf(block);
+      const entry = block.isContinuation ? null : entryOf(block, isRemoved);
       if (entry) {
         entries.push({ ...entry, pageIndex, topPt: pageHeightPt - pageY * PT_PER_PX });
       }
@@ -146,9 +147,9 @@ function collectEntries(layout: DocumentLayout): OutlineEntry[] {
   return entries;
 }
 
-function entryOf(block: LayoutBlock): { title: string; level: number } | null {
+function entryOf(block: LayoutBlock, isRemoved: (node: Node) => boolean): { title: string; level: number } | null {
   const level = outlineLevelOf(block.node);
   if (level === null) return null;
-  const title = block.node.textContent.trim();
+  const title = outlineTitleOf(block.node, isRemoved);
   return title ? { title, level } : null;
 }

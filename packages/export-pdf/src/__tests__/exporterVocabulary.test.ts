@@ -13,6 +13,9 @@ const LIST_WORDS = /bullet|numbered|\blists\b|\b(a|the|nested|ordered) list\b|li
 /** Nodes that declare their outline level on their spec (`outlineLevel`). */
 const OUTLINE_NODES = /heading/i;
 
+/** A node read by name as an image: its embedded file is declared on the PDF lane (`embeds`). */
+const IMAGE_NODE = /name ?[!=]==? ?["'`]image["'`]/;
+
 const sourceFiles = (dir: string): string[] =>
   readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const path = join(dir, entry.name);
@@ -32,5 +35,9 @@ describe("the exporter's vocabulary", () => {
 
   it("no source file names a node that declares its outline level", () => {
     expect(linesMatching(OUTLINE_NODES)).toEqual([]);
+  });
+
+  it("no source file reads an image by name", () => {
+    expect(linesMatching(IMAGE_NODE)).toEqual([]);
   });
 });

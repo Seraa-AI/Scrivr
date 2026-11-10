@@ -38,7 +38,7 @@ export type XAlign = "left" | "center" | "right" | "custom";
  * The legacy single-mode attribute kept for backward compatibility
  * with documents created before the `wrapMode` + `xAlign` split.
  * Read-only — layout never branches on these directly; they are
- * mapped to the new model by `normalizeImageAttrs`.
+ * mapped to the new model by the image's `anchored` declaration.
  */
 export type LegacyWrappingMode =
   | "inline"
@@ -49,12 +49,11 @@ export type LegacyWrappingMode =
   | "front";
 
 /**
- * The fully-resolved image attributes used by every layout consumer.
- * Produced by `normalizeImageAttrs` from a PM node's raw attrs;
- * legacy `wrappingMode` / `floatOffset` fields are mapped here so
- * the rest of the engine never branches on them.
+ * How an anchored object is placed: what a node spec's `anchored` declares
+ * for a node, resolved. Every layout, hit-test, drag and export consumer reads
+ * it through `anchoredOf`, so the engine never reads an object's raw attrs.
  */
-export interface NormalizedImageAttrs {
+export interface AnchoredPlacement {
   width: number;
   height: number;
   wrapMode: WrapMode;
@@ -71,129 +70,6 @@ export interface NormalizedImageAttrs {
   yOffset: number;
   zIndex: number;
   margin: number;
-}
-
-interface RawImageAttrs {
-  width?: unknown;
-  height?: unknown;
-  wrapMode?: unknown;
-  positionMode?: unknown;
-  xAlign?: unknown;
-  x?: unknown;
-  yOffset?: unknown;
-  zIndex?: unknown;
-  margin?: unknown;
-  // Legacy
-  wrappingMode?: unknown;
-  floatOffset?: unknown;
-}
-
-/**
- * Resolves a PM image node's raw attrs into the canonical
- * NormalizedImageAttrs. Read-side mapping — the PM document is
- * never mutated by this function. Layout, hit testing, drag, and
- * exporters all read attrs through this function so legacy
- * documents continue to render correctly without rewriting the doc.
- *
- * Resolution order:
- *   1. If new attrs (`wrapMode` / `xAlign`) are set to non-default
- *      values, they are authoritative.
- *   2. Otherwise legacy `wrappingMode` is mapped:
- *        "square-left"  → wrapMode: "square", xAlign: "left"
- *        "square-right" → wrapMode: "square", xAlign: "right"
- *        anything else  → matching wrapMode, default xAlign
- *   3. Defaults if neither is set: inline, left, no x.
- *
- * Legacy `floatOffset.y` is folded into structural `yOffset` on read
- * (see `06-yoffset-redesign.md` § Phase 1). `floatOffset.x` is discarded
- * — horizontal placement goes through `xAlign` / `x`. PM round-trip
- * preserves the legacy attr in the doc but layout reads only `yOffset`.
- */
-export function normalizeImageAttrs(node: Node): NormalizedImageAttrs {
-  const a = node.attrs as RawImageAttrs;
-
-  return {
-    width: numberOrDefault(a.width, 200),
-    height: numberOrDefault(a.height, 200),
-    wrapMode: resolveWrapMode(a),
-    positionMode: "move-with-text",
-    xAlign: resolveXAlign(a),
-    x: resolveCustomX(a),
-    yOffset: resolveYOffset(a),
-    zIndex: numberOrDefault(a.zIndex, 0),
-    margin: numberOrDefault(a.margin, ANCHORED_OBJECT_MARGIN),
-  };
-}
-
-/**
- * Resolve the structural `yOffset` from raw attrs. A non-zero `yOffset`
- * is authoritative. The schema default of `0` is ambiguous (could be
- * "unset" on a legacy doc or "user reset" on a new doc), so we fall back
- * to the legacy `floatOffset.y`. New code should always write `yOffset`
- * directly and never rely on `floatOffset` being preserved.
- */
-function resolveYOffset(a: RawImageAttrs): number {
-  if (typeof a.yOffset === "number" && Number.isFinite(a.yOffset) && a.yOffset !== 0) {
-    return a.yOffset;
-  }
-  return getLegacyFloatOffsetY(a);
-}
-
-/**
- * Read `floatOffset.y` from a legacy image node without an `as` cast.
- * Returns 0 if the attribute is absent or malformed. Used as the fallback
- * source for `yOffset` so documents written before Phase 1 keep their
- * vertical placement.
- */
-function getLegacyFloatOffsetY(a: RawImageAttrs): number {
-  const fo = a.floatOffset;
-  if (fo === null || typeof fo !== "object") return 0;
-  if (!("y" in fo)) return 0;
-  const y = (fo as { y: unknown }).y;
-  return typeof y === "number" && Number.isFinite(y) ? y : 0;
-}
-
-function resolveWrapMode(a: RawImageAttrs): WrapMode {
-  if (isWrapMode(a.wrapMode) && a.wrapMode !== "inline") return a.wrapMode;
-  switch (a.wrappingMode) {
-    case "square-left":
-    case "square-right":
-      return "square";
-    case "top-bottom":
-    case "behind":
-    case "front":
-      return a.wrappingMode;
-    default:
-      return isWrapMode(a.wrapMode) ? a.wrapMode : "inline";
-  }
-}
-
-function resolveXAlign(a: RawImageAttrs): XAlign {
-  // Hard precedence: an explicit non-default xAlign always wins. Drag and
-  // toolbar commits set `xAlign` directly (e.g. "custom" + a numeric `x`);
-  // the legacy `wrappingMode: "square-right"` branch below would otherwise
-  // shadow that and pin the image at the page's right edge after every drag.
-  // Schema-default "left" stays ambiguous (could be explicit or default), so
-  // it falls through to the legacy/default branches below.
-  if (isXAlign(a.xAlign) && a.xAlign !== "left") {
-    return a.xAlign;
-  }
-  // wrapMode-explicit nodes use their xAlign as-is (default-or-explicit "left").
-  if (isWrapMode(a.wrapMode) && a.wrapMode !== "inline") {
-    return "left";
-  }
-  // Legacy fallback for documents written before the wrapMode/xAlign split.
-  if (a.wrappingMode === "square-right") return "right";
-  return "left";
-}
-
-function resolveCustomX(a: RawImageAttrs): number | null {
-  if (typeof a.x === "number" && Number.isFinite(a.x)) return a.x;
-  return null;
-}
-
-function numberOrDefault(value: unknown, fallback: number): number {
-  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
 function isWrapMode(value: unknown): value is WrapMode {
@@ -228,7 +104,7 @@ function isXAlign(value: unknown): value is XAlign {
  * because headers and footers live there.
  */
 export function resolveImageX(
-  attrs: Pick<NormalizedImageAttrs, "width" | "xAlign" | "x">,
+  attrs: Pick<AnchoredPlacement, "width" | "xAlign" | "x">,
   contentX: number,
   contentWidth: number,
   pageWidth: number,
@@ -294,7 +170,7 @@ export function clearOfEarlier(
 export interface AnchorRef {
   docPos: number;
   node: Node;
-  attrs: NormalizedImageAttrs;
+  attrs: AnchoredPlacement;
 }
 
 /** The anchored images whose anchors sit in `lines`: zero-width object spans that are not inline. */
@@ -303,8 +179,8 @@ export function anchorsInLines(lines: readonly LayoutLine[]): AnchorRef[] {
   for (const line of lines) {
     for (const span of line.spans) {
       if (span.kind !== "object" || span.width !== 0) continue;
-      const attrs = normalizeImageAttrs(span.node);
-      if (attrs.wrapMode === "inline") continue;
+      const attrs = anchoredOf(span.node);
+      if (!attrs || attrs.wrapMode === "inline") continue;
       anchors.push({ docPos: span.docPos, node: span.node, attrs });
     }
   }
@@ -314,7 +190,7 @@ export function anchorsInLines(lines: readonly LayoutLine[]): AnchorRef[] {
 export interface AnchoredObjectInput {
   docPos: number;
   node: Node;
-  attrs: NormalizedImageAttrs;
+  attrs: AnchoredPlacement;
   anchorFlowIndex: number;
   anchorGlobalY: number;
 }
@@ -406,6 +282,80 @@ export function compareAnchoredObjectHitOrder(
 /** Type guard: is the value one of the v1 wrap modes? */
 export function isWrapModeValue(value: unknown): value is WrapMode {
   return isWrapMode(value);
+}
+
+/** Type guard: is the value one of the horizontal alignments? */
+export function isXAlignValue(value: unknown): value is XAlign {
+  return isXAlign(value);
+}
+
+const isFiniteNumber = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
+
+const isPositionMode = (value: unknown): value is PositionMode => value === "move-with-text";
+
+function isAnchoredPlacement(value: unknown): value is AnchoredPlacement {
+  return typeof value === "object" && value !== null
+    && "width" in value && isFiniteNumber(value.width) && value.width > 0
+    && "height" in value && isFiniteNumber(value.height) && value.height > 0
+    && "wrapMode" in value && isWrapMode(value.wrapMode)
+    && "positionMode" in value && isPositionMode(value.positionMode)
+    && "xAlign" in value && isXAlign(value.xAlign)
+    && "x" in value && (value.x === null || isFiniteNumber(value.x))
+    && "yOffset" in value && isFiniteNumber(value.yOffset)
+    && "zIndex" in value && isFiniteNumber(value.zIndex)
+    && "margin" in value && isFiniteNumber(value.margin);
+}
+
+/** The placement fields a gesture changes: a drag, a resize, a return to the line. */
+export type PlacementPatch = Partial<Pick<AnchoredPlacement, "width" | "height" | "wrapMode" | "xAlign" | "x" | "yOffset">>;
+
+/**
+ * How a node is placed as an anchored object, both ways: what a node spec's
+ * `anchored` declares. `read` resolves its attrs into a placement; `write`
+ * turns a placement patch into the attrs that store it. Both must be pure and
+ * must not throw: layout, hit-testing and every gesture call them.
+ */
+export interface AnchoredSpec {
+  read(node: Node): AnchoredPlacement | null;
+  write(patch: PlacementPatch): Record<string, unknown>;
+}
+
+function anchoredSpecOf(node: Node): AnchoredSpec | null {
+  const declared: unknown = node.type.spec["anchored"];
+  if (typeof declared !== "object" || declared === null) return null;
+  if (!("read" in declared) || typeof declared.read !== "function") return null;
+  if (!("write" in declared) || typeof declared.write !== "function") return null;
+  const { read, write } = declared;
+  return {
+    read: (n) => {
+      const placement: unknown = read(n);
+      return isAnchoredPlacement(placement) ? placement : null;
+    },
+    write: (patch) => {
+      const attrs: unknown = write(patch);
+      return typeof attrs === "object" && attrs !== null ? { ...attrs } : {};
+    },
+  };
+}
+
+/**
+ * How a node is placed as an anchored object, as its spec's `anchored`
+ * declares it; null for a node that declares none, or a placement that does
+ * not hold up. A placement whose `wrapMode` is `inline` sits in its line.
+ */
+export function anchoredOf(node: Node): AnchoredPlacement | null {
+  return anchoredSpecOf(node)?.read(node) ?? null;
+}
+
+/** The attrs that store `patch` on `node`, through its declaration; null for a node that declares none. */
+export function placementAttrs(node: Node, patch: PlacementPatch): Record<string, unknown> | null {
+  return anchoredSpecOf(node)?.write(patch) ?? null;
+}
+
+/** Whether a node floats: it declares a placement, and not an inline one. */
+export function floats(node: Node): boolean {
+  const placement = anchoredOf(node);
+  return placement !== null && placement.wrapMode !== "inline";
 }
 
 /** Type guard: is the value one of the legacy wrappingMode values? */

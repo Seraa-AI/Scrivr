@@ -63,4 +63,4 @@ export type {
   SectionSettings,
   SectionSettingsPatch,
 } from "./sections";
-export { outlineLevelOf } from "./outline";
+export { outlineLevelOf, outlineTitleOf } from "./outline";

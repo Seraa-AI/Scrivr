@@ -6,7 +6,8 @@ import {
   hitHandle,
   computeNewSize,
 } from "./ResizeController";
-import { normalizeImageAttrs, type AnchoredObjectPlacement } from "../layout/AnchoredObjects";
+import type { Node as PmNode } from "prosemirror-model";
+import { anchoredOf, placementAttrs, type AnchoredObjectPlacement, type PlacementPatch } from "../layout/AnchoredObjects";
 import type { CellSubBlock, LayoutBlock } from "../layout/BlockLayout";
 import { CELL_PADDING_H } from "../layout/TableLayoutEngine";
 import { resolvePointOwner, type PointOwner } from "../layout/pointOwnership";
@@ -34,7 +35,7 @@ const RE_ANCHOR_THRESHOLD_PX = 24;
  */
 function paintedYOffset(placement: AnchoredObjectPlacement): number {
   const moved = placement.clamped === true || placement.stackOffset !== undefined;
-  return moved ? placement.globalY - placement.anchorGlobalY : normalizeImageAttrs(placement.node).yOffset;
+  return moved ? placement.globalY - placement.anchorGlobalY : (anchoredOf(placement.node)?.yOffset ?? 0);
 }
 
 /**
@@ -96,6 +97,8 @@ export class PointerController {
     startClientY: number;
     /** Image's painted X at drag start, in page-local coordinates. */
     startImageX: number;
+    /** The dragged node: its declaration writes the placement a drop commits. */
+    node: PmNode;
     /**
      * Anchor flow's globalY snapshot. Frozen at pointerdown — never recomputed
      * during the gesture. Phase 2 spec ("snapshot or die"): drag math reads
@@ -500,6 +503,7 @@ export class PointerController {
         startClientX: e.clientX,
         startClientY: e.clientY,
         startImageX: anchoredHit.x,
+        node: anchoredHit.node,
         anchorGlobalY: anchoredHit.anchorGlobalY,
         startImageGlobalY: anchoredHit.globalY,
         startYOffset: paintedYOffset(anchoredHit),
@@ -713,7 +717,11 @@ export class PointerController {
     }
     if (this.resizeDrag) {
       const { docPos, pendingWidth, pendingHeight } = this.resizeDrag;
-      editor.setNodeAttrs(docPos, { width: pendingWidth, height: pendingHeight });
+      // A node that declares its placement stores its size there; any other
+      // object is sized by its width and height attrs, as layout reads it.
+      const node = editor.getState().doc.nodeAt(docPos);
+      const size = { width: pendingWidth, height: pendingHeight };
+      editor.setNodeAttrs(docPos, (node && placementAttrs(node, size)) ?? size);
       this.resizeDrag = null;
       this.setCursorAll("text");
     }
@@ -886,30 +894,30 @@ export class PointerController {
         return;
       }
 
-      const attrs: Record<string, unknown> = {};
+      const patch: PlacementPatch = {};
       if (!horizontallyStill && newX !== null) {
-        attrs["xAlign"] = "custom";
-        attrs["x"] = this.contentRelativeX(newX);
+        patch.xAlign = "custom";
+        patch.x = this.contentRelativeX(newX);
       }
       if (!verticallyStill) {
-        attrs["yOffset"] = newYOffset;
+        patch.yOffset = newYOffset;
       }
       const reanchor = !verticallyStill
-        ? this.resolveSamePageReanchor(newYOffset, attrs)
+        ? this.resolveSamePageReanchor(newYOffset, patch)
         : null;
       if (reanchor) {
-        editor.moveAndUpdateNode(docPos, reanchor.docPos, reanchor.attrs);
+        this.movePlacement(docPos, reanchor.docPos, reanchor.patch);
         dragDebugLog(editor, "commit", {
           commitPath: "moveAndUpdateNode",
           docPos,
           newDocPos: reanchor.docPos,
           newX,
-          newYOffset: reanchor.attrs["yOffset"],
+          newYOffset: reanchor.patch.yOffset,
           reanchor: true,
         });
         return;
       }
-      editor.setNodeAttrs(docPos, attrs);
+      this.setPlacement(docPos, patch);
       dragDebugLog(editor, "commit", {
         commitPath: "setNodeAttrs",
         docPos,
@@ -941,17 +949,17 @@ export class PointerController {
     const crossPageYOffset = drop?.yOffset ?? 0;
 
     if (!horizontallyStill && !verticallyStill && newX !== null && drop) {
-      editor.moveAndUpdateNode(docPos, drop.docPos, {
+      this.movePlacement(docPos, drop.docPos, {
         xAlign: "custom",
         x: this.contentRelativeX(newX),
         yOffset: crossPageYOffset,
       });
       commitPath = "moveAndUpdateNode";
     } else if (!verticallyStill && drop) {
-      editor.moveAndUpdateNode(docPos, drop.docPos, { yOffset: crossPageYOffset });
+      this.movePlacement(docPos, drop.docPos, { yOffset: crossPageYOffset });
       commitPath = "moveAndUpdateNode";
     } else if (newX !== null) {
-      editor.setNodeAttrs(docPos, { xAlign: "custom", x: this.contentRelativeX(newX) });
+      this.setPlacement(docPos, { xAlign: "custom", x: this.contentRelativeX(newX) });
       commitPath = "setNodeAttrs";
     } else {
       return;
@@ -984,14 +992,11 @@ export class PointerController {
     const HORIZONTAL_THRESHOLD = 3;
     if (Math.abs(dx) < HORIZONTAL_THRESHOLD) return null;
 
-    const node = editor.getState().doc.nodeAt(this.anchoredDrag.docPos);
-    if (!node) return null;
-
+    // The painted width snapshotted at pointerdown, as the rest of the drag
+    // reads its geometry.
     const { pageWidth } = editor.layout.pageConfig;
-    const attrs = normalizeImageAttrs(node);
-
     const proposedX = this.anchoredDrag.startImageX + dx;
-    const clampedX = Math.max(0, Math.min(proposedX, pageWidth - attrs.width));
+    const clampedX = Math.max(0, Math.min(proposedX, pageWidth - this.anchoredDrag.rect.width));
     return clampedX;
   }
 
@@ -1015,14 +1020,14 @@ export class PointerController {
       // A cell with no paragraph (only a nested table) cannot take the image.
       const paragraph = nearestCellParagraph(target.row, target.cell, ghostY);
       if (!paragraph) return true;
-      const attrs = {
+      const patch: PlacementPatch = {
         xAlign: "custom",
         x: ghostX - (target.cell.x + CELL_PADDING_H),
         yOffset: ghostY - (target.row.y + paragraph.y),
       };
       const anchorPos = paragraph.nodePos + 1;
-      if (anchorPos === ownParagraph) editor.setNodeAttrs(docPos, attrs);
-      else editor.moveAndUpdateNode(docPos, anchorPos, attrs);
+      if (anchorPos === ownParagraph) this.setPlacement(docPos, patch);
+      else this.movePlacement(docPos, anchorPos, patch);
       dragDebugLog(editor, "commit", { commitPath: "cell", docPos, newDocPos: anchorPos, cellPos: target.cell.cellPos });
       return true;
     }
@@ -1033,13 +1038,25 @@ export class PointerController {
     const ghostGlobalY = this.pageLocalYToGlobal(hit.page, ghostY);
     const nearest = this.nearestAnchorStartingOn(hit.page, ghostGlobalY, () => false);
     if (!nearest) return true;
-    editor.moveAndUpdateNode(docPos, nearest.docPos, {
+    this.movePlacement(docPos, nearest.docPos, {
       xAlign: "custom",
       x: this.contentRelativeX(ghostX),
       yOffset: ghostGlobalY - nearest.globalY,
     });
     dragDebugLog(editor, "commit", { commitPath: "leaveCell", docPos, newDocPos: nearest.docPos });
     return true;
+  }
+
+  /** Sets the dragged object's placement, written through its own declaration. */
+  private setPlacement(docPos: number, patch: PlacementPatch): void {
+    const attrs = this.anchoredDrag ? placementAttrs(this.anchoredDrag.node, patch) : null;
+    if (attrs) this.deps.editor.setNodeAttrs(docPos, attrs);
+  }
+
+  /** Moves the dragged object to `to` with its placement, written through its own declaration. */
+  private movePlacement(docPos: number, to: number, patch: PlacementPatch): void {
+    const attrs = this.anchoredDrag ? placementAttrs(this.anchoredDrag.node, patch) : null;
+    if (attrs) this.deps.editor.moveAndUpdateNode(docPos, to, attrs);
   }
 
   /**
@@ -1062,8 +1079,8 @@ export class PointerController {
 
   private resolveSamePageReanchor(
     committedYOffset: number,
-    attrs: Record<string, unknown>,
-  ): { docPos: number; attrs: Record<string, unknown> } | null {
+    patch: PlacementPatch,
+  ): { docPos: number; patch: PlacementPatch } | null {
     if (!this.anchoredDrag) return null;
     const sourcePage = this.anchoredDrag.rect.page;
     const imageGlobalY = this.anchoredDrag.anchorGlobalY + committedYOffset;
@@ -1077,8 +1094,8 @@ export class PointerController {
     if (wouldReduce <= RE_ANCHOR_THRESHOLD_PX) return null;
     return {
       docPos: best.docPos,
-      attrs: {
-        ...attrs,
+      patch: {
+        ...patch,
         yOffset: imageGlobalY - best.globalY,
       },
     };

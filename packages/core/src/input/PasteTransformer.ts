@@ -10,6 +10,8 @@ import type MarkdownIt from "markdown-it";
 import { createMarkdownIt } from "../model/parseMarkdown";
 import type {
   MarkdownParserTokenSpec,
+  PasteFileHandler,
+  PasteFileSpec,
   PasteTransform,
   PasteHtmlTransform,
 } from "../extensions/types";
@@ -68,6 +70,19 @@ export interface PasteTransformerOptions {
    * parsed. Collected by `ExtensionManager.buildPasteHtmlTransforms()`.
    */
   pasteHtmlTransforms?: PasteHtmlTransform[];
+
+  /**
+   * The pasted files each node type takes, declared by the extension that
+   * owns it (`addPasteFiles`). Collected by `ExtensionManager.buildPasteFiles()`.
+   */
+  pasteFiles?: readonly PasteFileHandler[];
+}
+
+/** A pasted file and the node type that takes it. */
+interface TakenFile {
+  file: File;
+  type: NodeType;
+  spec: PasteFileSpec;
 }
 
 /** A synchronous reservation followed by asynchronous image resolution. */
@@ -158,7 +173,7 @@ export class PasteTransformer {
     // An image copied from a file manager arrives as bytes plus a text/plain
     // file path. The bytes are the content the user meant; inserting the path
     // as well would paste the image twice, once as a URL string.
-    if (!html && hasImageFile(clipboardData)) return null;
+    if (!html && this.takenFiles(clipboardData).length > 0) return null;
 
     if (html) {
       try {
@@ -204,44 +219,29 @@ export class PasteTransformer {
   ): PendingImagePaste | null {
     if (clipboardData.getData("text/html").trim()) return null;
 
-    const imageType = this.schema.nodes["image"];
-    if (!imageType) return null;
+    const taken = this.takenFiles(clipboardData);
+    if (taken.length === 0) return null;
 
-    const files = imageFiles(clipboardData);
-    if (files.length === 0) return null;
-
-    const reservations = files.map(() => {
+    const reservations = taken.map(({ type, spec }) => {
       const id = crypto.randomUUID();
-      return {
-        id,
-        node: imageType.create({
-          src: PENDING_IMAGE_SRC,
-          alt: "Uploading image…",
-          pendingPasteId: id,
-        }),
-      };
+      return { id, spec, node: type.create(spec.pending(id)) };
     });
     const insert = state.tr.replaceSelection(
       new Slice(Fragment.from(reservations.map(({ node }) => node)), 0, 0),
     );
 
     let cancelled = false;
-    const reservationIds = reservations.map(({ id }) => id);
     return {
       insert,
       resolve: async (getState) => {
         if (cancelled) return null;
-        const resolved = await this.resolveImageFiles(files);
+        const resolved = await this.resolveImageFiles(taken.map(({ file }) => file));
         if (cancelled) return null;
-        return resolveImageReservations(getState(), reservationIds, resolved);
+        return resolveReservations(getState(), reservations.map((r, index) => ({ ...r, file: resolved[index] ?? null })));
       },
       cancel: (currentState) => {
         cancelled = true;
-        return resolveImageReservations(
-          currentState,
-          reservationIds,
-          reservationIds.map(() => null),
-        );
+        return resolveReservations(currentState, reservations.map((r) => ({ ...r, file: null })));
       },
     };
   }
@@ -255,19 +255,29 @@ export class PasteTransformer {
     getState: () => EditorState,
   ): Promise<Transaction | null> {
     if (clipboardData.getData("text/html").trim()) return null;
-    const imageType = this.schema.nodes["image"];
-    if (!imageType) return null;
-    const files = imageFiles(clipboardData);
-    if (files.length === 0) return null;
-    const resolved = await this.resolveImageFiles(files);
+    const taken = this.takenFiles(clipboardData);
+    if (taken.length === 0) return null;
+    const resolved = await this.resolveImageFiles(taken.map(({ file }) => file));
 
     const nodes: Node[] = [];
-    for (const image of resolved) {
-      if (image) nodes.push(imageType.create(image));
-    }
+    resolved.forEach((file, index) => {
+      const owner = taken[index];
+      if (file && owner) nodes.push(owner.type.create(owner.spec.resolved(file)));
+    });
     if (nodes.length === 0) return null;
 
     return getState().tr.replaceSelection(new Slice(Fragment.from(nodes), 0, 0));
+  }
+
+  /** Each pasted file a node type takes, with that type; a file none takes is left out. */
+  private takenFiles(clipboardData: DataTransfer): TakenFile[] {
+    return clipboardFiles(clipboardData).flatMap((file) => {
+      for (const { node, spec } of this.options.pasteFiles ?? []) {
+        const type = this.schema.nodes[node];
+        if (type && spec.accepts(file)) return [{ file, type, spec }];
+      }
+      return [];
+    });
   }
 
   private async resolveImageFiles(
@@ -397,54 +407,44 @@ export class PasteTransformer {
 
 /** Image files */
 
-const PENDING_IMAGE_SRC =
-  "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=";
-
-function resolveImageReservations(
+/**
+ * Swap each placeholder for the node its file resolved to, through the spec
+ * that made it, or remove it when the file did not resolve.
+ */
+function resolveReservations(
   state: EditorState,
-  ids: readonly string[],
-  images: readonly ({ src: string; width: number; height: number } | null)[],
+  reservations: readonly { id: string; spec: PasteFileSpec; file: { src: string; width: number; height: number } | null }[],
 ): Transaction | null {
-  const byId = new Map(ids.map((id, index) => [id, images[index] ?? null]));
-  const matches: Array<{ pos: number; node: Node; image: { src: string; width: number; height: number } | null }> = [];
+  const byId = new Map(reservations.map((reservation) => [reservation.id, reservation]));
+  const matches: Array<{ pos: number; node: Node; spec: PasteFileSpec; file: { src: string; width: number; height: number } | null }> = [];
   state.doc.descendants((node, pos) => {
-    const id = node.attrs["pendingPasteId"];
-    if (typeof id === "string" && byId.has(id)) {
-      matches.push({ pos, node, image: byId.get(id) ?? null });
+    for (const { spec } of reservations) {
+      const id = spec.pendingIdOf(node);
+      const reservation = id === null ? undefined : byId.get(id);
+      if (reservation) {
+        matches.push({ pos, node, spec: reservation.spec, file: reservation.file });
+        return;
+      }
     }
   });
   if (matches.length === 0) return null;
 
   const tr = state.tr;
-  for (const { pos, node, image } of matches.sort((a, b) => b.pos - a.pos)) {
-    if (image) {
-      tr.setNodeMarkup(pos, undefined, {
-        ...node.attrs,
-        ...image,
-        alt: "",
-        pendingPasteId: null,
-      });
-    } else {
-      tr.delete(pos, pos + node.nodeSize);
-    }
+  for (const { pos, node, spec, file } of matches.sort((a, b) => b.pos - a.pos)) {
+    if (file) tr.setNodeMarkup(pos, undefined, { ...node.attrs, ...spec.resolved(file) });
+    else tr.delete(pos, pos + node.nodeSize);
   }
   tr.setMeta("addToHistory", false);
   return tr;
 }
 
-/** Image files on the clipboard, in order. Reading `files` can throw once the event's DataTransfer is detached. */
-function imageFiles(clipboardData: DataTransfer): File[] {
+/** Files on the clipboard, in order. Reading `files` can throw once the event's DataTransfer is detached. */
+function clipboardFiles(clipboardData: DataTransfer): File[] {
   try {
-    return Array.from(clipboardData.files ?? []).filter((f) =>
-      f.type.startsWith("image/"),
-    );
+    return Array.from(clipboardData.files ?? []);
   } catch {
     return [];
   }
-}
-
-function hasImageFile(clipboardData: DataTransfer): boolean {
-  return imageFiles(clipboardData).length > 0;
 }
 
 /** Default `uploadImage` — embed the bytes in the document as a data URL. */

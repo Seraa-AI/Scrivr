@@ -425,7 +425,7 @@ describe("Editor.moveNode", () => {
   });
 });
 
-describe("Editor.convertImageToInlineAtVisualPosition", () => {
+describe("Editor.placeInlineAtVisualPosition", () => {
   it("moves a floating image to the visual insertion point and clears placement attrs", () => {
     const { editor, cleanup } = makeEditor();
     const schema = editor.schema;
@@ -454,7 +454,7 @@ describe("Editor.convertImageToInlineAtVisualPosition", () => {
     expect(imagePos).toBeGreaterThan(0);
 
     const posAtCoords = vi.spyOn(editor.charMap, "posAtCoords").mockReturnValue(1);
-    expect(editor.convertImageToInlineAtVisualPosition(imagePos)).toBe(true);
+    expect(editor.placeInlineAtVisualPosition(imagePos)).toBe(true);
 
     const firstParagraph = editor.getState().doc.child(0);
     const movedImage = firstParagraph.child(0);

@@ -12,7 +12,7 @@
  */
 
 import type { Node as PmNode, Mark as PmMark, Schema } from "prosemirror-model";
-import { normalizeImageAttrs, type WrapMode, type XAlign } from "../layout/AnchoredObjects";
+import { anchoredOf, type WrapMode, type XAlign } from "../layout/AnchoredObjects";
 
 // ── The unit ──────────────────────────────────────────────────────────────
 
@@ -39,15 +39,30 @@ export type SemanticRole = "body" | "header" | "footer";
  */
 export type SemanticTextView = "proposed";
 
+/** A block that heads a section, as a unit holds it. */
+export interface SemanticHeading {
+  /**
+   * The heading block's own id, or, for a nested heading with none, its
+   * position in the unit (`<unit id>/h<n>`): stable for the same tree, but it
+   * names no node, so a citation cannot resolve it.
+   */
+  nodeId: string;
+  level: number;
+  /** Its title (`outlineTitleOf`): the proposed text, a line break as a space, trimmed. */
+  title: string;
+  /** The headings it sits under, outermost first. */
+  breadcrumb: string[];
+}
+
 /**
  * One section of the document's outline — the tree the headings imply, which a
  * flat unit list states only implicitly.
  *
  * Derived from the same units, so the same JSON always yields the same
- * outline: ids come from unit anchors, never from fresh identity.
+ * outline: ids come from unit anchors and heading ids, never from fresh identity.
  */
 export interface OutlineSection {
-  /** The anchor id of the section's first unit. Stable across reads. */
+  /** Its heading's id (`SemanticHeading.nodeId`), or the first unit's for content before any heading. Stable across reads. */
   id: string;
   /** The enclosing section's `id`, or null at the top level. */
   parentId: string | null;
@@ -65,7 +80,10 @@ export interface OutlineSection {
   level: number;
   /** Ancestor headings outermost-first, ending with this section's own. */
   path: string[];
-  /** Index of the section's first unit — the heading itself. */
+  /**
+   * Index of the section's first unit: its heading's own unit, or the unit
+   * holding a nested heading, which it shares with the section before.
+   */
   startUnit: number;
   /**
    * Index one past the section's last unit. The range is heading-inclusive and
@@ -89,7 +107,15 @@ export interface SemanticUnit {
   view: SemanticTextView;
   /** Heading path, e.g. `["Limitation of Liability", "Exclusions"]`. */
   breadcrumb: string[];
+  /** The anchor block's outline level, when it heads a section (see `headings`). */
   headingLevel?: number;
+  /**
+   * Every block in this unit that heads a section, in document order: its
+   * anchor, a heading nested in a list, sourced block or table cell, each with
+   * the breadcrumb it sits under. A block heads a section when its spec
+   * declares an outline level and its proposed text is not empty.
+   */
+  headings?: SemanticHeading[];
   /** Monotonic document order. */
   order: number;
   /** Plain text for embedding. Tracked-delete text excluded, tracked-insert included. */
@@ -169,16 +195,17 @@ export const IMAGE_NODE_ATTRS: Record<keyof SemanticImage, string> = {
 };
 
 /**
- * The image a node is, as an agent reads it, or null when it is not an image.
- * Use it wherever an image is reported — a unit's `image`, or the image a
- * change inserts or deletes — so both read the same.
+ * The image a node is, as an agent reads it, or null when it is not one: an
+ * anchored object (its spec declares `anchored`) with a `src`. Use it wherever
+ * an image is reported — a unit's `image`, or the image a change inserts or
+ * deletes — so both read the same.
  */
 export function semanticImage(node: PmNode): SemanticImage | null {
-  if (node.type.name !== "image") return null;
-  const placed = normalizeImageAttrs(node);
+  const placed = anchoredOf(node);
   const { src, alt } = node.attrs;
+  if (!placed || typeof src !== "string") return null;
   return {
-    src: typeof src === "string" ? src : "",
+    src,
     alt: typeof alt === "string" ? alt : "",
     width: placed.width,
     height: placed.height,

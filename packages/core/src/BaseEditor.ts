@@ -236,6 +236,7 @@ export class BaseEditor implements IBaseEditor {
       // assignment — its throwaway ids would otherwise pollute the clone map.
       const result = normalizeDocument(rawInitialDoc, {
         schema: this.manager.schema,
+        pasteFiles: this.manager.buildPasteFiles(),
         assignIds: clone ? false : this.assignsBlockIdsOnLoad(),
       });
       this.lastNormalizeResultValue = result;
@@ -277,6 +278,7 @@ export class BaseEditor implements IBaseEditor {
         clonedDoc.check();
         const postClone = normalizeDocument(clonedDoc, {
           schema: this.manager.schema,
+          pasteFiles: this.manager.buildPasteFiles(),
           assignIds: false,
         });
         initialDoc = postClone.doc;

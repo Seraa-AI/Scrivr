@@ -1,5 +1,5 @@
 import type { Node as PmNode } from "@scrivr/core/pm";
-import { outlineLevelOf, type SemanticChange, type SemanticNodeResult, type SemanticPart, type SemanticUnit, type UnitCtx } from "@scrivr/core";
+import { outlineLevelOf, outlineTitleOf, type SemanticChange, type SemanticHeading, type SemanticNodeResult, type SemanticPart, type SemanticUnit, type UnitCtx } from "@scrivr/core";
 import type { ResolvedHandlers } from "./collectHandlers";
 import { groupBlocks } from "./grouping";
 import { resolveNodeId, type BlockEntry } from "./id";
@@ -48,6 +48,27 @@ export function walkSemantic(
   const stack: { level: number; title: string }[] = [];
   let order = 0;
 
+  // What the proposed view leaves out of a title: what the lane reports
+  // removed, and a text run its mark handlers drop (a tracked deletion).
+  const removed = (node: PmNode): boolean =>
+    ctx.isRemoved(node) || (node.isText && (node.text ?? "") !== "" && ctx.toText(node) === "");
+  // A block heads a section when its spec declares an outline level and its
+  // title is not empty, titled by the rule the PDF bookmarks use.
+  const headingOf = (node: PmNode): { level: number; title: string } | null => {
+    const level = outlineLevelOf(node);
+    if (level === null) return null;
+    const title = outlineTitleOf(node, removed);
+    return title === "" ? null : { level, title };
+  };
+  // A heading sits under the open headings shallower than it, then heads
+  // what follows it.
+  const enter = (heading: { level: number; title: string }): string[] => {
+    while (stack.length > 0 && stack[stack.length - 1]!.level >= heading.level) stack.pop();
+    const under = stack.map((s) => s.title);
+    stack.push(heading);
+    return under;
+  };
+
   for (const group of groups) {
     const anchor = group[0]!.node;
     const nodes = group.map((e) => e.node);
@@ -61,25 +82,27 @@ export function walkSemantic(
       result = { type: "unknown" };
     }
 
-    // Breadcrumb is the ancestor heading path. For a heading unit, pop
-    // same/shallower-level entries FIRST so its own breadcrumb reflects only
-    // true ancestors (a sibling heading — or a top-level heading with none —
-    // must not inherit the previous section). Body units then read the full
-    // active-heading stack.
-    const headingLevel = outlineLevelOf(anchor) ?? undefined;
-    if (headingLevel !== undefined) {
-      while (stack.length > 0 && stack[stack.length - 1]!.level >= headingLevel) {
-        stack.pop();
-      }
-    }
-    const breadcrumb = stack.map((s) => s.title);
-    if (headingLevel !== undefined) {
-      // Breadcrumbs are embedding input too, so they must use the same
-      // mark-aware extraction as unit text (notably excluding tracked deletes).
-      stack.push({ level: headingLevel, title: ctx.toText(anchor) });
+    // A heading unit's breadcrumb is its true ancestors (a sibling heading
+    // must not inherit the previous section); any other unit reads the open
+    // headings. Headings nested inside the unit then head what follows it.
+    const nodeIds = group.map(resolveNodeId);
+    const anchorHeading = headingOf(anchor);
+    const breadcrumb = anchorHeading ? enter(anchorHeading) : stack.map((s) => s.title);
+    const headings: SemanticHeading[] = anchorHeading
+      ? [{ nodeId: nodeIds[0]!, ...anchorHeading, breadcrumb }]
+      : [];
+    for (const node of nodes) {
+      node.descendants((child) => {
+        const nested = headingOf(child);
+        if (nested) {
+          const raw = child.attrs["nodeId"];
+          const nodeId = typeof raw === "string" && raw.length > 0 ? raw : `${nodeIds[0]!}/h${headings.length}`;
+          headings.push({ nodeId, ...nested, breadcrumb: enter(nested) });
+        }
+        return !child.isTextblock;
+      });
     }
 
-    const nodeIds = group.map(resolveNodeId);
     const text = result.text ?? ctx.toText(nodes);
     const unit: SemanticUnit = {
       id: nodeIds[0]!,
@@ -95,7 +118,8 @@ export function walkSemantic(
     const placed = ctx.toChanges(nodes);
     const changes = result.text === undefined || result.text === ctx.toText(nodes) ? placed : placed.map(unplaced);
     if (changes.length > 0) unit.changes = changes;
-    if (headingLevel !== undefined) unit.headingLevel = headingLevel;
+    if (anchorHeading) unit.headingLevel = anchorHeading.level;
+    if (headings.length > 0) unit.headings = headings;
     // Block styling markdown can't express (alignment, indent, font, …), taken
     // from the anchor block. Only present when non-default.
     const attrs = ctx.attrsOf(anchor);

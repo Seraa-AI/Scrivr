@@ -9,6 +9,7 @@ import {
 	type Selection,
 } from "prosemirror-state";
 import { SelectionController } from "./SelectionController";
+import { anchoredOf, placementAttrs } from "./layout/AnchoredObjects";
 import type {
 	FontModifier,
 	MarkDecorator,
@@ -691,6 +692,7 @@ export class Editor extends BaseEditor implements IEditor {
 			{
 				pasteTransforms: this.manager.buildPasteTransforms(),
 				pasteHtmlTransforms: this.manager.buildPasteHtmlTransforms(),
+				pasteFiles: this.manager.buildPasteFiles(),
 				...(uploadPastedImage ? { uploadImage: uploadPastedImage } : {}),
 			},
 		);
@@ -909,24 +911,19 @@ export class Editor extends BaseEditor implements IEditor {
 	}
 
 	/**
-	 * Convert a floating image back to inline content at its current painted
-	 * location. Floating modes treat docPos as ownership and attrs as geometry;
-	 * inline mode is the opposite, so this is the one place where visual X/Y is
-	 * resolved back to a document insertion point.
+	 * Put a floating object back into its text, at its current painted
+	 * location, its placement written through its own declaration. Floating
+	 * modes treat docPos as ownership and attrs as geometry; inline mode is the
+	 * opposite, so this is the one place where visual X/Y is resolved back to a
+	 * document position.
 	 */
-	convertImageToInlineAtVisualPosition(docPos: number): boolean {
+	placeInlineAtVisualPosition(docPos: number): boolean {
 		const state = this.getActiveState();
 		const node = state.doc.nodeAt(docPos);
-		if (!node || node.type.name !== "image") return false;
-
-		const inlineAttrs: Record<string, unknown> = {
-			wrapMode: "inline",
-			wrappingMode: "inline",
-			xAlign: "left",
-			x: null,
-			yOffset: 0,
-			floatOffset: { x: 0, y: 0 },
-		};
+		const inlineAttrs = node && anchoredOf(node)
+			? placementAttrs(node, { wrapMode: "inline", xAlign: "left", x: null, yOffset: 0 })
+			: null;
+		if (!node || !inlineAttrs) return false;
 
 		const rect = this.getNodeRect(docPos);
 		if (!rect) {
@@ -954,7 +951,7 @@ export class Editor extends BaseEditor implements IEditor {
 			if (this.debug?.drag) {
 				// eslint-disable-next-line no-console
 				console.warn(
-					"[convertImageToInlineAtVisualPosition] moveAndUpdateNode rejected — falling back to attrs-only update",
+					"[placeInlineAtVisualPosition] moveAndUpdateNode rejected — falling back to attrs-only update",
 					{ from, to, targetPos },
 				);
 			}

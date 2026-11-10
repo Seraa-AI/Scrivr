@@ -3,6 +3,7 @@ import "./augmentation";
 
 export { PdfExport } from "./PdfExport";
 export type { PdfHandlers, PdfNodeHandler, PdfChromeHandler } from "./augmentation";
+export type { PdfEmbedSource } from "@scrivr/core";
 // The handler contract lives in core so an extension can describe its node and
 // its mark without depending on this package; re-exported for consumers already
 // importing it from here.
@@ -31,7 +32,9 @@ export type { PdfMetadata } from "./metadata";
 export type { ImageResolver, ImageBytes } from "./fetchImage";
 
 import { PDFDocument, type PDFPage, type PDFImage } from "pdf-lib";
+import type { Node as PmNode } from "@scrivr/core/pm";
 import type {
+  PdfEmbedSource,
   PdfMarkHandler,
   IEditor,
   IBaseEditor,
@@ -181,8 +184,12 @@ async function writePdf(
   } = { before: [], after: [] };
 
   const markerPainters = editor.getMarkerPainters();
+  const removers: Array<(node: PmNode) => boolean> = [];
+  const embedSources = new Map<string, PdfEmbedSource>();
 
   for (const contrib of editor.getExportContributions()) {
+    const remover = proposedRemoverOf(contrib);
+    if (remover) removers.push(remover);
     const pdfContrib = contrib.pdf;
     if (!pdfContrib) continue;
     for (const [name, handler] of Object.entries(pdfContrib.nodes ?? {})) {
@@ -190,6 +197,9 @@ async function writePdf(
     }
     for (const [name, handler] of Object.entries(pdfContrib.marks ?? {})) {
       markHandlers.set(name, handler);
+    }
+    for (const [name, source] of Object.entries(pdfContrib.embeds ?? {})) {
+      embedSources.set(name, source);
     }
     for (const [name, handler] of Object.entries(pdfContrib.chrome ?? {})) {
       chromeHandlers.set(name, handler);
@@ -237,6 +247,7 @@ async function writePdf(
     pdfDoc,
     layout,
     options?.resolveImage ?? createDefaultImageResolver(options?.onImageRefused),
+    (node) => embedSources.get(node.type.name)?.(node) ?? null,
   );
 
   // Mutable page ref — updated per page in the loop. Draw helpers read lazily.
@@ -362,8 +373,22 @@ async function writePdf(
   // After the pages exist, because a bookmark's destination names the page
   // object it jumps to.
   applyMetadata(pdfDoc, options?.metadata);
-  if (options?.outline !== false) addOutline(pdfDoc, layout);
+  if (options?.outline !== false) addOutline(pdfDoc, layout, (node) => removers.some((removed) => removed(node)));
   return pdfDoc.save();
+}
+
+/**
+ * What the proposed view leaves out, as an extension declares it on the
+ * semantic lane (`isRemoved`): a bookmark is titled by its block's proposed
+ * text, as the semantic outline titles a section. Read by shape, since this package does
+ * not depend on the semantic one.
+ */
+function proposedRemoverOf(contrib: object): ((node: PmNode) => boolean) | null {
+  if (!("semantic" in contrib)) return null;
+  const semantic: unknown = contrib.semantic;
+  if (typeof semantic !== "object" || semantic === null || !("isRemoved" in semantic)) return null;
+  const isRemoved: unknown = semantic.isRemoved;
+  return typeof isRemoved === "function" ? (node) => isRemoved(node) === true : null;
 }
 
 // ── Anchored objects ────────────────────────────────────────────────────────
@@ -400,30 +425,25 @@ async function embedImages(
   pdfDoc: PDFDocument,
   layout: DocumentLayout,
   resolveImage: ImageResolver,
+  embedOf: (node: PmNode) => string | null,
 ): Promise<Map<string, PDFImage | null>> {
   const srcs = new Set<string>();
-
-  for (const object of layout.anchoredObjects ?? []) {
-    const src = object.node.attrs["src"] as string | undefined;
+  const add = (node: PmNode): void => {
+    const src = embedOf(node);
     if (src) srcs.add(src);
-  }
+  };
+
+  for (const object of layout.anchoredObjects ?? []) add(object.node);
 
   const collectFromBlock = (block: DocumentLayout["pages"][0]["blocks"][number]) => {
     for (const cell of block.cells ?? []) {
       for (const child of cell.blocks) collectFromBlock(child);
     }
 
-    if (block.node.type.name === "image") {
-      const src = block.node.attrs["src"] as string | undefined;
-      if (src) srcs.add(src);
-    }
-
+    add(block.node);
     for (const line of block.lines) {
       for (const span of line.spans) {
-        if (span.kind === "object" && span.node.type.name === "image") {
-          const src = span.node.attrs["src"] as string | undefined;
-          if (src) srcs.add(src);
-        }
+        if (span.kind === "object") add(span.node);
       }
     }
   };
