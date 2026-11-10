@@ -36,6 +36,13 @@ and row splitting later changes one function, not the engine's vocabulary.
 
 ### 1. A node declares that it is composite
 
+The pattern is the list's (wrapper layout, #238): the extension **declares
+the shape**, the engine **does the mechanics**. A list's `place` says how far
+a block is indented and what marker hangs before it; the engine walks and
+measures the blocks. A composite says where its regions sit; the engine lays
+out what each region holds with the same walk (`collectChildItems` +
+`layoutItem`) the page body, lists and today's cells already use.
+
 ```ts
 type NodeLayout =
   | { kind: "block" }
@@ -46,44 +53,38 @@ type NodeLayout =
 interface CompositeLayout {
   /** The units pagination places one at a time, in order: a table's rows. */
   units(node: Node, pos: number): CompositeUnit[];
-  /** Lay one unit out at a width: its height, and the regions it holds. */
-  layoutUnit(unit: CompositeUnit, ctx: UnitLayoutContext): LaidUnit;
+  /** Where each region of a unit sits at the unit's width: a row's cells. */
+  regions(unit: CompositeUnit, width: number): RegionPlacement[];
 }
 
-interface CompositeUnit { node: Node; pos: number; data: unknown }
-
-interface UnitLayoutContext {
-  x: number;
-  width: number;
-  /** Lay a node's child blocks out in a nested region, by the engine's own flow. */
-  layoutRegion(node: Node, pos: number, region: { x: number; width: number }): { blocks: LayoutBlock[]; height: number };
-}
-
-interface LaidUnit {
-  height: number;
-  regions: LaidRegion[];
-  /** The extension's own, for its painter and exporters: a row's borders, shading, merges. */
+interface CompositeUnit {
+  node: Node;
+  pos: number;
+  /** The extension's own, for its painter and exporters: a row's column grid, its last-row edge. */
   data: unknown;
 }
 
-interface LaidRegion {
-  pos: number;            // the region's node (a cell)
-  x: number; y: number;   // y relative to the unit's top
-  width: number; height: number;
-  blocks: LayoutBlock[];
-  floats?: RegionFloat[]; // today's CellFloat, renamed
+interface RegionPlacement {
+  node: Node;             // the region's node (a cell); its children are laid out in it
+  pos: number;
+  x: number;              // relative to the unit's left
+  width: number;
+  inset: { top: number; right: number; bottom: number; left: number }; // a cell's padding
+  data?: unknown;         // a cell's background, merge, borders
 }
 ```
 
 - **The walk** emits one item per unit for a composite node, instead of
   expanding a node named `table`. `tableColumns` and `isLastRow` become unit
   `data` the Table extension computes.
-- **Region layout stays the engine's.** `layoutRegion` runs the same item
-  collection and measurement a page body uses (it is today's sandboxed cell
-  layout, `layoutTableRowCells`' inner loop), so an extension never measures
-  text, and every block a cell holds lays out as it does anywhere else.
+- **The engine lays out each region**: the region's child blocks, walked and
+  measured inside its inset box, floats in them included (today's cell float
+  logic, made generic). A region is as tall as its content plus its inset; a
+  unit is as tall as its tallest region, and every region fills that height —
+  today's row rule, which is what side-by-side regions need in general.
 - **`LayoutBlockKind` becomes `"text" | "leaf" | "composite"`**, and a block
-  carries `regions` and `unitData` in place of `cells` and `isLastRow`.
+  carries `regions` (laid out: placement + blocks + floats) and `unitData` in
+  place of `cells` and `isLastRow`.
 - **A composite unit is atomic** for now, as a row is today: it moves to the
   next page whole. A unit's break policy (`atomic` / `splittable`) is where
   resumable layout Phase 5 attaches row splitting.
@@ -116,7 +117,7 @@ Breaking, during beta (patch changesets):
   `layoutTableRow`, `TableRowStrategy` from core's renderer exports,
   `cellAtCoords`.
 - New: `NodeLayout`'s `composite`, `CompositeLayout`, `CompositeUnit`,
-  `UnitLayoutContext`, `LaidUnit`, `LaidRegion`, `RegionFloat`;
+  `RegionPlacement`, `LaidRegion`, `RegionFloat`;
   `LayoutBlock.regions` / `unitData`; `regionAtCoords`.
 
 ## How it is checked
@@ -135,8 +136,9 @@ guards keep `table`, `tableRow`, `tableCell` and `tableHeader` out of
    rows and cells in the engine under generic types.
 2. **Atomic units only in this PR.** Row splitting waits for resumable
    layout's producer phases; the unit's break policy is where it attaches.
-3. **Region layout stays engine-owned** (`layoutRegion`), so extensions place
-   regions and the engine lays out what they hold.
+3. **Region content is laid out by the engine, as a list's is**: the
+   extension declares where regions sit (`regions`), the engine walks and
+   measures what they hold.
 4. **One PR**, as the earlier phases.
 
 ## What shipped
