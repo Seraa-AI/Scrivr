@@ -380,10 +380,27 @@ export class CellBookmark {
  */
 export const CELL_SELECTION_JSON_ID = "scrivr:cell";
 
-// Register exactly once. A duplicate Scrivr runtime must fail fast: allowing a
-// second CellSelection class to share this id would make deserialized selections
-// fail that runtime's instanceof checks.
-Selection.jsonID(CELL_SELECTION_JSON_ID, CellSelection);
+/**
+ * Registers `selectionClass` under `id` with prosemirror-state, once. A second
+ * registration is a duplicate Scrivr runtime and fails fast: a second class
+ * sharing the id would make deserialized selections fail that runtime's
+ * `instanceof` checks. While a dev server reloads the module (`reloading`),
+ * prosemirror-state keeps the first registration and the module goes on.
+ */
+export function registerSelectionJsonId(
+  id: string,
+  selectionClass: Parameters<typeof Selection.jsonID>[1],
+  reloading: boolean,
+): void {
+  try {
+    Selection.jsonID(id, selectionClass);
+  } catch (error) {
+    if (!reloading || !(error instanceof RangeError)) throw error;
+  }
+}
+
+// A dev server that reloads modules in place sets `import.meta.hot`.
+registerSelectionJsonId(CELL_SELECTION_JSON_ID, CellSelection, Reflect.get(import.meta, "hot") !== undefined);
 
 /**
  * The active cell selection resolved to its cell positions, or null when the
