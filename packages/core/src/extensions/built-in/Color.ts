@@ -117,12 +117,15 @@ export const Color = Extension.create<ColorOptions>({
 
   addImports() {
     // OOXML `<w:color w:val="FF0000"/>` — uppercase 6-char hex without `#`.
-    // `w:val="auto"` means "default text color" — drop, schema's default wins.
+    // `w:val="auto"` means "default text color": no mark, and nothing lost,
+    // because the editor's default is what the source asked for.
     const handler: DocxMarkTransform = (mark, ctx) => {
       const val = mark.attrs?.["val"];
-      if (typeof val !== "string" || val.length === 0 || val === "auto") {
+      if (val === "auto") {
+        ctx.report.kept(mark.kind);
         return null;
       }
+      if (typeof val !== "string" || val.length === 0) return null;
       const t = ctx.schema.marks["color"];
       if (!t) return null;
       return t.create({ color: `#${val}` });

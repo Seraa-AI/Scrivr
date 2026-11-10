@@ -1266,3 +1266,33 @@ describe("review marks are not formatting", () => {
     expect(schema.nodes["codeBlock"]!.allowsMarkType(schema.marks["bold"]!)).toBe(false);
   });
 });
+
+describe("getFormatContributions", () => {
+  it("names each extension's contributions, in the order the unnamed lists use", () => {
+    const manager = new ExtensionManager([StarterKit]);
+    const named = manager.getFormatContributions();
+    const exports = manager.getExportContributions();
+    const imports = manager.getImportContributions();
+
+    expect(named).toHaveLength(exports.length);
+    named.forEach((contribution, index) => {
+      expect(contribution.exports).toBe(exports[index]);
+      expect(contribution.imports).toBe(imports[index]);
+    });
+  });
+
+  it("carries each extension's own name", () => {
+    const Marker = Extension.create({ name: "formatMarker" });
+    const manager = new ExtensionManager([Paragraph, Document, Bold, Marker]);
+    const names = manager.getFormatContributions().map((c) => c.extension);
+    expect(names).toContain("bold");
+    expect(names).toContain("formatMarker");
+    expect(names.indexOf("bold")).toBeLessThan(names.indexOf("formatMarker"));
+  });
+
+  it("is reachable from an editor", () => {
+    const editor = new ServerEditor({ extensions: [StarterKit] });
+    const names = editor.getFormatContributions().map((c) => c.extension);
+    expect(names).toContain("paragraph");
+  });
+});

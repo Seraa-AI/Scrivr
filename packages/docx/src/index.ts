@@ -10,6 +10,15 @@ export { DocxExport } from "./export/DocxExport";
 
 export { DocxExportError } from "./export/error";
 
+// The report both `exportDocx` and `importDocx` return. Defined in core so an
+// extension's handlers can write to it.
+export type {
+  DocxReport,
+  DocxReportCount,
+  DocxReportEntry,
+  DocxReporter,
+} from "@scrivr/core";
+
 export type {
   DocxNodeHandler,
   DocxMarkHandler,
@@ -42,6 +51,19 @@ export type { ZipDocxOptions, ZipCompressionLevel } from "./export/package";
 // Lower-level building blocks — exported for advanced callers and tests.
 // Most consumers should only need `exportDocx` / `exportDocxBytes`.
 export { walkDocument } from "./export/walker";
+export type { WalkerHandlers, WalkerHandlerOwners } from "./export/walker";
+export type { HandlerOwner } from "./report";
+// The words `report.entries` carry in `owner` and `reason`, so an app that
+// groups or translates entries matches on these rather than on copied strings.
+export {
+  OVERRIDES_OWNER,
+  NO_HANDLER,
+  NO_PARSER,
+  HANDLER_RETURNED_NOTHING,
+  WRAPPER_DECLINED,
+  insideDropped,
+  noSchemaNode,
+} from "./report";
 export { createDocxContext } from "./export/createContext";
 export { buildDocxPackage } from "./export/defaults";
 

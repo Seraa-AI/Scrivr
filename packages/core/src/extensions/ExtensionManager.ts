@@ -32,7 +32,7 @@ import type { FontConfig } from "../layout/FontConfig";
 import type { PageConfig } from "../layout/PageLayout";
 import type { PageChromeContribution } from "../layout/PageMetrics";
 import type { SurfaceOwnerRegistration } from "../surfaces/types";
-import type { ExportContributionMap, ImportContributionMap } from "./export";
+import type { ExportContributionMap, FormatContribution, ImportContributionMap } from "./export";
 import { parseMarkdownToDoc } from "../model/parseMarkdown";
 import { isTrackedMark } from "../model/spansToFragment";
 
@@ -553,6 +553,20 @@ export class ExtensionManager {
    */
   getImportContributions(): ImportContributionMap[] {
     return this.resolved.map((ext) => ext.imports);
+  }
+
+  /**
+   * Both directions' contributions with the extension each came from, in
+   * registration order — the same order as `getExportContributions` and
+   * `getImportContributions`. The DOCX converter reads this so its report can
+   * name the extension behind each handler.
+   */
+  getFormatContributions(): FormatContribution[] {
+    return this.resolved.map((ext) => ({
+      extension: ext.name,
+      exports: ext.exports,
+      imports: ext.imports,
+    }));
   }
 
   /**

@@ -3,7 +3,7 @@
  *
  * Every node + mark contributes its DOCX export shape via the owning
  * extension's `addExports().docx`. The export pipeline aggregates from
- * `editor.getExportContributions()` plus per-call overrides — no defaults
+ * `editor.getFormatContributions()` plus per-call overrides — no defaults
  * layer in the format package.
  *
  * Kept as a tombstone export so any consumer that imported the constants

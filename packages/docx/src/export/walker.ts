@@ -12,8 +12,13 @@
  *   "placeholder" → warning + emit `[Unsupported Scrivr node: <type>]`
  *   "throw"       → abort with DocxExportError
  *
- * Unknown marks always record a warning; the run is still emitted (the
- * unknown mark is silently absent).
+ * A mark with neither a property handler nor a wrapper records a warning; the
+ * run is still emitted (the unknown mark is silently absent).
+ *
+ * The walker also keeps the report's count. Every node, mark and text run it
+ * meets is recorded as kept or dropped, each handler call is attributed to the
+ * extension that contributed it, and a node's content is moved to dropped when
+ * the node is lost — see `../report`.
  */
 
 import type { Node, Mark } from "@scrivr/core/pm";
@@ -28,12 +33,35 @@ import type {
   DocxRunProps,
 } from "./handlers";
 import { DocxExportError } from "./error";
+import {
+  NO_HANDLER,
+  WRAPPER_DECLINED,
+  entryOf,
+  ownerOf,
+  reportRecorderOf,
+  type DocxReportRecorder,
+  type HandlerOwner,
+  type LostItem,
+} from "../report";
 
 export interface WalkerHandlers {
   nodes: Record<string, DocxNodeHandler>;
   marks: Record<string, DocxMarkHandler>;
   /** Marks that wrap their runs — hyperlinks. See `DocxRunWrapper`. */
   markWrappers?: Record<string, DocxRunWrapper>;
+  /**
+   * Who contributed each handler, keyed like the tables above, so the report
+   * can say which extension kept or dropped what. A handler with no entry is
+   * reported with a `null` owner.
+   */
+  owners?: WalkerHandlerOwners;
+}
+
+/** The contributing extension of each handler in `WalkerHandlers`, by the same keys. */
+export interface WalkerHandlerOwners {
+  nodes?: Record<string, HandlerOwner>;
+  marks?: Record<string, HandlerOwner>;
+  markWrappers?: Record<string, HandlerOwner>;
 }
 
 /** Walk the body of a document — skips the implicit root and returns body content. */
@@ -42,10 +70,11 @@ export function walkDocument(
   ctx: DocxContext,
   handlers: WalkerHandlers,
 ): XmlNode[] {
+  const recorder = reportRecorderOf(ctx);
   const out: XmlNode[] = [];
   doc.forEach((child) => {
     const meta: DocxNodeMeta = { inline: child.isInline };
-    out.push(...walkNode(child, ctx, handlers, meta));
+    out.push(...walk(child, ctx, handlers, meta, recorder));
   });
   return out;
 }
@@ -56,45 +85,99 @@ export function walkNode(
   handlers: WalkerHandlers,
   meta: DocxNodeMeta,
 ): XmlNode[] {
+  return walk(node, ctx, handlers, meta, reportRecorderOf(ctx));
+}
+
+function walk(
+  node: Node,
+  ctx: DocxContext,
+  handlers: WalkerHandlers,
+  meta: DocxNodeMeta,
+  recorder: DocxReportRecorder,
+): XmlNode[] {
   // Text nodes own their mark stack — emit a single <w:r> with merged props,
   // then let any wrapping marks (hyperlinks) enclose it.
   if (node.isText) {
-    const run = renderRun(node.text ?? "", mergeMarks(node.marks, ctx, handlers));
-    return [wrapRun(run, node.marks, ctx, handlers)];
+    recorder.carried("text");
+    const run = renderRun(node.text ?? "", mergeMarks(node.marks, ctx, handlers, recorder));
+    return [wrapRun(run, node.marks, ctx, handlers, recorder)];
   }
 
-  const children: XmlNode[] = [];
-  node.forEach((child) => {
-    const childMeta: DocxNodeMeta = { inline: child.isInline };
-    children.push(...walkNode(child, ctx, handlers, childMeta));
-  });
+  const type = node.type.name;
+  const walked = recorder.subtree(
+    (): { xml: XmlNode[]; lost: LostItem | null } => {
+      const children: XmlNode[] = [];
+      node.forEach((child) => {
+        const childMeta: DocxNodeMeta = { inline: child.isInline };
+        children.push(...walk(child, ctx, handlers, childMeta, recorder));
+      });
 
-  const handler = handlers.nodes[node.type.name];
-  if (!handler) {
-    return applyUnsupportedPolicy(node, children, ctx);
-  }
+      const handler = entryOf(handlers.nodes, type);
+      if (!handler) {
+        recorder.unhandled(type, NO_HANDLER);
+        // A placeholder is output, but it stands in for the children, so they
+        // are lost; "drop" bubbles them up instead.
+        const lost = ctx.options.unsupported === "placeholder" ? { kind: type, owner: null } : null;
+        return { xml: applyUnsupportedPolicy(node, children, ctx), lost };
+      }
 
-  const result = handler(node, children, ctx, meta);
-  return Array.isArray(result) ? result : [result];
+      const owner = ownerOf(handlers.owners?.nodes, type);
+      const result = recorder.handle(
+        owner,
+        type,
+        () => handler(node, children, ctx, meta),
+        wroteXml,
+      );
+      return {
+        xml: Array.isArray(result) ? result : [result],
+        lost: wroteXml(result) ? null : { kind: type, owner },
+      };
+    },
+    (result) => result.lost,
+  );
+  return walked.xml;
 }
 
+/** A node handler's result put something in the document. */
+function wroteXml(result: XmlNode | XmlNode[]): boolean {
+  return Array.isArray(result) ? result.length > 0 : Boolean(result);
+}
+
+/**
+ * Fold a run's marks into its property bag.
+ *
+ * A mark is one item in the report however many handlers touch it, and the
+ * handler that writes its element accounts for it: the wrapper when there is
+ * one (a hyperlink exists only if it wraps the run, and `wrapRun` records it),
+ * otherwise the property handler.
+ */
 function mergeMarks(
   marks: readonly Mark[],
   ctx: DocxContext,
   handlers: WalkerHandlers,
+  recorder: DocxReportRecorder,
 ): DocxRunProps {
   let props: DocxRunProps = {};
   for (const mark of marks) {
-    const handler = handlers.marks[mark.type.name];
+    const type = mark.type.name;
+    const handler = entryOf(handlers.marks, type);
+    const hasWrapper = entryOf(handlers.markWrappers, type) !== undefined;
     if (!handler) {
-      ctx.diagnostics.warn({
-        code: "unsupported-mark",
-        message: `No DOCX handler registered for mark "${mark.type.name}"`,
-        markType: mark.type.name,
-      });
+      if (!hasWrapper) {
+        ctx.diagnostics.warn({
+          code: "unsupported-mark",
+          message: `No DOCX handler registered for mark "${type}"`,
+          markType: type,
+        });
+        recorder.unhandled(type, NO_HANDLER);
+      }
       continue;
     }
-    props = handler(props, mark, ctx);
+    const owner = ownerOf(handlers.owners?.marks, type);
+    const apply = () => handler(props, mark, ctx);
+    // A property handler always returns a bag, so when it accounts for the
+    // mark it kept it unless it said otherwise.
+    props = hasWrapper ? recorder.attribute(owner, apply) : recorder.handle(owner, type, apply, () => true);
   }
   return props;
 }
@@ -102,23 +185,32 @@ function mergeMarks(
 /**
  * Enclose a run in whatever its wrapping marks produce.
  *
- * A mark with no wrapper is not a gap — `mergeMarks` already warned about
- * marks with no handler at all, and most marks legitimately have nothing to
- * wrap with.
+ * A mark with no wrapper is not a gap — most marks legitimately have nothing
+ * to wrap with.
  */
 function wrapRun(
   run: XmlNode,
   marks: readonly Mark[],
   ctx: DocxContext,
   handlers: WalkerHandlers,
+  recorder: DocxReportRecorder,
 ): XmlNode {
   const wrappers = handlers.markWrappers;
   if (!wrappers) return run;
 
   let wrapped = run;
   for (const mark of marks) {
-    const wrapper = wrappers[mark.type.name];
-    if (wrapper) wrapped = wrapper(wrapped, mark, ctx);
+    const type = mark.type.name;
+    const wrapper = entryOf(wrappers, type);
+    if (!wrapper) continue;
+    const before = wrapped;
+    wrapped = recorder.handle(
+      ownerOf(handlers.owners?.markWrappers, type),
+      type,
+      () => wrapper(before, mark, ctx),
+      (result) => result !== before,
+      WRAPPER_DECLINED,
+    );
   }
   return wrapped;
 }

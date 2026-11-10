@@ -178,6 +178,81 @@ export interface DocxDiagnostic {
   markType?: string;
 }
 
+// ── Report ──────────────────────────────────────────────────────────────────
+
+/**
+ * Where a handler says what became of the content it was handed. Diagnostics
+ * stay the channel for warnings; a drop usually goes in both.
+ *
+ * `kind` uses the vocabulary of the side the content came from. An export
+ * reports Scrivr's node and mark names (`"paragraph"`, `"bold"`). An import
+ * reports Word's, as the parser names them: a `DocxBlock` or `DocxInline`
+ * `type`, a `DocxMark` `kind` such as `"b"`, or, for a top-level element the
+ * parser cannot read, its tag (`"w:customXml"`).
+ *
+ * A handler does not have to call this at all. For each item it hands to a
+ * handler — a node, an inline or a mark — the converter records `kept` if the
+ * handler returned content and `dropped` if it returned none, unless the
+ * handler itself reported `kept` or `dropped` for that kind while it ran, in
+ * which case the handler's account stands. When an item is lost, whatever was
+ * counted kept inside it is moved to dropped with it — unless its handler
+ * reported it kept, as one that writes it somewhere other than its result
+ * does. Content with no handler is recorded as dropped with the reason
+ * `"no handler"`. So `changed`, drops the converter cannot see, and returning
+ * nothing for a value that means "no formatting" (report it `kept`) are what a
+ * handler adds.
+ */
+export interface DocxReporter {
+  /**
+   * The handler wrote (export) or built (import) `count` of `kind`. `count`
+   * defaults to 1. A count of 0 is no account of the item. A count that is not
+   * a whole number is ignored with a warning.
+   */
+  kept(kind: string, count?: number): void;
+  /** One `kind` did not make it across, and why. */
+  dropped(kind: string, reason: string): void;
+  /**
+   * One `kind` made it across, but not as the source had it ("spacing
+   * ignored"). A note on content that was kept, not a third outcome: it does
+   * not stand in for `kept`, and one item can carry several.
+   */
+  changed(kind: string, reason: string): void;
+}
+
+/** One kind's totals in `DocxReport.counts`. */
+export interface DocxReportCount {
+  kept: number;
+  dropped: number;
+  /** Change notes, not items — one kept paragraph can carry several. */
+  changed: number;
+}
+
+/**
+ * A drop or change, with who recorded it and why. Identical ones — same
+ * outcome, kind, reason and owner — share one entry and add to its `count`.
+ */
+export interface DocxReportEntry {
+  outcome: "dropped" | "changed";
+  kind: string;
+  reason: string;
+  /**
+   * The extension whose handler or hook recorded it, `"overrides"` for a
+   * handler passed in the call's own `overrides`, or `null` when no extension
+   * did — the converter recording content that nothing handled.
+   */
+  owner: string | null;
+  /** How many times this drop or change happened. */
+  count: number;
+}
+
+/** What a DOCX import or export kept, dropped and changed. */
+export interface DocxReport {
+  /** Per kind, with sorted keys so two reports compare line by line. */
+  counts: Record<string, DocxReportCount>;
+  /** Every distinct drop and change, in the order the conversion first met it. */
+  entries: DocxReportEntry[];
+}
+
 // ── Options ─────────────────────────────────────────────────────────────────
 
 export type DocxUnsupportedPolicy = "drop" | "placeholder" | "throw";
@@ -250,6 +325,9 @@ export interface DocxContext {
     error(d: Omit<DocxDiagnostic, "level">): void;
     list(): DocxDiagnostic[];
   };
+
+  /** What this export kept, dropped and changed — see `DocxReporter`. */
+  report: DocxReporter;
 
   /** Root document tree — written by the walker before `onBuildTreeComplete`. */
   document: XmlNode;
@@ -552,6 +630,8 @@ export interface DocxImportContext {
     error(d: Omit<DocxDiagnostic, "level">): void;
     list(): DocxDiagnostic[];
   };
+  /** What this import kept, dropped and changed — see `DocxReporter`. */
+  report: DocxReporter;
   /**
    * Materialize binary parts (images) per `options.media`. Split from
    * `rels` because images run through MIME-sniff + base64 / object-URL

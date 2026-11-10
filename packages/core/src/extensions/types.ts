@@ -57,7 +57,7 @@ import type { ParsedFont } from "../layout/StyleResolver";
 import type { PageChromeContribution } from "../layout/PageMetrics";
 import type { SurfaceOwnerRegistration } from "../surfaces/types";
 import type { SurfaceRegistry } from "../surfaces/SurfaceRegistry";
-import type { ExportContributionMap, ImportContributionMap } from "./export";
+import type { ExportContributionMap, FormatContribution, ImportContributionMap } from "./export";
 import type { SelectionController } from "../SelectionController";
 import type { CursorManager } from "../renderer/CursorManager";
 import type { ResolvedTheme } from "../model/theme";
@@ -200,6 +200,13 @@ export interface IBaseEditor {
    * pass them to `serializeSelectionToHtml` to serialize what a copy would.
    */
   getCopyHtmlTransforms(): CopyHtmlTransform[];
+  /**
+   * Both directions' contributions, each with the name of the extension that
+   * made it, in registration order. For a format package that reports which
+   * extension handled what; one that only needs the handlers reads
+   * `getExportContributions()` or `getImportContributions()`.
+   */
+  getFormatContributions(): FormatContribution[];
   /**
    * Names of doc-level attributes declared by extensions via `addDocAttrs()`.
    *
