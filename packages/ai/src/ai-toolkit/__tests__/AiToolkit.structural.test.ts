@@ -135,7 +135,9 @@ describe("tracked moves", () => {
       { kind: "structural", op: "insertListItem", anchorNodeId: "p", position: "after", item: { spans: [{ text: "bad", marks: [] }] } },
       { kind: "structural", op: "moveBlock", nodeId: "tail", anchorNodeId: "list", position: "before" },
     ]);
-    expect(result.rejected).toEqual(["p", "list"]);
+    // Both anchors are proposed for deletion, so the agent is told to re-anchor.
+    expect(result.anchorProposedForDeletion).toEqual(["p", "list"]);
+    expect(result.rejected).toEqual([]);
     expect(result.applied).toBe(false);
     expect(editor.getState().doc).toBe(before);
   });

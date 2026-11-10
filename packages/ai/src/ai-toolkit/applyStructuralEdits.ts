@@ -12,7 +12,7 @@
  */
 import { findNodeById, safeImageUrl, spansToFragment, tableColumnCount } from "@scrivr/core";
 import { imageNodeAttrs } from "./imageAttrs";
-import { findLiveNodeById, pickAgentAttrs, shadowRanges } from "@scrivr/plugins";
+import { findLiveNodeById, isShadowNode, moveShadowRanges, pickAgentAttrs, proposedForDeletion, shadowRanges } from "@scrivr/plugins";
 import type { ShadowRange } from "@scrivr/plugins";
 import type { Node as PmNode, Schema, Transaction } from "@scrivr/core/pm";
 
@@ -24,8 +24,12 @@ export interface StructuralEditResult {
   changed: string[];
   /** nodeIds naming a node the document does not hold. */
   notFound: string[];
-  /** nodeIds that resolved, but only to deleted content or a shape the op cannot act on. */
+  /** nodeIds that resolved, but only to a shape the op cannot act on or a moved block's shadow. */
   rejected: string[];
+  /** Blocks a delete named that are already proposed for deletion; that proposal stands. */
+  alreadyProposed: string[];
+  /** Anchors proposed for deletion, which would disappear on Accept; the op needs another. */
+  anchorProposedForDeletion: string[];
 }
 
 type ResolveNode = (nodeId: string) => { node: PmNode; pos: number } | null;
@@ -147,7 +151,7 @@ function applyOne(
   switch (edit.op) {
     case "insertBlock": {
       const anchor = resolveTopLevel(tr.doc, edit.anchorNodeId, resolve);
-      if (!anchor) return void rejectOrMiss(tr.doc, edit.anchorNodeId, result);
+      if (!anchor) return void rejectOrMiss(tr.doc, edit.anchorNodeId, result, "anchor");
       const node = buildBlock(schema, edit.block);
       if (!node) return void result.rejected.push(edit.anchorNodeId);
       tr.insert(edit.position === "before" ? anchor.pos : anchor.pos + anchor.node.nodeSize, node);
@@ -156,7 +160,7 @@ function applyOne(
     }
     case "deleteBlock": {
       const target = resolveTopLevel(tr.doc, edit.nodeId, resolve);
-      if (!target) return void rejectOrMiss(tr.doc, edit.nodeId, result);
+      if (!target) return void rejectOrMiss(tr.doc, edit.nodeId, result, "deleted");
       // Deleting what this batch moved would take the move's copy and leave its shadow.
       if (overlapsBatch(tr, target, batch)) return void result.rejected.push(edit.nodeId);
       tr.delete(target.pos, target.pos + target.node.nodeSize);
@@ -169,9 +173,9 @@ function applyOne(
         ? resolveTopLevel(tr.doc, id, resolve)
         : resolveAncestor(tr.doc, id, "listItem", resolve);
       const target = resolveTarget(edit.nodeId);
-      if (!target) return void rejectOrMiss(tr.doc, edit.nodeId, result);
+      if (!target) return void rejectOrMiss(tr.doc, edit.nodeId, result, "target");
       const anchor = resolveTarget(edit.anchorNodeId);
-      if (!anchor) return void rejectOrMiss(tr.doc, edit.anchorNodeId, result);
+      if (!anchor) return void rejectOrMiss(tr.doc, edit.anchorNodeId, result, "anchor");
       // A second move of the same content in one transaction emits a second
       // overlapping delete/insert pair, which tracking pairs wrongly and
       // replays into a duplicated block. Content moves at most once per batch.
@@ -199,7 +203,7 @@ function applyOne(
     }
     case "insertListItem": {
       const item = resolveAncestor(tr.doc, edit.anchorNodeId, "listItem", resolve);
-      if (!item) return void rejectOrMiss(tr.doc, edit.anchorNodeId, result);
+      if (!item) return void rejectOrMiss(tr.doc, edit.anchorNodeId, result, "anchor");
       const itemType = schema.nodes["listItem"];
       const paragraph = schema.nodes["paragraph"];
       if (!itemType || !paragraph) return void result.rejected.push(edit.anchorNodeId);
@@ -218,7 +222,7 @@ function applyOne(
     }
     case "deleteListItem": {
       const item = resolveAncestor(tr.doc, edit.nodeId, "listItem", resolve);
-      if (!item) return void rejectOrMiss(tr.doc, edit.nodeId, result);
+      if (!item) return void rejectOrMiss(tr.doc, edit.nodeId, result, "deleted");
       if (overlapsBatch(tr, item, batch)) return void result.rejected.push(edit.nodeId);
       deleteContainerChild(tr, item);
       result.changed.push(edit.nodeId);
@@ -226,7 +230,7 @@ function applyOne(
     }
     case "insertTableRow": {
       const row = resolveAncestor(tr.doc, edit.anchorNodeId, "tableRow", resolve);
-      if (!row) return void rejectOrMiss(tr.doc, edit.anchorNodeId, result);
+      if (!row) return void rejectOrMiss(tr.doc, edit.anchorNodeId, result, "anchor");
       const rowType = schema.nodes["tableRow"];
       if (!rowType) return void result.rejected.push(edit.anchorNodeId);
       const table = tr.doc.resolve(row.pos).parent;
@@ -251,7 +255,7 @@ function applyOne(
     }
     case "deleteTableRow": {
       const row = resolveAncestor(tr.doc, edit.nodeId, "tableRow", resolve);
-      if (!row) return void rejectOrMiss(tr.doc, edit.nodeId, result);
+      if (!row) return void rejectOrMiss(tr.doc, edit.nodeId, result, "deleted");
       if (overlapsBatch(tr, row, batch)) return void result.rejected.push(edit.nodeId);
       deleteContainerChild(tr, row);
       result.changed.push(edit.nodeId);
@@ -305,10 +309,22 @@ function insideMoved(tr: Transaction, pos: number, batch: BatchRanges): boolean 
   });
 }
 
-/** An id the document still holds, in the wrong shape or only as a deleted shadow, is rejected, not "not found". */
-function rejectOrMiss(doc: PmNode, nodeId: string, result: StructuralEditResult): void {
-  if (findNodeById(doc, nodeId)) result.rejected.push(nodeId);
-  else result.notFound.push(nodeId);
+/**
+ * Why an id that did not resolve to a live node could not be acted on. Gone is
+ * `notFound`. Held but proposed for deletion is review state, named apart so
+ * an agent knows what to do: a deletion already proposed stands
+ * (`alreadyProposed`), and an anchor that disappears on Accept needs another
+ * (`anchorProposedForDeletion`). Anything else — the wrong shape, a moved
+ * block's shadow — is `rejected`.
+ */
+function rejectOrMiss(doc: PmNode, nodeId: string, result: StructuralEditResult, as: "target" | "deleted" | "anchor"): void {
+  const found = findNodeById(doc, nodeId);
+  if (!found) return void result.notFound.push(nodeId);
+  // The copy a pending move left is recorded as a deletion, but nobody proposed deleting it.
+  const deleted = proposedForDeletion(found.node) && !isShadowNode(found.node, found.pos, moveShadowRanges(doc));
+  if (deleted && as === "deleted") result.alreadyProposed.push(nodeId);
+  else if (deleted && as === "anchor") result.anchorProposedForDeletion.push(nodeId);
+  else result.rejected.push(nodeId);
 }
 
 /**
@@ -321,7 +337,7 @@ export function applyStructuralEdits(
   tr: Transaction,
   edits: StructuralSemanticEdit[],
 ): StructuralEditResult {
-  const result: StructuralEditResult = { changed: [], notFound: [], rejected: [] };
+  const result: StructuralEditResult = { changed: [], notFound: [], rejected: [], alreadyProposed: [], anchorProposedForDeletion: [] };
   const resolve = createLiveResolver(tr);
   const batch: BatchRanges = { moved: [], added: [] };
   for (const edit of edits) applyOne(tr, edit, result, resolve, batch);

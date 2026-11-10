@@ -1,5 +1,6 @@
-import type { IBaseEditor, SemanticExportOptions, SemanticUnit } from "@scrivr/core";
-import { collectHandlers } from "./collectHandlers";
+import type { IBaseEditor, SemanticExportOptions, SemanticTextView, SemanticUnit } from "@scrivr/core";
+import type { Node as PmNode } from "@scrivr/core/pm";
+import { collectHandlers, type ResolvedHandlers } from "./collectHandlers";
 import { createUnitCtx } from "./context";
 import { walkSemantic } from "./walker";
 
@@ -23,8 +24,20 @@ export function toSemanticUnits(
   options: SemanticExportOptions = {},
 ): SemanticUnit[] {
   const handlers = collectHandlers(editor, options.overrides);
-  const ctx = createUnitCtx(editor, handlers);
+  const view = options.view ?? "proposed";
+  const doc = documentIn(editor.getState().doc, view, handlers);
+  const ctx = createUnitCtx(editor, handlers, doc);
   const shortMax = options.shortBlockMaxChars ?? DEFAULT_SHORT_MAX;
   const group = options.groupBlocks ?? true;
-  return walkSemantic(editor.getState().doc, ctx, handlers, shortMax, group);
+  return walkSemantic(doc, ctx, handlers, shortMax, group, view);
+}
+
+/** The document `view` reads: the live one for the proposed view, or what a contribution supplies. */
+function documentIn(live: PmNode, view: SemanticTextView, handlers: ResolvedHandlers): PmNode {
+  if (view === "proposed") return live;
+  for (const supply of handlers.documentsIn) {
+    const doc = supply(live, view);
+    if (doc) return doc;
+  }
+  return live;
 }

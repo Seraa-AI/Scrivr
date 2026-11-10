@@ -8,6 +8,9 @@
  */
 import { describe, it, expect } from "vitest";
 import { ServerEditor } from "../ServerEditor";
+import { Document } from "../extensions/built-in/Document";
+import { Paragraph } from "../extensions/built-in/Paragraph";
+import { BaseEditing } from "../extensions/built-in/BaseEditing";
 import { spansToFragment, sameMark } from "./spansToFragment";
 import type { InlineSpan } from "../exports/semantic";
 
@@ -53,11 +56,35 @@ describe("spansToFragment", () => {
     expect(runsOf(frag)).toEqual([{ text: "kept", marks: [] }]);
   });
 
-  it("drops the NEWLINE_SPAN sentinel", () => {
-    const s = schema();
-    // "a" and "b" carry no marks, so PM merges them into one canonical run.
-    const frag = spansToFragment([{ text: "a", marks: [] }, { text: "\n", marks: [] }, { text: "b", marks: [] }], s);
-    expect(runsOf(frag)).toEqual([{ text: "ab", marks: [] }]);
+  describe("a line break", () => {
+    const nodesOf = (fragment: ReturnType<typeof spansToFragment>) => {
+      const out: string[] = [];
+      fragment.forEach((node) => out.push(node.isText ? `text:${node.text}` : node.type.name));
+      return out;
+    };
+
+    it("comes back as the schema's line-break node, as the export wrote it", () => {
+      const s = schema();
+      const frag = spansToFragment([{ text: "a", marks: [] }, { text: "\n", marks: [] }, { text: "b", marks: [] }], s);
+      expect(nodesOf(frag)).toEqual(["text:a", "hardBreak", "text:b"]);
+    });
+
+    it("comes back from inside a run, in a paragraph", () => {
+      const s = schema();
+      const frag = spansToFragment([{ text: "one\ntwo", marks: [{ type: "bold" }] }], s, { parentType: s.nodes["paragraph"]! });
+      expect(nodesOf(frag)).toEqual(["text:one", "hardBreak", "text:two"]);
+    });
+
+    it("is a space where the schema has no line-break node", () => {
+      const s = new ServerEditor({ extensions: [Document, Paragraph, BaseEditing] }).schema;
+      expect(nodesOf(spansToFragment([{ text: "a\nb", marks: [] }], s))).toEqual(["text:a b"]);
+    });
+
+    it("stays a newline in a code block, which holds text only", () => {
+      const s = schema();
+      const frag = spansToFragment([{ text: "a\nb", marks: [] }, { text: "\n", marks: [] }], s, { parentType: s.nodes["codeBlock"]! });
+      expect(nodesOf(frag)).toEqual(["text:a\nb\n"]);
+    });
   });
 
   it("drops an unknown mark but keeps the text, warning once", () => {

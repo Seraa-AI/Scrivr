@@ -1,5 +1,5 @@
 import type { Node as PmNode } from "@scrivr/core/pm";
-import { outlineLevelOf, outlineTitleOf, type SemanticChange, type SemanticHeading, type SemanticNodeResult, type SemanticPart, type SemanticUnit, type UnitCtx } from "@scrivr/core";
+import { outlineLevelOf, outlineTitleOf, type SemanticChange, type SemanticHeading, type SemanticNodeResult, type SemanticPart, type SemanticTextView, type SemanticUnit, type UnitCtx } from "@scrivr/core";
 import type { ResolvedHandlers } from "./collectHandlers";
 import { groupBlocks } from "./grouping";
 import { resolveNodeId, type BlockEntry } from "./id";
@@ -32,6 +32,7 @@ export function walkSemantic(
   handlers: ResolvedHandlers,
   shortBlockMaxChars: number,
   group = true,
+  view: SemanticTextView = "proposed",
 ): SemanticUnit[] {
   const entries: BlockEntry[] = [];
   doc.forEach((node, _offset, index) => {
@@ -109,7 +110,7 @@ export function walkSemantic(
       nodeIds,
       type: result.type,
       role: "body",
-      view: "proposed",
+      view,
       breadcrumb,
       order: order++,
       text,
