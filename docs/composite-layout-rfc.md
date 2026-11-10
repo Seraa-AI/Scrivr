@@ -1,6 +1,7 @@
 # Composite layout: tables owned by their extension
 
-Status: Draft (2026-11-10), for sign-off.
+Status: Approved (2026-11-10): the composite / units / regions vocabulary,
+regions laid out by the list walk, atomic units only, one PR.
 
 ## Problem
 
