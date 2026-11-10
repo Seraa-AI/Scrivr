@@ -141,8 +141,9 @@ if (rect) {
 
 Returns `null` when the positions are not in the character map or no rendering adapter is mounted.
 
-For a selected image, use `getNodeViewportRect(docPos)` instead — it returns a rect covering the
-full visual bounds of the node:
+For a node — an image, a paragraph, a table — use `getNodeViewportRect(docPos)` instead. It
+returns a rect covering the node's visual bounds (for a node split across pages, its first
+fragment; `getNodeViewportRects` returns all of them):
 
 ```ts
 const rect = editor.getNodeViewportRect(imageDocPos);

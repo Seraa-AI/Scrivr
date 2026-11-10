@@ -47,6 +47,5 @@ leaves the whole content width free.
 
 `AnchoredObjectPlacement` gains an optional `stackOffset`: how far the solver
 moved a stacked image below the float it would overlap. `globalY` includes it;
-the user's `yOffset` does not. It also gains an optional `cellPos`, the table
-cell an in-cell image is laid out in. `CellSubBlock` gains `floats`, the images
-laid out inside the cell, row-relative like its blocks.
+the user's `yOffset` does not. (Where an in-cell image is laid out is described
+with the composite layout: `regionPos`, `LaidRegion.floats`.)

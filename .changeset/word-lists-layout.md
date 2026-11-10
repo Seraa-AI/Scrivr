@@ -20,13 +20,7 @@ Lists lay out, print and export like Word's.
 - **Word's geometry.** Each level's text sits half an inch further in than
   the level above (the first level half an inch from the margin, where it was a
   quarter inch), and the marker hangs a quarter inch before the text,
-  left-aligned. A number wide enough to reach its text moves the item's first
-  line to the next tab stop, as Word's tab after the number does; when the
-  next stop would leave less than an inch of the line, the text follows the
-  number after a space, and a first word that still does not fit, but fits a
-  line of its own, wraps to the next line, leaving the number alone on its
-  line, as in Word; the caret, clicks, Home, End and selection keep to the
-  word's line. The text is never drawn over the number. Existing lists move a
+  left-aligned. The text is never drawn over the number. Existing lists move a
   quarter inch to the right.
 - **Lists inside table cells are drawn.** A list in a cell (pasting one
   there makes one) used to lay out as one empty line, its text never painted
@@ -60,23 +54,13 @@ Lists lay out, print and export like Word's.
   formats, glyphs and indents the editor draws; an item's further blocks
   export as Word's unnumbered continuation paragraphs, a table in an item with
   `w:tblInd` and a width that fits the rest of the column, and a sourced block
-  indented with them; list properties are written in schema order. Not yet:
-  every ordered list still shares one numbering instance and `order` is not
-  exported, so in Word separate ordered lists continue each other's
-  numbering.
+  indented with them; list properties are written in schema order.
 
 **API changes**
 
-- `@scrivr/core` exports `isListType` (moved here from track changes, and
+- `@scrivr/core` exports `isListType`, moved here from track changes and
   now what the list extension, Clear formatting, the semantic exporter and
-  track changes ask), `bulletShape`, `bulletBox` and `listMarkerOf` (which
-  answers how a block's marker is drawn: the face layout measured it in, the
-  baseline of its first line, past any gap a full-width image leaves, and
-  its `x`, past an image on the item's left that moves its line),
-  with the types `BulletShape`, `BulletBox`, `ListMarker` and
-  `ListMarkerFont`. `LayoutBlock.listMarkerFace` (new) carries the marker's
-  face on every part of a split item, so a number left alone at a page
-  bottom keeps its text's face.
+  track changes ask.
 - `ListItemStrategy` is removed, and blocks are no longer relabelled
   `blockType: "list_item"`. Core draws a block's list marker itself, over
   whatever painter draws the block, through the new `paintBlock` export —
@@ -91,15 +75,8 @@ Lists lay out, print and export like Word's.
   nodes that hold inline content or nothing. **Migration:** a container node
   that holds blocks must declare `layout: { kind: "block" }` to keep its
   registered painter; left undeclared, its painter is never called.
-- `LayoutBlock.listMarkerX` is now the marker's **left** edge (it was the
-  right edge of a right-aligned marker).
-- `BlockLayoutOptions.firstLineOffset` (new) adds to a node's own
-  `textIndent` on the first line, and `firstLineOffsetAt` (new) gives it for
-  a first line a float moves in, where Word puts the number at the line's
-  start and the text at the next tab stop past it;
-  `BlockLayoutOptions.keepAnchorLine` (new) keeps a line for a paragraph
-  holding only floating images' anchors. `AvailableSegment.indentFrom` (new)
-  records where a first line started before its indent moved it.
+- `AvailableSegment.indentFrom` (new) records where a first line started
+  before its indent moved it.
 - `LineBreaker.breakIntoLines` takes `firstLineMayStayEmpty` (new: a first
   word that fits only the next line leaves the first line empty, as a list
   number's push does) and `firstLineIndent` (new: how far the provider's first

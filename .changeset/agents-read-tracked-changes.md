@@ -79,7 +79,7 @@ One-time changes to watch for:
   2026-11-09). A pasted copy of a block that is still in place is not that
   cut, even when it reads the same.
   Documents saved with duplicates keep them; edits never repair them.
-- **An agent's edit to a block proposed for deletion is rejected.**
+- **An id two live blocks carry is refused.**
   `findLiveNodeById` returns `null` for an id two live blocks carry, so every
   write that resolves an id through it — the agent's edits and structural ops,
   ghost text, suggestions, image layout — refuses that id rather than acting
@@ -126,5 +126,6 @@ One-time changes to watch for:
   stays in the line it was in. An image or horizontal line you added and then
   delete leaves no change either.
 - `editor.getMarkdown()` no longer throws on a document with formatting
-  Markdown cannot write — a colour, a font size, a tracked change. That text
-  keeps its words and drops only the formatting.
+  Markdown cannot write: a colour or a font size is dropped and its words
+  kept. With TrackChanges installed, a pending change is written as
+  CriticMarkup.

@@ -18,10 +18,6 @@ knows what a table is.
 **Breaking:**
 
 - `LayoutBlockKind` `"tableRow"` is `"composite"`; `LayoutBlock.cells` is
-  `regions`, `isLastRow` is `lastUnit`; `CellSubBlock` and `CellFloat` are
-  `LaidRegion` and `RegionFloat` (a region's `pos`, `inset` and `data`, where a
-  cell's merge and background now live).
-- `AnchoredObjectPlacement.cellPos` is `regionPos`.
+  `regions` (`LaidRegion`: a region's `pos`, `inset` and `data`, where a cell's
+  merge and background now live), and `isLastRow` is `lastUnit`.
 - `BlockLayoutOptions.tableColumns` is removed (a unit carries its own data).
-- `TableRowStrategy`, `TableLayoutEngine` and `cellAtCoords` are removed from
-  core's layout and renderer.
