@@ -1,5 +1,5 @@
 import type { IEditor } from "../extensions/types";
-import type { HoverTarget } from "../hover/types";
+import { mapHoverTarget, type HoverTarget } from "../hover/types";
 
 /** How a popover is showing: a compact read-only peek from hover, or full from selection. */
 export type PopoverPresentation = "peek" | "full";
@@ -33,11 +33,11 @@ export interface SubscribeHoverTargetOptions {
  * Resting is per target, not per event: moving across a table's cells changes
  * the stack on every cell but never leaves the table, so the table's wait runs
  * on. Moving onto another target of the kind while a peek is open swaps after
- * `hideDelay`, unless the pointer reaches the peek first: it may only be
- * crossing that target on its way in. An edit that moves the target carries
- * it, wait and all: it is the same target at new positions. One that deletes
- * it, or a keyboard dismissal, closes the peek at once, even under the
- * pointer.
+ * `hideDelay`, and not while the pointer is on the peek: it may only be
+ * crossing that target on its way in. An edit carries what is shown and waited
+ * on (`mapHoverTarget`), wherever the pointer is: the same target at new
+ * positions. One the edit deletes, or a keyboard dismissal, closes the peek
+ * at once, even under the pointer.
  */
 export function subscribeHoverTarget(
   editor: IEditor,
@@ -87,13 +87,37 @@ export function subscribeHoverTarget(
     }, hideDelay);
   };
 
+  // What is shown and waited on is carried through each edit here, not read
+  // back from the pointer's stack: the pointer may have crossed other text,
+  // or another target, on its way into the peek.
+  const offEdit = editor.on("update", ({ mapping }) => {
+    if (pending) {
+      const mapped = mapHoverTarget(pending, mapping);
+      if (mapped) pending = mapped;
+      else clearTimer();
+    }
+    if (!shown) return;
+    const mapped = mapHoverTarget(shown, mapping);
+    if (!mapped) {
+      // Deleted: waiting would leave the peek on positions that now belong to
+      // whatever the edit shifted into them.
+      clearTimer();
+      shown = null;
+      fn(null);
+    } else if (!sameTarget(mapped, shown) || mapped.at !== shown.at) {
+      shown = mapped;
+      fn(mapped);
+    }
+  });
+
   const off = editor.on("hover", ({ targets, fromEdit, dismissed }) => {
+    // An edit moved the stack, not the pointer: the edit listener carries what
+    // this subscription holds.
+    if (fromEdit) return;
     const target = targets.find((t) => t.kind === kind) ?? null;
 
-    if (!target && shown && (fromEdit || dismissed)) {
-      // A deleted target: waiting would leave the peek holding the old
-      // positions, which now point at whatever the edit shifted into them.
-      // A dismissed one: the reader asked for it gone.
+    if (!target && shown && dismissed) {
+      // The reader asked for it gone, even under the pointer.
       clearTimer();
       shown = null;
       fn(null);
@@ -102,18 +126,6 @@ export function subscribeHoverTarget(
     if (!target) {
       if (shown) scheduleHide();
       else clearTimer();
-      return;
-    }
-    if (fromEdit) {
-      // The editor mapped the stack: the same target at new positions. A
-      // shown peek follows it; a wait goes on.
-      if (shown) {
-        clearTimer();
-        shown = target;
-        fn(target);
-      } else if (pending) {
-        pending = target;
-      }
       return;
     }
     if (shown) {
@@ -129,20 +141,27 @@ export function subscribeHoverTarget(
     if (pending && sameTarget(pending, target)) return;
     clearTimer();
     pending = target;
-    timer = setTimeout(() => {
+    const expire = (): void => {
+      // The pointer reached the open peek while crossing this target: the peek
+      // stays while it is there, and the swap goes on if it comes back out.
+      if (shown && overPopover()) {
+        timer = setTimeout(expire, delay);
+        return;
+      }
       timer = null;
       const waited = pending;
       pending = null;
-      // The pointer reached the open peek while crossing this target: it stays.
-      if (!waited || (shown && overPopover())) return;
+      if (!waited) return;
       // The peek opens where the pointer rests now, not where it first arrived.
       shown = editor.getHoverTargets().find((t) => sameTarget(t, waited)) ?? waited;
       fn(shown);
-    }, delay);
+    };
+    timer = setTimeout(expire, delay);
   }
 
   return () => {
     off();
+    offEdit();
     clearTimer();
     shown = null;
   };

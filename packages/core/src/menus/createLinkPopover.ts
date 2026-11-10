@@ -26,7 +26,7 @@ import { linkAt, type LinkRange } from "../extensions/built-in/Link";
 import { subscribeViewUpdates } from "./subscribeViewUpdates";
 import { subscribeEditorFocusOutside } from "./subscribeEditorFocusOutside";
 import { isAnchorInsideContainer } from "./anchorVisibility";
-import { trackShownPosition } from "./shownPosition";
+import { trackShownRange } from "./shownRange";
 import {
   subscribeHoverTarget,
   type HoverOption,
@@ -67,8 +67,8 @@ export function createLinkPopover(editor: IEditor, options: LinkPopoverOptions):
   let visible = false;
   let rafId: number | null = null;
   let hovered: HoverTarget | null = null;
-  /** Where the shown link starts, mapped through edits. */
-  const shown = trackShownPosition(editor);
+  /** The shown link, mapped through edits. */
+  const shown = trackShownRange(editor);
 
   function hide() {
     shown.set(null);
@@ -133,8 +133,8 @@ export function createLinkPopover(editor: IEditor, options: LinkPopoverOptions):
       presentation: selected ? "full" : "peek",
     };
 
-    const same = visible && shown.get() === link.from;
-    shown.set(link.from);
+    const same = visible && shown.is(link.from, link.to);
+    shown.set({ from: link.from, to: link.to });
     if (same) {
       onMove(rect, info);
     } else {

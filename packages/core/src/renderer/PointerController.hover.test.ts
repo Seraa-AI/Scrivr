@@ -86,4 +86,21 @@ describe("keys and hover", () => {
     expect(editor.getHoverTargets()).toEqual([]);
     expect(events.at(-1)?.dismissed).toBe(true);
   });
+
+  it("Escape is announced even when nothing is hovered: a peek may still be open", () => {
+    setup = makePointerControllerSetup();
+    const { editor } = setup;
+    const seen: HoverEvent[] = [];
+    editor.on("hover", (event) => seen.push(event));
+    press("Escape");
+    expect(seen.at(-1)?.dismissed).toBe(true);
+  });
+
+  it("a key pressed inside a popover is not typing in the editor", () => {
+    const { editor } = hovering();
+    const el = popover();
+    el.firstElementChild?.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
+    expect(editor.getHoverTargets()).toEqual([linkOver]);
+    el.remove();
+  });
 });

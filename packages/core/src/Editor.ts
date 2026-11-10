@@ -51,7 +51,7 @@ import type {
 	SelectionGestureProvider,
 } from "./selection/types";
 import type { HoverEvent, HoverResolver, HoverTarget } from "./hover/types";
-import { sameHoverTargets } from "./hover/types";
+import { mapHoverTarget, sameHoverTargets } from "./hover/types";
 import { resolveHoverTargets } from "./hover/resolveHoverTargets";
 import type { PagePoint } from "./layout/pagePoint";
 import { resolvePointOwner, type PointOwner } from "./layout/pointOwnership";
@@ -1634,7 +1634,8 @@ export class Editor extends BaseEditor implements IEditor {
 		// Kept even when unchanged: where in each target the pointer now rests.
 		this.hoverTargets = event.targets;
 		this.hoverPoint = event.point;
-		if (changed) this.emit("hover", event);
+		// A dismissal is news even when nothing was hovered: a peek may be open.
+		if (changed || event.dismissed) this.emit("hover", event);
 	}
 
 	/**
@@ -1647,10 +1648,8 @@ export class Editor extends BaseEditor implements IEditor {
 		if (this.hoverTargets.length === 0) return;
 		const targets: HoverTarget[] = [];
 		for (const target of this.hoverTargets) {
-			const pos = tr.mapping.map(target.pos, 1);
-			const end = tr.mapping.map(target.end, -1);
-			const at = Math.min(Math.max(tr.mapping.map(target.at, 1), pos), end - 1);
-			if (end > pos) targets.push({ ...target, pos, end, at });
+			const mapped = mapHoverTarget(target, tr.mapping);
+			if (mapped) targets.push(mapped);
 		}
 		this.reportHover({ targets, point: this.hoverPoint, fromEdit: true });
 	}

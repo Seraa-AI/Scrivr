@@ -421,11 +421,14 @@ export class PointerController {
   };
 
   /**
-   * Typing or Escape dismisses peeks. A modifier alone is not typing — it is
-   * how a shortcut, or a Cmd/Ctrl-click on the hovered link, begins.
+   * Typing or Escape in the editor dismisses peeks. A modifier alone is not
+   * typing — it is how a shortcut, or a Cmd/Ctrl-click on the hovered link,
+   * begins.
    */
   private handleKeyDown = (e: KeyboardEvent): void => {
     if (MODIFIER_KEYS.has(e.key)) return;
+    // Keys inside a popover use the popover — Tab to its link, copy its URL.
+    if (inPopover(e.target instanceof Element ? e.target : null)) return;
     this.clearHover(true);
   };
 

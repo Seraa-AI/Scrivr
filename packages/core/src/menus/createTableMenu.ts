@@ -29,7 +29,7 @@ import { describeTable, type TableShape } from "../table/describeTable";
 import { subscribeViewUpdates } from "./subscribeViewUpdates";
 import { subscribeEditorFocusOutside } from "./subscribeEditorFocusOutside";
 import { isAnchorInsideContainer } from "./anchorVisibility";
-import { trackShownPosition } from "./shownPosition";
+import { trackShownRange } from "./shownRange";
 import {
   subscribeHoverTarget,
   type HoverOption,
@@ -62,8 +62,8 @@ export function createTableMenu(editor: IEditor, options: TableMenuOptions): () 
   let visible = false;
   let rafId: number | null = null;
   let hovered: HoverTarget | null = null;
-  /** The shown table's position, mapped through edits. */
-  const shown = trackShownPosition(editor);
+  /** The shown table, mapped through edits. */
+  const shown = trackShownRange(editor);
 
   function hide() {
     shown.set(null);
@@ -105,8 +105,8 @@ export function createTableMenu(editor: IEditor, options: TableMenuOptions): () 
       presentation: selected?.editable ? "full" : "peek",
     };
 
-    const same = visible && shown.get() === docPos;
-    shown.set(docPos);
+    const same = visible && shown.is(docPos, docPos + table.nodeSize);
+    shown.set({ from: docPos, to: docPos + table.nodeSize });
     if (same) {
       onMove(rect, info);
     } else {

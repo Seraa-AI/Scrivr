@@ -237,6 +237,45 @@ describe("hover popovers", () => {
         expect(onShow.mock.calls.map(([, i]) => i.href)).toEqual([HREF, OTHER]);
       });
 
+      it("swaps once the pointer leaves the peek for the other link", () => {
+        const editor = makeEditor();
+        const el = document.createElement("div");
+        const overPeek = vi.spyOn(el, "matches").mockReturnValue(false);
+        const onShow = vi.fn<(r: DOMRect, i: LinkPopoverInfo) => void>();
+        cleanup = createLinkPopover(editor, { onShow, onHide: () => {}, onMove: () => {}, getPopoverElement: () => el });
+
+        hover(editor, linkTarget());
+        vi.advanceTimersByTime(400);
+        flushRaf();
+        hover(editor, otherTarget);
+        overPeek.mockReturnValue(true);
+        vi.advanceTimersByTime(200);
+        // Back onto the other link: the stack never changed, so no event says so.
+        overPeek.mockReturnValue(false);
+        vi.advanceTimersByTime(200);
+        flushRaf();
+        expect(onShow.mock.calls.map(([, i]) => i.href)).toEqual([HREF, OTHER]);
+      });
+
+      it("waits out the grace period through an edit", () => {
+        const editor = makeEditor();
+        const el = document.createElement("div");
+        const overPeek = vi.spyOn(el, "matches").mockReturnValue(false);
+        const onShow = vi.fn<(r: DOMRect, i: LinkPopoverInfo) => void>();
+        cleanup = createLinkPopover(editor, { onShow, onHide: () => {}, onMove: () => {}, getPopoverElement: () => el });
+
+        hover(editor, linkTarget());
+        vi.advanceTimersByTime(400);
+        flushRaf();
+        hover(editor, otherTarget);
+        editor.applyTransaction(editor.getState().tr.insertText("ab", 1));
+        flushRaf();
+        overPeek.mockReturnValue(true);
+        vi.advanceTimersByTime(200);
+        flushRaf();
+        expect(onShow.mock.calls.map(([, i]) => i.href)).toEqual([HREF]);
+      });
+
       it("keeps the peek the pointer reaches on the way", () => {
         const editor = makeEditor();
         const el = document.createElement("div");
@@ -252,6 +291,48 @@ describe("hover popovers", () => {
         vi.advanceTimersByTime(200);
         flushRaf();
         expect(onShow.mock.calls.map(([, i]) => i.href)).toEqual([HREF]);
+      });
+    });
+
+    describe("an edit while the pointer is off the link", () => {
+      it("follows the peek the pointer reached across plain text", () => {
+        const editor = makeEditor();
+        const el = document.createElement("div");
+        const overPeek = vi.spyOn(el, "matches").mockReturnValue(false);
+        const onMove = vi.fn<(r: DOMRect, i: LinkPopoverInfo) => void>();
+        const onHide = vi.fn();
+        cleanup = createLinkPopover(editor, { onShow: () => {}, onHide, onMove, getPopoverElement: () => el });
+
+        hover(editor, linkTarget());
+        vi.advanceTimersByTime(400);
+        flushRaf();
+        hover(editor);
+        overPeek.mockReturnValue(true);
+        editor.applyTransaction(editor.getState().tr.insertText("abc", 1));
+        vi.advanceTimersByTime(400);
+        flushRaf();
+
+        expect(onHide).not.toHaveBeenCalled();
+        expect(onMove.mock.calls.at(-1)![1]).toMatchObject({ href: HREF, from: 7, to: 12 });
+      });
+
+      it("does not close the peek at once when the pointer is on another kind", () => {
+        const editor = makeEditor();
+        const table = find(editor, (n) => n === "table");
+        const onHide = vi.fn();
+        cleanup = createLinkPopover(editor, { onShow: () => {}, onHide, onMove: () => {} });
+
+        hover(editor, linkTarget());
+        vi.advanceTimersByTime(400);
+        flushRaf();
+        hover(editor, { kind: "table", surfaceId: "body", pos: table.pos, end: table.pos + table.size, at: table.pos });
+        editor.applyTransaction(editor.getState().tr.insertText("ab", 1));
+        flushRaf();
+        expect(onHide).not.toHaveBeenCalled();
+
+        vi.advanceTimersByTime(200);
+        flushRaf();
+        expect(onHide).toHaveBeenCalledTimes(1);
       });
     });
 
@@ -284,6 +365,22 @@ describe("hover popovers", () => {
 
       expect(onShow).toHaveBeenCalledTimes(1);
       expect(onMove.mock.calls.at(-1)![1]).toMatchObject({ href: HREF, from: 6, to: 11, presentation: "full" });
+    });
+
+    it("is the same link when a collaborator retypes its first character", () => {
+      const editor = makeEditor();
+      const onShow = vi.fn<(r: DOMRect, i: LinkPopoverInfo) => void>();
+      const onMove = vi.fn<(r: DOMRect, i: LinkPopoverInfo) => void>();
+      cleanup = createLinkPopover(editor, { onShow, onHide: () => {}, onMove });
+
+      editor.selection.moveCursorTo(6);
+      flushRaf();
+      const linkMark = editor.schema.marks["link"]!.create({ href: HREF });
+      editor.applyTransaction(editor.getState().tr.replaceWith(4, 5, editor.schema.text("T", [linkMark])));
+      flushRaf();
+
+      expect(onShow).toHaveBeenCalledTimes(1);
+      expect(onMove).toHaveBeenCalled();
     });
 
     it("shows a different link as a new one: onShow", () => {
@@ -453,6 +550,24 @@ describe("hover popovers", () => {
       expect(onMove.mock.calls.at(-1)![1].docPos).toBe(image.pos + 2);
     });
 
+    it("is the same image when a collaborator resizes the one peeked", () => {
+      const editor = makeEditor();
+      const image = find(editor, (n) => n === "image");
+      const onShow = vi.fn<(r: DOMRect, i: ImageMenuInfo) => void>();
+      const onMove = vi.fn<(r: DOMRect, i: ImageMenuInfo) => void>();
+      cleanup = createImageMenu(editor, { onShow, onHide: () => {}, onMove, hover: true });
+
+      hover(editor, { kind: "image", surfaceId: "body", pos: image.pos, end: image.pos + image.size, at: image.pos });
+      vi.advanceTimersByTime(400);
+      flushRaf();
+      const node = editor.getState().doc.nodeAt(image.pos)!;
+      editor.applyTransaction(editor.getState().tr.setNodeMarkup(image.pos, undefined, { ...node.attrs, width: 120 }));
+      flushRaf();
+
+      expect(onShow).toHaveBeenCalledTimes(1);
+      expect(onMove).toHaveBeenCalled();
+    });
+
     it("does not peek by default", () => {
       const editor = makeEditor();
       const image = find(editor, (n) => n === "image");
@@ -508,6 +623,23 @@ describe("hover popovers", () => {
 
       expect(onShow).toHaveBeenCalledTimes(1);
       expect(onMove.mock.calls.at(-1)![1].docPos).toBe(table.pos + 2);
+    });
+
+    it("is the same table when one of its own actions changes its grid", () => {
+      const editor = makeEditor();
+      const table = find(editor, (n) => n === "table");
+      const onShow = vi.fn<(r: DOMRect, i: TableMenuInfo) => void>();
+      const onMove = vi.fn<(r: DOMRect, i: TableMenuInfo) => void>();
+      cleanup = createTableMenu(editor, { onShow, onHide: () => {}, onMove });
+
+      selectCells(editor);
+      flushRaf();
+      const node = editor.getState().doc.nodeAt(table.pos)!;
+      editor.applyTransaction(editor.getState().tr.setNodeMarkup(table.pos, undefined, { ...node.attrs, grid: [120, 100, 100] }));
+      flushRaf();
+
+      expect(onShow).toHaveBeenCalledTimes(1);
+      expect(onMove).toHaveBeenCalled();
     });
 
     it("peeks while the pointer keeps moving between cells", () => {

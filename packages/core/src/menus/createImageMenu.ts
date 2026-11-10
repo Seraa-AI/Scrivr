@@ -32,7 +32,7 @@ import type { IEditor } from "../extensions/types";
 import { subscribeViewUpdates } from "./subscribeViewUpdates";
 import { subscribeEditorFocusOutside } from "./subscribeEditorFocusOutside";
 import { isAnchorInsideContainer } from "./anchorVisibility";
-import { trackShownPosition } from "./shownPosition";
+import { trackShownRange } from "./shownRange";
 import type { HoverTarget } from "../hover/types";
 import {
   subscribeHoverTarget,
@@ -74,8 +74,8 @@ export function createImageMenu(editor: IEditor, options: ImageMenuOptions): () 
   let visible = false;
   let rafId: number | null = null;
   let hovered: HoverTarget | null = null;
-  /** The shown image's position, mapped through edits. */
-  const shown = trackShownPosition(editor);
+  /** The shown image, mapped through edits. */
+  const shown = trackShownRange(editor);
 
   function hide() {
     shown.set(null);
@@ -118,8 +118,8 @@ export function createImageMenu(editor: IEditor, options: ImageMenuOptions): () 
 
     const info: ImageMenuInfo = { node, docPos, presentation: full ? "full" : "peek" };
 
-    const same = visible && shown.get() === docPos;
-    shown.set(docPos);
+    const same = visible && shown.is(docPos, docPos + node.nodeSize);
+    shown.set({ from: docPos, to: docPos + node.nodeSize });
     if (same) {
       onMove(rect, info);
     } else {

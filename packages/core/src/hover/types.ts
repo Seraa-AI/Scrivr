@@ -1,4 +1,5 @@
 import type { Node } from "prosemirror-model";
+import type { Mappable } from "prosemirror-transform";
 import type { PagePoint } from "../layout/pagePoint";
 
 /**
@@ -110,4 +111,31 @@ export function sameHoverTargets(
     const u = b[i]!;
     return t.kind === u.kind && t.surfaceId === u.surfaceId && t.pos === u.pos && t.end === u.end;
   });
+}
+
+/** A document range, `[from, to)`. */
+export interface DocRange {
+  from: number;
+  to: number;
+}
+
+/**
+ * A range carried through an edit. Its start sticks after an insertion there
+ * and its end before one, so it neither grows onto its neighbours nor slides
+ * off what it held. It is gone only once the edit leaves it empty: an edit
+ * that replaced what it held in place — a node whose attrs changed, a retyped
+ * character — keeps it, because what is in the range is re-read, never kept.
+ */
+export function mapRange(range: DocRange, mapping: Mappable): DocRange | null {
+  const from = mapping.map(range.from, 1);
+  const to = mapping.map(range.to, -1);
+  return to > from ? { from, to } : null;
+}
+
+/** A hover target carried through an edit by `mapRange`, `at` kept inside it. */
+export function mapHoverTarget(target: HoverTarget, mapping: Mappable): HoverTarget | null {
+  const range = mapRange({ from: target.pos, to: target.end }, mapping);
+  if (!range) return null;
+  const at = Math.min(Math.max(mapping.map(target.at, 1), range.from), range.to - 1);
+  return { ...target, pos: range.from, end: range.to, at };
 }
