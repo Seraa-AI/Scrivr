@@ -8,6 +8,9 @@
  */
 import { describe, it, expect } from "vitest";
 import { ServerEditor } from "../ServerEditor";
+import { Document } from "../extensions/built-in/Document";
+import { Paragraph } from "../extensions/built-in/Paragraph";
+import { BaseEditing } from "../extensions/built-in/BaseEditing";
 import { spansToFragment, sameMark } from "./spansToFragment";
 import type { InlineSpan } from "../exports/semantic";
 
@@ -70,6 +73,11 @@ describe("spansToFragment", () => {
       const s = schema();
       const frag = spansToFragment([{ text: "one\ntwo", marks: [{ type: "bold" }] }], s, { parentType: s.nodes["paragraph"]! });
       expect(nodesOf(frag)).toEqual(["text:one", "hardBreak", "text:two"]);
+    });
+
+    it("is a space where the schema has no line-break node", () => {
+      const s = new ServerEditor({ extensions: [Document, Paragraph, BaseEditing] }).schema;
+      expect(nodesOf(spansToFragment([{ text: "a\nb", marks: [] }], s))).toEqual(["text:a b"]);
     });
 
     it("stays a newline in a code block, which holds text only", () => {

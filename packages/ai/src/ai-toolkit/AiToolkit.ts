@@ -1,7 +1,7 @@
 import { blockIdOf, Extension, findNodeById, IMAGE_NODE_ATTRS, stableStringify } from "@scrivr/core";
 import type { IBaseEditor, IEditor, SemanticChange, SemanticImage, SemanticPart, SemanticTextView, SemanticUnit } from "@scrivr/core";
 import type { ReviewDecisions, ReviewOutcome } from "@scrivr/plugins";
-import { semanticPartRichHash, toSemanticUnits, unitRichHash } from "@scrivr/export-semantic";
+import { resolveNodeId, semanticPartRichHash, toSemanticUnits, unitRichHash } from "@scrivr/export-semantic";
 import { SemanticImageAttrsSchema, type SemanticEdit, type StructuralSemanticEdit } from "../schema/edit";
 import { applyStructuralEdits } from "./applyStructuralEdits";
 import { applyImageLayout, type ImageLayoutEdit } from "./imageAttrs";
@@ -9,7 +9,7 @@ import { toCoreSpans } from "./spans";
 import { UniqueId } from "./UniqueId";
 import { GhostText, ghostTextPluginKey } from "./GhostText";
 import { AiCaret, aiCaretPluginKey } from "./AiCaret";
-import { findLiveNodeById, isShadowNode, moveShadowRanges, reviewChanges, trackAsSuggestion } from "@scrivr/plugins";
+import { findLiveNodeById, isShadowNode, moveShadowRanges, originalDocument, reviewChanges, trackAsSuggestion } from "@scrivr/plugins";
 import { aiToolkitRegistry } from "./aiToolkitRegistry";
 import { applyRichDiffAsSuggestion, buildAcceptedTextMap, type RichBlockEdit } from "@scrivr/plugins";
 
@@ -122,24 +122,48 @@ function placeById<T>(items: readonly T[], idOf: (item: T) => string, nodes: rea
  */
 function unitHashResolver(editor: IBaseEditor): (nodeId: string) => string | null {
   const doc = editor.getState().doc;
-  const hashes = new Map(toSemanticUnits(editor, { groupBlocks: false }).map((unit) => [unit.id, unitRichHash(unit)]));
+  // The units `getRichBlocks` hands out, by the ids it gives them.
+  const read = unitsToRead(toSemanticUnits(editor, { groupBlocks: false }), doc);
+  const hashes = new Map(read.map((unit) => [unit.id, unitRichHash(unit)]));
   return (nodeId) => {
     const found = findNodeById(doc, nodeId);
-    const top = found ? blockIdOf(doc.child(doc.resolve(found.pos).index(0))) : null;
-    return top === null ? null : hashes.get(top) ?? null;
+    if (!found) return null;
+    const index = doc.resolve(found.pos).index(0);
+    return hashes.get(resolveNodeId({ node: doc.child(index), index })) ?? null;
   };
 }
 
-/** The ids a structural op names by hash whose units changed since the agent read them. */
+/**
+ * The ids a structural op names by hash whose units changed since the agent
+ * read them. An id the document does not hold is not stale; the op reports it
+ * not found.
+ */
 function staleIn(edit: StructuralSemanticEdit, hashHolding: (nodeId: string) => string | null): string[] {
+  const changed = (nodeId: string, expected: string | undefined) => {
+    if (expected === undefined) return false;
+    const now = hashHolding(nodeId);
+    return now !== null && now !== expected;
+  };
   const stale: string[] = [];
-  if ("expectedContentHash" in edit && edit.expectedContentHash !== undefined && hashHolding(edit.nodeId) !== edit.expectedContentHash) {
-    stale.push(edit.nodeId);
-  }
-  if ("anchorContentHash" in edit && edit.anchorContentHash !== undefined && hashHolding(edit.anchorNodeId) !== edit.anchorContentHash) {
-    stale.push(edit.anchorNodeId);
-  }
+  if ("expectedContentHash" in edit && changed(edit.nodeId, edit.expectedContentHash)) stale.push(edit.nodeId);
+  if ("anchorContentHash" in edit && changed(edit.anchorNodeId, edit.anchorContentHash)) stale.push(edit.anchorNodeId);
   return stale;
+}
+
+/** A live range in the original document: its blocks, and positions mapped there. */
+function originalRange(live: PmNode, from: number, to: number): { doc: PmNode; from: number; to: number } {
+  const original = originalDocument(live);
+  if (!original) return { doc: live, from, to };
+  return { doc: original.doc, from: original.mapping.map(from, -1), to: original.mapping.map(to, 1) };
+}
+
+/** The units whose top-level block overlaps `[from, to)` of `doc`, by the ids the walker gives them. */
+function unitsInRange(units: SemanticUnit[], { doc, from, to }: { doc: PmNode; from: number; to: number }): SemanticUnit[] {
+  const allowed = new Set<string>();
+  doc.forEach((node, offset, index) => {
+    if (offset < to && offset + node.nodeSize > from) allowed.add(resolveNodeId({ node, index }));
+  });
+  return units.filter((unit) => allowed.has(unit.id));
 }
 
 /** What `applySemanticEdits` did with a batch, by id. */
@@ -497,10 +521,12 @@ export class AiToolkitAPI {
     const { from, to, view = "proposed" } = typeof fromOrOptions === "object"
       ? fromOrOptions
       : { from: fromOrOptions, to: toPos };
+    const live = this.editor.getState().doc;
     const all = toSemanticUnits(this.editor, { groupBlocks: false, view });
     // Nothing is pending in the original view, so no move left a copy behind.
-    const units = view === "proposed" ? unitsToRead(all, this.editor.getState().doc) : all;
+    const units = view === "proposed" ? unitsToRead(all, live) : all;
     if (from === undefined || to === undefined) return units;
+    if (view === "original") return unitsInRange(units, originalRange(live, from, to));
     const allowed = new Set<string>();
     this.editor.getState().doc.forEach((node, offset) => {
       const nodeId = node.attrs["nodeId"];
@@ -576,7 +602,8 @@ export class AiToolkitAPI {
       if (isSemanticUnit(item)) {
         const nodeId = item.nodeIds[0];
         if (!nodeId) continue;
-        if (item.view !== "proposed") {
+        // A unit handed back without its view was read as the proposed one.
+        if (item.view !== undefined && item.view !== "proposed") {
           wrongView.push(nodeId);
           continue;
         }
@@ -732,7 +759,7 @@ export class AiToolkitAPI {
     return {
       applied: richResult.applied || touched,
       changed: [...richResult.changed, ...structuralResult.changed],
-      stale: [...richResult.stale, ...staleIds],
+      stale: [...new Set([...richResult.stale, ...staleIds])],
       notFound: [...richResult.notFound, ...structuralResult.notFound],
       rejected: [...richResult.rejected, ...structuralResult.rejected],
       alreadyProposed: structuralResult.alreadyProposed,

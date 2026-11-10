@@ -23,4 +23,9 @@ when what they name has changed.
   nothing is written. `applySemanticEdits` returns `SemanticEditResult`, which
   adds `alreadyProposed` (a delete whose block another author already proposed
   for deletion) and `anchorProposedForDeletion` (an anchor that disappears on
-  Accept). Both were refused before, inside `rejected`.
+  Accept). Both were refused before, inside `rejected`. Hashes are judged
+  against the units `getRichBlocks` hands out; an id the document does not hold
+  is `notFound`, not `stale`.
+- `@scrivr/export-semantic` exports `resolveNodeId`, the id rule units are
+  keyed by; `@scrivr/plugins` exports `originalDocument(doc)`, the original
+  document with the mapping into it.

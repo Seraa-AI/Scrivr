@@ -359,8 +359,8 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
           const now = Date.now();
           const baseAttrs = createNewPendingAttrs(now, authorID);
 
-          // A "\n" is the block's line break, as the semantic export reads one.
-          const content = suggestedContent([{ text, marks: [] }], schema, state.doc.resolve(from).parent.type, createNewInsertAttrs(baseAttrs));
+          // Plain text: a "\n" is a space, as this command has always written it.
+          const content = suggestedContent([{ text: text.replace(/\n/g, " "), marks: [] }], schema, state.doc.resolve(from).parent.type, createNewInsertAttrs(baseAttrs));
 
           const tr = state.tr;
 

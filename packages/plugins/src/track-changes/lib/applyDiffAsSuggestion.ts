@@ -31,7 +31,7 @@
  *                   > 0.7 → full rewrite, offer "Accept rewrite" button
  */
 
-import type { Schema } from "@scrivr/core/pm";
+import type { Node as PMNode, Schema } from "@scrivr/core/pm";
 import type { EditorState, Transaction } from "@scrivr/core/pm";
 
 import { findLiveNodeById } from "../liveNode";
@@ -41,7 +41,7 @@ import {
   createNewInsertAttrs,
   createNewPendingAttrs,
 } from "../helpers";
-import { CHANGE_STATUS } from "../types";
+import { CHANGE_OPERATION, CHANGE_STATUS } from "../types";
 import { acceptedRangeToDocRange, bridgeable, buildAcceptedTextMap } from "./acceptedTextMap";
 import { computeEditDensity, diffText, phraseReplacements } from "./diffText";
 import { applyTrackedDelete } from "./splitRangeForNewMark";
@@ -84,6 +84,12 @@ export function clearAuthorPendingMarks(
 
   // Walk the block content (nodeFrom+1 skips the opening token).
   tr.doc.nodesBetween(nodeFrom + 1, nodeTo - 1, (child, pos) => {
+    // A break or other inline object the author inserted is recorded on the
+    // node, not a mark: it goes with the rest of their suggestion.
+    if (child.isInline && !child.isText) {
+      if (ownPendingInsert(child, authorID)) insertRanges.push({ from: pos, to: pos + child.nodeSize });
+      return;
+    }
     if (!child.isText) return;
     const from = pos;
     const to = pos + child.nodeSize;
@@ -113,6 +119,16 @@ export function clearAuthorPendingMarks(
   for (const { from, to } of insertRanges) {
     tr.delete(from, to);
   }
+}
+
+/** Whether an inline node's own record is `authorID`'s pending insertion. */
+function ownPendingInsert(node: PMNode, authorID: string): boolean {
+  const records: unknown = node.attrs["dataTracked"];
+  return Array.isArray(records) && records.some((record: unknown) =>
+    typeof record === "object" && record !== null &&
+    "authorID" in record && record.authorID === authorID &&
+    "status" in record && record.status === CHANGE_STATUS.pending &&
+    "operation" in record && record.operation === CHANGE_OPERATION.insert);
 }
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -227,7 +243,8 @@ function applyBlockToTr(
         if (insertMarkType) {
           const at = range.from + insertedChars;
           const insertAttrs = { ...createNewInsertAttrs(baseAttrs), ...(op.groupId ? { groupId: op.groupId } : {}) };
-          const content = suggestedContent([{ text: op.text, marks: [] }], schema, tr.doc.resolve(at).parent.type, insertAttrs);
+          // This lane reads a block's text without its breaks (`buildAcceptedTextMap`), so it writes none.
+          const content = suggestedContent([{ text: op.text.replace(/\n/g, " "), marks: [] }], schema, tr.doc.resolve(at).parent.type, insertAttrs);
           tr.insert(at, content);
           insertedChars += content.size;
           applied = content.size > 0 || applied;

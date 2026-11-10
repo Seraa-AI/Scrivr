@@ -279,7 +279,8 @@ function settleGroups(
 
 /** Who applied changes are by: the suggestion's author, or the assistant for one built without one. */
 function authorOf(suggestion: AiSuggestion): string {
-  return suggestion.author ?? "ai:assistant";
+  // An empty author is no author.
+  return suggestion.author || "ai:assistant";
 }
 
 /**
@@ -339,9 +340,13 @@ function applyKeepFormatting(
  * formatting the op proposed. An op made from plain text proposes none, which
  * `spansToFragment` renders as an unmarked run.
  */
-/** An op's inserted text for a block of `parentType`: a "\n" is its line break. */
+/**
+ * An op's inserted text for a block of `parentType`. This lane reads a block's
+ * text without its line breaks (`buildAcceptedTextMap`), so it writes none: a
+ * "\n" is a space, and what it inserts can always be reviewed and taken back.
+ */
 function insertedContent(op: AiOp, schema: Schema, parentType: NodeType, extraMarks: readonly Mark[] = []) {
-  const fragment = spansToFragment([{ text: op.text, marks: op.marks ?? [] }], schema, { parentType });
+  const fragment = spansToFragment([{ text: op.text.replace(/\n/g, " "), marks: op.marks ?? [] }], schema, { parentType });
   if (extraMarks.length === 0) return fragment;
   const marked: PmNode[] = [];
   fragment.forEach((child) => {

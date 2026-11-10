@@ -5,6 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { ServerEditor, StarterKit } from "@scrivr/core";
+import { TextSelection } from "@scrivr/core/pm";
 import { unitRichHash } from "@scrivr/export-semantic";
 import { TrackChanges, TrackChangesStatus } from "@scrivr/plugins";
 import { AiToolkit } from "../AiToolkit";
@@ -51,4 +52,34 @@ describe("editing a view", () => {
     expect(res.wrongView).toEqual(["p1"]);
     expect(editor.getState().doc).toBe(before);
   });
+
+  it("edits a unit handed back without its view, as the proposed one it was read as", () => {
+    const { ai } = build();
+    // An agent's JSON, with the field it dropped.
+    const { view: _dropped, ...rest } = ai.getRichBlocks()[0]!;
+    const unit = JSON.parse(JSON.stringify(rest));
+    const res = ai.applyRichEdit([{ ...unit, text: "revised agreed terms, amended", spans: [{ text: "revised agreed terms, amended", marks: [] }] }]);
+    expect(res.wrongView).toEqual([]);
+    expect(res.applied).toBe(true);
+  });
 });
+
+describe("the original view over a range", () => {
+  it("keeps the blocks the range covers, though a pending change rewrapped them", () => {
+    const editor = new ServerEditor({
+      extensions: [StarterKit, TrackChanges.configure({ userID: "u2", initialStatus: TrackChangesStatus.enabled }), AiToolkit],
+      content: { type: "doc", content: [
+        { type: "paragraph", attrs: { nodeId: "a" }, content: [{ type: "text", text: "one" }] },
+        { type: "paragraph", attrs: { nodeId: "b" }, content: [{ type: "text", text: "two" }] },
+      ] },
+    });
+    const ai = getAiToolkit(editor)!;
+    const state = editor.getState();
+    editor.applyTransaction(state.tr.setSelection(TextSelection.create(state.doc, 1, state.doc.content.size - 1)));
+    editor.commands.toggleBulletList();
+    const whole = ai.getRichBlocks({ view: "original" });
+    expect(whole.map((u) => u.text)).toContain("one");
+    expect(ai.getRichBlocks({ view: "original", from: 0, to: editor.getState().doc.content.size })).toEqual(whole);
+  });
+});
+

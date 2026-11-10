@@ -5,6 +5,8 @@
 // other extensions rely on. Extensions that WRITE semantic handlers opt in with
 //   import "@scrivr/export-semantic/augment";
 export { toSemanticUnits } from "./toSemanticUnits";
+export { resolveNodeId } from "./id";
+export type { BlockEntry } from "./id";
 export { toDocumentOutline } from "./outline";
 export type { DocumentOutlineOptions } from "./outline";
 export { SemanticExport } from "./SemanticExport";

@@ -223,3 +223,22 @@ Columns, also on plan 155's later list, is its own RFC
   refused, inside the generic `rejected`. This phase names the reasons apart:
   `alreadyProposed` for a delete's target, `anchorProposedForDeletion` for an
   anchor. One existing test moved its anchors from `rejected` to the new list.
+
+### Next release cycle (decided 2026-11-10)
+
+Kept out of this release so it is not held:
+
+- **The suggestion lanes record through the engine.** Four lanes
+  (`applyDiffAsSuggestion`, `applyRichDiffAsSuggestion`, AI suggestion apply,
+  `insertAsSuggestion`) write tracked marks by hand instead of making plain
+  edits under `trackAsSuggestion` for the step trackers to record. That second
+  copy of the engine's rules knew only text; the review found its gaps. This
+  release closes the ones it opened — plain lanes write no breaks, a rich insert
+  is one act and withdraws its breaks — and leaves the rest: a rich edit cannot
+  yet propose deleting an existing break (`splitRangeForNewMark` marks text
+  only), and the plain lanes read no breaks.
+- **Phase 2, block-level previews** — not blocked.
+- **Phase 3, structural previews**, on the revision-projection substrate
+  (projection by the engine's own accept/reject, its mapping as the bijection,
+  an editor lens), as proposed on 2026-11-10.
+

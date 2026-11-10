@@ -12,7 +12,7 @@
  */
 import { findNodeById, safeImageUrl, spansToFragment, tableColumnCount } from "@scrivr/core";
 import { imageNodeAttrs } from "./imageAttrs";
-import { findLiveNodeById, pickAgentAttrs, proposedForDeletion, shadowRanges } from "@scrivr/plugins";
+import { findLiveNodeById, isShadowNode, moveShadowRanges, pickAgentAttrs, proposedForDeletion, shadowRanges } from "@scrivr/plugins";
 import type { ShadowRange } from "@scrivr/plugins";
 import type { Node as PmNode, Schema, Transaction } from "@scrivr/core/pm";
 
@@ -319,9 +319,11 @@ function insideMoved(tr: Transaction, pos: number, batch: BatchRanges): boolean 
  */
 function rejectOrMiss(doc: PmNode, nodeId: string, result: StructuralEditResult, as: "target" | "deleted" | "anchor"): void {
   const found = findNodeById(doc, nodeId);
-  if (!found) result.notFound.push(nodeId);
-  else if (proposedForDeletion(found.node) && as === "deleted") result.alreadyProposed.push(nodeId);
-  else if (proposedForDeletion(found.node) && as === "anchor") result.anchorProposedForDeletion.push(nodeId);
+  if (!found) return void result.notFound.push(nodeId);
+  // The copy a pending move left is recorded as a deletion, but nobody proposed deleting it.
+  const deleted = proposedForDeletion(found.node) && !isShadowNode(found.node, found.pos, moveShadowRanges(doc));
+  if (deleted && as === "deleted") result.alreadyProposed.push(nodeId);
+  else if (deleted && as === "anchor") result.anchorProposedForDeletion.push(nodeId);
   else result.rejected.push(nodeId);
 }
 

@@ -9,7 +9,7 @@
  *  - a `"\n"` is a line break, as the export writes one: it becomes the
  *    schema's line-break node (`breakOf` → `"line"`) where the destination
  *    takes one, stays a newline in a block that holds text only (code), and
- *    is dropped where neither can stand;
+ *    is a space where neither can stand, so words never run together;
  *  - an unknown mark type is dropped but its TEXT is kept, warned once;
  *  - url-bearing mark attrs (`link.href`) are sanitized through `safeUrl`;
  *    an unsafe url drops the mark, keeping the text;
@@ -52,7 +52,7 @@ export function spansToFragment(
   for (const span of spans) {
     if (span.text === "") continue;
     const marks = resolveInlineMarks(span.marks, schema, options.parentType, warnOnce);
-    const lines = keepsNewlines ? [span.text] : span.text.split("\n");
+    const lines = keepsNewlines ? [span.text] : lineBreak ? span.text.split("\n") : [span.text.replace(/\n/g, " ")];
     lines.forEach((line, index) => {
       if (index > 0 && lineBreak) nodes.push(lineBreak.create());
       if (line !== "") nodes.push(schema.text(line, marks.length > 0 ? marks : null));
