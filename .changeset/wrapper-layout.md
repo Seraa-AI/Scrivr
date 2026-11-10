@@ -28,17 +28,15 @@ Lists look and export exactly as before.
 
 **Breaking:**
 
-- Removed `LayoutBlock.listMarker`, `listMarkerX` and `listMarkerFace`; read
-  `LayoutBlock.marker` (`data` holds a list's bullet or number).
-- Removed `listMarkerOf`, `ListMarker`, `ListMarkerFont`, `bulletShape`,
-  `bulletBox`, `BulletShape` and `BulletBox` from `@scrivr/core`; use
-  `markerAnchorOf`, `PlacedMarker` and `MarkerFace`.
-- Removed `BlockLayoutOptions.firstLineOffset`, `firstLineOffsetAt` and
-  `keepAnchorLine`; pass `marker: { offset, offsetAt }`, whose presence keeps
-  an anchor-only block's line.
+- Removed `LayoutBlock.listMarker` and `listMarkerX`; read
+  `LayoutBlock.marker` (`data` holds a list's bullet or number) and
+  `markerAnchorOf(block)` for where it is drawn.
 - The `listMarker` theme token is renamed `marker`: the colour of any block
   marker, a list's included. Same defaults, still resolved per surface, so the
   PDF keeps its own print theme.
 - A container holding only `listItem`s that does not declare `listWrap` is no
   longer drawn as a bullet list; its items lay out as plain blocks.
 - A custom `PdfDrawSurface` must implement `ellipse`.
+- `IBaseEditor.getMarkerPainters()` and `ResolvedExtension.markerPainters` are
+  required: an editor double or a hand-built resolved extension must provide
+  them (`new Map()` and `{}` will do).

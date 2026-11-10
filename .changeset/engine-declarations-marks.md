@@ -36,3 +36,5 @@ before.
   `prepareDocumentFonts(doc, provider, { fontModifiers?, fontConfig?, constraints? })`.
 - `chromeFontConfig` (plugins, internal) is replaced by `chromeFontConfigOf`,
   and `ResolvedHeaderFooter` carries the band's `fontConfig`.
+- `IBaseEditor.getFontModifiers()` and `getBlockStyles()` are required: an
+  editor double must provide them.

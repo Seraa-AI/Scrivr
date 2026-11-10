@@ -2,6 +2,7 @@
 "@scrivr/core": patch
 "@scrivr/plugins": patch
 "@scrivr/react": patch
+"@scrivr/ai": patch
 ---
 
 Track changes keeps its boundaries: editing content that already holds
@@ -10,7 +11,8 @@ suggestions no longer destroys authorship, selection, or unrelated decisions.
 **Core**
 
 - `editor.commands.*` and `runCommand` return whether the command ran, instead
-  of `void`. A read-only editor returns `false`.
+  of `void`. A read-only editor returns `false`. **Breaking** for an
+  `IBaseEditor` double: its `runCommand` must return a boolean.
 - A node's `marks` restriction now limits formatting only. Review marks are
   admitted wherever track changes is installed, so edits inside a code block
   are tracked like any other text.

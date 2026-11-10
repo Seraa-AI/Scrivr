@@ -35,3 +35,5 @@ as before.
   given (the editors pass theirs).
 - A `PasteTransformer` built without `pasteFiles` inserts no pasted files;
   `Editor` passes them.
+- `ResolvedExtension.pasteFiles` is required: a hand-built resolved extension
+  passes `{}`.

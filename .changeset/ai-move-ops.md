@@ -103,7 +103,8 @@ tracked suggestion a reviewer decides in one click.
 - A semantic contribution can name what the proposed view leaves out
   (`isRemoved`). Track changes supplies `proposedForDeletion`, exported, so an
   image proposed for deletion is not read as present, and a paragraph whose
-  other text is proposed for deletion reads as its image.
+  other text is proposed for deletion reads as its image. **Breaking** for a
+  hand-built `UnitCtx`: `isRemoved` is a required member.
 - An image unit's rich hash covers its `image`, so an edited image is seen as
   changed. Other units' hashes are unchanged.
 - Core names the image values: `ImageWrap`, `ImageAlign`, `IMAGE_WRAPS`,
