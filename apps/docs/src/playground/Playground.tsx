@@ -42,7 +42,7 @@ import {
   describeSuggestionRefusal,
 } from "@scrivr/react";
 import type { SuggestionRefusalText } from "@scrivr/react";
-import type { Editor } from "@scrivr/core";
+import type { Editor, ToolbarState } from "@scrivr/core";
 import { Selection } from "@scrivr/core/pm";
 import { ChatPanel } from "./ChatPanel";
 import { DemoContent, demoDoc, startingDemo, type DemoKind } from "./demoContent";
@@ -177,28 +177,20 @@ const EXTENSIONS =
         DemoContent,
       ];
 
-interface ToolbarSlice {
-  activeMarks: string[];
-  activeMarkAttrs: Record<string, Record<string, unknown>>;
-  blockType: string;
-  blockAttrs: Record<string, unknown>;
-}
-
-function selectToolbar(ctx: EditorStateContext): ToolbarSlice {
-  const { blockType, blockAttrs } = ctx.editor.getBlockInfo();
+function selectToolbar(ctx: EditorStateContext): ToolbarState {
   return {
     activeMarks: ctx.editor.getActiveMarks(),
     activeMarkAttrs: ctx.editor.getActiveMarkAttrs(),
-    blockType,
-    blockAttrs: blockAttrs as Record<string, unknown>,
+    ...ctx.editor.getBlockInfo(),
   };
 }
 
-const EMPTY_TOOLBAR: ToolbarSlice = {
+const EMPTY_TOOLBAR: ToolbarState = {
   activeMarks: [],
   activeMarkAttrs: {},
   blockType: "paragraph",
   blockAttrs: {},
+  ancestors: [],
 };
 
 type SidebarTab = "ai" | "changes";
@@ -391,10 +383,7 @@ export function Playground() {
         <div className="min-w-0 flex-1 overflow-x-auto">
           <Toolbar
             items={editor?.toolbarItems ?? []}
-            activeMarks={toolbar.activeMarks}
-            activeMarkAttrs={toolbar.activeMarkAttrs}
-            blockType={toolbar.blockType}
-            blockAttrs={toolbar.blockAttrs}
+            state={toolbar}
             editor={editor}
           />
         </div>

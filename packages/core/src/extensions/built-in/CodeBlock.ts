@@ -225,7 +225,7 @@ export const CodeBlock = Extension.create<CodeBlockOptions>({
         label: "</>",
         title: "Code block (⌥⌘C)",
         group: "insert",
-        isActive: (_marks: string[], blockType: string) => blockType === "codeBlock",
+        isActive: ({ blockType }) => blockType === "codeBlock",
       },
     ];
   },

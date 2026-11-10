@@ -58,7 +58,7 @@ export const Strikethrough = Extension.create({
       label: "S\u0336",
       title: "Strikethrough (⌘⇧S)",
       group: "format",
-      isActive: (marks: string[]) => marks.includes("strikethrough"),
+      isActive: ({ activeMarks }) => activeMarks.includes("strikethrough"),
     }];
   },
 

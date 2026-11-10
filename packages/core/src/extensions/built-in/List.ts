@@ -17,7 +17,7 @@ import {
   nestedListLevel,
 } from "./listLevels";
 import { LIST_MARKER_PAINTER, listItemWrap, listMarkerPainter, listWrap } from "./listLayout";
-import type { SlashCommandContribution, ToolbarItemSpec } from "../types";
+import type { BlockAncestor, SlashCommandContribution, ToolbarItemSpec } from "../types";
 import { KeymapPriority } from "../types";
 import {
   pxToTwips,
@@ -269,6 +269,16 @@ const joinOntoListAbove: Command = (state, dispatch) => {
   return true;
 };
 
+/**
+ * The list the caret's paragraph is an item of, as Word's ribbon shows it:
+ * the list of the item that holds it. A paragraph in a table inside an item
+ * is no item, so it is in no list.
+ */
+function paragraphList(ancestors: readonly BlockAncestor[]): string | null {
+  const [holder, list] = ancestors;
+  return holder?.type === "listItem" && list ? list.type : null;
+}
+
 const listPdf: PdfNodeHandler = (block, ctx) => ctx.draw.lines(block, ctx);
 
 /**
@@ -401,14 +411,14 @@ export const List = Extension.create({
         label: "•",
         title: "Bullet list (⌘⇧8)",
         group: "list",
-        isActive: (_marks, blockType) => blockType === "bulletList",
+        isActive: ({ ancestors }) => paragraphList(ancestors) === "bulletList",
       },
       {
         command: "toggleOrderedList",
         label: "1.",
         title: "Ordered list (⌘⇧9)",
         group: "list",
-        isActive: (_marks, blockType) => blockType === "orderedList",
+        isActive: ({ ancestors }) => paragraphList(ancestors) === "orderedList",
       },
     ];
   },

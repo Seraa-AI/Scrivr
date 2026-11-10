@@ -28,8 +28,9 @@ snap.activeMarks                    // ['bold', 'italic']
 snap.activeMarkAttrs.color?.color   // '#dc2626'
 snap.activeMarkAttrs.fontSize?.size // 18
 
-snap.blockType      // 'paragraph' | 'heading' | 'bulletList' | ...
+snap.blockType      // 'paragraph' | 'heading' | 'codeBlock' | ...
 snap.blockAttrs     // { level: 2, align: 'left' }
+snap.ancestors      // [{ type: 'listItem', … }, { type: 'bulletList', … }, …]
 ```
 
 For ranges, `activeMarks` only includes marks present on **every** character in the selection.
@@ -44,7 +45,10 @@ Quick boolean check — useful for toggling toolbar button active states:
 editor.isActive('bold');
 editor.isActive('heading', { level: 1 });
 editor.isActive('link');
+editor.isActive('bulletList'); // the cursor is inside a bullet list, at any depth
 ```
+
+In a numbered list nested in a bulleted one, both `isActive('bulletList')` and `isActive('orderedList')` are true. To show toolbar buttons pressed as Word does, ask the item itself: `item.isActive(editor.getSelectionSnapshot())` presses only the list the paragraph belongs to.
 
 ---
 
@@ -69,11 +73,12 @@ attrs.fontFamily?.family; // 'Georgia'
 
 ### `editor.getBlockInfo()`
 
-Type name and attributes of the block containing the cursor:
+Type name and attributes of the node holding the selection's start (its paragraph or heading for a text selection; the cell for a cell selection), and the nodes around it, innermost first. In a list nested inside a table cell, the paragraph is the block and the list it belongs to is the nearest list in `ancestors`:
 
 ```ts
-const { blockType, blockAttrs } = editor.getBlockInfo();
+const { blockType, blockAttrs, ancestors } = editor.getBlockInfo();
 // blockType: 'heading', blockAttrs: { level: 2, align: 'center' }
+// ancestors: [{ type: 'listItem', attrs }, { type: 'orderedList', attrs }, { type: 'tableCell', attrs }, …]
 ```
 
 ---

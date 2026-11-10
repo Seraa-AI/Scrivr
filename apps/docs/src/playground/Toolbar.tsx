@@ -1,4 +1,4 @@
-import type { ToolbarItemSpec } from "@scrivr/core";
+import type { ToolbarItemSpec, ToolbarState } from "@scrivr/core";
 
 /** The command half of a spec — the only names a toolbar button can dispatch. */
 type ToolbarCommand = ToolbarItemSpec["command"];
@@ -32,10 +32,8 @@ import {
 interface ToolbarProps {
   editor: Editor | null;
   items: ToolbarItemSpec[];
-  activeMarks: string[];
-  activeMarkAttrs: Record<string, Record<string, unknown>>;
-  blockType: string;
-  blockAttrs: Record<string, unknown>;
+  /** The marks and block at the caret, as each item's `isActive` reads them. */
+  state: ToolbarState;
   /** Document-level default font family — shown when no explicit family is set on the selection. */
   defaultFontFamily?: string;
   /** Document-level default font size in px — shown when no fontSize mark is active. */
@@ -80,10 +78,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
 export function Toolbar({
   editor,
   items,
-  activeMarks,
-  activeMarkAttrs,
-  blockType,
-  blockAttrs,
+  state,
   defaultFontFamily = DEFAULT_FONT_FAMILY,
   defaultFontSize = 14,
 }: ToolbarProps) {
@@ -128,12 +123,7 @@ export function Toolbar({
             />
           ) : (
             groupMap.get(group)!.map((item) => {
-              const active = item.isActive(
-                activeMarks,
-                blockType,
-                blockAttrs,
-                activeMarkAttrs,
-              );
+              const active = item.isActive(state);
               return (
                 <ToolbarButton
                   key={`${item.command}:${JSON.stringify(item.args)}`}
