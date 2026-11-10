@@ -26,6 +26,7 @@ import type { Node as PmNode, Mark as PmMark } from "@scrivr/core/pm";
 import { layer } from "./styles";
 import type {
   DocxBlock,
+  DocxDiagnostic,
   DocxImportContext,
   DocxImportModel,
   DocxImports,
@@ -34,6 +35,9 @@ import type {
 } from "@scrivr/core";
 import {
   NO_HANDLER,
+  entryOf,
+  insideDropped,
+  noSchemaNode,
   ownerOf,
   reportRecorderOf,
   type DocxReportRecorder,
@@ -110,6 +114,23 @@ function lostUnlessProduced(
   return (result) => (producedNodes(result) ? null : { kind, owner });
 }
 
+/**
+ * Content the converter itself drops: one warning for the diagnostics and one
+ * entry for the report, so neither channel can be forgotten at a drop site.
+ * A `null` warning records the drop without one, for kinds whose warnings are
+ * silenced but which the inventory still counts.
+ */
+function dropUnhandled(
+  ctx: DocxImportContext,
+  recorder: DocxReportRecorder,
+  kind: string,
+  reason: string,
+  warning: Omit<DocxDiagnostic, "level"> | null,
+): void {
+  if (warning) ctx.diagnostics.warn(warning);
+  recorder.unhandled(kind, reason);
+}
+
 function transformBlock(
   block: DocxBlock,
   ctx: DocxImportContext,
@@ -121,7 +142,7 @@ function transformBlock(
   }
 
   if (block.type === "sdt") {
-    const blockHandler = handlers.blocks["sdt"];
+    const blockHandler = entryOf(handlers.blocks, "sdt");
     const owner = ownerOf(handlers.owners.blocks, "sdt");
     return recorder.subtree(
       () => {
@@ -135,7 +156,7 @@ function transformBlock(
           );
           if (handled) return handled;
         } else {
-          recorder.unhandled("sdt", NO_HANDLER);
+          dropUnhandled(ctx, recorder, "sdt", NO_HANDLER, null);
         }
         // Degrade gracefully by returning the unwrapped children.
         return contentNodes;
@@ -146,7 +167,7 @@ function transformBlock(
     );
   }
 
-  const blockHandler = handlers.blocks[block.type];
+  const blockHandler = entryOf(handlers.blocks, block.type);
   if (blockHandler) {
     const owner = ownerOf(handlers.owners.blocks, block.type);
     // A container — a table, a list — walks its own content from inside the
@@ -166,16 +187,7 @@ function transformParagraph(
   recorder: DocxReportRecorder,
 ): PmNode | PmNode[] | null {
   const styleId = block.attrs.styleId;
-  // Paragraph-style override fires first — Heading extension claims
-  // `Heading1` / `Heading2` / etc. before the default paragraph transform.
-  const override = styleId ? handlers.paragraphStyles[styleId] : undefined;
-  const blockHandler = handlers.blocks["paragraph"];
-  const owner =
-    styleId && override
-      ? ownerOf(handlers.owners.paragraphStyles, styleId)
-      : blockHandler
-        ? ownerOf(handlers.owners.blocks, "paragraph")
-        : null;
+  const dispatch = paragraphHandler(styleId, handlers);
 
   // The runs are counted as they are built, before the paragraph's handler
   // has decided; a paragraph that comes back empty takes them with it.
@@ -190,14 +202,42 @@ function transformParagraph(
       recorder,
       ctx.styles.runMarks(styleId),
     );
+    if (!dispatch) return fallbackParagraph(block, content, ctx, recorder);
+    return recorder.handle(
+      dispatch.owner,
+      "paragraph",
+      () => dispatch.handler(block, content, ctx),
+      producedNodes,
+    );
+  }, lostUnlessProduced("paragraph", dispatch?.owner ?? null));
+}
+
+type ParagraphTransform = (
+  block: DocxBlock & { type: "paragraph" },
+  content: PmNode[],
+  ctx: DocxImportContext,
+) => PmNode | PmNode[] | null;
+
+/**
+ * Who builds a paragraph: the override for its style when one is registered —
+ * the Heading extension claims `Heading1`, `Heading2`, … — otherwise the
+ * `paragraph` block handler. `null` leaves it to the converter's fallback.
+ */
+function paragraphHandler(
+  styleId: string | undefined,
+  handlers: ResolvedImportHandlers,
+): { handler: ParagraphTransform; owner: HandlerOwner } | null {
+  if (styleId !== undefined) {
+    const override = entryOf(handlers.paragraphStyles, styleId);
     if (override) {
-      return recorder.handle(owner, "paragraph", () => override(block, content, ctx), producedNodes);
+      return { handler: override, owner: ownerOf(handlers.owners.paragraphStyles, styleId) };
     }
-    if (blockHandler) {
-      return recorder.handle(owner, "paragraph", () => blockHandler(block, content, ctx), producedNodes);
-    }
-    return fallbackParagraph(block, content, ctx, recorder);
-  }, lostUnlessProduced("paragraph", owner));
+  }
+  const blockHandler = entryOf(handlers.blocks, "paragraph");
+  if (blockHandler) {
+    return { handler: blockHandler, owner: ownerOf(handlers.owners.blocks, "paragraph") };
+  }
+  return null;
 }
 
 function transformInlines(
@@ -220,12 +260,11 @@ function transformInlines(
         out.push(hb.create());
         recorder.carried("hardBreak");
       } else {
-        ctx.diagnostics.warn({
+        dropUnhandled(ctx, recorder, "hardBreak", noSchemaNode("hardBreak"), {
           code: "schema-missing-hardBreak",
           message: "Schema has no `hardBreak` node — line break dropped",
           nodeType: "hardBreak",
         });
-        recorder.unhandled("hardBreak", "the schema has no hardBreak node");
       }
     } else {
       const node = transformAtom(item, inherited, ctx, handlers, recorder);
@@ -237,7 +276,7 @@ function transformInlines(
 
 /**
  * An inline an extension builds — an image or a field. Its marks are counted
- * as they are built, so they go with it when the handler builds nothing.
+ * as they are built, so they go with it when it is not built.
  */
 function transformAtom(
   item: DocxInline & { type: "image" | "field" },
@@ -246,28 +285,38 @@ function transformAtom(
   handlers: ResolvedImportHandlers,
   recorder: DocxReportRecorder,
 ): PmNode | null {
-  const handler = handlers.inlines[item.type];
+  const marks = layer(inherited, item.marks);
+  const handler = entryOf(handlers.inlines, item.type);
   if (!handler) {
-    if (item.type === "image") {
-      ctx.diagnostics.warn({
-        code: "image-no-handler",
-        message: "No image import handler registered — image dropped",
-        nodeType: "image",
-      });
-    } else {
-      ctx.diagnostics.warn({
-        code: "field-no-handler",
-        message: `No import handler for field "${item.instr.trim()}" — dropped`,
-      });
+    dropUnhandled(
+      ctx,
+      recorder,
+      item.type,
+      NO_HANDLER,
+      item.type === "image"
+        ? {
+            code: "image-no-handler",
+            message: "No image import handler registered — image dropped",
+            nodeType: "image",
+          }
+        : {
+            code: "field-no-handler",
+            message: `No import handler for field "${item.instr.trim()}" — dropped`,
+          },
+    );
+    // Its formatting goes with it. Not dispatched: nothing would carry the
+    // marks, and a mark nobody claims would add an `unsupported-mark` that
+    // fails an import under `unsupported: "throw"` for a drop that is not.
+    for (const mark of marks) {
+      if (!mark.off) recorder.unhandled(mark.kind, insideDropped(item.type));
     }
-    recorder.unhandled(item.type, NO_HANDLER);
     return null;
   }
   const owner = ownerOf(handlers.owners.inlines, item.type);
   return recorder.subtree(
     () => {
-      const marks = transformMarks(layer(inherited, item.marks), ctx, handlers, recorder);
-      return recorder.handle(owner, item.type, () => handler(item, marks, ctx), built);
+      const pmMarks = transformMarks(marks, ctx, handlers, recorder);
+      return recorder.handle(owner, item.type, () => handler(item, pmMarks, ctx), built);
     },
     (node) => (node ? null : { kind: item.type, owner }),
   );
@@ -284,24 +333,30 @@ function transformMarks(
     // The run refused this formatting. It has already outranked whatever the
     // style offered; there is nothing left to draw.
     if (mark.off) continue;
-    const handler = handlers.marks[mark.kind];
+    const handler = entryOf(handlers.marks, mark.kind);
     if (!handler) {
-      // Counted even when the warning below is silenced: the report is the
-      // inventory, and a property nobody reads is still a property dropped.
-      recorder.unhandled(mark.kind, NO_HANDLER);
-      // Unknown mark kind — drop with diagnostic. Reserved kinds we don't
-      // map yet (like spacing, kern, lang) flood diagnostics noisily; skip
-      // the warning for them. The well-known kinds we *do* expect callers
-      // to claim are formatting marks (b, i, u, strike, color, highlight,
-      // shd, sz, rFonts).
-      if (NOISY_RPR_KINDS.has(mark.kind)) continue;
-      ctx.diagnostics.warn({
-        code: "unsupported-mark",
-        message: `No import handler for OOXML run-property "${mark.kind}"`,
-        markType: mark.kind,
-      });
+      // Reserved kinds we don't map yet (like spacing, kern, lang) flood
+      // diagnostics noisily, so their warning is silenced. They are still
+      // counted: the report is the inventory, and a property nobody reads is
+      // still a property dropped.
+      dropUnhandled(
+        ctx,
+        recorder,
+        mark.kind,
+        NO_HANDLER,
+        NOISY_RPR_KINDS.has(mark.kind)
+          ? null
+          : {
+              code: "unsupported-mark",
+              message: `No import handler for OOXML run-property "${mark.kind}"`,
+              markType: mark.kind,
+            },
+      );
       continue;
     }
+    // A handler that returns nothing for a value Word uses to mean "no
+    // formatting" — `w:color="auto"` — reports the property kept itself, so
+    // what is recorded here as dropped is formatting that did not cross.
     const result = recorder.handle(
       ownerOf(handlers.owners.marks, mark.kind),
       mark.kind,
@@ -338,12 +393,11 @@ function fallbackParagraph(
 ): PmNode | null {
   const paragraph = ctx.schema.nodes["paragraph"];
   if (!paragraph) {
-    ctx.diagnostics.warn({
+    dropUnhandled(ctx, recorder, "paragraph", noSchemaNode("paragraph"), {
       code: "schema-missing-paragraph",
       message: "Schema has no `paragraph` node — block dropped",
       nodeType: "paragraph",
     });
-    recorder.unhandled("paragraph", "the schema has no paragraph node");
     return null;
   }
   const attrs: Record<string, unknown> = {};
@@ -363,26 +417,18 @@ function fallbackBlock(
   ctx: DocxImportContext,
   recorder: DocxReportRecorder,
 ): PmNode | null {
-  if (block.type === "horizontalRule") {
-    const hr = ctx.schema.nodes["horizontalRule"];
-    if (hr) {
-      const rule = hr.create();
-      recorder.carried("horizontalRule");
-      return rule;
+  const hasFallback = block.type === "horizontalRule" || block.type === "pageBreak";
+  if (hasFallback) {
+    const type = ctx.schema.nodes[block.type];
+    if (type) {
+      const node = type.create();
+      recorder.carried(block.type);
+      return node;
     }
   }
-  if (block.type === "pageBreak") {
-    const pb = ctx.schema.nodes["pageBreak"];
-    if (pb) {
-      const pageBreak = pb.create();
-      recorder.carried("pageBreak");
-      return pageBreak;
-    }
-  }
-  ctx.diagnostics.warn({
+  dropUnhandled(ctx, recorder, block.type, hasFallback ? noSchemaNode(block.type) : NO_HANDLER, {
     code: "unsupported-block",
     message: `No import handler (and no fallback) for block kind "${block.type}"`,
   });
-  recorder.unhandled(block.type, NO_HANDLER);
   return null;
 }

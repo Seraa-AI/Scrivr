@@ -161,22 +161,15 @@ export interface IBaseEditor {
   getMarkdownParserTokens(): Record<string, MarkdownParserTokenSpec>;
   /** Parse a markdown string into a ProseMirror document node. */
   parseMarkdown(text: string): Node;
-  /**
-   * Export contributions from all extensions, in registration order.
-   * @deprecated Use `getFormatContributions()`, which also names each
-   * contribution's extension.
-   */
+  /** Export contributions from all extensions, in registration order. */
   getExportContributions(): ExportContributionMap[];
-  /**
-   * Import contributions from all extensions, in registration order.
-   * @deprecated Use `getFormatContributions()`, which also names each
-   * contribution's extension.
-   */
+  /** Import contributions from all extensions, in registration order. */
   getImportContributions(): ImportContributionMap[];
   /**
-   * Export and import contributions from all extensions, each with the name of
-   * the extension that made it, in registration order. What a format package
-   * reads to collect handlers, so it can say which extension handled what.
+   * Both directions' contributions, each with the name of the extension that
+   * made it, in registration order. For a format package that reports which
+   * extension handled what; one that only needs the handlers reads
+   * `getExportContributions()` or `getImportContributions()`.
    */
   getFormatContributions(): FormatContribution[];
   /**

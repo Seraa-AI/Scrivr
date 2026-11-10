@@ -36,6 +36,7 @@ import { DocxExportError } from "./error";
 import {
   NO_HANDLER,
   WRAPPER_DECLINED,
+  entryOf,
   ownerOf,
   reportRecorderOf,
   type DocxReportRecorder,
@@ -103,22 +104,21 @@ function walk(
   }
 
   const type = node.type.name;
-  let lost: LostItem | null = null;
-  return recorder.subtree(
-    () => {
+  const walked = recorder.subtree(
+    (): { xml: XmlNode[]; lost: LostItem | null } => {
       const children: XmlNode[] = [];
       node.forEach((child) => {
         const childMeta: DocxNodeMeta = { inline: child.isInline };
         children.push(...walk(child, ctx, handlers, childMeta, recorder));
       });
 
-      const handler = handlers.nodes[type];
+      const handler = entryOf(handlers.nodes, type);
       if (!handler) {
         recorder.unhandled(type, NO_HANDLER);
-        // "drop" bubbles the children up; "placeholder" writes a stand-in
-        // in their place.
-        if (ctx.options.unsupported === "placeholder") lost = { kind: type, owner: null };
-        return applyUnsupportedPolicy(node, children, ctx);
+        // A placeholder is output, but it stands in for the children, so they
+        // are lost; "drop" bubbles them up instead.
+        const lost = ctx.options.unsupported === "placeholder" ? { kind: type, owner: null } : null;
+        return { xml: applyUnsupportedPolicy(node, children, ctx), lost };
       }
 
       const owner = ownerOf(handlers.owners?.nodes, type);
@@ -128,11 +128,14 @@ function walk(
         () => handler(node, children, ctx, meta),
         wroteXml,
       );
-      if (!wroteXml(result)) lost = { kind: type, owner };
-      return Array.isArray(result) ? result : [result];
+      return {
+        xml: Array.isArray(result) ? result : [result],
+        lost: wroteXml(result) ? null : { kind: type, owner },
+      };
     },
-    () => lost,
+    (result) => result.lost,
   );
+  return walked.xml;
 }
 
 /** A node handler's result put something in the document. */
@@ -141,20 +144,13 @@ function wroteXml(result: XmlNode | XmlNode[]): boolean {
 }
 
 /**
- * Which of a mark's handlers accounts for it in the report. A mark is one item
- * however many handlers touch it, and the one that writes its element decides:
- * the wrapper when there is one (a hyperlink exists only if it wraps the run),
+ * Fold a run's marks into its property bag.
+ *
+ * A mark is one item in the report however many handlers touch it, and the
+ * handler that writes its element accounts for it: the wrapper when there is
+ * one (a hyperlink exists only if it wraps the run, and `wrapRun` records it),
  * otherwise the property handler.
  */
-function markAccountant(
-  handlers: WalkerHandlers,
-  type: string,
-): "wrapper" | "properties" | "none" {
-  if (handlers.markWrappers?.[type]) return "wrapper";
-  if (handlers.marks[type]) return "properties";
-  return "none";
-}
-
 function mergeMarks(
   marks: readonly Mark[],
   ctx: DocxContext,
@@ -164,11 +160,10 @@ function mergeMarks(
   let props: DocxRunProps = {};
   for (const mark of marks) {
     const type = mark.type.name;
-    const accountant = markAccountant(handlers, type);
-    const handler = handlers.marks[type];
+    const handler = entryOf(handlers.marks, type);
+    const hasWrapper = entryOf(handlers.markWrappers, type) !== undefined;
     if (!handler) {
-      // A wrapper alone carries a mark across, and `wrapRun` accounts for it.
-      if (accountant === "none") {
+      if (!hasWrapper) {
         ctx.diagnostics.warn({
           code: "unsupported-mark",
           message: `No DOCX handler registered for mark "${type}"`,
@@ -180,11 +175,9 @@ function mergeMarks(
     }
     const owner = ownerOf(handlers.owners?.marks, type);
     const apply = () => handler(props, mark, ctx);
-    // A property handler always returns a bag, so when it is the accountant it
-    // kept the mark unless it said otherwise.
-    props = accountant === "properties"
-      ? recorder.handle(owner, type, apply, () => true)
-      : recorder.attribute(owner, apply);
+    // A property handler always returns a bag, so when it accounts for the
+    // mark it kept it unless it said otherwise.
+    props = hasWrapper ? recorder.attribute(owner, apply) : recorder.handle(owner, type, apply, () => true);
   }
   return props;
 }
@@ -208,7 +201,7 @@ function wrapRun(
   let wrapped = run;
   for (const mark of marks) {
     const type = mark.type.name;
-    const wrapper = wrappers[type];
+    const wrapper = entryOf(wrappers, type);
     if (!wrapper) continue;
     const before = wrapped;
     wrapped = recorder.handle(

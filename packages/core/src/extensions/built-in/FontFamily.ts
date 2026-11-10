@@ -159,7 +159,14 @@ export const FontFamily = Extension.create<FontFamilyOptions>({
         readFontFamilyAttr(attrs["ascii"]) ??
         readFontFamilyAttr(attrs["hAnsi"]) ??
         readFontFamilyAttr(attrs["cs"]);
-      if (!family) return null;
+      if (!family) {
+        // `w:hint` alone names no face — it only says which script's font
+        // applies — so there is nothing to carry and nothing lost. A theme
+        // reference (`w:asciiTheme`) does name a face; it is not resolved
+        // yet, so it stays a drop.
+        if (Object.keys(attrs).every((name) => name === "hint")) ctx.report.kept(mark.kind);
+        return null;
+      }
       const t = ctx.schema.marks["fontFamily"];
       if (!t) return null;
       return t.create({ family });

@@ -7,11 +7,13 @@
  */
 
 import { describe, it, expect } from "vitest";
-import type { DocxDiagnostic } from "@scrivr/core";
+import { ServerEditor, type DocxDiagnostic } from "@scrivr/core";
+import { createDocxImportContext } from "./import/context";
 import {
   HANDLER_RETURNED_NOTHING,
   assignOwned,
   createReportRecorder,
+  entryOf,
   insideDropped,
   ownedBundles,
   ownerOf,
@@ -346,12 +348,68 @@ describe("report recorder — counts", () => {
   });
 });
 
+describe("report recorder — a handler's own account against its result", () => {
+  it("keeps an item's content when its handler reports it kept but returns nothing", () => {
+    // A handler that writes its item somewhere other than its result — a
+    // footnote into its own part — has kept it, and so its content.
+    const recorder = createReportRecorder();
+    recorder.subtree(
+      () => {
+        recorder.carried("text");
+        return recorder.handle(
+          "footnote",
+          "footnote",
+          () => {
+            recorder.reporter.kept("footnote");
+            return null;
+          },
+          (result) => result !== null,
+        );
+      },
+      (result) => (result === null ? { kind: "footnote", owner: "footnote" } : null),
+    );
+
+    const { counts, entries } = recorder.snapshot();
+    expect(entries).toEqual([]);
+    expect(counts["footnote"]).toEqual({ kept: 1, dropped: 0, changed: 0 });
+    expect(counts["text"]).toEqual({ kept: 1, dropped: 0, changed: 0 });
+  });
+
+  it("still takes the content when the handler only reported a different kind kept", () => {
+    const recorder = createReportRecorder();
+    recorder.subtree(
+      () => {
+        recorder.carried("text");
+        return recorder.handle(
+          "callout",
+          "callout",
+          () => {
+            recorder.reporter.kept("calloutIcon");
+            return null;
+          },
+          (result) => result !== null,
+        );
+      },
+      (result) => (result === null ? { kind: "callout", owner: "callout" } : null),
+    );
+
+    expect(recorder.snapshot().counts["text"]).toEqual({ kept: 0, dropped: 1, changed: 0 });
+  });
+});
+
 describe("report recorder — binding", () => {
-  it("gives a context assembled by hand a recorder of its own", () => {
-    const context = {};
-    const recorder = reportRecorderOf(context);
-    expect(reportRecorderOf(context)).toBe(recorder);
-    expect(reportRecorderOf({})).not.toBe(recorder);
+  it("binds the recorder its factory made, and warns once for a context it did not make", () => {
+    const ctx = createDocxImportContext({ schema: new ServerEditor().schema });
+    const bound = reportRecorderOf(ctx);
+    expect(reportRecorderOf(ctx)).toBe(bound);
+    expect(ctx.diagnostics.list().some((d) => d.code === "report-unbound")).toBe(false);
+
+    // A copy is a different object, so the converter cannot find its recorder.
+    const copy = { ...ctx };
+    const detached = reportRecorderOf(copy);
+    expect(detached).not.toBe(bound);
+    expect(reportRecorderOf(copy)).toBe(detached);
+    expect(ctx.diagnostics.list().filter((d) => d.code === "report-unbound")).toHaveLength(1);
   });
 });
 
@@ -373,6 +431,11 @@ describe("handler ownership", () => {
     expect(ownerOf(owners, "constructor")).toBeNull();
     expect(ownerOf(owners, "toString")).toBeNull();
     expect(ownerOf(undefined, "Heading1")).toBeNull();
+
+    const handlers: Record<string, () => string> = { Heading1: () => "heading" };
+    expect(entryOf(handlers, "Heading1")).toBe(handlers["Heading1"]);
+    expect(entryOf(handlers, "constructor")).toBeUndefined();
+    expect(entryOf(handlers, "__proto__")).toBeUndefined();
   });
 
   it("orders bundles by registration, with the call's overrides last", () => {

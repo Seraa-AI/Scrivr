@@ -53,6 +53,17 @@ export type { ZipDocxOptions, ZipCompressionLevel } from "./export/package";
 export { walkDocument } from "./export/walker";
 export type { WalkerHandlers, WalkerHandlerOwners } from "./export/walker";
 export type { HandlerOwner } from "./report";
+// The words `report.entries` carry in `owner` and `reason`, so an app that
+// groups or translates entries matches on these rather than on copied strings.
+export {
+  OVERRIDES_OWNER,
+  NO_HANDLER,
+  NO_PARSER,
+  HANDLER_RETURNED_NOTHING,
+  WRAPPER_DECLINED,
+  insideDropped,
+  noSchemaNode,
+} from "./report";
 export { createDocxContext } from "./export/createContext";
 export { buildDocxPackage } from "./export/defaults";
 

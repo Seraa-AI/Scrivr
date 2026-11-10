@@ -284,11 +284,11 @@ describe("renderTableRowPdf — cell shading", () => {
 describe("Table extension — PDF export contribution", () => {
   it("contributes a tableRow PDF node handler via addExports", () => {
     const editor = new ServerEditor({ extensions: [StarterKit.configure({ table: true })] });
-    expect(typeof pdfNodeHandler(editor.getFormatContributions().map((c) => c.exports), "tableRow")).toBe("function");
+    expect(typeof pdfNodeHandler(editor.getExportContributions(), "tableRow")).toBe("function");
   });
 
   it("does not contribute the handler when tables are disabled", () => {
     const editor = new ServerEditor({ extensions: [StarterKit] });
-    expect(pdfNodeHandler(editor.getFormatContributions().map((c) => c.exports), "tableRow")).toBeUndefined();
+    expect(pdfNodeHandler(editor.getExportContributions(), "tableRow")).toBeUndefined();
   });
 });

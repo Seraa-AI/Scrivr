@@ -42,13 +42,16 @@ import { NO_PARSER } from "../report";
 const MAX_GRID_SPAN = 64;
 
 /**
- * Where the parser says what it could not read: a warning for the
- * diagnostics, and an entry for the import's report. A standalone argument so
+ * Where the parser reports what it could not read: warnings for the
+ * diagnostics, and drops for the import's report. A standalone argument so
  * parser tests can supply a no-op without spinning up a full context.
  */
 export interface ParserDiagnostics {
   warn(d: Omit<DocxDiagnostic, "level">): void;
-  /** Record a Word element the parser has no reading for. */
+  /**
+   * Record a Word element the parser has no reading for. Called for top-level
+   * body elements; what it skips inside a paragraph or run is not seen here.
+   */
   dropped(element: string, reason: string): void;
 }
 

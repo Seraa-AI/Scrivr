@@ -177,25 +177,26 @@ export interface DocxDiagnostic {
 // ── Report ──────────────────────────────────────────────────────────────────
 
 /**
- * Where a handler says what became of the content it was handed.
- *
- * The report is the inventory of a conversion: what crossed, what did not, and
- * what crossed but not as the source had it. Diagnostics stay the channel for
- * warnings. A drop is usually both, and the two are recorded separately.
+ * Where a handler says what became of the content it was handed. Diagnostics
+ * stay the channel for warnings; a drop usually goes in both.
  *
  * `kind` uses the vocabulary of the side the content came from. An export
  * reports Scrivr's node and mark names (`"paragraph"`, `"bold"`). An import
  * reports Word's, as the parser names them: a `DocxBlock` or `DocxInline`
- * `type`, or a `DocxMark` `kind` such as `"b"`.
+ * `type`, a `DocxMark` `kind` such as `"b"`, or, for a top-level element the
+ * parser cannot read, its tag (`"w:customXml"`).
  *
  * A handler does not have to call this at all. For each item it hands to a
  * handler — a node, an inline or a mark — the converter records `kept` if the
  * handler returned content and `dropped` if it returned none, unless the
  * handler itself reported `kept` or `dropped` for that kind while it ran, in
  * which case the handler's account stands. When an item is lost, whatever was
- * counted kept inside it is moved to dropped with it. Content with no handler
- * is recorded as dropped with the reason `"no handler"`. So `changed`, and
- * drops the converter cannot see, are what a handler adds.
+ * counted kept inside it is moved to dropped with it — unless its handler
+ * reported it kept, as one that writes it somewhere other than its result
+ * does. Content with no handler is recorded as dropped with the reason
+ * `"no handler"`. So `changed`, drops the converter cannot see, and returning
+ * nothing for a value that means "no formatting" (report it `kept`) are what a
+ * handler adds.
  */
 export interface DocxReporter {
   /**

@@ -69,6 +69,8 @@ report.entries;          // [{ outcome: "dropped", kind: "sdt", reason: "no hand
 
 So an app can say "imported 214 paragraphs and 37 line breaks; omitted 2 content controls".
 
+The words the converter writes in `reason` and `owner` are exported, so an app that groups or translates entries matches on them rather than on copied strings: `NO_HANDLER`, `NO_PARSER`, `HANDLER_RETURNED_NOTHING`, `WRAPPER_DECLINED`, `OVERRIDES_OWNER`, and `insideDropped(kind)` / `noSchemaNode(name)` for the reasons that name a kind.
+
 An export names content in Scrivr's terms (`paragraph`, `bold`). An import names it in Word's terms, as the parser reads them: block and inline types (`paragraph`, `hardBreak`), run properties without their prefix (`b`, `lang`), and, for a top-level element the parser cannot read, the element's full name (`w:customXml`).
 
 **What it covers.** The report covers every item a handler or a built-in fallback was given, and every top-level body element the parser could not read. When an item is lost, the content inside it is counted as dropped with it. A diagnostic is a warning, so the report also lists drops too common to warn about, such as a `lang` run property. Not yet covered: elements the parser skips inside a paragraph or run, such as an equation or a text box. Those are not in the report.
@@ -130,6 +132,11 @@ callout: (node, children, ctx) => {
 ```
 
 When a handler calls `ctx.report.kept(kind, count)` or `ctx.report.dropped(kind, reason)` with the kind it was handed, its account replaces the converter's for that item. Calls for any other kind are counted as well and replace nothing. `changed` is a note on content that was kept, and one item can carry several.
+
+Two cases where a handler returns nothing and should say `kept`:
+
+- **A value that means "no formatting".** Word's `w:color="auto"` builds no mark, but nothing was lost: the editor's default is what the file asked for. The built-in Color, Highlight and FontFamily handlers report these kept.
+- **Content written somewhere other than the result**, such as a footnote written to its own part. The handler reports its item kept, and the content inside it stays kept too.
 
 ## License
 

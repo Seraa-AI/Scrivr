@@ -20,12 +20,25 @@ import {
   type FormatContribution,
 } from "@scrivr/core";
 import {
+  HANDLER_RETURNED_NOTHING,
+  NO_HANDLER,
+  NO_PARSER,
+  OVERRIDES_OWNER,
+  WRAPPER_DECLINED,
   exportDocx,
   exportDocxBytes,
   importDocx,
+  insideDropped,
+  noSchemaNode,
+  walkDocument,
   xml,
   type DocxReport,
+  type DocxReportCount,
   type DocxReportEntry,
+  type DocxReporter,
+  type HandlerOwner,
+  type WalkerHandlerOwners,
+  type WalkerHandlers,
 } from "./index";
 
 const UnhandledNode = Extension.create({
@@ -444,6 +457,102 @@ describe("importDocx — report", () => {
     expect(report.counts["text"]?.dropped).toBe(0);
   });
 
+  it("counts formatting Word sets to its default as kept, not dropped", async () => {
+    // Each says "no formatting": automatic colour, no highlight, no shading,
+    // and a font hint that names no face. None of them is a loss.
+    const rPr =
+      `<w:rFonts w:hint="eastAsia"/><w:color w:val="auto"/>` +
+      `<w:highlight w:val="none"/><w:shd w:val="clear" w:color="auto" w:fill="auto"/>`;
+    const bytes = await docWithBody(`<w:p><w:r><w:rPr>${rPr}</w:rPr><w:t>plain</w:t></w:r></w:p>`);
+    const { report } = await importDocx(new ServerEditor({ extensions: [StarterKit] }), bytes);
+
+    for (const kind of ["rFonts", "color", "highlight", "shd"]) {
+      expect(report.counts[kind], kind).toEqual({ kept: 1, dropped: 0, changed: 0 });
+    }
+    expect(dropsOf(report)).toEqual([]);
+  });
+
+  it("still records a theme font as dropped, under the extension that could not read it", async () => {
+    const bytes = await docWithBody(
+      `<w:p><w:r><w:rPr><w:rFonts w:asciiTheme="minorHAnsi" w:hAnsiTheme="minorHAnsi"/></w:rPr><w:t>x</w:t></w:r></w:p>`,
+    );
+    const { report } = await importDocx(new ServerEditor({ extensions: [StarterKit] }), bytes);
+
+    expect(report.entries).toContainEqual({
+      outcome: "dropped",
+      kind: "rFonts",
+      reason: "handler returned nothing",
+      owner: "fontFamily",
+      count: 1,
+    });
+  });
+
+  it("imports a paragraph whose style id is a name Object already has", async () => {
+    const paragraphs = ["constructor", "toString", "__proto__"]
+      .map((id) => `<w:p><w:pPr><w:pStyle w:val="${id}"/></w:pPr><w:r><w:t>${id}</w:t></w:r></w:p>`)
+      .join("");
+    const bytes = await docWithBody(paragraphs);
+    const { doc, report } = await importDocx(new ServerEditor({ extensions: [StarterKit] }), bytes);
+
+    expect(doc.textContent).toContain("constructor");
+    expect(doc.textContent).toContain("toString");
+    expect(doc.textContent).toContain("__proto__");
+    expect(dropsOf(report)).toEqual([]);
+  });
+
+  describe("a field nothing handles", () => {
+    // StarterKit has no field handler. The field inherits its paragraph
+    // style's run properties: bold, which StarterKit claims, and outline,
+    // which nothing does.
+    async function unhandledField(editor: ServerEditor): Promise<Uint8Array> {
+      const entries = unzipSync(await exportDocxBytes(editor));
+      entries["word/styles.xml"] = strToU8(
+        strFromU8(entries["word/styles.xml"]!).replace(
+          "</w:styles>",
+          `<w:style w:type="paragraph" w:styleId="Loud"><w:rPr><w:b/><w:outline/></w:rPr></w:style></w:styles>`,
+        ),
+      );
+      entries["word/document.xml"] = strToU8(
+        strFromU8(entries["word/document.xml"]!).replace(
+          "<w:sectPr",
+          `<w:p><w:pPr><w:pStyle w:val="Loud"/></w:pPr><w:fldSimple w:instr=" PAGE "/></w:p><w:sectPr`,
+        ),
+      );
+      return zipSync(entries);
+    }
+
+    it("takes its formatting with it", async () => {
+      const editor = new ServerEditor({ extensions: [StarterKit] });
+      const { report } = await importDocx(editor, await unhandledField(editor));
+
+      expect(report.entries).toContainEqual({
+        outcome: "dropped",
+        kind: "field",
+        reason: "no handler",
+        owner: null,
+        count: 1,
+      });
+      for (const kind of ["b", "outline"]) {
+        expect(report.entries).toContainEqual({
+          outcome: "dropped",
+          kind,
+          reason: "inside a field that was dropped",
+          owner: null,
+          count: 1,
+        });
+      }
+    });
+
+    it("does not fail a throwing import over formatting nobody claims on it", async () => {
+      // The field's own drop is not fatal, so neither is the formatting it took.
+      const editor = new ServerEditor({ extensions: [StarterKit] });
+      const { diagnostics } = await importDocx(editor, await unhandledField(editor), {
+        unsupported: "throw",
+      });
+      expect(diagnostics.some((d) => d.code === "unsupported-mark")).toBe(false);
+    });
+  });
+
   it("records a content control's content as dropped when its handler returns an empty list", async () => {
     const bytes = await docWithBody(UNTAGGED_CONTROL);
     const { report, doc } = await importDocx(new ServerEditor({ extensions: [StarterKit] }), bytes, {
@@ -458,5 +567,39 @@ describe("importDocx — report", () => {
       owner: "overrides",
       count: 1,
     });
+  });
+});
+
+describe("the report's vocabulary, as a consumer imports it", () => {
+  it("names each reason and owner the converter writes", () => {
+    // An app matches entries on these rather than on copied strings, so a
+    // rewording reaches it through the constant.
+    expect([NO_HANDLER, NO_PARSER, HANDLER_RETURNED_NOTHING, WRAPPER_DECLINED]).toEqual([
+      "no handler",
+      "no parser",
+      "handler returned nothing",
+      "wrapper left the run unwrapped",
+    ]);
+    expect(OVERRIDES_OWNER).toBe("overrides");
+    expect(insideDropped("table")).toBe("inside a table that was dropped");
+    expect(noSchemaNode("hardBreak")).toBe("the schema has no hardBreak node");
+  });
+
+  it("types a walk's handlers, their owners and its report from the package entry", () => {
+    const editor = new ServerEditor({ extensions: [StarterKit] });
+    paragraphDoc(editor);
+    const owners: WalkerHandlerOwners = { nodes: { paragraph: "paragraph" } };
+    const handlers: WalkerHandlers = { nodes: {}, marks: {}, owners };
+    const owner: HandlerOwner = owners.nodes?.["paragraph"] ?? null;
+    const count: DocxReportCount = { kept: 0, dropped: 0, changed: 0 };
+    const reporter: DocxReporter = { kept: () => {}, dropped: () => {}, changed: () => {} };
+
+    expect(typeof walkDocument).toBe("function");
+    expect([handlers.owners, owner, count.kept, typeof reporter.kept]).toEqual([
+      owners,
+      "paragraph",
+      0,
+      "function",
+    ]);
   });
 });

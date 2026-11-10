@@ -538,7 +538,8 @@ export class ExtensionManager {
   /**
    * Both directions' contributions with the extension each came from, in
    * registration order — the same order as `getExportContributions` and
-   * `getImportContributions`.
+   * `getImportContributions`. The DOCX converter reads this so its report can
+   * name the extension behind each handler.
    */
   getFormatContributions(): FormatContribution[] {
     return this.resolved.map((ext) => ({

@@ -23,7 +23,9 @@
  */
 
 import type {
+  DocxContext,
   DocxDiagnostic,
+  DocxImportContext,
   DocxReport,
   DocxReportCount,
   DocxReportEntry,
@@ -32,8 +34,9 @@ import type {
 } from "@scrivr/core";
 
 /**
- * Who contributed a handler: an extension's `name`, `OVERRIDES_OWNER` for a
- * handler passed in the call's own `overrides`, or `null` for none.
+ * Who contributed a handler: an extension's `name`, `"overrides"` for a
+ * handler passed in the call's own `overrides`, or `null` when nothing
+ * handled the content.
  */
 export type HandlerOwner = string | null;
 
@@ -55,6 +58,11 @@ export const WRAPPER_DECLINED = "wrapper left the run unwrapped";
 /** The reason recorded for content inside an item that was itself lost. */
 export function insideDropped(parentKind: string): string {
   return `inside a ${parentKind} that was dropped`;
+}
+
+/** The reason recorded when the converter's own fallback needs a node the schema lacks. */
+export function noSchemaNode(nodeName: string): string {
+  return `the schema has no ${nodeName} node`;
 }
 
 /** The item whose content a subtree held, when that item was lost. */
@@ -90,7 +98,8 @@ export interface DocxReportRecorder {
   /**
    * Run the walk of one item's content together with the item's own handler.
    * When `lost(result)` names the item, everything counted kept inside is
-   * moved to dropped, filed under that item's owner.
+   * moved to dropped, filed under that item's owner — unless the item's
+   * handler reported it kept, in which case its account stands.
    */
   subtree<T>(run: () => T, lost: (result: T) => LostItem | null): T;
   /** The converter's own account: one `kind` it carried across with no handler. */
@@ -115,6 +124,16 @@ interface Frame {
   kind: string | null;
   /** The code in this frame reported `kept` or `dropped` for `kind`. */
   decided: boolean;
+  /** Of those, it reported `kept`. */
+  claimedKept: boolean;
+}
+
+/** One open subtree. */
+interface SubtreeLevel {
+  /** Kept counts inside it, so a lost parent can move them. */
+  kept: Map<string, number>;
+  /** Kinds whose handler, running at this level, reported them kept. */
+  claimedKept: Set<string>;
 }
 
 export function createReportRecorder(options: ReportRecorderOptions = {}): DocxReportRecorder {
@@ -124,8 +143,8 @@ export function createReportRecorder(options: ReportRecorderOptions = {}): DocxR
   // every other loss and grow with the document.
   const entries = new Map<string, DocxReportEntry>();
   const frames: Frame[] = [];
-  /** Kept counts per open subtree, innermost last, so a lost parent can move them. */
-  const keptInSubtree: Array<Map<string, number>> = [];
+  /** Open subtrees, innermost last. */
+  const subtrees: SubtreeLevel[] = [];
 
   const countOf = (kind: string): DocxReportCount => {
     let count = counts.get(kind);
@@ -138,8 +157,8 @@ export function createReportRecorder(options: ReportRecorderOptions = {}): DocxR
 
   const addKept = (kind: string, count: number): void => {
     countOf(kind).kept += count;
-    const open = keptInSubtree[keptInSubtree.length - 1];
-    if (open) open.set(kind, (open.get(kind) ?? 0) + count);
+    const open = subtrees[subtrees.length - 1];
+    if (open) open.kept.set(kind, (open.kept.get(kind) ?? 0) + count);
   };
 
   const addEntry = (
@@ -159,9 +178,12 @@ export function createReportRecorder(options: ReportRecorderOptions = {}): DocxR
   const innermost = (): Frame | undefined => frames[frames.length - 1];
 
   /** A handler accounted for the item its frame was handed. */
-  const markDecided = (kind: string): void => {
+  const markDecided = (kind: string, kept: boolean): void => {
     const frame = innermost();
-    if (frame && frame.kind === kind) frame.decided = true;
+    if (frame && frame.kind === kind) {
+      frame.decided = true;
+      if (kept) frame.claimedKept = true;
+    }
   };
 
   const ownerNow = (): HandlerOwner => innermost()?.owner ?? null;
@@ -188,11 +210,11 @@ export function createReportRecorder(options: ReportRecorderOptions = {}): DocxR
       }
       addKept(kind, count);
       // Keeping none of the item is no account of it.
-      if (count > 0) markDecided(kind);
+      if (count > 0) markDecided(kind, true);
     },
     dropped(kind, reason) {
       addEntry("dropped", kind, reason, ownerNow());
-      markDecided(kind);
+      markDecided(kind, false);
     },
     changed(kind, reason) {
       addEntry("changed", kind, reason, ownerNow());
@@ -202,21 +224,26 @@ export function createReportRecorder(options: ReportRecorderOptions = {}): DocxR
   return {
     reporter,
     handle(owner, kind, run, produced, ifNothing = HANDLER_RETURNED_NOTHING) {
-      const frame: Frame = { owner, kind, decided: false };
+      const frame: Frame = { owner, kind, decided: false, claimedKept: false };
       const result = within(frame, run);
       if (!frame.decided) {
         if (produced(result)) addKept(kind, 1);
         else addEntry("dropped", kind, ifNothing, owner);
+      } else if (frame.claimedKept) {
+        // A handler can keep an item without returning it here — writing it
+        // to another part, say — so its enclosing subtree must not move its
+        // content to dropped just because the result is empty.
+        subtrees[subtrees.length - 1]?.claimedKept.add(kind);
       }
       return result;
     },
     attribute(owner, run) {
-      return within({ owner, kind: null, decided: false }, run);
+      return within({ owner, kind: null, decided: false, claimedKept: false }, run);
     },
     async attributeAsync(owner, run) {
       // Hooks run one at a time, each awaited before the next, so the stack
       // stays balanced across the await.
-      frames.push({ owner, kind: null, decided: false });
+      frames.push({ owner, kind: null, decided: false, claimedKept: false });
       try {
         return await run();
       } finally {
@@ -224,26 +251,28 @@ export function createReportRecorder(options: ReportRecorderOptions = {}): DocxR
       }
     },
     subtree<T>(run: () => T, lost: (result: T) => LostItem | null): T {
-      const kept = new Map<string, number>();
-      keptInSubtree.push(kept);
+      const level: SubtreeLevel = { kept: new Map(), claimedKept: new Set() };
+      subtrees.push(level);
       const result = (() => {
         try {
           return run();
         } finally {
-          keptInSubtree.pop();
+          subtrees.pop();
         }
       })();
       const item = lost(result);
-      if (item) {
-        for (const [kind, count] of kept) {
+      if (item && !level.claimedKept.has(item.kind)) {
+        for (const [kind, count] of level.kept) {
           countOf(kind).kept -= count;
           addEntry("dropped", kind, insideDropped(item.kind), item.owner, count);
         }
       } else {
         // Survived this level; an enclosing item can still be lost.
-        const parent = keptInSubtree[keptInSubtree.length - 1];
+        const parent = subtrees[subtrees.length - 1];
         if (parent) {
-          for (const [kind, count] of kept) parent.set(kind, (parent.get(kind) ?? 0) + count);
+          for (const [kind, count] of level.kept) {
+            parent.kept.set(kind, (parent.kept.get(kind) ?? 0) + count);
+          }
         }
       }
       return result;
@@ -265,21 +294,32 @@ export function createReportRecorder(options: ReportRecorderOptions = {}): DocxR
   };
 }
 
-const recorders = new WeakMap<object, DocxReportRecorder>();
+type ReportingContext = DocxContext | DocxImportContext;
+
+const recorders = new WeakMap<ReportingContext, DocxReportRecorder>();
 
 /** Bind `recorder` to the context it reports for. Called by the context factories. */
-export function bindReportRecorder(context: object, recorder: DocxReportRecorder): void {
+export function bindReportRecorder(context: ReportingContext, recorder: DocxReportRecorder): void {
   recorders.set(context, recorder);
 }
 
 /**
- * The recorder bound to `context`. A context built without the factories gets
- * a detached one: nothing reads its account, but the walk still runs.
+ * The recorder bound to `context`. A context built without the factories has
+ * none, so it gets a detached one and a warning: the walk still runs, but the
+ * converter's account goes nowhere and `ctx.report` hears only the handlers.
  */
-export function reportRecorderOf(context: object): DocxReportRecorder {
+export function reportRecorderOf(context: ReportingContext): DocxReportRecorder {
   let recorder = recorders.get(context);
   if (!recorder) {
-    recorder = createReportRecorder();
+    const warn = (diagnostic: Omit<DocxDiagnostic, "level">): void =>
+      context.diagnostics.warn(diagnostic);
+    warn({
+      code: "report-unbound",
+      message:
+        "This context was not made by createDocxContext or createDocxImportContext, " +
+        "so the converter's report is not collected",
+    });
+    recorder = createReportRecorder({ warn });
     recorders.set(context, recorder);
   }
   return recorder;
@@ -313,7 +353,7 @@ export function ownedBundles<B>(
 /**
  * Merge one contribution's handlers into a dispatch table, noting `owner`
  * against each key. A later contribution replaces an earlier one's handler and
- * its owner together, as the plain `Object.assign` merge did.
+ * its owner together.
  */
 export function assignOwned<H>(
   into: Record<string, H>,
@@ -329,13 +369,18 @@ export function assignOwned<H>(
 }
 
 /**
- * The owner recorded against `key`, or `null` when the table does not say.
- * Own keys only: the key can come from the document (a style id), and
- * `"constructor"` must not answer with `Object`.
+ * The entry a dispatch table holds for `key`, own keys only. The key can come
+ * from the document — a style id, a mark kind — and `"constructor"` must not
+ * answer with `Object`, which dispatch would then call as a handler.
  */
+export function entryOf<V>(table: Readonly<Record<string, V>> | undefined, key: string): V | undefined {
+  return table && Object.hasOwn(table, key) ? table[key] : undefined;
+}
+
+/** The owner recorded against `key`, or `null` when the table does not say. */
 export function ownerOf(
   owners: Readonly<Record<string, HandlerOwner>> | undefined,
   key: string,
 ): HandlerOwner {
-  return owners && Object.hasOwn(owners, key) ? (owners[key] ?? null) : null;
+  return entryOf(owners, key) ?? null;
 }

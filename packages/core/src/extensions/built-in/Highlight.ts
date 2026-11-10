@@ -159,19 +159,30 @@ export const Highlight = Extension.create<HighlightOptions>({
     // exact regardless of which form the source used.
     const multicolor = this.options.multicolor;
 
+    // A highlight of `none`, or shading with no fill and no pattern, is Word
+    // saying "no background": no mark, and nothing lost.
     const fromHighlight: DocxMarkTransform = (mark, ctx) => {
+      const name = mark.attrs?.["val"];
+      if (name === "none") {
+        ctx.report.kept(mark.kind);
+        return null;
+      }
       const t = ctx.schema.marks["highlight"];
       if (!t) return null;
-      const name = mark.attrs?.["val"];
-      if (typeof name !== "string" || name === "none") return null;
+      if (typeof name !== "string") return null;
       if (multicolor) return t.create({ color: name });
       return t.create();
     };
 
     const fromShading: DocxMarkTransform = (mark, ctx) => {
+      const fill = mark.attrs?.["fill"];
+      const pattern = mark.attrs?.["val"];
+      if (fill === "auto" && (pattern === undefined || pattern === "clear" || pattern === "nil")) {
+        ctx.report.kept(mark.kind);
+        return null;
+      }
       const t = ctx.schema.marks["highlight"];
       if (!t) return null;
-      const fill = mark.attrs?.["fill"];
       if (typeof fill !== "string" || fill === "auto") return null;
       if (multicolor) return t.create({ color: `#${fill}` });
       return t.create();
