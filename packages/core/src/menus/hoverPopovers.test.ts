@@ -443,6 +443,16 @@ describe("hover popovers", () => {
         expect(onShow.mock.calls[0]![0].top).toBe(lineTwo.top);
       });
 
+      it("shows full under the last line when the caret sits just past the link", () => {
+        const editor = twoLineEditor(lineTwo.top);
+        const caretAt = vi.spyOn(editor, "getViewportRect");
+        cleanup = createLinkPopover(editor, { onShow: () => {}, onHide: () => {}, onMove: () => {} });
+
+        editor.selection.moveCursorTo(9);
+        flushRaf();
+        expect(caretAt).toHaveBeenLastCalledWith(8, 8);
+      });
+
       it("shows on the part still on screen when the hovered part scrolled away", () => {
         const offscreen = rect(-200, 300, 200, 16);
         const editor = twoLineEditor(offscreen.top, [offscreen, lineTwo]);

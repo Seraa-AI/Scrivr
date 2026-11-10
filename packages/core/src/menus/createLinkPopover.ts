@@ -92,18 +92,14 @@ export function createLinkPopover(editor: IEditor, options: LinkPopoverOptions):
     return linkAt(state.doc, hovered.pos + 1, linkType);
   }
 
-  /** Where in the link the pointer rests; its start when the target is gone. */
-  function hoveredAt(link: LinkRange): number {
-    const at = hovered?.at ?? link.from;
-    return at >= link.from && at < link.to ? at : link.from;
-  }
-
   /**
-   * The part of the link to anchor to: the line `at` is on, as a wrapped link
-   * peeks under the line the pointer rests on. When that line is scrolled
-   * away, the first part still on screen; none on screen, nothing.
+   * The part of the link to anchor to: the line of the character at `at`, as
+   * a wrapped link peeks under the line the pointer rests on. A caret just
+   * past the link reads its last character. When that line is scrolled away,
+   * the first part still on screen; none on screen, nothing.
    */
-  function anchorRect(link: LinkRange, at: number): DOMRect | null {
+  function anchorRect(link: LinkRange, pos: number): DOMRect | null {
+    const at = Math.min(Math.max(pos, link.from), link.to - 1);
     const container = editor.getScrollContainerRect();
     const parts = editor
       .getRangeViewportRects(link.from, link.to)
@@ -120,7 +116,7 @@ export function createLinkPopover(editor: IEditor, options: LinkPopoverOptions):
     const link = selected ?? hoveredLink();
     if (!link) { hide(); return; }
 
-    const rect = anchorRect(link, selected ? editor.getState().selection.head : hoveredAt(link));
+    const rect = anchorRect(link, selected ? editor.getState().selection.head : hovered?.at ?? link.from);
     if (!rect) {
       hide();
       return;

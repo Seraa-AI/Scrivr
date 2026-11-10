@@ -516,9 +516,11 @@ menu anchors to `getNodeViewportRect`. The link popover anchors to the line of
 the link the pointer rests on (a peek) or the caret is on (full), from
 `getRangeViewportRects(from, to)` — one rect per line, `Range.getClientRects()`
 for the canvas — and to the first line still on screen when that one has
-scrolled away. Body geometry places body positions only: while a header or
-footer is edited, a node lookup that is not an image answers nothing rather
-than the body node that shares the number. Fragments are found inside table cells too, so a table nested in
+scrolled away; a caret just past the link reads its last character. A
+floating image's link anchors to the image's box, as a DOM range gives a
+replaced element's. Body geometry places body positions only: while a header
+or footer is edited, node and range lookups answer nothing rather than the
+body content that shares the numbers. Fragments are found inside table cells too, so a table nested in
 another table's cell gets its own menu.
 
 **Deviation: hover positions are mapped.** §1 says positions go stale on the
@@ -580,7 +582,12 @@ can cross the link below.
 
 **Click reads the point's region.** `routePageClick` takes the `PagePoint`
 the pointer controller resolved, so click and hover agree on the region; a
-double-click in the gap between pages is no header or footer click.
+double-click in the gap between pages is no header or footer click, and a
+click anywhere but a band, off the page included, leaves header or footer
+editing.
+
+The playground turns image peeks on (`<ImageMenu hover />`); the default
+stays off.
 
 **Popovers know their target across edits.** Each controller holds the
 position that identifies what it shows — a link's start, an image's or

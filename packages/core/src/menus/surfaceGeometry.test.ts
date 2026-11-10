@@ -37,4 +37,26 @@ describe("node geometry while a surface is edited", () => {
     registerActiveSurface(e);
     expect(e.getNodeViewportRects(0)).toEqual([]);
   });
+
+  it("does not answer a surface position with the body image at the same number", () => {
+    const e = createTestEditor({
+      content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "image", attrs: { src: "x.png", width: 80, height: 60 } }] }] },
+    });
+    editor = e;
+    e.setPageTopLookup(() => ({ screenLeft: 0, screenTop: 0 }));
+    e.ensurePagePopulated(1);
+    expect(e.getNodeViewportRects(1)).not.toEqual([]);
+    registerActiveSurface(e);
+    expect(e.getNodeViewportRects(1)).toEqual([]);
+  });
+
+  it("does not answer a surface range with the body text at the same numbers", () => {
+    const e = createTestEditor({ content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "body" }] }] } });
+    editor = e;
+    e.setPageTopLookup(() => ({ screenLeft: 0, screenTop: 0 }));
+    e.ensurePagePopulated(1);
+    expect(e.getRangeViewportRects(1, 3)).not.toEqual([]);
+    registerActiveSurface(e);
+    expect(e.getRangeViewportRects(1, 3)).toEqual([]);
+  });
 });

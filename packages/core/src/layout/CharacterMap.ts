@@ -520,19 +520,26 @@ export class CharacterMap {
   /**
    * One rect per line the range `[from, to)` paints on, in page and line
    * order, each spanning that line's glyphs in the range. A link wrapped onto
-   * two lines, or across a page, has a rect on each.
+   * two lines, or across a page, has a rect on each. An object painted off
+   * its line — a floating image, whose glyph has no width — adds its own box,
+   * as a DOM range gives a replaced element's.
    */
   rangeRects(from: number, to: number): RangeRect[] {
     const rects: RangeRect[] = [];
+    const onLines = new Set<number>();
     for (const line of this.linesInRange(from, to)) {
       let left = Infinity;
       let right = -Infinity;
       for (const g of this.lineGlyphs.get(extentKey(line.page, line.lineIndex)) ?? []) {
         if (g.docPos < from || g.docPos >= to || g.width <= 0) continue;
+        onLines.add(g.docPos);
         left = Math.min(left, g.x);
         right = Math.max(right, g.x + g.width);
       }
       if (right > left) rects.push({ page: line.page, x: left, y: line.y, width: right - left, height: line.height });
+    }
+    for (const [pos, { page, x, y, width, height }] of this.objectRects) {
+      if (pos >= from && pos < to && !onLines.has(pos)) rects.push({ page, x, y, width, height });
     }
     return rects.sort((a, b) => a.page - b.page || a.y - b.y);
   }

@@ -619,7 +619,7 @@ export function Playground() {
       <FloatingMenuBar editor={editor} />
       <SlashMenu editor={editor} />
       <LinkPopover editor={editor} />
-      <ImageMenu editor={editor} />
+      <ImageMenu editor={editor} hover />
       <TableMenu editor={editor} />
       <TrackChangesPopover editor={editor} />
       {refusal && (

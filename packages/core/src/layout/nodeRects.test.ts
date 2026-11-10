@@ -156,3 +156,20 @@ describe("CharacterMap.rangeRects", () => {
     expect(makeEditor(twoLines).charMap.rangeRects(500, 600)).toEqual([]);
   });
 });
+
+describe("CharacterMap.rangeRects over an object", () => {
+  it("gives a floating image its own box, as it has no glyph of any width", () => {
+    const editor = makeEditor([{
+      type: "paragraph",
+      content: [
+        { type: "text", text: "text" },
+        { type: "image", attrs: { src: "x.png", width: 80, height: 60, wrapMode: "square" } },
+      ],
+    }]);
+    const rect = editor.getNodeRect(5);
+    if (!rect) throw new Error("no image rect");
+    expect(editor.charMap.rangeRects(5, 6)).toEqual([
+      { page: rect.page, x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+    ]);
+  });
+});

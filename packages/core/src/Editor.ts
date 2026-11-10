@@ -1190,18 +1190,20 @@ export class Editor extends BaseEditor implements IEditor {
 	 * the cell's own rect for a table cell. `getNodeRect` stays the
 	 * image-only lookup.
 	 *
-	 * Fragments are read from the body's layout, so they place body positions
-	 * only. While a header or footer is edited, a position is that surface's,
-	 * and the body node sharing its number is not it.
+	 * Read from the body's layout, so they place body positions only. While a
+	 * header or footer is edited, a position is that surface's, and the body
+	 * node sharing its number is not it.
 	 */
 	private getNodeRects(docPos: number): ObjectRectEntry[] {
+		if (this.surfaces?.activeSurface) return [];
 		const object = this.getNodeRect(docPos);
 		if (object) return [object];
-		if (this.surfaces?.activeSurface) return [];
 		return nodeFragmentRects(this.layout.pages, this.getState().doc, docPos);
 	}
 
 	getRangeViewportRects(from: number, to: number): DOMRect[] {
+		// Body geometry places body positions only, as `getNodeRects` says.
+		if (this.surfaces?.activeSurface) return [];
 		this.lc.ensureLayout();
 		const out: DOMRect[] = [];
 		for (const rect of this.lc.charMap.rangeRects(from, to)) {

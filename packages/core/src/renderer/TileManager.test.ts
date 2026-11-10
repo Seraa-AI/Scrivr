@@ -571,6 +571,17 @@ describe("TileManager — body click deactivates surface", () => {
     setup.cleanup();
   });
 
+  it("clicking outside the pages deactivates an active surface, as a body click does", () => {
+    const setup = makeRendererTestSetup({ scrollParent: true });
+    registerActiveSurface(setup.editor);
+    const activateSpy = vi.spyOn(setup.editor.surfaces, "activate");
+
+    expect(routePageClick(setup.editor, { page: 1, x: 400, y: 5000, region: "outside" }, 1)).toBe(false);
+    expect(activateSpy).toHaveBeenCalledWith(null);
+
+    setup.cleanup();
+  });
+
   it("clicking in a chrome band does NOT deactivate the surface", () => {
     const setup = makeRendererTestSetup({
       scrollParent: true,

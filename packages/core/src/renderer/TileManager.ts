@@ -129,10 +129,9 @@ export function routePageClick(editor: Editor, point: PagePoint, clickCount: num
   // agree on it: band bounds, the margin-strip fallback before any
   // header/footer policy exists, and the gap between pages, which is no band.
   const { page, x, y, region } = point;
-  if (region === "outside") return false;
 
   if (region !== "header" && region !== "footer") {
-    // Click in the body while a surface is active — deactivate first.
+    // Click anywhere but a band while a surface is active — deactivate first.
     if (editor.surfaces?.activeSurface) {
       editor.surfaces.activate(null);
     }
