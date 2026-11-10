@@ -327,7 +327,7 @@ export class CharacterMap {
 
     // Find the highest line on this page that is strictly above currentLine.y
     const above = this.lines
-      .filter((l) => l.page === currentLine.page && l.y < currentLine.y)
+      .filter((l) => l.page === currentLine.page && l.y < currentLine.y && !isEmptyLine(l))
       .reduce<
         LineEntry | undefined
       >((best, l) => (best === undefined || l.y > best.y ? l : best), undefined);
@@ -337,7 +337,7 @@ export class CharacterMap {
 
     // First visual row on this page — jump to the last line of the previous page
     const prevPageLines = this.lines.filter(
-      (l) => l.page === currentLine.page - 1,
+      (l) => l.page === currentLine.page - 1 && !isEmptyLine(l),
     );
     if (!prevPageLines.length) return null;
     const lastOnPrev = prevPageLines.reduce((max, l) =>
@@ -370,7 +370,7 @@ export class CharacterMap {
     // Find the lowest line on this page that starts strictly below currentLine's bottom
     const currentBottom = currentLine.y + currentLine.height;
     const below = this.lines
-      .filter((l) => l.page === currentLine.page && l.y >= currentBottom)
+      .filter((l) => l.page === currentLine.page && l.y >= currentBottom && !isEmptyLine(l))
       .reduce<
         LineEntry | undefined
       >((best, l) => (best === undefined || l.y < best.y ? l : best), undefined);
@@ -380,7 +380,7 @@ export class CharacterMap {
 
     // Last visual row on this page — jump to the first line of the next page
     const nextPageLines = this.lines.filter(
-      (l) => l.page === currentLine.page + 1,
+      (l) => l.page === currentLine.page + 1 && !isEmptyLine(l),
     );
     if (!nextPageLines.length) return null;
     const firstOnNext = nextPageLines.reduce((min, l) =>
@@ -429,16 +429,14 @@ export class CharacterMap {
 
   /**
    * Returns all lines that overlap the given ProseMirror position range.
-   * Includes empty lines (startDocPos === endDocPos) when the cursor position
-   * falls within [from, to). Used by the renderer to draw full-line selection
-   * highlights, including for empty paragraphs.
+   * Includes an empty line (one holding no position: a marker's line of
+   * its own, the gap past a float) only when the range runs across it, from
+   * before its position. Used by the renderer to draw full-line selection
+   * highlights.
    */
   linesInRange(from: number, to: number): LineEntry[] {
     return this.lines.filter((l) => {
-      if (l.startDocPos === l.endDocPos) {
-        // Empty line — include when the cursor position is within the selection
-        return l.startDocPos >= from && l.startDocPos < to;
-      }
+      if (isEmptyLine(l)) return l.startDocPos > from && l.startDocPos < to;
       // Non-empty line — include when any character is within the selection
       return l.startDocPos < to && l.endDocPos > from;
     });
@@ -457,7 +455,7 @@ export class CharacterMap {
   private lineForDocPos(docPos: number, page?: number): LineEntry | undefined {
     return this.lines.find((l) => {
       if (page !== undefined && l.page !== page) return false;
-      if (l.startDocPos === l.endDocPos) return docPos === l.startDocPos;
+      if (isEmptyLine(l)) return docPos === l.startDocPos;
       return docPos >= l.startDocPos && docPos <= l.endDocPos;
     });
   }
@@ -483,7 +481,7 @@ export class CharacterMap {
 
   /**
    * The glyph painted under (x, y), or null. Never snaps: trailing line space,
-   * paragraph spacing, cell padding, list-marker gutters and margins all return
+   * paragraph spacing, cell padding, marker gutters and margins all return
    * null. `docPos` is the character's own position, so its marks are
    * `doc.resolve(docPos + 1).marks()` — no left/right ambiguity at a boundary.
    *
@@ -545,4 +543,9 @@ export class CharacterMap {
 
   // Internal — find the closest line when y is outside all line ranges.
   // Click above first line → first line. Click below last line → last line.
+}
+
+/** A line that holds no position: its start is its end, where the text after it starts. */
+function isEmptyLine(line: LineEntry): boolean {
+  return line.startDocPos === line.endDocPos;
 }

@@ -142,7 +142,7 @@ function tableRowWithCellImage(src: string): LayoutBlock {
   const rowNode = schema.nodes.tableRow!.create(null, [cellNode]);
   const child = paragraphBlock([imageObjectLine(src)], MARGIN + 4);
   return {
-    kind: "tableRow",
+    kind: "composite",
     node: rowNode,
     nodePos: 0,
     x: MARGIN,
@@ -150,7 +150,7 @@ function tableRowWithCellImage(src: string): LayoutBlock {
     width: 120,
     height: 40,
     lines: [],
-    cells: [{ cellPos: 1, x: MARGIN, y: 0, width: 120, height: 40, vMerge: "none", background: null, blocks: [child] }],
+    regions: [{ pos: 1, x: MARGIN, y: 0, width: 120, height: 40, inset: { top: 4, right: 6, bottom: 4, left: 6 }, blocks: [child], data: { vMerge: "none", background: null } }],
     spaceBefore: 0,
     spaceAfter: 0,
     blockType: "tableRow",

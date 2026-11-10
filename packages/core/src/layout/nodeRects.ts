@@ -11,12 +11,12 @@ import type { LayoutPage } from "./PageLayout";
  * Per page, the first of these that matches wins:
  *   1. Blocks laid out for the node itself (`sourceNodePos ?? nodePos`) — a
  *      paragraph, or each part of one split across pages.
- *   2. A table cell — the `CellSubBlock` with that `cellPos`.
+ *   2. A region of a composite block — a table cell — at that `pos`.
  *   3. Blocks laid out for the node's descendants, unioned — a table is laid
- *      out as its rows, a list as its items.
+ *      out as its rows, a wrapper as the blocks it holds.
  *
- * Each step also searches inside cells, so a table nested in another table's
- * cell has rects too.
+ * Each step also searches inside regions, so a table nested in another
+ * table's cell has rects too.
  *
  * Image-like nodes are not here; their rects come from anchored placements and
  * the character map.
@@ -48,9 +48,9 @@ interface Found {
 }
 
 /**
- * One page's blocks, and the blocks inside each of their cells — a table
- * nested in a cell is laid out there, not on the page. A cell's blocks sit at
- * `y` relative to their row's top, so `top` carries that row's y down.
+ * One page's blocks, and the blocks inside each of their regions — a table
+ * nested in a cell is laid out there, not on the page. A region's blocks sit
+ * at `y` relative to their unit's top, so `top` carries that unit's y down.
  */
 function collect(
   blocks: readonly LayoutBlock[],
@@ -70,11 +70,11 @@ function collect(
       const r = rectOf(docPos, page, block.x, y, block.width, block.height);
       found.inner = found.inner ? union(found.inner, r) : r;
     }
-    for (const c of block.cells ?? []) {
-      if (c.cellPos === docPos) {
-        found.cell = rectOf(docPos, page, c.x, y + c.y, c.width, c.height);
+    for (const region of block.regions ?? []) {
+      if (region.pos === docPos) {
+        found.cell = rectOf(docPos, page, region.x, y + region.y, region.width, region.height);
       }
-      collect(c.blocks, y, page, docPos, end, found);
+      collect(region.blocks, y, page, docPos, end, found);
     }
   }
 }

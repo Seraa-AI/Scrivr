@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { doc, p, h, ul, ol, li, TestEditor } from "./helpers";
 import { CHANGE_OPERATION, TrackChangesStatus } from "../types";
+import type { NodeAttrChange, TrackedChange } from "../types";
 import { trackChangesPlugin, trackChangesPluginKey } from "../engine/trackChangesPlugin";
 import { EditorState } from "@scrivr/core/pm";
 import type { Transaction } from "@scrivr/core/pm";
@@ -8,6 +9,13 @@ import { history } from "@scrivr/core/pm";
 import { schema } from "./helpers";
 
 // ── Node attribute change tracking ─────────────────────────────────────��──────
+
+
+/** The change, which must be an attribute change. */
+function attrChange(change: TrackedChange | undefined): NodeAttrChange {
+  if (change?.type !== "node-attr-change") throw new Error(`expected an attribute change, got ${change?.type}`);
+  return change;
+}
 
 describe("trackTransaction — paragraph → heading", () => {
   let editor: TestEditor;
@@ -38,18 +46,16 @@ describe("trackTransaction — paragraph → heading", () => {
     const tr = editor.state.tr.setNodeMarkup(0, schema.nodes.heading, { level: 2 });
     editor.dispatch(tr);
 
-    const change = editor.pendingChanges[0]!;
-    // @ts-expect-error — NodeAttrChange has oldAttrs
-    expect(change.oldAttrs?.level ?? null).toBeNull();
+    const change = attrChange(editor.pendingChanges[0]);
+    expect(change.oldAttrs.level ?? null).toBeNull();
   });
 
   it("newAttrs reflects the post-change heading level", () => {
     const tr = editor.state.tr.setNodeMarkup(0, schema.nodes.heading, { level: 2 });
     editor.dispatch(tr);
 
-    const change = editor.pendingChanges[0]!;
-    // @ts-expect-error — NodeAttrChange has newAttrs
-    expect(change.newAttrs?.level).toBe(2);
+    const change = attrChange(editor.pendingChanges[0]);
+    expect(change.newAttrs.level).toBe(2);
   });
 
   it("text content is preserved after paragraph → heading", () => {
@@ -67,12 +73,9 @@ describe("trackTransaction — heading level change (h1 → h2)", () => {
     editor.dispatch(tr);
 
     expect(editor.pendingChanges).toHaveLength(1);
-    const change = editor.pendingChanges[0]!;
-    expect(change.type).toBe("node-attr-change");
-    // @ts-expect-error
-    expect(change.oldAttrs?.level).toBe(1);
-    // @ts-expect-error
-    expect(change.newAttrs?.level).toBe(2);
+    const change = attrChange(editor.pendingChanges[0]);
+    expect(change.oldAttrs.level).toBe(1);
+    expect(change.newAttrs.level).toBe(2);
   });
 });
 

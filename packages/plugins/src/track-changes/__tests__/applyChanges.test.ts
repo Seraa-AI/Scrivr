@@ -133,7 +133,7 @@ describe("applyChanges — node-attr-change", () => {
 // This is the correct behavior: undo rolls back the entire editing session.
 
 describe("applyChanges — undo of accept", () => {
-  it("undo after accepting a tracked insert reverts both insert and accept", () => {
+  it("undoing an accept brings the change back, and undoing again removes the edit", () => {
     const editor = new TestEditor(doc(p("hello")));
     editor.insertAt(6, "!");
 
@@ -143,9 +143,10 @@ describe("applyChanges — undo of accept", () => {
     expect(editor.text).toBe("hello!");
 
     editor.undo();
+    expect(editor.text).toBe("hello!");
+    expect(editor.pendingChanges).toHaveLength(1);
 
-    // Both the insert and the accept are in the same history group (same tick),
-    // so undo reverts all the way back to the original document.
+    editor.undo();
     expect(editor.text).toBe("hello");
     expect(editor.pendingChanges).toHaveLength(0);
   });

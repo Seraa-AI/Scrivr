@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { snapRect, setActiveDpr } from "./OverlayRenderer";
+import { snapRect, setActiveDpr, renderTrackedFormatting, renderTrackedInsert, renderTrackedMove, renderTrackedObject, renderTrackedRow } from "./OverlayRenderer";
+import type { GlyphEntry, LineEntry } from "../layout/CharacterMap";
 
 describe("snapRect — pixel-grid snapping", () => {
   beforeEach(() => {
@@ -49,5 +50,105 @@ describe("snapRect — pixel-grid snapping", () => {
     expect(Math.abs(r.y * 3 - Math.round(r.y * 3))).toBeLessThan(eps);
     expect(Math.abs((r.x + r.w) * 3 - Math.round((r.x + r.w) * 3))).toBeLessThan(eps);
     expect(Math.abs((r.y + r.h) * 3 - Math.round((r.y + r.h) * 3))).toBeLessThan(eps);
+  });
+});
+
+function context(): CanvasRenderingContext2D {
+  const ctx = document.createElement("canvas").getContext("2d");
+  if (!ctx) throw new Error("no 2d context");
+  return ctx;
+}
+
+describe("a formatting change", () => {
+  it("is washed, never underlined, so it is not mistaken for underlining", () => {
+    const calls: string[] = [];
+    const ctx = context();
+    ctx.fillRect = () => calls.push("fillRect");
+    ctx.stroke = () => calls.push("stroke");
+    const glyph = (docPos: number): GlyphEntry => ({ docPos, x: docPos * 8, y: 0, lineY: 0, width: 8, height: 16, page: 1, lineIndex: 0 });
+
+    renderTrackedFormatting(ctx, [glyph(1), glyph(2)], "#d97706");
+
+    expect(calls).toEqual(["fillRect", "fillRect"]);
+  });
+});
+
+describe("an inserted empty line", () => {
+  it("is marked, though the caret's zero-width glyph sits on it", () => {
+    const fills: number[][] = [];
+    const ctx = context();
+    ctx.fillRect = (x, y, w, h) => fills.push([x, y, w, h]);
+    const caret: GlyphEntry = { docPos: 5, x: 40, y: 0, lineY: 0, width: 0, height: 16, page: 1, lineIndex: 3 };
+    const line: LineEntry = { page: 1, lineIndex: 3, y: 0, height: 16, x: 40, contentWidth: 400, startDocPos: 5, endDocPos: 5 };
+
+    renderTrackedInsert(ctx, [caret], [line], "#16a34a");
+
+    expect(fills.some(([, , w]) => (w ?? 0) > 0)).toBe(true);
+  });
+});
+
+describe("a changed object", () => {
+  const painted = (removed: boolean) => {
+    const calls: string[] = [];
+    const ctx = context();
+    ctx.fillRect = () => calls.push("fill");
+    ctx.strokeRect = () => calls.push("frame");
+    ctx.stroke = () => calls.push("strike");
+    renderTrackedObject(ctx, { x: 10, y: 10, width: 120, height: 80 }, "#16a34a", removed);
+    return calls;
+  };
+
+  it("is framed where it is drawn", () => {
+    expect(painted(false)).toEqual(["fill", "frame"]);
+  });
+
+  it("is also struck through when removed, as Word marks a deleted object", () => {
+    expect(painted(true)).toEqual(["fill", "frame", "strike"]);
+  });
+});
+
+describe("moved content", () => {
+  const strokes = (removed: boolean) => {
+    const ys: number[] = [];
+    const ctx = context();
+    ctx.fillRect = () => undefined;
+    ctx.moveTo = (_x: number, y: number) => { ys.push(y); };
+    ctx.stroke = () => undefined;
+    const glyph: GlyphEntry = { docPos: 1, x: 0, y: 0, lineY: 0, width: 8, height: 16, page: 1, lineIndex: 0 };
+    renderTrackedMove(ctx, [glyph], [], "#15803d", removed);
+    return ys;
+  };
+
+  it("is double-underlined where it moved to, as Word marks it", () => {
+    const ys = strokes(false);
+    expect(ys).toHaveLength(2);
+    expect(Math.min(...ys)).toBeGreaterThan(8);
+  });
+
+  it("is double-struck where it moved from", () => {
+    const ys = strokes(true);
+    expect(ys).toHaveLength(2);
+    expect(Math.max(...ys)).toBeLessThan(12);
+  });
+});
+
+describe("a table row added or removed", () => {
+  const painted = (removed: boolean) => {
+    const calls: string[] = [];
+    let dashed = false;
+    const ctx = context();
+    ctx.fillRect = () => { calls.push("wash"); };
+    ctx.strokeRect = () => { calls.push(dashed ? "dashed frame" : "frame"); };
+    ctx.setLineDash = (segments: number[]) => { dashed = segments.length > 0; };
+    renderTrackedRow(ctx, { x: 10, y: 10, width: 400, height: 38 }, "#16a34a", removed);
+    return calls;
+  };
+
+  it("is washed and framed across the whole row", () => {
+    expect(painted(false)).toEqual(["wash", "frame"]);
+  });
+
+  it("is framed with a dashed line when removed", () => {
+    expect(painted(true)).toEqual(["wash", "dashed frame"]);
   });
 });

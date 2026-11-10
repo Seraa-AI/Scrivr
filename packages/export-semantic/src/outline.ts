@@ -8,7 +8,7 @@
  * Each of those is a judgement about what a section is, and the editor that
  * owns the structure should be the one making it.
  */
-import type { OutlineSection, SemanticUnit } from "@scrivr/core";
+import type { OutlineSection, SemanticHeading, SemanticUnit } from "@scrivr/core";
 
 export interface DocumentOutlineOptions {
   /**
@@ -37,19 +37,28 @@ export function toDocumentOutline(
 ): OutlineSection[] {
   if (units.length === 0) return [];
 
-  const closed: OutlineSection[] = [];
-  const open: OpenSection[] = [];
-  const close = (section: OpenSection, endUnit: number): void => {
-    closed.push({ ...section, endUnit });
+  // Each section with the order its heading comes in, so sections opened by
+  // headings in the same unit keep document order.
+  const closed: { section: OutlineSection; order: number }[] = [];
+  const open: { section: OpenSection; order: number }[] = [];
+  const close = ({ section, order }: { section: OpenSection; order: number }, endUnit: number): void => {
+    closed.push({ section: { ...section, endUnit }, order });
   };
 
-  const firstHeading = units.findIndex((unit) => unit.type === "heading");
-  if (firstHeading !== 0) {
+  // A section opened by a heading nested inside a unit shares that unit with
+  // the section before it, so a heading closes what it ends one unit later
+  // than one that is its unit's anchor.
+  const endBefore = (index: number, heading: SemanticHeading, unit: SemanticUnit): number =>
+    heading.nodeId === unit.id && unit.headingLevel !== undefined ? index : index + 1;
+
+  const firstIndex = units.findIndex((unit) => (unit.headings?.length ?? 0) > 0);
+  const first = units[0]!;
+  const firstHeading = firstIndex === -1 ? undefined : units[firstIndex]?.headings?.[0];
+  const firstUnit = firstIndex === -1 ? undefined : units[firstIndex];
+  if (!(firstIndex === 0 && firstUnit?.headingLevel !== undefined)) {
     // Content before the first heading is a section the reader navigates to,
     // so it gets one — with a supplied name, because the document gives none.
-    const first = units[0]!;
-    close(
-      {
+    close({ order: -1, section: {
         id: first.id,
         parentId: null,
         heading: options.untitledHeading ?? DEFAULT_UNTITLED,
@@ -57,34 +66,34 @@ export function toDocumentOutline(
         level: 1,
         path: [options.untitledHeading ?? DEFAULT_UNTITLED],
         startUnit: 0,
-      },
-      firstHeading === -1 ? units.length : firstHeading,
+      } },
+      firstHeading && firstUnit ? endBefore(firstIndex, firstHeading, firstUnit) : units.length,
     );
   }
 
+  let order = 0;
   units.forEach((unit, index) => {
-    if (unit.type !== "heading") return;
+    for (const heading of unit.headings ?? []) {
+      // Depth comes from the breadcrumb the walker already threaded, not from
+      // a second level-comparison here. "Which headings am I under" has one
+      // owner, so a section's path and its units' breadcrumbs cannot drift.
+      const depth = heading.breadcrumb.length;
+      while (open.length > depth) close(open.pop()!, endBefore(index, heading, unit));
 
-    // Depth comes from the breadcrumb the walker already threaded, not from a
-    // second level-comparison here. "Which headings am I under" has one owner,
-    // so a section's path and its units' breadcrumbs cannot drift apart.
-    const depth = unit.breadcrumb.length;
-    while (open.length > depth) close(open.pop()!, index);
-
-    open.push({
-      id: unit.id,
-      parentId: open[depth - 1]?.id ?? null,
-      heading: unit.text,
-      headingNodeId: unit.nodeIds[0] ?? null,
-      level: unit.headingLevel ?? 1,
-      path: [...unit.breadcrumb, unit.text],
-      startUnit: index,
-    });
+      open.push({ order: order++, section: {
+        id: heading.nodeId,
+        parentId: open[depth - 1]?.section.id ?? null,
+        heading: heading.title,
+        headingNodeId: heading.nodeId,
+        level: heading.level,
+        path: [...heading.breadcrumb, heading.title],
+        startUnit: index,
+      } });
+    }
   });
 
   while (open.length > 0) close(open.pop()!, units.length);
 
-  // Sections close innermost-first. Document order is what a reader navigates,
-  // and a section that opens where its parent does follows it.
-  return closed.sort((a, b) => a.startUnit - b.startUnit || a.level - b.level);
+  // Sections close innermost-first. Document order is what a reader navigates.
+  return closed.sort((a, b) => a.order - b.order).map(({ section }) => section);
 }

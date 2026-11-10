@@ -10,6 +10,7 @@ import type { IBaseEditor } from "@scrivr/core";
 import type { Node as PmNode } from "@scrivr/core/pm";
 import { xml, serializeXml } from "./xml";
 import { walkDocument, type WalkerHandlers } from "./walker";
+import { TEXT_WIDTH_TWIPS } from "./section";
 import type {
   DocxContext,
   DocxFidelity,
@@ -51,7 +52,13 @@ export interface StyleEntry {
 
 export interface NumberingEntry {
   numId: number;
+  /** The definition (`w:abstractNum`) this numbering counts by; entries with equal levels share one. */
+  abstractId: number;
   config: { type: "bullet" | "ordered" | "task"; levels: DocxNumberingLevel[] };
+  /** The list this numbering is for, when it is one list's own. */
+  instance?: object;
+  /** Level 0's first number, written as its `startOverride`, when this is one list's own. */
+  start?: number;
 }
 
 export interface RelEntry {
@@ -134,20 +141,23 @@ export function createDocxContext(
   const ctx: DocxContext = {
     editor: opts.editor,
     options,
+    textWidthTwips: TEXT_WIDTH_TWIPS,
     styles: {
       paragraph: { getOrCreate: (n, s) => getOrCreateStyle("paragraph", n, s) },
       character: { getOrCreate: (n, s) => getOrCreateStyle("character", n, s) },
       table: { getOrCreate: (n, s) => getOrCreateStyle("table", n, s) },
     },
     numbering: {
-      getOrCreate(config) {
+      getOrCreate({ instance, start, ...config }) {
         const key = numberingKey(config);
-        const existing = state.numbering.find((entry) =>
-          numberingKey(entry.config) === key
-        );
+        const sameLevels = state.numbering.find((entry) => numberingKey(entry.config) === key);
+        const existing = instance
+          ? state.numbering.find((entry) => entry.instance === instance)
+          : state.numbering.find((entry) => !entry.instance && numberingKey(entry.config) === key);
         if (existing) return { numId: existing.numId };
         const numId = state.numbering.length + 1;
-        state.numbering.push({ numId, config });
+        const abstractId = sameLevels?.abstractId ?? Math.max(0, ...state.numbering.map((entry) => entry.abstractId)) + 1;
+        state.numbering.push({ numId, abstractId, config, ...(instance ? { instance, start: start ?? 1 } : {}) });
         return { numId };
       },
     },
@@ -270,6 +280,8 @@ function numberingKey(config: NumberingEntry["config"]): string {
       level: level.level,
       format: level.format,
       text: level.text,
+      left: level.left,
+      hanging: level.hanging,
     })),
   });
 }

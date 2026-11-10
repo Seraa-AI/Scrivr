@@ -217,7 +217,7 @@ export const Link = Extension.create({
         label: "🔗",
         title: "Insert link",
         group: "insert",
-        isActive: (marks: string[]) => marks.includes("link"),
+        isActive: ({ activeMarks }) => activeMarks.includes("link"),
       },
       {
         command: "unsetLink",

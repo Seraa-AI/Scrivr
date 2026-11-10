@@ -26,20 +26,28 @@ import {
   type CitationRange,
 } from "@scrivr/plugins";
 import { AiToolkit } from "@scrivr/ai";
+import { installAgentDebug } from "./agentDebug";
 import { playgroundFonts } from "./fonts";
 import { Toolbar } from "./Toolbar";
 import { BubbleMenuBar } from "./BubbleMenuBar";
 import { FloatingMenuBar } from "./FloatingMenuBar";
-import { ModeSwitcher } from "./ModeSwitcher";
+import { ModeSwitcher, useEditorMode, type EditorMode } from "./ModeSwitcher";
+import { ContentSwitcher } from "./ContentSwitcher";
+import { onRefusal, reportRefusal } from "./refusals";
 import {
   TrackChangesPopover,
   TrackChangesPanel,
   AiSuggestionCardsPanel,
   useTrackChangesPanel,
   useAiSuggestionCards,
+  describeSuggestionRefusal,
 } from "@scrivr/react";
+import type { SuggestionRefusalText } from "@scrivr/react";
+import type { Editor, ToolbarState } from "@scrivr/core";
+import { Selection } from "@scrivr/core/pm";
 import { ChatPanel } from "./ChatPanel";
-import { DemoContent } from "./demoContent";
+import { DemoContent, demoDoc, startingDemo, type DemoKind } from "./demoContent";
+import { TrackChangesInspector } from "./TrackChangesInspector";
 import { env } from "../lib/env";
 import {
   ChevronLeft,
@@ -94,7 +102,7 @@ const PLAYGROUND_THEME: EditorTheme = {
   imagePlaceholderBg: "var(--scrivr-img-placeholder-bg)",
   imagePlaceholderBorder: "var(--scrivr-img-placeholder-border)",
   imagePlaceholderText: "var(--scrivr-img-placeholder-text)",
-  listMarker: "var(--scrivr-list-marker)",
+  marker: "var(--scrivr-marker)",
   hrColor: "var(--scrivr-hr)",
   resizeHandle: "var(--scrivr-resize-handle)",
 };
@@ -152,6 +160,7 @@ const EXTENSIONS =
         TrackChanges.configure({
           userID: identity.userName,
           canAcceptReject: true,
+          onRefused: reportRefusal,
         }),
         CitationHighlight,
         // AiToolkit is only loaded in local dev (see AI_ENABLED above).
@@ -163,37 +172,46 @@ const EXTENSIONS =
         PdfExport.configure({ filename: "scrivr-demo" }),
         DocxExport.configure({ filename: "scrivr-demo" }),
         DocxImport,
-        TrackChanges.configure({ userID: "demo-user", canAcceptReject: true }),
+        TrackChanges.configure({ userID: "demo-user", canAcceptReject: true, onRefused: reportRefusal }),
         CitationHighlight,
         ...(AI_ENABLED ? [AiToolkit] : []),
         DemoContent,
       ];
 
-interface ToolbarSlice {
-  activeMarks: string[];
-  activeMarkAttrs: Record<string, Record<string, unknown>>;
-  blockType: string;
-  blockAttrs: Record<string, unknown>;
-}
-
-function selectToolbar(ctx: EditorStateContext): ToolbarSlice {
-  const { blockType, blockAttrs } = ctx.editor.getBlockInfo();
+function selectToolbar(ctx: EditorStateContext): ToolbarState {
   return {
     activeMarks: ctx.editor.getActiveMarks(),
     activeMarkAttrs: ctx.editor.getActiveMarkAttrs(),
-    blockType,
-    blockAttrs: blockAttrs as Record<string, unknown>,
+    ...ctx.editor.getBlockInfo(),
   };
 }
 
-const EMPTY_TOOLBAR: ToolbarSlice = {
+const EMPTY_TOOLBAR: ToolbarState = {
   activeMarks: [],
   activeMarkAttrs: {},
   blockType: "paragraph",
   blockAttrs: {},
+  ancestors: [],
 };
 
 type SidebarTab = "ai" | "changes";
+
+/** The mode a demo is meant to be tried in. */
+const DEMO_MODE: Record<DemoKind, EditorMode> = { editing: "editing", "track-changes": "suggesting" };
+
+/**
+ * Replaces the document with a demo's, as initial content: what it holds is
+ * loaded as written, Alice's pending changes included, and not undoable.
+ */
+function loadDemo(editor: Editor, kind: DemoKind) {
+  const state = editor.getState();
+  const doc = state.schema.nodeFromJSON(demoDoc(kind));
+  const tr = state.tr.replaceWith(0, state.doc.content.size, doc.content);
+  for (const [name, value] of Object.entries(doc.attrs)) tr.setDocAttribute(name, value);
+  // A new document starts at its beginning, not wherever the last one was scrolled to.
+  tr.setSelection(Selection.atStart(tr.doc)).scrollIntoView();
+  editor.applyTransaction(tr.setMeta("initialContent", true).setMeta("addToHistory", false));
+}
 
 export function Playground() {
   // Default to "changes" when AI is disabled in production builds so there's
@@ -230,6 +248,7 @@ export function Playground() {
       console.log("[ProseMirror doc]", doc.toJSON());
       return doc.toJSON();
     };
+    installAgentDebug(editor);
 
   }
 
@@ -256,6 +275,24 @@ export function Playground() {
     selector: (ctx) => ctx.editor.loadingState,
     equalityFn: Object.is,
   });
+  const [demo, setDemo] = useState<DemoKind>(startingDemo);
+  const [mode, setMode] = useState<EditorMode>(() => DEMO_MODE[startingDemo()]);
+  useEditorMode(editor, mode);
+  const switchDemo = (next: DemoKind) => {
+    if (editor) loadDemo(editor, next);
+    setDemo(next);
+    setMode(DEMO_MODE[next]);
+  };
+
+  // An edit the editor stopped while suggesting: say why, and what to do instead.
+  const [refusal, setRefusal] = useState<SuggestionRefusalText | null>(null);
+  useEffect(() => onRefusal((next) => setRefusal(describeSuggestionRefusal(next))), []);
+  useEffect(() => {
+    if (!refusal) return;
+    const timer = setTimeout(() => setRefusal(null), 6000);
+    return () => clearTimeout(timer);
+  }, [refusal]);
+
   const trackPanel = useTrackChangesPanel(editor);
   const aiSuggestions = useAiSuggestionCards(editor);
 
@@ -320,7 +357,8 @@ export function Playground() {
               <StatusPill>AI local</StatusPill>
             </a>
           )}
-          <ModeSwitcher editor={editor} />
+          {!USE_COLLAB && <ContentSwitcher demo={demo} onChange={switchDemo} />}
+          <ModeSwitcher mode={mode} onChange={setMode} />
           <IconButton
             onClick={toggleDark}
             title={isDark ? "Switch to light mode" : "Switch to dark mode"}
@@ -346,10 +384,7 @@ export function Playground() {
         <div className="min-w-0 flex-1 overflow-x-auto">
           <Toolbar
             items={editor?.toolbarItems ?? []}
-            activeMarks={toolbar.activeMarks}
-            activeMarkAttrs={toolbar.activeMarkAttrs}
-            blockType={toolbar.blockType}
-            blockAttrs={toolbar.blockAttrs}
+            state={toolbar}
             editor={editor}
           />
         </div>
@@ -442,7 +477,7 @@ export function Playground() {
                   >
                     {tab === "ai" ? <MessageSquareText size={14} strokeWidth={2} /> : <History size={14} strokeWidth={2} />}
                     {tab === "ai" ? "Assistant" : "Changes"}
-                    {tab === "changes" && trackPanel.changes.length > 0 && (
+                    {tab === "changes" && trackPanel.items.length > 0 && (
                       <span
                         className="ml-0.5 rounded-full px-1.5 text-[10px] leading-4"
                         style={{
@@ -450,7 +485,7 @@ export function Playground() {
                           color: selected ? "var(--app-accent-soft-fg)" : "var(--app-text-muted)",
                         }}
                       >
-                        {trackPanel.changes.length}
+                        {trackPanel.items.length}
                       </span>
                     )}
                   </button>
@@ -482,7 +517,7 @@ export function Playground() {
                     ? "Ask with document context or edit selected text."
                     : trackPanel.isEmpty
                       ? "No pending tracked changes."
-                      : `${trackPanel.changes.length} pending change${trackPanel.changes.length === 1 ? "" : "s"} to review.`}
+                      : `${trackPanel.items.length} pending change${trackPanel.items.length === 1 ? "" : "s"} to review.`}
                 </div>
               </div>
               {sidebarTab === "changes" && !trackPanel.isEmpty && (
@@ -538,6 +573,7 @@ export function Playground() {
                 }}
               >
                 <TrackChangesPanel editor={editor} className="playground-track-panel" />
+                <TrackChangesInspector editor={editor} />
               </div>
             </>
           ) : (
@@ -550,6 +586,7 @@ export function Playground() {
               }}
             >
               <TrackChangesPanel editor={editor} className="playground-track-panel" />
+              <TrackChangesInspector editor={editor} />
             </div>
           )}
         </aside>
@@ -585,6 +622,20 @@ export function Playground() {
       <ImageMenu editor={editor} />
       <TableMenu editor={editor} />
       <TrackChangesPopover editor={editor} />
+      {refusal && (
+        <div
+          role="status"
+          className="fixed left-1/2 top-16 z-50 max-w-[440px] -translate-x-1/2 rounded-lg border px-4 py-3 text-[13px] shadow-lg"
+          style={{
+            background: "var(--app-surface)",
+            borderColor: "var(--app-border)",
+            color: "var(--app-text)",
+          }}
+        >
+          <div className="font-medium">{refusal.message}</div>
+          <div className="mt-1 opacity-75">{refusal.remedy}</div>
+        </div>
+      )}
     </div>
   );
 }

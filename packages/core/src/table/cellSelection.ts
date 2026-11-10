@@ -1,7 +1,7 @@
 import { Selection, SelectionRange, TextSelection } from "prosemirror-state";
 import type { EditorState } from "prosemirror-state";
 import { Fragment, Slice } from "prosemirror-model";
-import type { Node, ResolvedPos } from "prosemirror-model";
+import type { DOMSerializer, Node, ResolvedPos } from "prosemirror-model";
 import type { Mappable } from "prosemirror-transform";
 import { getTableMap, type Rect, type TableMap } from "./TableMap";
 import { cellGridSpan } from "./attrs";
@@ -47,7 +47,7 @@ interface CellInfo {
   tableStart: number;
 }
 
-function isCellType(name: string): boolean {
+export function isCellType(name: string): boolean {
   return name === "tableCell" || name === "tableHeader";
 }
 
@@ -192,6 +192,32 @@ export class CellSelection extends Selection {
   readonly $headCell: ResolvedPos;
   /** Normalized grid rect covering every cell in the selection. */
   readonly rect: Rect;
+
+  /**
+   * This selection as clipboard HTML: a standalone table of its cells. Their
+   * merge role is an attr until the Table's copy transform states it as
+   * `rowspan`, as for any copied table.
+   */
+  clipboardHtml(serializer: DOMSerializer): string {
+    const tableNode = this.content().content.firstChild;
+    if (!tableNode) return "";
+    const container = document.createElement("div");
+    container.appendChild(serializer.serializeNode(tableNode));
+    return container.innerHTML;
+  }
+
+  /** This selection as plain text: tab-separated columns, newline-separated rows (the spreadsheet convention). */
+  clipboardText(): string {
+    const table = this.content().content.firstChild;
+    if (!table) return "";
+    const rows: string[] = [];
+    table.forEach((row) => {
+      const cells: string[] = [];
+      row.forEach((cell) => cells.push(cell.textContent));
+      rows.push(cells.join("\t"));
+    });
+    return rows.join("\n");
+  }
 
   constructor($anchorCell: ResolvedPos, $headCell: ResolvedPos = $anchorCell) {
     if (
@@ -352,10 +378,27 @@ export class CellBookmark {
  */
 export const CELL_SELECTION_JSON_ID = "scrivr:cell";
 
-// Register exactly once. A duplicate Scrivr runtime must fail fast: allowing a
-// second CellSelection class to share this id would make deserialized selections
-// fail that runtime's instanceof checks.
-Selection.jsonID(CELL_SELECTION_JSON_ID, CellSelection);
+/**
+ * Registers `selectionClass` under `id` with prosemirror-state, once. A second
+ * registration is a duplicate Scrivr runtime and fails fast: a second class
+ * sharing the id would make deserialized selections fail that runtime's
+ * `instanceof` checks. While a dev server reloads the module (`reloading`),
+ * prosemirror-state keeps the first registration and the module goes on.
+ */
+export function registerSelectionJsonId(
+  id: string,
+  selectionClass: Parameters<typeof Selection.jsonID>[1],
+  reloading: boolean,
+): void {
+  try {
+    Selection.jsonID(id, selectionClass);
+  } catch (error) {
+    if (!reloading || !(error instanceof RangeError)) throw error;
+  }
+}
+
+// A dev server that reloads modules in place sets `import.meta.hot`.
+registerSelectionJsonId(CELL_SELECTION_JSON_ID, CellSelection, Reflect.get(import.meta, "hot") !== undefined);
 
 /**
  * The active cell selection resolved to its cell positions, or null when the

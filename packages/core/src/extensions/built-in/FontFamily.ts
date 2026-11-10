@@ -132,7 +132,7 @@ export const FontFamily = Extension.create<FontFamilyOptions>({
         "fontFamily",
         (parsed: ParsedFont, attrs: Record<string, unknown>) => {
           const family = attrs["family"];
-          if (typeof family === "string") {
+          if (typeof family === "string" && family.trim() !== "") {
             parsed.family = family;
           }
         },
@@ -177,9 +177,9 @@ export const FontFamily = Extension.create<FontFamilyOptions>({
       group: "family",
       // Active when the block attr is set, OR when every character in the
       // selection carries the fontFamily mark for this family.
-      isActive: (_activeMarks, _blockType, blockAttrs, activeMarkAttrs) =>
+      isActive: ({ blockAttrs, activeMarkAttrs }) =>
         blockAttrs["fontFamily"] === family ||
-        activeMarkAttrs?.["fontFamily"]?.["family"] === family,
+        activeMarkAttrs["fontFamily"]?.["family"] === family,
     }));
     return items;
   },

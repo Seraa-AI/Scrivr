@@ -11,13 +11,14 @@ import type { Node } from "@scrivr/core/pm";
 import {
   runMiniPipeline,
   type DocumentLayout,
+  type FontConfig,
   type PageChromeMeasureInput,
   type ChromeContribution,
   type LayoutIterationContext,
 } from "@scrivr/core";
 import type { HeaderFooterPolicy, HeaderFooterDefinition } from "./types";
 import { resolveSlot } from "./resolveSlot";
-import { chromeFontConfig } from "./chromeFontConfig";
+import { chromeFontConfigOf } from "./chromeFontConfig";
 import {
   arrangedForPage,
   digitsIn,
@@ -74,6 +75,8 @@ export interface ResolvedHeaderFooter {
   defaultMarginTop: number;
   /** Fallback marginBottom from pageConfig. */
   defaultMarginBottom: number;
+  /** The band's block styles: the editor's, as every slot was measured with. */
+  fontConfig: FontConfig;
 }
 
 /** Narrows a ChromeContribution payload back to this contributor's own. */
@@ -102,6 +105,7 @@ function countsPages(slots: ResolvedHeaderFooter["slots"]): boolean {
 const PER_PAGE_TOKENS: ReadonlySet<string> = new Set([PER_PAGE_TOKEN]);
 
 function measureSlot(
+  fontConfig: FontConfig,
   def: HeaderFooterDefinition | undefined,
   input: PageChromeMeasureInput,
   activeEditingGap: number,
@@ -115,7 +119,7 @@ function measureSlot(
   const arrange = (): DocumentLayout => runMiniPipeline(miniDoc, {
     pageConfig: input.pageConfig,
     measurer: input.measurer,
-    fontConfig: chromeFontConfig,
+    fontConfig,
     ...(input.fonts ? { fonts: input.fonts } : {}),
     ...(input.fontModifiers ? { fontModifiers: input.fontModifiers } : {}),
     // Required, not optional: the tokens declare no size of their own, so
@@ -206,24 +210,26 @@ export function resolveChrome(
   const assumedPageCount =
     verifiedPageCount ?? ctx.previousRunFlowLayout?.pages.length ?? 1;
 
+  const fontConfig = chromeFontConfigOf(input.fontConfig);
   const resolved: ResolvedHeaderFooter = {
     policy,
+    fontConfig,
     defaultMarginTop: input.pageConfig.margins.top,
     defaultMarginBottom: input.pageConfig.margins.bottom,
     slots: {
-      defaultHeader: measureSlot(policy.defaultHeader, input, activeEditingGap, assumedPageCount),
-      defaultFooter: measureSlot(policy.defaultFooter, input, activeEditingGap, assumedPageCount),
+      defaultHeader: measureSlot(fontConfig, policy.defaultHeader, input, activeEditingGap, assumedPageCount),
+      defaultFooter: measureSlot(fontConfig, policy.defaultFooter, input, activeEditingGap, assumedPageCount),
       firstPageHeader: policy.differentFirstPage
-        ? measureSlot(policy.firstPageHeader, input, activeEditingGap, assumedPageCount)
+        ? measureSlot(fontConfig, policy.firstPageHeader, input, activeEditingGap, assumedPageCount)
         : undefined,
       firstPageFooter: policy.differentFirstPage
-        ? measureSlot(policy.firstPageFooter, input, activeEditingGap, assumedPageCount)
+        ? measureSlot(fontConfig, policy.firstPageFooter, input, activeEditingGap, assumedPageCount)
         : undefined,
       evenPageHeader: policy.differentOddEven
-        ? measureSlot(policy.evenPageHeader, input, activeEditingGap, assumedPageCount)
+        ? measureSlot(fontConfig, policy.evenPageHeader, input, activeEditingGap, assumedPageCount)
         : undefined,
       evenPageFooter: policy.differentOddEven
-        ? measureSlot(policy.evenPageFooter, input, activeEditingGap, assumedPageCount)
+        ? measureSlot(fontConfig, policy.evenPageFooter, input, activeEditingGap, assumedPageCount)
         : undefined,
     },
   };

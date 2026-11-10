@@ -286,11 +286,13 @@ function imageCount(node: { descendants: (f: (n: { type: { name: string } }) => 
   return count;
 }
 
+const pasteFiles = new ExtensionManager([StarterKit]).buildPasteFiles();
+
 describe("normalizeDocument — orphaned paste placeholders", () => {
   it("drops an image left mid-upload, keeping the text around it", () => {
     const result = normalizeDocument(
       doc(paraWith({ type: "text", text: "before " }, pendingImage("abc-123"), { type: "text", text: " after" })),
-      { schema },
+      { schema, pasteFiles },
     );
 
     expect(imageCount(result.doc)).toBe(0);
@@ -301,7 +303,7 @@ describe("normalizeDocument — orphaned paste placeholders", () => {
   it("reports the drop as a warning with a count", () => {
     const result = normalizeDocument(
       doc(paraWith(pendingImage("a")), paraWith(pendingImage("b"))),
-      { schema },
+      { schema, pasteFiles },
     );
 
     const warning = result.warnings.find((w) => w.code === "placeholders-dropped");
@@ -315,7 +317,7 @@ describe("normalizeDocument — orphaned paste placeholders", () => {
         type: "image",
         attrs: { src: "https://example.com/a.png", alt: "", pendingPasteId: null },
       })),
-      { schema },
+      { schema, pasteFiles },
     );
 
     expect(imageCount(result.doc)).toBe(1);
@@ -323,7 +325,7 @@ describe("normalizeDocument — orphaned paste placeholders", () => {
   });
 
   it("does not report a warning for a document with no placeholders", () => {
-    const result = normalizeDocument(doc(para("plain")), { schema });
+    const result = normalizeDocument(doc(para("plain")), { schema, pasteFiles });
     expect(result.warnings.some((w) => w.code === "placeholders-dropped")).toBe(false);
   });
 

@@ -21,6 +21,8 @@ interface Harness {
   bridge: InputBridge;
   doc: () => string;
   docJSON: () => ReturnType<EditorState["doc"]["toJSON"]>;
+  select: (from: number, to: number) => void;
+  lastDispatched: () => Transaction | null;
 }
 
 function imagesInDocument(
@@ -41,6 +43,7 @@ function mountEditor(initialText = "Hello world"): Harness {
   ]);
   let state = EditorState.create({ schema, doc, plugins: manager.buildPlugins() });
   state = state.apply(state.tr.setSelection(TextSelection.create(state.doc, 1)));
+  let lastDispatched: Transaction | null = null;
 
   const container = document.createElement("div");
   document.body.appendChild(container);
@@ -49,8 +52,10 @@ function mountEditor(initialText = "Hello world"): Harness {
     getState: () => state,
     dispatch: (tr: Transaction | null) => {
       if (tr) state = state.apply(tr);
+      lastDispatched = tr;
     },
     getSchema: () => schema,
+    copyHtmlTransforms: manager.buildCopyHtmlTransforms(),
     getViewportRect: () => null,
     getCharMap: () => new CharacterMap(),
     keymap: manager.buildKeymap(),
@@ -58,8 +63,8 @@ function mountEditor(initialText = "Hello world"): Harness {
     navigator: {} as EditorNavigator,
     pasteTransformer: new PasteTransformer(
       schema,
-      manager.buildMarkdownRules(),
       manager.buildMarkdownParserTokens(),
+      { pasteFiles: manager.buildPasteFiles() },
     ),
     onFocus: () => {},
     onBlur: () => {},
@@ -75,6 +80,10 @@ function mountEditor(initialText = "Hello world"): Harness {
     bridge,
     doc: () => state.doc.textContent,
     docJSON: () => state.doc.toJSON(),
+    select: (from, to) => {
+      state = state.apply(state.tr.setSelection(TextSelection.create(state.doc, from, to)));
+    },
+    lastDispatched: () => lastDispatched,
   };
 }
 
@@ -105,6 +114,33 @@ afterEach(() => {
   harness?.bridge.unmount();
   harness?.container.remove();
   harness = null;
+});
+
+describe("cut", () => {
+  it("marks its deletion as a cut, which a plugin tells apart from deleting", () => {
+    const h = harness!;
+    h.select(1, 6);
+    const written: Record<string, string> = {};
+    const event = new Event("cut", { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "clipboardData", {
+      value: { setData: (key: string, value: string) => { written[key] = value; }, getData: () => "" },
+    });
+    h.textarea.dispatchEvent(event);
+
+    expect(written["text/plain"]).toBe("Hello");
+    expect(h.doc()).toBe(" world");
+    expect(h.lastDispatched()?.getMeta("uiEvent")).toBe("cut");
+  });
+});
+
+describe("paste", () => {
+  it("marks its insertion as a paste, which a plugin tells apart from typing", () => {
+    const h = harness!;
+    h.textarea.dispatchEvent(pasteEvent({ "text/plain": "one\ntwo" }));
+
+    expect(h.doc()).toBe("onetwoHello world");
+    expect(h.lastDispatched()?.getMeta("uiEvent")).toBe("paste");
+  });
 });
 
 describe("paste without formatting (Mod-Shift-v)", () => {

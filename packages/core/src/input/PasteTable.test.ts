@@ -21,7 +21,7 @@ function pasteHtml(html: string): Node {
     getData: (type: string) => (type === "text/html" ? html : ""),
   } as DataTransfer;
   const htmlTransforms: PasteHtmlTransform[] = manager.buildPasteHtmlTransforms();
-  const transformer = new PasteTransformer(schema, [], {}, {
+  const transformer = new PasteTransformer(schema, {}, {
     pasteHtmlTransforms: htmlTransforms,
     pasteTransforms: manager.buildPasteTransforms(),
   });
@@ -259,5 +259,40 @@ describe("pasting a table from another editor", () => {
       [cellShape({ text: "Tall", vMerge: "restart" }), cellShape({ text: "X" })],
       [cellShape({ vMerge: "continue" }), cellShape({ text: "Y" })],
     ]);
+  });
+});
+
+describe("pasting a markdown table", () => {
+  function pasteMarkdown(text: string): Node {
+    const state = EditorState.create({ schema, plugins: manager.buildPlugins() });
+    const clipboardData = new DataTransfer();
+    clipboardData.setData("text/plain", text);
+    const transformer = new PasteTransformer(schema, manager.buildMarkdownParserTokens(), {
+      pasteTransforms: manager.buildPasteTransforms(),
+    });
+    const tr = transformer.transform(clipboardData, state);
+    if (!tr) throw new Error("paste produced no transaction");
+    return tr.doc;
+  }
+
+  it("becomes a table, its header row first", () => {
+    const doc = pasteMarkdown([
+      "## Equipment",
+      "",
+      "| Item | Provided |",
+      "|------|----------|",
+      "| Monitor | On request |",
+      "| Laptop | Always |",
+    ].join("\n"));
+
+    const table = findTable(doc);
+    const text = (row: Node) => {
+      const out: string[] = [];
+      row.forEach((cell) => out.push(cell.textContent));
+      return out;
+    };
+    const rows: string[][] = [];
+    table.forEach((row) => rows.push(text(row)));
+    expect(rows).toEqual([["Item", "Provided"], ["Monitor", "On request"], ["Laptop", "Always"]]);
   });
 });

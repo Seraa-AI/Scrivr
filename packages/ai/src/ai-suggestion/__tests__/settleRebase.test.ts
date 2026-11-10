@@ -10,7 +10,8 @@
 import { describe, expect, it } from "vitest";
 import { computeAiSuggestion } from "../computeAiSuggestion";
 import { subscribeToAiSuggestions } from "../subscribeToAiSuggestions";
-import { AiTestEditor, doc, markedText, p, schema } from "./helpers";
+import { AiTestEditor, doc, markedText, moveFirstBlockToEnd, p, schema } from "./helpers";
+import { rebaseAfterSettle } from "../rebase";
 import type { AiSuggestion } from "../types";
 
 const groupsOf = (suggestion: AiSuggestion, pick: "text" | "format") =>
@@ -21,6 +22,10 @@ const groupsOf = (suggestion: AiSuggestion, pick: "text" | "format") =>
     .filter((id, i, all) => all.indexOf(id) === i);
 
 const live = (editor: AiTestEditor) => editor.suggestionState?.suggestion ?? null;
+
+/** Two wording changes too far apart to read as one phrase: two groups. */
+const FAR_APART = "one two three four five six seven";
+const FAR_APART_PROPOSED = "ONE two three four five six SEVEN";
 
 describe("settling one group", () => {
   it("leaves the rest applying to the right words", () => {
@@ -47,20 +52,20 @@ describe("settling one group", () => {
   });
 
   it("keeps a later wording change reachable", () => {
-    const editor = new AiTestEditor(doc(p("one two three", "p1")));
+    const editor = new AiTestEditor(doc(p(FAR_APART, "p1")));
     const suggestion = computeAiSuggestion(editor.getState(), {
-      blocks: [{ nodeId: "p1", proposedText: "ONE two THREE" }],
+      blocks: [{ nodeId: "p1", proposedText: FAR_APART_PROPOSED }],
       authorID: "AI Assistant",
     })!;
 
     editor.showSuggestion(suggestion);
     const [first, second] = groupsOf(suggestion, "text");
     editor.apply({ mode: "direct", groupId: first! });
-    expect(editor.getState().doc.textContent).toBe("ONE two three");
+    expect(editor.getState().doc.textContent).toBe("ONE two three four five six seven");
 
     const rest = live(editor)!;
     editor.apply({ mode: "direct", groupId: groupsOf(rest, "text")[0]! });
-    expect(editor.getState().doc.textContent).toBe("ONE two THREE");
+    expect(editor.getState().doc.textContent).toBe(FAR_APART_PROPOSED);
     expect(second).toBeDefined();
   });
 
@@ -201,5 +206,22 @@ describe("an accept that writes nothing", () => {
     const rest = live(editor);
     expect(rest?.blocks[0]?.ops.filter((op) => op.type === "keep" && op.marks) ?? []).toEqual([]);
     expect(markedText(editor, "bold")).toBe("omega");
+  });
+});
+
+describe("settling a group in a block with a pending move", () => {
+  it("rebuilds the rest against the moved block, not the copy it left behind", () => {
+    const editor = new AiTestEditor(doc(p(FAR_APART, "p1"), p("tail", "p2")));
+    const suggestion = computeAiSuggestion(editor.getState(), {
+      blocks: [{ nodeId: "p1", proposedText: FAR_APART_PROPOSED }],
+      authorID: "AI Assistant",
+    });
+    if (!suggestion) throw new Error("no suggestion");
+    const [first] = groupsOf(suggestion, "text");
+    if (!first) throw new Error("no group");
+    moveFirstBlockToEnd(editor);
+
+    const rest = rebaseAfterSettle(editor, suggestion, "p1", new Set([first]), false);
+    expect(rest?.blocks.map((block) => block.nodeId)).toEqual(["p1"]);
   });
 });

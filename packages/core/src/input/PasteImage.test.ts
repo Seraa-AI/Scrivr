@@ -14,6 +14,8 @@ function makeContext() {
   return { schema, state };
 }
 
+const pasteFiles = new ExtensionManager([StarterKit]).buildPasteFiles();
+
 const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 function file(name: string, type: string, bytes = PNG_BYTES): File {
@@ -77,7 +79,7 @@ describe("pasting an image file", () => {
     vi.stubGlobal("Image", FailingDecoder);
 
     const { schema, state } = makeContext();
-    const transformer = new PasteTransformer(schema, [], {}, {
+    const transformer = new PasteTransformer(schema, {}, { pasteFiles,
       uploadImage: async () => "https://cdn.example.com/uploaded.png",
     });
     const pending = transformer.prepareImagePaste(
@@ -103,7 +105,7 @@ describe("pasting an image file", () => {
 
   it("inserts an image node with an inline data URL by default", async () => {
     const { schema, state } = makeContext();
-    const transformer = new PasteTransformer(schema);
+    const transformer = new PasteTransformer(schema, {}, { pasteFiles });
 
     const tr = await transformer.transformFiles(
       clipboard([file("shot.png", "image/png")]),
@@ -119,7 +121,7 @@ describe("pasting an image file", () => {
   it("uses a supplied uploader's URL instead of embedding the bytes", async () => {
     const { schema, state } = makeContext();
     const uploaded: File[] = [];
-    const transformer = new PasteTransformer(schema, [], {}, {
+    const transformer = new PasteTransformer(schema, {}, { pasteFiles,
       uploadImage: async (f) => {
         uploaded.push(f);
         return "https://cdn.example.com/uploaded.png";
@@ -138,7 +140,7 @@ describe("pasting an image file", () => {
 
   it("falls back to no insertion when the uploader fails", async () => {
     const { schema, state } = makeContext();
-    const transformer = new PasteTransformer(schema, [], {}, {
+    const transformer = new PasteTransformer(schema, {}, { pasteFiles,
       uploadImage: async () => {
         throw new Error("network down");
       },
@@ -153,7 +155,7 @@ describe("pasting an image file", () => {
 
   it("rejects an SVG file — it can carry script, unlike raster bytes", async () => {
     const { schema, state } = makeContext();
-    const transformer = new PasteTransformer(schema);
+    const transformer = new PasteTransformer(schema, {}, { pasteFiles });
 
     const tr = await transformer.transformFiles(
       clipboard([file("evil.svg", "image/svg+xml")]),
@@ -164,7 +166,7 @@ describe("pasting an image file", () => {
 
   it("rejects a src the uploader returns that is not a safe URL", async () => {
     const { schema, state } = makeContext();
-    const transformer = new PasteTransformer(schema, [], {}, {
+    const transformer = new PasteTransformer(schema, {}, { pasteFiles,
       uploadImage: async () => "javascript:alert(1)",
     });
 
@@ -177,7 +179,7 @@ describe("pasting an image file", () => {
 
   it("ignores non-image files", async () => {
     const { schema, state } = makeContext();
-    const transformer = new PasteTransformer(schema);
+    const transformer = new PasteTransformer(schema, {}, { pasteFiles });
 
     const tr = await transformer.transformFiles(
       clipboard([file("notes.txt", "text/plain")]),
@@ -188,7 +190,7 @@ describe("pasting an image file", () => {
 
   it("inserts every image when several are pasted at once", async () => {
     const { schema, state } = makeContext();
-    const transformer = new PasteTransformer(schema);
+    const transformer = new PasteTransformer(schema, {}, { pasteFiles });
 
     const tr = await transformer.transformFiles(
       clipboard([file("a.png", "image/png"), file("b.png", "image/png")]),
@@ -203,7 +205,7 @@ describe("pasting an image file", () => {
     // clipboard. The HTML keeps the original URL, so the document stays small —
     // embedding the bytes as well would insert the image twice.
     const { schema, state } = makeContext();
-    const transformer = new PasteTransformer(schema);
+    const transformer = new PasteTransformer(schema, {}, { pasteFiles });
 
     const tr = await transformer.transformFiles(
       clipboard([file("a.png", "image/png")], {
@@ -250,7 +252,7 @@ describe("pasted image sizing", () => {
   it("inserts a decoded image at its natural size", async () => {
     stubDecoder({ naturalWidth: 320, naturalHeight: 240 });
     const { schema, state } = makeContext();
-    const transformer = new PasteTransformer(schema);
+    const transformer = new PasteTransformer(schema, {}, { pasteFiles });
 
     const tr = await transformer.transformFiles(
       clipboard([file("shot.png", "image/png")]),
@@ -265,7 +267,7 @@ describe("pasted image sizing", () => {
   it("scales an oversized screenshot down to fit the page", async () => {
     stubDecoder({ naturalWidth: 2560, naturalHeight: 1440 });
     const { schema, state } = makeContext();
-    const transformer = new PasteTransformer(schema);
+    const transformer = new PasteTransformer(schema, {}, { pasteFiles });
 
     const tr = await transformer.transformFiles(
       clipboard([file("shot.png", "image/png")]),
@@ -281,7 +283,7 @@ describe("pasted image sizing", () => {
   it("falls back to the default box when the image cannot be decoded", async () => {
     stubDecoder("error");
     const { schema, state } = makeContext();
-    const transformer = new PasteTransformer(schema);
+    const transformer = new PasteTransformer(schema, {}, { pasteFiles });
 
     const tr = await transformer.transformFiles(
       clipboard([file("broken.png", "image/png")]),

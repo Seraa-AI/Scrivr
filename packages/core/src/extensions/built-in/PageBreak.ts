@@ -31,6 +31,7 @@ export const PageBreak = Extension.create({
         group: "block",
         atom: true,
         selectable: false,
+        layout: { kind: "break", breaks: "page" },
         attrs: { nodeId: { default: null }, dataTracked: { default: [] } },
         parseDOM: [
           {

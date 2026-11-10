@@ -149,8 +149,12 @@ export interface DocxStyleSpec {
 
 export interface DocxNumberingLevel {
   level: number;
-  format: "bullet" | "decimal";
+  format: "bullet" | "decimal" | "lowerLetter" | "lowerRoman";
   text: string;
+  /** Left indent of the level's text, in twips. Defaults to half an inch per level. */
+  left?: number;
+  /** How far the number hangs before the text, in twips. Defaults to a quarter inch. */
+  hanging?: number;
 }
 
 /** A binary media file (image, embedded object) registered in `word/media/`. */
@@ -204,6 +208,11 @@ export interface DocxContext {
   readonly editor: IBaseEditor;
   /** Resolved export options — never undefined inside a handler. */
   readonly options: DocxResolvedOptions;
+  /**
+   * Width of the exported section's text column, in twips. A handler that
+   * indents a table sizes it to fit what is left of the column.
+   */
+  readonly textWidthTwips: number;
 
   styles: {
     paragraph: { getOrCreate(name: string, spec: DocxStyleSpec): string };
@@ -212,9 +221,17 @@ export interface DocxContext {
   };
 
   numbering: {
+    /**
+     * A numbering for these levels. Without `instance`, equal configs share
+     * one. With it, each instance (a list) gets its own `numId`, so separate
+     * lists restart in Word, over one shared definition; its count starts at
+     * `start` (default 1), written as level 0's `startOverride`.
+     */
     getOrCreate(config: {
       type: "bullet" | "ordered" | "task";
       levels: DocxNumberingLevel[];
+      instance?: object;
+      start?: number;
     }): { numId: number };
   };
 
@@ -469,6 +486,8 @@ export interface DocxParagraphAttrs {
  */
 export interface DocxListItem {
   content: DocxBlock[];
+  /** Levels deeper than its list, where Word's levels skip one. */
+  levelOffset?: number;
 }
 
 /** One reconstructed `<w:tc>`. Cell content is `DocxBlock[]` (cells hold block content). */
@@ -495,7 +514,13 @@ export type DocxBlock =
   | { type: "paragraph"; attrs: DocxParagraphAttrs; content: DocxInline[] }
   | { type: "horizontalRule" }
   | { type: "pageBreak" }
-  | { type: "list"; listType: "bullet" | "ordered"; items: DocxListItem[] }
+  | {
+      type: "list";
+      listType: "bullet" | "ordered";
+      items: DocxListItem[];
+      /** The number an ordered list starts at, when not 1. */
+      start?: number;
+    }
   | { type: "table"; grid: number[]; rows: DocxTableRow[] }
   | { type: "sdt"; tag: string | null; content: DocxBlock[] };
 

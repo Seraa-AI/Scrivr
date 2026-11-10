@@ -1,6 +1,7 @@
 import type { LayoutFontResolver } from "./fonts/layoutResolver";
-import { resolveActiveFontSize } from "./fonts/activeFontSize";
-import { getBlockStyle } from "./layout/FontConfig";
+import { parseFontSizePx, resolveActiveFontSize } from "./fonts/activeFontSize";
+import { applyPageFont, blockFontOf, blockStyleOf } from "./layout/FontConfig";
+import { parseFont, resolveFont, type ParsedFont } from "./layout/StyleResolver";
 import {
 	EditorState,
 	Transaction,
@@ -8,14 +9,16 @@ import {
 	type Selection,
 } from "prosemirror-state";
 import { SelectionController } from "./SelectionController";
+import { anchoredOf, placementAttrs } from "./layout/AnchoredObjects";
 import type {
 	FontModifier,
 	MarkDecorator,
 	ToolbarItemSpec,
+	ToolbarState,
 	OverlayRenderHandler,
 	IEditor,
 } from "./extensions/types";
-import type { Node as PmNode, Schema } from "prosemirror-model";
+import type { Mark, Node as PmNode, Schema } from "prosemirror-model";
 import { StarterKit } from "./extensions/StarterKit";
 import { BlockRegistry } from "./layout/BlockRegistry";
 import type { Extension } from "./extensions/Extension";
@@ -31,7 +34,7 @@ import {
 	usedResolutions,
 	type FontShortfall,
 } from "./fonts/collectFontRequests";
-import { primaryFamily } from "./fonts/layoutResolver";
+import { faceOf, primaryFamily } from "./fonts/layoutResolver";
 import { DEFAULT_FONT_FAMILY } from "./layout/FontConfig";
 import { CursorManager } from "./renderer/CursorManager";
 import { SelectionRegistry } from "./selection/SelectionRegistry";
@@ -89,7 +92,7 @@ export type EditorChangeHandler = (state: EditorState) => void;
  * can draw both the cursor and selection highlights without importing
  * ProseMirror types.
  */
-export interface SelectionSnapshot {
+export interface SelectionSnapshot extends ToolbarState {
 	/** The fixed end of the selection (doesn't move when you Shift+arrow) */
 	anchor: number;
 	/** The moving end — where the cursor is drawn */
@@ -100,20 +103,6 @@ export interface SelectionSnapshot {
 	to: number;
 	/** True when anchor === head (cursor only, no highlight) */
 	empty: boolean;
-	/**
-	 * Names of marks active at the cursor (or present anywhere in the selection).
-	 * Use this to show toolbar button active states without importing ProseMirror.
-	 */
-	activeMarks: string[];
-	/**
-	 * Attributes of each active mark, keyed by mark name.
-	 * e.g. { color: { color: "#dc2626" }, fontSize: { size: 18 } }
-	 */
-	activeMarkAttrs: Record<string, Record<string, unknown>>;
-	/** The ProseMirror node type name of the block containing the cursor: "paragraph", "heading", etc. */
-	blockType: string;
-	/** Attributes of that block node — e.g. { level: 1, align: "left" } for a heading */
-	blockAttrs: Record<string, unknown>;
 }
 
 function moveDeleteRange(
@@ -347,9 +336,9 @@ function withAvailableFamilies(
 		// No `labelStyle`: owned bytes are installed under a private name, so
 		// styling a label `font-family: Inter` asks the browser for a family it
 		// does not have and previews every entry in the same fallback.
-		isActive: (activeMarks, blockType, blockAttrs, activeMarkAttrs) =>
+		isActive: ({ blockAttrs, activeMarkAttrs }) =>
 			blockAttrs["fontFamily"] === family ||
-			activeMarkAttrs?.["fontFamily"]?.["family"] === family,
+			activeMarkAttrs["fontFamily"]?.["family"] === family,
 	}));
 
 	const firstAt = items.indexOf(template);
@@ -697,11 +686,11 @@ export class Editor extends BaseEditor implements IEditor {
 
 		const pasteTransformer = new PasteTransformer(
 			this.manager.schema,
-			this.manager.buildMarkdownRules(),
 			this.manager.buildMarkdownParserTokens(),
 			{
 				pasteTransforms: this.manager.buildPasteTransforms(),
 				pasteHtmlTransforms: this.manager.buildPasteHtmlTransforms(),
+				pasteFiles: this.manager.buildPasteFiles(),
 				...(uploadPastedImage ? { uploadImage: uploadPastedImage } : {}),
 			},
 		);
@@ -710,6 +699,7 @@ export class Editor extends BaseEditor implements IEditor {
 			getState: getRoutedState,
 			dispatch: routedDispatch,
 			getSchema: () => this.manager.schema,
+			copyHtmlTransforms: this.getCopyHtmlTransforms(),
 			getViewportRect: (from, to) => this.getViewportRect(from, to),
 			// TODO(pr7): getViewportRect still resolves positions against the flow
 			// layout. When a surface is active, `from`/`to` are surface-doc positions
@@ -920,24 +910,19 @@ export class Editor extends BaseEditor implements IEditor {
 	}
 
 	/**
-	 * Convert a floating image back to inline content at its current painted
-	 * location. Floating modes treat docPos as ownership and attrs as geometry;
-	 * inline mode is the opposite, so this is the one place where visual X/Y is
-	 * resolved back to a document insertion point.
+	 * Put a floating object back into its text, at its current painted
+	 * location, its placement written through its own declaration. Floating
+	 * modes treat docPos as ownership and attrs as geometry; inline mode is the
+	 * opposite, so this is the one place where visual X/Y is resolved back to a
+	 * document position.
 	 */
-	convertImageToInlineAtVisualPosition(docPos: number): boolean {
+	placeInlineAtVisualPosition(docPos: number): boolean {
 		const state = this.getActiveState();
 		const node = state.doc.nodeAt(docPos);
-		if (!node || node.type.name !== "image") return false;
-
-		const inlineAttrs: Record<string, unknown> = {
-			wrapMode: "inline",
-			wrappingMode: "inline",
-			xAlign: "left",
-			x: null,
-			yOffset: 0,
-			floatOffset: { x: 0, y: 0 },
-		};
+		const inlineAttrs = node && anchoredOf(node)
+			? placementAttrs(node, { wrapMode: "inline", xAlign: "left", x: null, yOffset: 0 })
+			: null;
+		if (!node || !inlineAttrs) return false;
 
 		const rect = this.getNodeRect(docPos);
 		if (!rect) {
@@ -965,7 +950,7 @@ export class Editor extends BaseEditor implements IEditor {
 			if (this.debug?.drag) {
 				// eslint-disable-next-line no-console
 				console.warn(
-					"[convertImageToInlineAtVisualPosition] moveAndUpdateNode rejected — falling back to attrs-only update",
+					"[placeInlineAtVisualPosition] moveAndUpdateNode rejected — falling back to attrs-only update",
 					{ from, to, targetPos },
 				);
 			}
@@ -1064,31 +1049,55 @@ export class Editor extends BaseEditor implements IEditor {
 	}
 
 	/**
+	 * The font a run is drawn in: its block's font with the run's marks applied
+	 * through the font modifiers, as layout resolves it. A font control that
+	 * re-derived it would drift from the thing it describes.
+	 */
+	private runFont(marks: readonly Mark[], block: PmNode, config: FontConfig): ParsedFont {
+		return parseFont(resolveFont(blockFontOf(block, config), marks, this.fontModifiers));
+	}
+
+	/**
+	 * The font of every run the selection covers, in order; for a collapsed
+	 * selection, or one that covers no text, the one the next typed character
+	 * takes.
+	 */
+	private selectedRunFonts(): Array<{ font: ParsedFont; block: PmNode }> {
+		const state = this.getActiveState();
+		const { from, to, empty, $from } = state.selection;
+		const config = applyPageFont(this.fontConfig, this.pageConfig.fontFamily ?? DEFAULT_FONT_FAMILY);
+		const runs: Array<{ font: ParsedFont; block: PmNode }> = [];
+		let firstTextblock: PmNode | null = null;
+		if (!empty) {
+			state.doc.nodesBetween(from, to, (node, _pos, parent) => {
+				if (node.isTextblock) firstTextblock ??= node;
+				if (node.isText && parent) runs.push({ font: this.runFont(node.marks, parent, config), block: parent });
+			});
+		}
+		if (runs.length > 0) return runs;
+		// No text: an empty block, an image, or a whole document of empty blocks.
+		const block = $from.parent.isTextblock ? $from.parent : (firstTextblock ?? $from.parent);
+		return [{ font: this.runFont(state.storedMarks ?? $from.marks(), block, config), block }];
+	}
+
+	/**
 	 * The family in effect at the selection, and the face it is drawn in.
 	 *
-	 * The precedence — inline mark, then block attr, then the document default —
-	 * is the editor's own rule, so a font control that re-derived it would drift
-	 * from the thing it describes.
+	 * Asked of every run rather than the first: a range drawn in two families
+	 * is `mixed`, so one family is not named confidently for it.
 	 */
 	getActiveFontFamily(): ActiveFontFamily {
-		const inline = this.getActiveMarkAttrs()["fontFamily"]?.["family"];
-		const block = this.getBlockInfo().blockAttrs["fontFamily"];
-		const mixed = this.selectionSpansMultipleFamilies();
-		const requested = primaryFamily(
-			typeof inline === "string" && inline.length > 0
-				? inline
-				: typeof block === "string" && block.length > 0
-					? block
-					: (this.pageConfig.fontFamily ?? DEFAULT_FONT_FAMILY),
-		);
+		const runs = this.selectedRunFonts();
+		const families = runs.map((run) => primaryFamily(run.font.family));
+		const first = runs[0]?.font;
+		const requested = families[0] ?? primaryFamily(this.pageConfig.fontFamily ?? DEFAULT_FONT_FAMILY);
+		const mixed = families.some((family) => family !== requested);
 
-		if (!this.fonts) return { requested, resolved: requested, substituted: false, mixed };
+		if (!this.fonts || !first) return { requested, resolved: requested, substituted: false, mixed };
 
-		const marks = this.getActiveMarks();
 		const { resolved } = this.fonts.resolve({
 			family: requested,
-			weight: marks.includes("bold") ? 700 : 400,
-			style: marks.includes("italic") ? "italic" : "normal",
+			...faceOf(first),
 			// Size never changes which face answers; the provider's own is the
 			// one value guaranteed to be meaningful to it.
 			size: this.fonts.defaultRequest().size,
@@ -1102,76 +1111,21 @@ export class Editor extends BaseEditor implements IEditor {
 	}
 
 	/**
-	 * Does the selection cover runs that are drawn in different families?
-	 *
-	 * Asked of every run rather than the first: `getActiveMarkAttrs` reports a
-	 * mark only when the whole range carries it and then answers with the first
-	 * match, so one family is named confidently for a range drawn in two.
-	 */
-	private selectionSpansMultipleFamilies(): boolean {
-		const state = this.getActiveState();
-		const { from, to, empty } = state.selection;
-		if (empty) return false;
-
-		let seen: string | null = null;
-		let mixed = false;
-		state.doc.nodesBetween(from, to, (node, _pos, parent) => {
-			if (mixed || !node.isText || !parent) return !mixed;
-			const mark = node.marks.find((m) => m.type.name === "fontFamily")?.attrs["family"];
-			const blockFamily = parent.attrs["fontFamily"];
-			const family = primaryFamily(
-				typeof mark === "string" && mark.length > 0
-					? mark
-					: typeof blockFamily === "string" && blockFamily.length > 0
-						? blockFamily
-						: (this.pageConfig.fontFamily ?? DEFAULT_FONT_FAMILY),
-			);
-			if (seen === null) seen = family;
-			else if (seen !== family) mixed = true;
-			return !mixed;
-		});
-		return mixed;
-	}
-
-	/**
 	 * The size in effect at the selection, in px — the counterpart to
-	 * `getActiveFontFamily`. Inline `fontSize` mark if present, else the size the
-	 * block style renders at. Always a number.
+	 * `getActiveFontFamily`: the size each run is drawn at, or null when the
+	 * runs differ. A selection covering a 24px run and an unmarked one has no
+	 * single size, and naming either invites the reader to confirm it and
+	 * resize the other.
 	 */
 	getActiveFontSize(): number | null {
-		const state = this.getActiveState();
-		const { from, to, empty, $from } = state.selection;
-
-		/** The size a run is drawn at: its own mark, else the style of its block. */
-		const sizeOf = (markSize: unknown, block: PmNode): number => {
-			const level = block.attrs["level"];
-			return resolveActiveFontSize(
-				typeof markSize === "number" ? markSize : undefined,
-				// The textblock itself, not a depth-1 ancestor: layout styles the
-				// leaf, so a heading inside a table cell is styled as a heading
-				// while its ancestor is the table, which has no style of its own.
-				getBlockStyle(this.fontConfig, block.type.name, typeof level === "number" ? level : undefined),
-			);
-		};
-
-		if (empty) {
-			return sizeOf(this.getActiveMarkAttrs()["fontSize"]?.["size"], $from.parent);
-		}
-
-		// Every run in the range, not the first: a selection covering a 24px run
-		// and an unmarked one has no single size, and naming either invites the
-		// reader to confirm it and resize the other.
-		let answer: number | null = null;
-		let mixed = false;
-		state.doc.nodesBetween(from, to, (node, _pos, parent) => {
-			if (mixed || !node.isText || !parent) return !mixed;
-			const mark = node.marks.find((m) => m.type.name === "fontSize");
-			const size = sizeOf(mark?.attrs["size"], parent);
-			if (answer === null) answer = size;
-			else if (answer !== size) mixed = true;
-			return !mixed;
-		});
-		return mixed ? null : answer;
+		// The textblock itself, not a depth-1 ancestor: layout styles the leaf,
+		// so a heading inside a table cell is styled as a heading while its
+		// ancestor is the table, which has no style of its own.
+		const sizes = this.selectedRunFonts().map(({ font, block }) =>
+			resolveActiveFontSize(parseFontSizePx(font.size) ?? undefined, blockStyleOf(block, this.fontConfig)));
+		const [first] = sizes;
+		if (first === undefined) return null;
+		return sizes.every((size) => size === first) ? first : null;
 	}
 
 	/** True when the editor is in pageless (infinite-scroll) mode. */
@@ -1352,6 +1306,7 @@ export class Editor extends BaseEditor implements IEditor {
 			activeMarkAttrs: this.getActiveMarkAttrs(),
 			blockType: blockInfo.blockType,
 			blockAttrs: blockInfo.blockAttrs,
+			ancestors: blockInfo.ancestors,
 		};
 	}
 

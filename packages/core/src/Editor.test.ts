@@ -425,7 +425,7 @@ describe("Editor.moveNode", () => {
   });
 });
 
-describe("Editor.convertImageToInlineAtVisualPosition", () => {
+describe("Editor.placeInlineAtVisualPosition", () => {
   it("moves a floating image to the visual insertion point and clears placement attrs", () => {
     const { editor, cleanup } = makeEditor();
     const schema = editor.schema;
@@ -454,7 +454,7 @@ describe("Editor.convertImageToInlineAtVisualPosition", () => {
     expect(imagePos).toBeGreaterThan(0);
 
     const posAtCoords = vi.spyOn(editor.charMap, "posAtCoords").mockReturnValue(1);
-    expect(editor.convertImageToInlineAtVisualPosition(imagePos)).toBe(true);
+    expect(editor.placeInlineAtVisualPosition(imagePos)).toBe(true);
 
     const firstParagraph = editor.getState().doc.child(0);
     const movedImage = firstParagraph.child(0);
@@ -1043,7 +1043,7 @@ describe("Editor — list commands", () => {
     const { editor, type, cleanup } = makeEditor();
     type("Hello");
     editor.commands["toggleBulletList"]?.();
-    expect(editor.getBlockInfo().blockType).toBe("bulletList");
+    expect(editor.isActive("bulletList")).toBe(true);
     expect(editor.getState().doc.textContent).toBe("Hello");
     cleanup();
   });
@@ -1062,7 +1062,7 @@ describe("Editor — list commands", () => {
     const { editor, type, cleanup } = makeEditor();
     type("Hello");
     editor.commands["toggleOrderedList"]?.();
-    expect(editor.getBlockInfo().blockType).toBe("orderedList");
+    expect(editor.isActive("orderedList")).toBe(true);
     cleanup();
   });
 
@@ -1079,9 +1079,9 @@ describe("Editor — list commands", () => {
     const { editor, type, cleanup } = makeEditor();
     type("Hello");
     editor.commands["toggleBulletList"]?.();
-    expect(editor.getBlockInfo().blockType).toBe("bulletList");
+    expect(editor.isActive("bulletList")).toBe(true);
     editor.commands["toggleOrderedList"]?.();
-    expect(editor.getBlockInfo().blockType).toBe("orderedList");
+    expect(editor.isActive("orderedList")).toBe(true);
     expect(editor.getState().doc.textContent).toBe("Hello");
     cleanup();
   });
@@ -1091,15 +1091,15 @@ describe("Editor — list commands", () => {
     type("Hello");
     editor.commands["toggleOrderedList"]?.();
     editor.commands["toggleBulletList"]?.();
-    expect(editor.getBlockInfo().blockType).toBe("bulletList");
+    expect(editor.isActive("bulletList")).toBe(true);
     cleanup();
   });
 
-  it("getBlockInfo returns bulletList when cursor is inside a bullet list", () => {
+  it("isActive(\"bulletList\") when the cursor is inside a bullet list", () => {
     const { editor, type, cleanup } = makeEditor();
     type("Hello");
     editor.commands["toggleBulletList"]?.();
-    expect(editor.getBlockInfo().blockType).toBe("bulletList");
+    expect(editor.isActive("bulletList")).toBe(true);
     cleanup();
   });
 

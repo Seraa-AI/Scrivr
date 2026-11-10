@@ -525,8 +525,8 @@ bottom, `:45`) which is exactly the grouped/fragment border-ownership model.
 Two-tier plan, matching the two-tier problem:
 
 - **Phase 1 (standalone).** A fragment-aware paragraph `BlockStrategy` that
-  wraps `TextBlockStrategy` — the way `ListItemStrategy` wraps it
-  (`ListItemStrategy.ts:30`) — registered via `addLayoutHandlers`. It draws
+  wraps `TextBlockStrategy`, registered via `addLayoutHandlers` under the
+  node type, and painted through core's `paintBlock` like every block. It draws
   shading fill → delegates text → strokes the **fragment-visible** sides (§7),
   mirroring `paintRowGrid`'s fill→stroke→text order. Per-block is sufficient
   here because a standalone paragraph's fragments are self-contained.

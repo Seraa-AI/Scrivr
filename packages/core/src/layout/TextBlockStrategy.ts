@@ -10,7 +10,7 @@ import type { BlockStrategy, BlockRenderContext } from "./BlockRegistry";
  * TextBlockStrategy — the default render strategy for text-based block nodes.
  *
  * Handles any block whose layout is expressed as LayoutLines of LayoutSpans
- * (paragraph, heading, list item, etc.). Draws each span with mark decorators
+ * (paragraph, heading, etc.). Draws each span with mark decorators
  * and registers glyph positions into the CharacterMap for cursor hit-testing.
  *
  * Text spans are drawn directly. Object spans (inline images, widgets) are
@@ -210,7 +210,7 @@ export const TextBlockStrategy: BlockStrategy = {
         spacesBeforeSpan += countSpaces(span.text);
       }
 
-      // Register a zero-width glyph at the hardBreak's doc position so
+      // Register a zero-width glyph at the line break's doc position so
       // coordsAtPos(breakDocPos) returns the correct cursor location at line-end.
       if (line.terminalBreakDocPos !== undefined && !map.hasGlyph(line.terminalBreakDocPos)) {
         map.registerGlyph({
@@ -234,12 +234,12 @@ export const TextBlockStrategy: BlockStrategy = {
           height: line.lineHeight,
           x,
           contentWidth: availableWidth,
-          startDocPos: line.spans[0]?.docPos ?? 0,
+          startDocPos: line.spans[0]?.docPos ?? block.nodePos + 1,
           endDocPos: line.terminalBreakDocPos !== undefined
             ? line.terminalBreakDocPos + 1
             : (lastSpan
               ? (lastSpan.kind === "text" ? lastSpan.docPos + lastSpan.text.length : lastSpan.docPos + 1)
-              : 0),
+              : block.nodePos + 1),
         });
       }
     }

@@ -1,26 +1,14 @@
 /**
- * computeAiSuggestion
- *
- * Pure function — no dispatch, no document mutation.
- *
- * Computes a word-level diff between each block's current accepted text and the
- * AI-proposed replacement, then packages the result as a serializable
- * AiSuggestion that can be:
- *   - saved to a DB as plain JSON
- *   - passed to showAiSuggestion() to render as an overlay
- *   - passed to applyAiSuggestion() to commit to the document
- *
- * Notably does NOT call expandCharLevel — AI suggestions stay at word/token
- * granularity. Character-level surgical marks are appropriate for human edits
- * (where lawyers want to see exactly which suffix changed) but produce visual
- * noise for AI suggestions where the unit of accept/reject is a whole word.
+ * The word-level diff between each block's accepted text and the agent's
+ * proposal, as a serializable AiSuggestion — saved as JSON, shown as an
+ * overlay, or applied. Pure: nothing is dispatched. A change is never made
+ * inside a word.
  */
 
 import type { EditorState, Node as PmNode, Schema } from "@scrivr/core/pm";
 
-import { findNodeById } from "../ai-toolkit/UniqueId";
-import { buildAcceptedTextMap } from "@scrivr/plugins";
-import { diffText, pairReplacements } from "@scrivr/plugins";
+import { findLiveNodeById } from "@scrivr/plugins";
+import { bridgeable, buildAcceptedTextMap, diffText, phraseReplacements } from "@scrivr/plugins";
 import type { PairedDiffOp } from "@scrivr/plugins";
 import { describeInlineMark, resolveInlineMarks, stableStringify, type InlineMark } from "@scrivr/core";
 import type { InlineSpan } from "../schema/edit";
@@ -122,21 +110,16 @@ function splitByMarks(op: AiOp, marksAt: InlineMark[][], offset: number): AiOp[]
 }
 
 /**
- * One diff op as a suggestion op. `proposedOffset` stays behind: it is diff
- * bookkeeping the caller needs while building, not something a suggestion
- * carries into storage.
- *
- * `nodeId` prefixes the generated ids because a group is addressed across the
- * whole suggestion, and an index into one block's ops repeats in every block.
+ * One diff op as a suggestion op, keeping the group the diff gave it.
+ * `proposedOffset` stays behind: it is diff bookkeeping the caller needs while
+ * building, not something a suggestion carries into storage.
  */
-function toDiffOp(op: PairedDiffOp, i: number, nodeId: string): AiOp {
+function toDiffOp(op: PairedDiffOp): AiOp {
   if (op.type === "keep") return { type: "keep", text: op.text };
-  // Use the existing groupId from pairReplacements, or generate a unique one
-  // for standalone ops that weren't paired (no matching insert/delete nearby).
-  const gid = `${nodeId}_${op.groupId ?? `solo_${i}`}`;
-  if (op.type === "delete")
-    return { type: "delete", text: op.text, groupId: gid };
-  return { type: "insert", text: op.text, groupId: gid };
+  const grouped = op.groupId ? { groupId: op.groupId } : {};
+  return op.type === "delete"
+    ? { type: "delete", text: op.text, ...grouped }
+    : { type: "insert", text: op.text, ...grouped };
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -166,19 +149,21 @@ export function computeAiSuggestion(
 
   for (const block of inputBlocks) {
     const { nodeId, summary } = block;
-    const found = findNodeById(state.doc, nodeId);
+    const found = findLiveNodeById(state.doc, nodeId);
     if (!found || !found.node.isTextblock) continue;
     const proposal = readProposal(block, schema, found.node);
     if (!proposal) continue;
 
-    const { acceptedText } = buildAcceptedTextMap(
+    const { acceptedText, map } = buildAcceptedTextMap(
       found.node,
       found.pos,
       schema,
     );
 
+    // Phrases, as the tracked rewrite writes them, so the proposal reads the
+    // same before it is applied as after.
     const rawOps = diffText(acceptedText, proposal.text);
-    const paired = pairReplacements(rawOps);
+    const paired = phraseReplacements(rawOps, (from, to) => bridgeable(state.doc, map, from, to));
 
     // Two cursors: one into the document's accepted text, which deletes and
     // keeps consume, and one into the proposal, which keeps and inserts consume.
@@ -186,17 +171,14 @@ export function computeAiSuggestion(
     let formatGroups = 0;
     let acceptedOffset = 0;
     const ops: AiOp[] = [];
-    for (const [i, raw] of paired.entries()) {
-      const op = toDiffOp(raw, i, nodeId);
+    for (const raw of paired) {
+      const op = toDiffOp(raw);
       if (op.type === "delete") {
         ops.push(op);
         acceptedOffset += op.text.length;
         continue;
       }
-      // Where this op sits in the proposal comes from the op itself. Counting
-      // as we walk would be wrong: `pairReplacements` emits in document order,
-      // which is what applying a diff needs and is not the order the proposal
-      // reads in, so a counted offset lands on the wrong words.
+      // Where this op sits in the proposal comes from the op itself.
       const proposedOffset = raw.type === "delete" ? 0 : raw.proposedOffset ?? 0;
       for (const part of splitByMarks(op, proposal.marksAt, proposedOffset)) {
         if (part.type !== "keep" || !part.marks) {

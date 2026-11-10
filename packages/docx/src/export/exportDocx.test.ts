@@ -577,3 +577,170 @@ describe("table fill export", () => {
     editor.destroy();
   });
 });
+
+describe("list levels match what the editor draws", () => {
+  type Json = { type: string; attrs?: Record<string, unknown>; content?: Json[]; text?: string };
+  const p = (text: string): Json => ({ type: "paragraph", content: [{ type: "text", text }] });
+  const item = (text: string, ...more: Json[]): Json => ({ type: "listItem", content: [p(text), ...more] });
+  const list = (type: string, ...items: Json[]): Json => ({ type, content: items });
+
+  async function exported(content: Json[]) {
+    const editor = new ServerEditor({ content: { type: "doc", content } });
+    const files = readZip(await exportDocxBytes(editor));
+    editor.destroy();
+    return { document: files["word/document.xml"] ?? "", numbering: files["word/numbering.xml"] ?? "" };
+  }
+
+  /** The `<w:p>` holding `text`. */
+  const paragraphWith = (document: string, text: string) =>
+    document.split("<w:p>").find((part) => part.includes(`<w:t>${text}</w:t>`)) ?? "";
+
+  it("numbers nested ordered levels 1. / a. / i., nine levels deep", async () => {
+    let nested = item("d4");
+    for (const text of ["d3", "d2", "d1"]) nested = item(text, list("orderedList", nested));
+    const { document, numbering } = await exported([list("orderedList", nested)]);
+
+    expect(paragraphWith(document, "d4")).toContain('<w:ilvl w:val="3"/>');
+    expect(numbering.match(/<w:lvl w:ilvl=/g)).toHaveLength(9);
+    expect(numbering).toContain('<w:numFmt w:val="lowerLetter"/>');
+    expect(numbering).toContain('<w:numFmt w:val="lowerRoman"/>');
+  });
+
+  it("keeps lists nested past the ninth level at the ninth", async () => {
+    let nested = item("deepest");
+    for (let depth = 0; depth < 10; depth++) nested = item(`d${depth}`, list("bulletList", nested));
+    const { document } = await exported([list("bulletList", nested)]);
+    expect(paragraphWith(document, "deepest")).toContain('<w:ilvl w:val="8"/>');
+  });
+
+  it("cycles bullets •, ◦, ▪ by level", async () => {
+    const { numbering } = await exported([list("bulletList", item("a"))]);
+    const glyphs = [...numbering.matchAll(/<w:lvlText w:val="([^"]*)"\/>/g)].map((match) => match[1]);
+    expect(glyphs.slice(0, 4)).toEqual(["•", "◦", "▪", "•"]);
+  });
+
+  it("indents an item's further blocks to its text, unnumbered", async () => {
+    const { document } = await exported([
+      list("bulletList", item("one", p("more"), list("bulletList", item("child", p("child more"))))),
+    ]);
+    const more = paragraphWith(document, "more");
+    expect(more).not.toContain("<w:numPr>");
+    expect(more).toContain('<w:ind w:left="720"/>');
+    expect(paragraphWith(document, "child more")).toContain('<w:ind w:left="1440"/>');
+  });
+
+  /** The `numId` a paragraph is numbered under. */
+  const numIdOf = (paragraph: string) => /<w:numId w:val="(\d+)"\/>/.exec(paragraph)?.[1];
+
+  it("restarts each list in Word, as it does on screen", async () => {
+    const { document, numbering } = await exported([
+      list("orderedList", item("a1"), item("a2")),
+      p("between"),
+      list("orderedList", item("b1")),
+    ]);
+    const [first, second] = [numIdOf(paragraphWith(document, "a1")), numIdOf(paragraphWith(document, "b1"))];
+    expect(numIdOf(paragraphWith(document, "a2"))).toBe(first);
+    expect(second).not.toBe(first);
+    for (const numId of [first, second]) {
+      const num = new RegExp(`<w:num w:numId="${numId}">.*?</w:num>`).exec(numbering)?.[0] ?? "";
+      expect(num).toContain('<w:startOverride w:val="1"/>');
+    }
+    // One definition serves both lists.
+    expect(numbering.match(/<w:abstractNum /g)).toHaveLength(1);
+  });
+
+  it("starts an ordered list at its order", async () => {
+    const { document, numbering } = await exported([{ type: "orderedList", attrs: { order: 3 }, content: [item("c")] }]);
+    const numId = numIdOf(paragraphWith(document, "c"));
+    const num = new RegExp(`<w:num w:numId="${numId}">.*?</w:num>`).exec(numbering)?.[0] ?? "";
+    expect(num).toContain('<w:lvlOverride w:ilvl="0"><w:startOverride w:val="3"/></w:lvlOverride>');
+  });
+
+  it("numbers a nested list in its top list's numbering, at its level", async () => {
+    const { document } = await exported([list("orderedList", item("top", list("orderedList", item("nested"))))]);
+    expect(numIdOf(paragraphWith(document, "nested"))).toBe(numIdOf(paragraphWith(document, "top")));
+    expect(paragraphWith(document, "nested")).toContain('<w:ilvl w:val="1"/>');
+  });
+
+  /** The order paragraph properties appear in, which the schema fixes (CT_PPrBase). */
+  const propertyOrder = (paragraph: string) =>
+    [...paragraph.matchAll(/<w:(pStyle|numPr|spacing|ind|jc)\b/g)].map((match) => match[1]);
+
+  it("writes the number before the alignment, in the order the schema requires", async () => {
+    const centred = (text: string): Json => ({ type: "paragraph", attrs: { align: "center" }, content: [{ type: "text", text }] });
+    const { document } = await exported([
+      list("orderedList", { type: "listItem", content: [centred("first"), centred("more")] }),
+    ]);
+    expect(propertyOrder(paragraphWith(document, "first"))).toEqual(["numPr", "jc"]);
+    expect(propertyOrder(paragraphWith(document, "more"))).toEqual(["ind", "jc"]);
+  });
+
+  it("indents a table inside an item to the item's text", async () => {
+    const editor = new ServerEditor({ extensions: [StarterKit.configure({ table: true })] });
+    const cell = (text: string): Json => ({ type: "tableCell", content: [p(text)] });
+    editor.setContent({ type: "doc", content: [list("bulletList", {
+      type: "listItem",
+      content: [p("one"), { type: "table", attrs: { grid: [120, 120] }, content: [{ type: "tableRow", content: [cell("a"), cell("b")] }] }],
+    })] });
+    const document = readZip(await exportDocxBytes(editor))["word/document.xml"] ?? "";
+    editor.destroy();
+    const tblPr = document.match(/<w:tblPr>.*?<\/w:tblPr>/)?.[0] ?? "";
+    expect(tblPr).toMatch(/<w:tblInd (?=[^>]*w:w="720")(?=[^>]*w:type="dxa")[^>]*\/>/);
+    const order = [...tblPr.matchAll(/<w:(tblStyle|tblW|jc|tblInd|tblBorders|tblLayout|tblCellMar|tblLook)\b/g)].map((m) => m[1]);
+    const schemaOrder = ["tblStyle", "tblW", "jc", "tblInd", "tblBorders", "tblLayout", "tblCellMar", "tblLook"];
+    expect(order).toEqual(schemaOrder.filter((name) => order.includes(name)));
+  });
+
+  it("fits a table in an item inside the margins: its width and indent add up to the text column", async () => {
+    const editor = new ServerEditor({ extensions: [StarterKit.configure({ table: true })] });
+    const cell = (text: string): Json => ({ type: "tableCell", content: [p(text)] });
+    const table: Json = { type: "table", attrs: { grid: [120, 120] }, content: [{ type: "tableRow", content: [cell("a"), cell("b")] }] };
+    editor.setContent({ type: "doc", content: [list("bulletList", item("one", list("bulletList", { type: "listItem", content: [p("two"), table] })))] });
+    const document = readZip(await exportDocxBytes(editor))["word/document.xml"] ?? "";
+    editor.destroy();
+
+    const attr = (element: string, name: string) => Number(element.match(new RegExp(`${name}="(-?\\d+)"`))?.[1]);
+    const pgSz = document.match(/<w:pgSz [^>]*\/>/)?.[0] ?? "";
+    const pgMar = document.match(/<w:pgMar [^>]*\/>/)?.[0] ?? "";
+    const textWidth = attr(pgSz, "w:w") - attr(pgMar, "w:left") - attr(pgMar, "w:right");
+    const tblW = document.match(/<w:tblW [^>]*\/>/)?.[0] ?? "";
+    const tblInd = document.match(/<w:tblInd [^>]*\/>/)?.[0] ?? "";
+    expect(tblW).toContain('w:type="pct"');
+    const tableWidth = (attr(tblW, "w:w") / 5000) * textWidth;
+    expect(attr(tblInd, "w:w")).toBe(1440);
+    expect(tableWidth + attr(tblInd, "w:w")).toBeLessThanOrEqual(textWidth + 2);
+    expect(tableWidth + attr(tblInd, "w:w")).toBeGreaterThan(textWidth - 10);
+  });
+
+  it("indents a sourced block inside an item to the item's text", async () => {
+    const editor = new ServerEditor({
+      extensions: [StarterKit, SourcedBlockExtension],
+      content: { type: "doc", content: [list("orderedList", { type: "listItem", content: [p("first"), {
+        type: "sourcedBlock",
+        attrs: { instanceId: "src_1", kind: "clause", resourceId: "r1", versionId: "v1", baseHash: "abc123", baseNormalizer: 1 },
+        content: [p("quoted")],
+      }] })] },
+    });
+    const document = readZip(await exportDocxBytes(editor))["word/document.xml"] ?? "";
+    editor.destroy();
+    expect(paragraphWith(document, "quoted")).toContain('<w:ind w:left="720"/>');
+  });
+
+  it.each([
+    ["holds nothing else", []],
+    ["is followed by a table", [{ type: "table", attrs: { grid: [120] }, content: [{ type: "tableRow", content: [{ type: "tableCell", content: [p("cell")] }] }] }]],
+    ["is followed by a nested list", [list("orderedList", item("child"))]],
+  ])("numbers an item's floating-image paragraph when it %s, as the editor does", async (_case, after) => {
+    const floating: Json = {
+      type: "paragraph",
+      content: [{ type: "image", attrs: { src: "data:image/png;base64,AA==", width: 40, height: 40, wrapMode: "square" } }],
+    };
+    const editor = new ServerEditor({ extensions: [StarterKit.configure({ table: true })] });
+    editor.setContent({ type: "doc", content: [list("orderedList", { type: "listItem", content: [floating, ...after] }, item("next"))] });
+    const document = readZip(await exportDocxBytes(editor))["word/document.xml"] ?? "";
+    editor.destroy();
+    const anchorParagraph = document.split("<w:p>").find((part) => part.includes("<w:drawing>")) ?? "";
+    expect(anchorParagraph).toContain('<w:ilvl w:val="0"/>');
+    expect(paragraphWith(document, "next")).toContain('<w:ilvl w:val="0"/>');
+  });
+});

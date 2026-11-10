@@ -105,8 +105,8 @@ interface BlockExtent {
 function blockExtents(blocks: readonly LayoutBlock[], rowTop = 0): BlockExtent[] {
 	return blocks.flatMap(block => {
 		const top = rowTop + block.y;
-		const cellBlocks = (block.cells ?? []).flatMap(cell => blockExtents(cell.blocks, top));
-		return [{ nodePos: block.nodePos, top, bottom: top + block.height }, ...cellBlocks];
+		const regionBlocks = (block.regions ?? []).flatMap(region => blockExtents(region.blocks, top));
+		return [{ nodePos: block.nodePos, top, bottom: top + block.height }, ...regionBlocks];
 	});
 }
 

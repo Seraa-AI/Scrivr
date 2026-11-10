@@ -62,7 +62,7 @@ export const Bold = Extension.create<BoldOptions>({
       label: "B",
       title: "Bold (⌘B)",
       group: "format",
-      isActive: (marks: string[]) => marks.includes("bold"),
+      isActive: ({ activeMarks }) => activeMarks.includes("bold"),
     }];
   },
 

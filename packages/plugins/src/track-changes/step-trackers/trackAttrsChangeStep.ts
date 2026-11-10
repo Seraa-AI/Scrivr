@@ -1,9 +1,9 @@
 import { Node as PMNode } from "@scrivr/core/pm";
 import { EditorState, Transaction } from "@scrivr/core/pm";
-import { AttrStep } from "@scrivr/core/pm";
+import { AttrStep, type Mapping } from "@scrivr/core/pm";
 
 import { NewEmptyAttrs } from "../helpers";
-import { ChangeStep } from "../types";
+import { ChangeStep, UpdateNodeAttrsStep } from "../types";
 
 function trackAttrsChangeStep(
   step: AttrStep,
@@ -12,8 +12,10 @@ function trackAttrsChangeStep(
   newTr: Transaction,
   _attrs: NewEmptyAttrs,
   currentStepDoc: PMNode,
-) {
-  const newStep = step.invert(currentStepDoc);
+  replayBridge: Mapping,
+): ChangeStep[] {
+  const newStep = step.invert(currentStepDoc).map(replayBridge);
+  if (!newStep) return [];
   const stepResult = newTr.maybeStep(newStep);
   if (stepResult.failed) {
     console.error(
@@ -30,15 +32,15 @@ function trackAttrsChangeStep(
 
   const { dataTracked, ...newAttrs } = node.attrs || {};
 
-  const changeStep = {
-    pos: step.pos,
+  const changeStep: UpdateNodeAttrsStep = {
+    pos: replayBridge.map(step.pos, 1),
     type: "update-node-attrs",
     node,
     newAttrs: {
       ...newAttrs,
       [step.attr]: step.value,
     },
-  } as ChangeStep;
+  };
 
   return [changeStep];
 }

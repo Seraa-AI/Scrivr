@@ -5,18 +5,16 @@ import { CHANGE_OPERATION } from "../types";
 // ── Enter at end of paragraph ─────────────────────────────────────────────────
 
 describe("enterKey — Enter at end of paragraph", () => {
-  it("produces a node_split change on the new paragraph and a reference change on the source", () => {
+  it("records the new paragraph as inserted: nothing was carried out of the source", () => {
     const editor = new TestEditor(doc(p("hello")));
-    // cursor at pos 6 (end of "hello", inside the paragraph)
+    // pos 6 is the end of "hello", inside the paragraph
     const tr = editor.state.tr.split(6);
     editor.dispatch(tr);
 
     const pending = editor.pendingChanges;
-    expect(pending).toHaveLength(2);
-
-    const ops = pending.map(c => c.dataTracked.operation);
-    expect(ops).toContain(CHANGE_OPERATION.node_split);
-    expect(ops).toContain("reference");
+    expect(pending).toHaveLength(1);
+    expect(pending[0]!.dataTracked.operation).toBe(CHANGE_OPERATION.insert);
+    expect(pending[0]!.from).toBe(7);
   });
 
   it("does not produce any trackedInsert marks on text", () => {
@@ -131,10 +129,10 @@ describe("enterKey — reject", () => {
     const editor = new TestEditor(doc(p("hello")));
     editor.dispatch(editor.state.tr.split(6)); // "hello" | ""
 
-    const splitChange = editor.pendingChanges.find(
-      c => c.dataTracked.operation === CHANGE_OPERATION.node_split,
+    const newParagraph = editor.pendingChanges.find(
+      c => c.dataTracked.operation === CHANGE_OPERATION.insert,
     )!;
-    editor.rejectChanges([splitChange.id]);
+    editor.rejectChanges([newParagraph.id]);
 
     expect(editor.pendingChanges).toHaveLength(0);
     expect(editor.state.doc.childCount).toBe(1);

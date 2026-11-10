@@ -1,16 +1,16 @@
 /**
- * PDF export handler for `tableRow` blocks.
+ * PDF export handler for a table row: its decoration, as the canvas row
+ * painter draws it. What the cells hold is dispatched by the exporter, as any
+ * composite's regions.
  *
  * Draws through `ctx.draw`, the surface core itself declares, so this works in
- * layout pixels and plain `Rgb` and never names a PDF library.
- *
- * Mirrors the canvas `TableRowStrategy`: per cell, fill the shading, draw
- * borders (top suppressed for a vMerge continuation so a vertical merge reads
- * as one cell), then dispatch each child block to its own handler at its
- * absolute y — fill before stroke, so a border sits on top of its own cell's
- * shading rather than under it.
+ * layout pixels and plain `Rgb` and never names a PDF library. Per cell: fill
+ * the shading, then the borders (top suppressed for a vMerge continuation so a
+ * vertical merge reads as one cell) — fill before stroke, so a border sits on
+ * top of its own cell's shading rather than under it.
  */
 import type { LayoutBlock } from "../layout/BlockLayout";
+import { cellDataOf } from "./layout";
 import { parseCssColor } from "../model/cssColor";
 import type { PdfNodeContext, PdfPoint } from "../exports/pdf";
 import type { Rgb } from "../model/cssColor";
@@ -20,11 +20,12 @@ const BORDER_COLOR: Rgb = { r: 156, g: 163, b: 175 };
 
 export function renderTableRowPdf(
   block: LayoutBlock,
-  ctx: Pick<PdfNodeContext, "draw" | "blocks">,
+  ctx: Pick<PdfNodeContext, "draw">,
 ): void {
-  const cells = block.cells ?? [];
-  if (cells.length === 0) return;
-  const isLastRow = block.isLastRow === true;
+  const cells = block.regions ?? [];
+  const last = cells[cells.length - 1];
+  if (!last) return;
+  const isLastRow = block.lastUnit === true;
 
   const stroke = (from: PdfPoint, to: PdfPoint): void =>
     ctx.draw.line({ from, to, thicknessPx: 1, color: BORDER_COLOR });
@@ -37,7 +38,8 @@ export function renderTableRowPdf(
     const top = block.y + cell.y;
     const bottom = top + cell.height;
 
-    const fill = cell.background === null ? null : parseCssColor(cell.background);
+    const { background, vMerge } = cellDataOf(cell);
+    const fill = background === null ? null : parseCssColor(background);
     if (fill !== null && fill.alpha > 0) {
       ctx.draw.rect({
         x: left,
@@ -50,14 +52,10 @@ export function renderTableRowPdf(
     }
 
     stroke({ x: left, y: top }, { x: left, y: bottom });
-    if (cell.vMerge !== "continue") stroke({ x: left, y: top }, { x: right, y: top });
+    if (vMerge !== "continue") stroke({ x: left, y: top }, { x: right, y: top });
     if (isLastRow) stroke({ x: left, y: bottom }, { x: right, y: bottom });
-
-    // Positioned relative to the row, then dispatched — see `CellSubBlock.y`.
-    ctx.blocks(cell.blocks.map((child) => ({ ...child, y: block.y + child.y })));
   }
 
-  const last = cells[cells.length - 1]!;
   const rx = last.x + last.width;
   const top = block.y + last.y;
   stroke({ x: rx, y: top }, { x: rx, y: top + last.height });

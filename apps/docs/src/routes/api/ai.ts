@@ -10,6 +10,8 @@ import type { UIMessage, UIMessageStreamWriter } from "ai";
 import { createFileRoute } from "@tanstack/react-router";
 import { anthropic } from "@ai-sdk/anthropic";
 import { z } from "zod";
+import { SemanticEditSchema } from "@scrivr/ai";
+import { IMAGE_ALIGNS, IMAGE_WRAPS } from "@scrivr/core";
 
 // ── Typed data parts emitted per tool result ────────────────────────────────
 // The client's onData callback receives these during streaming.
@@ -19,33 +21,116 @@ export type ToolOutputData = {
   output: Record<string, unknown>;
 };
 
-type DocBlock = { nodeId: string; text: string };
+/** A unit of `getRichBlocks()`, trimmed to what the agent needs to address it. */
+const DocUnitSchema = z.object({
+  id: z.string(),
+  type: z.string(),
+  text: z.string(),
+  headingLevel: z.number().int().optional(),
+  parts: z.array(z.object({ nodeId: z.string(), text: z.string(), proposedForDeletion: z.literal(true).optional() })).optional(),
+  image: z.object({
+    src: z.string(),
+    alt: z.string(),
+    width: z.number(),
+    height: z.number(),
+    wrap: z.enum(IMAGE_WRAPS),
+    align: z.enum([...IMAGE_ALIGNS, "custom"]),
+  }).optional(),
+  /** The block itself is proposed for deletion, as `getRichBlocks` says. */
+  proposedForDeletion: z.literal(true).optional(),
+  changes: z.array(z.object({
+    type: z.enum(["suggestedInsert", "suggestedDelete", "suggestedAttrs"]),
+    text: z.string(),
+    id: z.string().optional(),
+    at: z.number().int().optional(),
+    length: z.number().int().optional(),
+    authorId: z.string().optional(),
+    oldAttrs: z.record(z.string(), z.unknown()).optional(),
+    /** For a formatting change, the formatting the text has in the proposed version. */
+    nowAttrs: z.record(z.string(), z.unknown()).optional(),
+    /** The src of an image the change inserts or deletes. */
+    image: z.string().optional(),
+  })).optional(),
+});
+export type DocUnit = z.infer<typeof DocUnitSchema>;
+type DocChange = NonNullable<DocUnit["changes"]>[number];
+
+const CHANGE_VERBS: Record<DocChange["type"], string> = {
+  suggestedInsert: "insert",
+  suggestedDelete: "delete",
+  suggestedAttrs: "format",
+};
+
+/** The words a change covers in its block's text, when it says where. */
+function coveredText(change: DocChange, unitText: string): string | undefined {
+  if (change.at === undefined || change.length === undefined || change.length === 0) return undefined;
+  return unitText.slice(change.at, change.at + change.length);
+}
+
+/** What a change adds, removes or changes, as the agent reads it. */
+function changeSubject(change: DocChange, unitText: string): string {
+  if (change.type === "suggestedAttrs") {
+    const covered = coveredText(change, unitText);
+    const now = change.nowAttrs ? `, now ${JSON.stringify(change.nowAttrs)}` : "";
+    return `${covered !== undefined ? `${JSON.stringify(covered)} ` : ""}was ${JSON.stringify(change.oldAttrs ?? {})}${now}`;
+  }
+  return change.image ? `image ${change.image}` : JSON.stringify(change.text);
+}
+
+/** One pending change: what it does, where in the block's text, whose, and the id to review it by. */
+function describeChange(change: DocChange, unitText: string | undefined): string {
+  const at = unitText !== undefined && change.at !== undefined ? ` at ${change.at}` : "";
+  const by = change.authorId ? ` by ${change.authorId}` : "";
+  return `  pending ${CHANGE_VERBS[change.type]} ${changeSubject(change, unitText ?? "")}${at}${by}${change.id ? ` (id ${change.id})` : ""}`;
+}
+
+const RequestBodySchema = z.object({
+  // The AI SDK checks each message's shape when it converts them.
+  messages: z.array(z.custom<UIMessage>((message) => typeof message === "object" && message !== null)),
+  context: z.string().optional(),
+  units: z.array(DocUnitSchema).optional(),
+});
 
 export const Route = createFileRoute("/api/ai")({
   server: {
     handlers: {
       POST: async ({ request }: { request: Request }) => {
-        const { messages, context, blocks } = (await request.json()) as {
-          messages: UIMessage[];
-          context?: string;
-          blocks?: DocBlock[];
-        };
+        const body = RequestBodySchema.safeParse(await request.json());
+        if (!body.success) return new Response(body.error.message, { status: 400 });
+        const { messages, context, units } = body.data;
 
-        // Build structured document context for the system prompt.
-        // blocks come from AiToolkitAPI.getBlocks() — accepted text only, no markup.
         const docContextLines: string[] = [];
-        if (blocks && blocks.length > 0) {
+        if (units && units.length > 0) {
           docContextLines.push(
             "## Document content",
             "",
-            "Each block has a stable nodeId. Use it when calling `edit_paragraph` or `edit_section`.",
-            "The text shown is the clean accepted view (pending tracked changes already resolved).",
-            "Your proposedText replaces the entire block — plain text, no markup.",
+            "Blocks are listed in document order, first to last. Each has a stable nodeId; a list or table",
+            "also lists the nodeIds of its items or cells. Address blocks by these ids in every tool. Text",
+            "is the proposed version: pending insertions are in it, pending deletions are not. A block's",
+            "pending changes are listed under it, each with the id to review it by and, where given, `at`:",
+            "the character offset into that block's `text` line. The two halves of a replacement or a move",
+            "are listed under one id. A format change names the words it covers, the formatting they had",
+            "(`was`) and the formatting the change gives them (`now`). A block proposed for deletion reads empty. To put something at the end",
+            "of the document, place it after the block marked `last block`.",
             "",
           );
-          for (const b of blocks) {
-            docContextLines.push(`nodeId: ${b.nodeId}`);
-            docContextLines.push(`text: ${b.text}`);
+          // A block proposed for deletion cannot be placed after; the last other one can.
+          const lastLive = units.reduce((last, u, index) => (u.proposedForDeletion ? last : index), -1);
+          for (const [index, u] of units.entries()) {
+            const kind = u.headingLevel ? `heading ${u.headingLevel}` : u.type;
+            const last = index === lastLive ? ", last block" : "";
+            docContextLines.push(`nodeId: ${u.id} (${kind}${last})`);
+            if (u.image) {
+              const { src, alt, width, height, wrap, align } = u.image;
+              docContextLines.push(`image: ${src} "${alt}" ${width}×${height}, wrap ${wrap}, align ${align}`);
+            } else {
+              docContextLines.push(`text: ${JSON.stringify(u.text)}`);
+              for (const part of u.parts ?? []) {
+                const gone = part.proposedForDeletion ? " (proposed for deletion)" : "";
+                docContextLines.push(`  - nodeId: ${part.nodeId}${gone} — ${part.text}`);
+              }
+            }
+            for (const change of u.changes ?? []) docContextLines.push(describeChange(change, u.image ? undefined : u.text));
             docContextLines.push("");
           }
         } else if (context) {
@@ -60,6 +145,21 @@ export const Route = createFileRoute("/api/ai")({
           "- To rewrite multiple paragraphs at once → `edit_section(edits)` — one atomic change.",
           "- To insert entirely new text at the cursor → `insert_text(text)`.",
           "- To replace the currently selected text → `replace_selection(text)`.",
+          "- To change the document's structure — move, add or delete blocks, list items or table rows — or to",
+          "  rewrite blocks keeping their formatting → `edit_document(edits)`, one batch applied as tracked changes.",
+          "  `moveBlock` takes a top-level block's nodeId; `moveListItem` takes an item's (or its paragraph's) nodeId and",
+          "  stays within its own list. A batch touches a block once: don't move or delete what an earlier edit in",
+          "  the same batch moved.",
+          "- Images: an `image` unit is a paragraph holding one image, named by its nodeId. Add one with `insertBlock`",
+          "  and `block: { type: \"image\", src, alt, width, height, wrap, align }`; change how it sits with `richText`",
+          "  and `attrs: { wrap, align, width, height, alt }` (wrap: inline|square|top-bottom|behind|front, align:",
+          "  left|center|right); remove it with `deleteBlock`. `src` must be an https image URL.",
+          "- Headings: change a block's level with `richText` and `attrs: { level }` — 1-6 sets the heading level",
+          "  (a paragraph becomes a heading), 0 makes a heading a paragraph.",
+          "- To accept or reject pending changes → `review_changes(accepted, rejected)` with the ids listed under the",
+          "  blocks; both halves of a replacement or a move are listed under one id, which decides both. Only when the",
+          "  user asks you to review. The result says what was decided, or why not. A decided change is no longer",
+          "  pending, so it is gone from the document content you see next: that is the review having worked.",
           "- You MAY include a short text message (1-2 sentences) explaining what you are doing.",
           "- NEVER write suggested content only in a text reply — always put it in a tool call.",
           "- If the user is asking a general question (not requesting new content), reply with text only.",
@@ -142,6 +242,21 @@ export const Route = createFileRoute("/api/ai")({
                   },
                 }),
 
+                edit_document: tool({
+                  description:
+                    "Apply semantic edits to the document as one batch of tracked suggestions: move, insert or delete blocks, list items and table rows, or rewrite a block's rich text. Each edit names blocks by nodeId.",
+                  inputSchema: z.object({
+                    edits: z.array(SemanticEditSchema).describe("The edits, applied in order as one batch"),
+                  }),
+                  execute: async ({ edits }, { toolCallId }) => {
+                    writer.write({
+                      type: "data-tool_result",
+                      data: { toolCallId, toolType: "edit_document", output: { edits } } satisfies ToolOutputData,
+                    });
+                    return { edits };
+                  },
+                }),
+
                 insert_text: tool({
                   description:
                     "Insert new text into the document at the current cursor position. Use this to add new content or continue a passage.",
@@ -155,6 +270,17 @@ export const Route = createFileRoute("/api/ai")({
                     });
                     return { text };
                   },
+                }),
+
+                // No execute: it runs in the browser, where the document is, and
+                // the editor's own outcome — refusals included — goes back to the model.
+                review_changes: tool({
+                  description:
+                    "Accept or reject pending changes by the ids listed under each block. One id decides every change listed with it.",
+                  inputSchema: z.object({
+                    accepted: z.array(z.string()).describe("Ids of the changes to accept"),
+                    rejected: z.array(z.string()).describe("Ids of the changes to reject"),
+                  }),
                 }),
 
                 replace_selection: tool({

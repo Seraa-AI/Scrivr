@@ -28,6 +28,8 @@ export interface AvailableSegment {
   x: number;
   /** Usable inline width in CSS pixels. */
   width: number;
+  /** On a first line's first segment: where the line started before its first-line indent moved it to `x`. */
+  indentFrom?: number;
 }
 
 export interface LineSpace {
@@ -126,18 +128,26 @@ export class ExclusionManager {
   }
 
   /**
-   * Returns the Y coordinate past all full-width exclusions overlapping absoluteY.
-   * Used to skip 'top-bottom' float gaps in PageLayout.
+   * The first y at or below `absoluteY` where a band `height` tall keeps the
+   * whole content width free. Side rects count: a block that cannot wrap
+   * (a table) cannot share its rows with one.
    */
-  getNextFreeY(page: number, absoluteY: number): number {
+  getNextFreeY(
+    page: number,
+    absoluteY: number,
+    height: number,
+    contentX: number,
+    contentWidth: number,
+  ): number {
+    const contentRight = contentX + contentWidth;
     let y = absoluteY;
     let changed = true;
     while (changed) {
       changed = false;
       for (const r of this.rects) {
         if (r.page !== page) continue;
-        if (r.side !== "full") continue;
-        if (y >= r.y && y < r.bottom) {
+        if (r.right <= contentX || r.x >= contentRight) continue;
+        if (y + height > r.y && y < r.bottom) {
           y = r.bottom;
           changed = true;
         }

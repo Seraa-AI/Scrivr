@@ -34,13 +34,8 @@ describe("pending proposals and committed tracked changes", () => {
 
       expect(editor.getState().doc).toBe(before);
       expect(trackChangesPluginKey.getState(editor.getState())!.changeSet.changes).toEqual(changes);
-      // The diff addresses the inserted word and space separately. Rejecting
-      // one group leaves the other pending; neither owns the prior insertion.
-      if (scope === "group") {
-        expect(api.getCurrent()).not.toBeNull();
-        api.reject({ groupId: firstGroup(api) });
-        expect(editor.getState().doc).toBe(before);
-      }
+      // "very " is one addition, so rejecting its group rejects the whole
+      // proposal; it never owned the prior insertion.
       expect(api.getCurrent()).toBeNull();
 
       // The committed insertion remains reviewable through its owning API.

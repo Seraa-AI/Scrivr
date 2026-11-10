@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { resolveFont, substituteFamily, normalizeFont } from "./StyleResolver";
 import { buildStarterKitContext } from "../test-utils";
 
-const { schema } = buildStarterKitContext();
+const { schema, fontModifiers } = buildStarterKitContext();
 // Helper — create a ProseMirror mark by name
 function mark(name: string, attrs?: Record<string, unknown>) {
   return schema.marks[name]!.create(attrs);
@@ -10,19 +10,19 @@ function mark(name: string, attrs?: Record<string, unknown>) {
 
 describe("resolveFont — no marks", () => {
   it("returns base font unchanged when no marks", () => {
-    expect(resolveFont("14px Georgia", [])).toBe("14px Georgia");
+    expect(resolveFont("14px Georgia", [], fontModifiers)).toBe("14px Georgia");
   });
 
   it("handles bold base font", () => {
-    expect(resolveFont("bold 28px Georgia", [])).toBe("bold 28px Georgia");
+    expect(resolveFont("bold 28px Georgia", [], fontModifiers)).toBe("bold 28px Georgia");
   });
 
   it("handles italic base font", () => {
-    expect(resolveFont("italic 14px Georgia", [])).toBe("italic 14px Georgia");
+    expect(resolveFont("italic 14px Georgia", [], fontModifiers)).toBe("italic 14px Georgia");
   });
 
   it("handles multi-word font family", () => {
-    expect(resolveFont("14px Times New Roman", [])).toBe(
+    expect(resolveFont("14px Times New Roman", [], fontModifiers)).toBe(
       "14px Times New Roman",
     );
   });
@@ -30,13 +30,13 @@ describe("resolveFont — no marks", () => {
 
 describe("resolveFont — bold mark", () => {
   it("adds bold to a normal weight font", () => {
-    expect(resolveFont("14px Georgia", [mark("bold")])).toBe(
+    expect(resolveFont("14px Georgia", [mark("bold")], fontModifiers)).toBe(
       "bold 14px Georgia",
     );
   });
 
   it("bold on already-bold base font stays bold", () => {
-    expect(resolveFont("bold 28px Georgia", [mark("bold")])).toBe(
+    expect(resolveFont("bold 28px Georgia", [mark("bold")], fontModifiers)).toBe(
       "bold 28px Georgia",
     );
   });
@@ -44,7 +44,7 @@ describe("resolveFont — bold mark", () => {
 
 describe("resolveFont — italic mark", () => {
   it("adds italic to a normal style font", () => {
-    expect(resolveFont("14px Georgia", [mark("italic")])).toBe(
+    expect(resolveFont("14px Georgia", [mark("italic")], fontModifiers)).toBe(
       "italic 14px Georgia",
     );
   });
@@ -52,12 +52,12 @@ describe("resolveFont — italic mark", () => {
 
 describe("resolveFont — combined marks", () => {
   it("bold + italic produces canonical order: italic bold size family", () => {
-    const result = resolveFont("14px Georgia", [mark("bold"), mark("italic")]);
+    const result = resolveFont("14px Georgia", [mark("bold"), mark("italic")], fontModifiers);
     expect(result).toBe("italic bold 14px Georgia");
   });
 
   it("italic + bold (reversed order) produces the same canonical result", () => {
-    const result = resolveFont("14px Georgia", [mark("italic"), mark("bold")]);
+    const result = resolveFont("14px Georgia", [mark("italic"), mark("bold")], fontModifiers);
     expect(result).toBe("italic bold 14px Georgia");
   });
 
@@ -65,7 +65,7 @@ describe("resolveFont — combined marks", () => {
     const result = resolveFont("bold 14px Georgia", [
       mark("bold"),
       mark("italic"),
-    ]);
+    ], fontModifiers);
     expect(result).toBe("italic bold 14px Georgia");
     expect(result.match(/bold/g)).toHaveLength(1);
   });
@@ -73,7 +73,7 @@ describe("resolveFont — combined marks", () => {
 
 describe("resolveFont — fontSize mark", () => {
   it("overrides the base font size", () => {
-    expect(resolveFont("14px Georgia", [mark("fontSize", { size: 18 })])).toBe(
+    expect(resolveFont("14px Georgia", [mark("fontSize", { size: 18 })], fontModifiers)).toBe(
       "18px Georgia",
     );
   });
@@ -82,7 +82,7 @@ describe("resolveFont — fontSize mark", () => {
 describe("resolveFont — fontFamily mark", () => {
   it("overrides the base font family", () => {
     expect(
-      resolveFont("14px Georgia", [mark("fontFamily", { family: "Arial" })]),
+      resolveFont("14px Georgia", [mark("fontFamily", { family: "Arial" })], fontModifiers),
     ).toBe("14px Arial");
   });
 
@@ -90,7 +90,7 @@ describe("resolveFont — fontFamily mark", () => {
     expect(
       resolveFont("14px Georgia", [
         mark("fontFamily", { family: "Times New Roman" }),
-      ]),
+      ], fontModifiers),
     ).toBe("14px Times New Roman");
   });
 });

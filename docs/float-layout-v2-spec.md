@@ -318,7 +318,7 @@ Manages exclusion rects for both legacy page-scoped and new global-Y usage.
 | `addRect(rect)` | Push an exclusion rect (with or without `page` field) |
 | `getConstraint(page, absoluteY, lineHeight, contentX, contentWidth)` | Returns `{ x, width, skipToY? }` or null. `page: undefined` = global-Y mode |
 | `hasExclusionsInRange(yStart, yEnd)` | Boolean overlap test in global-Y space |
-| `getNextFreeY(page, absoluteY)` | Skip past full-width (top-bottom) exclusions |
+| `getNextFreeY(page, absoluteY, height, contentX, contentWidth)` | First y where a band `height` tall keeps the whole content width free, past side and full-width rects alike (superseded the `(page, absoluteY)` full-width-only form; see `float-beside-table-rfc.md`) |
 | `hasExclusionsInPage(page)` | Boolean check for any wrapping exclusion on a page |
 
 For `"full"` (top-bottom) side, `getConstraint` returns `{ x: 0, width: 0, skipToY: rect.bottom }` — tells the line breaker to skip entirely past the float.

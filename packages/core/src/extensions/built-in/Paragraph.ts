@@ -8,22 +8,24 @@ import {
   type DocxNodeHandler,
   type DocxBlockTransform,
 } from "../../exports/docx";
-import type { SemanticNodeHandler } from "../../exports/semantic";
+import { semanticImage, type SemanticNodeHandler } from "../../exports/semantic";
 import type { PdfNodeHandler } from "../../exports/pdf";
 import type { Node as PmNode } from "prosemirror-model";
-import { normalizeImageAttrs } from "../../layout/AnchoredObjects";
+import { floats } from "../../layout/AnchoredObjects";
 
-/** A paragraph whose only non-whitespace content is a single image. */
-function isImageOnlyParagraph(node: PmNode): boolean {
-  let images = 0;
+/**
+ * The single image a paragraph holds with nothing else but whitespace, or null.
+ * What the view leaves out (proposed for deletion) does not count.
+ */
+function soleImage(node: PmNode, isRemoved: (node: PmNode) => boolean): PmNode | null {
+  const images: PmNode[] = [];
   let other = 0;
   node.forEach((child) => {
-    if (child.type.name === "image") images += 1;
-    else if (child.isText && (child.text ?? "").trim() === "") {
-      /* surrounding whitespace is fine */
-    } else other += 1;
+    if (isRemoved(child)) return;
+    if (semanticImage(child)) images.push(child);
+    else if (!child.isText || (child.text ?? "").trim() !== "") other += 1;
   });
-  return images === 1 && other === 0;
+  return images.length === 1 && other === 0 ? images[0] ?? null : null;
 }
 
 /**
@@ -89,8 +91,7 @@ const splitParagraph = splitBlockAs((parent, _atEnd, $from) => {
 function isAnchoredObjectSelected(state: EditorState): boolean {
   const { selection } = state;
   if (!(selection instanceof NodeSelection)) return false;
-  if (selection.node.type.name !== "image") return false;
-  return normalizeImageAttrs(selection.node).wrapMode !== "inline";
+  return floats(selection.node);
 }
 
 export const splitBlockInheritAttrs: Command = (state, dispatch) => {
@@ -206,8 +207,11 @@ export const Paragraph = Extension.create({
       const lead = jc ? [xml("w:pPr", undefined, [xml("w:jc", { "w:val": jc })])] : [];
       return xml("w:p", undefined, [...lead, ...children]);
     };
-    const semanticHandler: SemanticNodeHandler = (node) =>
-      isImageOnlyParagraph(node) ? { type: "image" } : { type: "paragraph" };
+    const semanticHandler: SemanticNodeHandler = (node, ctx) => {
+      const sole = soleImage(node, (child) => ctx.isRemoved(child));
+      const image = sole && semanticImage(sole);
+      return image ? { type: "image", image } : { type: "paragraph" };
+    };
     return {
       docx: { nodes: { paragraph: handler } },
       semantic: { nodes: { paragraph: semanticHandler } },

@@ -69,7 +69,7 @@ describe("nodeFragmentRects", () => {
     const rects = rectsOf(editor, tablePos);
     expect(rects).toHaveLength(1);
 
-    const rows = editor.layout.pages[0]!.blocks.filter((b) => b.kind === "tableRow");
+    const rows = editor.layout.pages[0]!.blocks.filter((b) => b.kind === "composite");
     expect(rows).toHaveLength(3);
     expect(rects[0]!.y).toBe(rows[0]!.y);
     expect(rects[0]!.y + rects[0]!.height).toBe(rows[2]!.y + rows[2]!.height);

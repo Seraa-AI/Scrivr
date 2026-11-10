@@ -1,18 +1,20 @@
-import { Extension } from "@scrivr/core";
-import type { IBaseEditor, IEditor, SemanticPart, SemanticUnit } from "@scrivr/core";
+import { blockIdOf, Extension, IMAGE_NODE_ATTRS, stableStringify } from "@scrivr/core";
+import type { IBaseEditor, IEditor, SemanticChange, SemanticImage, SemanticPart, SemanticUnit } from "@scrivr/core";
+import type { ReviewDecisions, ReviewOutcome } from "@scrivr/plugins";
 import { semanticPartRichHash, toSemanticUnits, unitRichHash } from "@scrivr/export-semantic";
-import type { SemanticEdit, StructuralSemanticEdit } from "../schema/edit";
+import { SemanticImageAttrsSchema, type SemanticEdit, type StructuralSemanticEdit } from "../schema/edit";
 import { applyStructuralEdits } from "./applyStructuralEdits";
+import { applyImageLayout, type ImageLayoutEdit } from "./imageAttrs";
 import { toCoreSpans } from "./spans";
 import { UniqueId } from "./UniqueId";
 import { GhostText, ghostTextPluginKey } from "./GhostText";
 import { AiCaret, aiCaretPluginKey } from "./AiCaret";
-import { findNodeById } from "./UniqueId";
+import { findLiveNodeById, isShadowNode, moveShadowRanges, reviewChanges, trackAsSuggestion } from "@scrivr/plugins";
 import { aiToolkitRegistry } from "./aiToolkitRegistry";
 import { applyRichDiffAsSuggestion, buildAcceptedTextMap, type RichBlockEdit } from "@scrivr/plugins";
 
 export { unitRichHash };
-import type { Schema } from "@scrivr/core/pm";
+import type { Node as PmNode, Schema } from "@scrivr/core/pm";
 import type { Command } from "@scrivr/core/pm";
 import { AiSuggestion as AiSuggestionExtension } from "../ai-suggestion/AiSuggestion";
 import { computeAiSuggestion } from "../ai-suggestion/computeAiSuggestion";
@@ -80,7 +82,7 @@ export class AiSuggestionsAPI {
    * Reject (discard) the current suggestion or a specific group/block.
    * No document changes — the overlay is simply hidden or trimmed.
    * Changes already applied in tracked mode are reviewed separately through
-   * `editor.commands.setChangeStatuses`, using their tracked-change IDs.
+   * `reviewChanges`, using their tracked-change IDs.
    */
   reject(options?: RejectAiSuggestionOptions): void {
     rejectAiSuggestion(this.editor, options);
@@ -92,18 +94,125 @@ export class AiSuggestionsAPI {
   }
 }
 
+type Placed = { node: PmNode; pos: number };
+
 /**
- * AiToolkitAPI — the single entry point for all AI interactions with an editor.
- *
- * Obtain via:
- *   import { getAiToolkit } from "@scrivr/plugins";
- *   const ai = getAiToolkit(editor);
- *
- * Never instantiate directly — created by AiToolkit.onEditorReady().
+ * Pairs each item with the node it was read from: the k-th item under an id
+ * with the k-th node carrying it, in document order. A pending move's two
+ * copies share their ids, so the id alone cannot tell them apart.
  */
+function placeById<T>(items: readonly T[], idOf: (item: T) => string, nodes: readonly Placed[]): Array<Placed | undefined> {
+  const byId = new Map<string, Placed[]>();
+  for (const placed of nodes) {
+    const id = blockIdOf(placed.node);
+    if (id !== null) byId.set(id, [...(byId.get(id) ?? []), placed]);
+  }
+  const seen = new Map<string, number>();
+  return items.map((item) => {
+    const id = idOf(item);
+    const k = seen.get(id) ?? 0;
+    seen.set(id, k + 1);
+    return byId.get(id)?.[k];
+  });
+}
+
+/**
+ * The units an agent reads: one per block. A pending move leaves a copy of the
+ * moved block where it was, under the same ids; that copy — inside a move's
+ * left-behind range — is left out with its parts. Any other unit stays, a
+ * block proposed for deletion included, whatever id it carries.
+ */
+function unitsToRead(units: SemanticUnit[], doc: PmNode): SemanticUnit[] {
+  const moved = moveShadowRanges(doc);
+  if (moved.length === 0) return units;
+  const blocks: Placed[] = [];
+  doc.forEach((node, pos) => blocks.push({ node, pos }));
+  const unitBlocks = placeById(units, (unit) => unit.id, blocks);
+  return units.flatMap((unit, i) => {
+    const block = unitBlocks[i];
+    if (!block) return [unit];
+    if (isShadowNode(block.node, block.pos, moved)) return [];
+    if (!unit.parts) return [unit];
+    const leaves: Placed[] = [];
+    block.node.descendants((node, offset) => {
+      if (node.isTextblock) leaves.push({ node, pos: block.pos + 1 + offset });
+      return !node.isTextblock;
+    });
+    const partLeaves = placeById(unit.parts, (part) => part.nodeId, leaves);
+    return [{ ...unit, parts: unit.parts.filter((_part, j) => {
+      const leaf = partLeaves[j];
+      return !leaf || !isShadowNode(leaf.node, leaf.pos, moved);
+    }) }];
+  });
+}
+
+/** The image fields `proposed` sets to something other than what `current` has. */
+function changedImageFields(current: SemanticImage | undefined, proposed: unknown): Record<string, unknown> {
+  if (typeof proposed !== "object" || proposed === null) return {};
+  const changed: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(proposed)) {
+    if (key in IMAGE_NODE_ATTRS && value !== Reflect.get(current ?? {}, key)) changed[key] = value;
+  }
+  return changed;
+}
+
 /** Distinguish a whole `SemanticUnit` (has `nodeIds[]`) from a `RichBlockEdit` (has `nodeId`). */
 function isSemanticUnit(item: RichBlockEdit | SemanticUnit): item is SemanticUnit {
   return "nodeIds" in item && Array.isArray(item.nodeIds);
+}
+
+/** The blocks one id names as read: those still there, and those proposed for deletion. */
+interface Named<T> {
+  live: T[];
+  deleted: T[];
+}
+
+function blocksById<T extends { proposedForDeletion?: true }>(items: readonly T[], idOf: (item: T) => string): Map<string, Named<T>> {
+  const out = new Map<string, Named<T>>();
+  for (const item of items) {
+    const named = out.get(idOf(item)) ?? { live: [], deleted: [] };
+    (item.proposedForDeletion ? named.deleted : named.live).push(item);
+    out.set(idOf(item), named);
+  }
+  return out;
+}
+
+/** The blocks a handed-back unit can mean: those read as it was — live or proposed for deletion — else any. */
+function meant<T>(named: Named<T> | undefined, deleted: boolean): T[] {
+  if (!named) return [];
+  const same = deleted ? named.deleted : named.live;
+  return same.length > 0 ? same : [...named.live, ...named.deleted];
+}
+
+interface ChangeHolder {
+  changes?: SemanticChange[];
+}
+
+/**
+ * `item` with `current`'s review changes in place of its own. An agent cannot
+ * edit `changes`, so whatever it hands back there must not read as an edit.
+ */
+function withCurrentChanges<T extends ChangeHolder>(item: T, current: ChangeHolder | undefined): T {
+  const copy = { ...item };
+  delete copy.changes;
+  if (current?.changes) copy.changes = current.changes;
+  return copy;
+}
+
+/** `withCurrentChanges` on a unit and on each of its parts and cells, all of which its hash covers. */
+function unitWithCurrentChanges(unit: SemanticUnit, current: SemanticUnit): SemanticUnit {
+  const copy = withCurrentChanges(unit, current);
+  if (unit.parts) {
+    copy.parts = unit.parts.map((part) => withCurrentChanges(part, current.parts?.find((p) => p.nodeId === part.nodeId)));
+  }
+  if (unit.cells) {
+    copy.cells = {
+      rows: unit.cells.rows.map((row, r) => ({
+        cells: row.cells.map((cell, c) => withCurrentChanges(cell, current.cells?.rows[r]?.cells[c])),
+      })),
+    };
+  }
+  return copy;
 }
 
 /** A caller-pinned source hash on a unit (optional stale-edit guard). */
@@ -125,6 +234,15 @@ function readStringField(item: unknown, key: string): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
+/**
+ * AiToolkitAPI — the single entry point for all AI interactions with an editor.
+ *
+ * Obtain via:
+ *   import { getAiToolkit } from "@scrivr/plugins";
+ *   const ai = getAiToolkit(editor);
+ *
+ * Never instantiate directly — created by AiToolkit.onEditorReady().
+ */
 export class AiToolkitAPI {
   /**
    * AI suggestion overlay API.
@@ -311,6 +429,11 @@ export class AiToolkitAPI {
    * block (grouping bypassed) so the edit round-trips mechanically; container
    * units still expose their inner leaves via `parts`.
    *
+   * With TrackChanges, `text` is the proposed version and each unit, part and
+   * cell lists its pending `changes`, each with the id `reviewChanges` takes.
+   * A block proposed for deletion is included, reading `text: ""` with its
+   * deletion; the copy a pending move leaves behind is not.
+   *
    * Pass `from` / `to` to restrict to blocks overlapping a position range.
    *
    * @example
@@ -319,10 +442,28 @@ export class AiToolkitAPI {
    * ai.applyRichEdit(edited);
    */
   getRichBlocks(from?: number, to?: number): SemanticUnit[] {
-    const units = toSemanticUnits(this.editor, { groupBlocks: false });
+    const units = unitsToRead(toSemanticUnits(this.editor, { groupBlocks: false }), this.editor.getState().doc);
     if (from === undefined || to === undefined) return units;
-    const allowed = new Set(this.getBlocks(from, to).map((b) => b.nodeId));
+    const allowed = new Set<string>();
+    this.editor.getState().doc.forEach((node, offset) => {
+      const nodeId = node.attrs["nodeId"];
+      if (typeof nodeId === "string" && offset < to && offset + node.nodeSize > from) allowed.add(nodeId);
+    });
     return units.filter((u) => allowed.has(u.id));
+  }
+
+  /**
+   * Accept or reject pending changes by the ids `getRichBlocks` reports. The
+   * id decides the whole act — both halves of a replacement or a move, a block
+   * and its text. Whether an agent may review at all is the host's call
+   * (`TrackChanges.configure({ canAcceptReject })`); a refusal says why.
+   *
+   * @example
+   * const change = ai.getRichBlocks()[0]?.changes?.[0];
+   * if (change?.id) ai.reviewChanges({ accepted: [change.id], rejected: [] });
+   */
+  reviewChanges(decisions: ReviewDecisions): ReviewOutcome {
+    return reviewChanges(this.editor, decisions);
   }
 
   /**
@@ -337,7 +478,7 @@ export class AiToolkitAPI {
    * block's current rich hash differs, the edit is skipped as `stale` rather
    * than clobbering newer content.
    *
-   * Applies as tracked suggestions wherever TrackChanges is active — an agent's
+   * When TrackChanges is installed, applies as tracked suggestions — an agent's
    * edit is a proposal, and a reviewer accepts or rejects it. Applying agent
    * output straight into the document is `applyAiSuggestion({ mode: "direct" })`.
    */
@@ -347,52 +488,76 @@ export class AiToolkitAPI {
   ): { applied: boolean; changed: string[]; stale: string[]; notFound: string[]; rejected: string[] } {
     const authorID = options.authorID ?? "AI Assistant";
 
-    // Current rich hash per block — the freshness base for both auto-diff
-    // (which units changed) and the stale guard (did the doc move under us).
-    const currentUnits = new Map<string, SemanticUnit>();
-    const currentHashByNodeId = new Map<string, string>();
-    for (const u of toSemanticUnits(this.editor, { groupBlocks: false })) {
-      currentUnits.set(u.id, u);
-      currentHashByNodeId.set(u.id, unitRichHash(u));
-      for (const part of u.parts ?? []) {
-        currentHashByNodeId.set(part.nodeId, semanticPartRichHash(part));
-      }
-    }
+    // The units as they stand — the freshness base for both auto-diff (which
+    // units changed) and the stale guard (did the doc move under us). Ids are
+    // unique at the source, so an id names one block; a document saved before
+    // that held may name two, and an edit to such an id is refused, not guessed.
+    const read = unitsToRead(toSemanticUnits(this.editor, { groupBlocks: false }), this.editor.getState().doc);
+    const unitsById = blocksById(read, (u) => u.id);
+    const partsById = blocksById(read.flatMap((u) => u.parts ?? []), (part) => part.nodeId);
 
     const resolved: RichBlockEdit[] = [];
     const changed: string[] = [];
     const stale: string[] = [];
     const notFound: string[] = [];
+    // An image unit has no words to diff; its layout is set as image attrs.
+    const imageLayouts: ImageLayoutEdit[] = [];
+    const rejected: string[] = [];
+    // Only the fields that change are checked: an image placed by drag reads
+    // `align: "custom"`, which an agent cannot set but may hand back untouched.
+    const queueImageLayout = (nodeId: string, current: SemanticUnit, proposed: unknown) => {
+      const changes = changedImageFields(current.image, proposed);
+      const parsed = SemanticImageAttrsSchema.strict().safeParse(changes);
+      if (parsed.success && Object.keys(parsed.data).length > 0) imageLayouts.push({ nodeId, attrs: parsed.data });
+      else rejected.push(nodeId);
+    };
 
     for (const item of edits) {
       if (isSemanticUnit(item)) {
         const nodeId = item.nodeIds[0];
         if (!nodeId) continue;
-        const currentUnit = currentUnits.get(nodeId);
-        if (currentUnit === undefined) {
+        const named = unitsById.get(nodeId);
+        const candidates = meant(named, !!item.proposedForDeletion);
+        if (candidates.length === 0) {
           notFound.push(nodeId);
           continue;
         }
-        const current = unitRichHash(currentUnit);
         const sourceHash = sourceHashOf(item);
-        if (sourceHash !== undefined && sourceHash !== current) {
+        const pinned = sourceHash === undefined ? candidates : candidates.filter((c) => unitRichHash(c) === sourceHash);
+        if (pinned.length === 0) {
           stale.push(nodeId);
           continue;
         }
-        if (unitRichHash(item) === current) continue; // unchanged — skip
+        if (pinned.some((c) => unitRichHash(unitWithCurrentChanges(item, c)) === unitRichHash(c))) continue; // unchanged — skip
+        const [currentUnit] = pinned;
+        // A block proposed for deletion is not there to edit, and an id two
+        // live blocks carry does not say which one.
+        if (!currentUnit || currentUnit.proposedForDeletion || (named?.live.length ?? 0) > 1) {
+          rejected.push(nodeId);
+          continue;
+        }
+        if (currentUnit.type === "image") {
+          if (stableStringify(item.attrs ?? {}) === stableStringify(currentUnit.attrs ?? {})) queueImageLayout(nodeId, currentUnit, item.image);
+          else rejected.push(nodeId);
+          continue;
+        }
 
         // Container units are context envelopes; their individually-addressable
         // parts are the edit surface. Diff those leaves and never send the
         // container itself to the leaf-only merge engine.
         if (item.parts || currentUnit.parts) {
-          const currentParts = new Map((currentUnit.parts ?? []).map((part) => [part.nodeId, part]));
           for (const part of item.parts ?? []) {
-            const currentPart = currentParts.get(part.nodeId);
-            if (!currentPart) {
+            const partNamed = partsById.get(part.nodeId);
+            const partCandidates = meant(partNamed, !!part.proposedForDeletion);
+            if (partCandidates.length === 0) {
               notFound.push(part.nodeId);
               continue;
             }
-            if (semanticPartRichHash(part) === semanticPartRichHash(currentPart)) continue;
+            if (partCandidates.some((c) => semanticPartRichHash(withCurrentChanges(part, c)) === semanticPartRichHash(c))) continue;
+            if (partCandidates[0]?.proposedForDeletion || (partNamed?.live.length ?? 0) > 1) {
+              rejected.push(part.nodeId);
+              continue;
+            }
             resolved.push(editForPart(part));
             changed.push(part.nodeId);
           }
@@ -406,11 +571,20 @@ export class AiToolkitAPI {
           nodeId,
           spans: item.spans ?? [{ text: item.text, marks: [] }],
           ...(item.attrs ? { attrs: item.attrs } : {}),
-          expectedContentHash: sourceHash ?? current,
+          expectedContentHash: sourceHash ?? unitRichHash(currentUnit),
         });
       } else {
-        if (item.expectedContentHash !== undefined && currentHashByNodeId.get(item.nodeId) !== item.expectedContentHash) {
+        // An edit named only by id lands on the live block it names.
+        const unit = unitsById.get(item.nodeId)?.live;
+        const part = partsById.get(item.nodeId)?.live;
+        const currentHash = unit?.[0] ? unitRichHash(unit[0]) : part?.[0] ? semanticPartRichHash(part[0]) : undefined;
+        if (item.expectedContentHash !== undefined && currentHash !== item.expectedContentHash) {
           stale.push(item.nodeId);
+          continue;
+        }
+        if (unit?.[0]?.type === "image") {
+          if (item.spans) rejected.push(item.nodeId);
+          else queueImageLayout(item.nodeId, unit[0], item.attrs);
           continue;
         }
         resolved.push(item);
@@ -418,19 +592,24 @@ export class AiToolkitAPI {
       }
     }
 
-    if (resolved.length === 0) return { applied: false, changed, stale, notFound, rejected: [] };
+    const laidOut = imageLayouts.length > 0 ? applyImageLayout(this.editor, imageLayouts, authorID) : [];
+    rejected.push(...imageLayouts.map((edit) => edit.nodeId).filter((nodeId) => !laidOut.includes(nodeId)));
+    if (resolved.length === 0) {
+      return { applied: laidOut.length > 0, changed: [...changed, ...laidOut], stale, notFound, rejected };
+    }
 
     const result = applyRichDiffAsSuggestion(
       this.editor.getState(),
       (tr) => this.editor.applyTransaction(tr),
       { edits: resolved, authorID },
     );
+    const unapplied = new Set([...result.notFound, ...result.rejected]);
     return {
-      applied: result.applied,
-      changed,
+      applied: result.applied || laidOut.length > 0,
+      changed: [...changed.filter((nodeId) => !unapplied.has(nodeId)), ...laidOut],
       stale,
       notFound: [...notFound, ...result.notFound],
-      rejected: result.rejected,
+      rejected: [...rejected, ...result.rejected],
     };
   }
 
@@ -442,9 +621,11 @@ export class AiToolkitAPI {
    * `applyStructuralEdits`. Both report into one result; `stale` comes only from
    * the rich half, which is the only one with a hash to check against.
    *
-   * `authorID` names the author of the rich half. Structural changes are
-   * attributed by the track-changes author, because the engine assigns them as
-   * it tracks the transaction and takes no per-transaction override.
+   * When TrackChanges is installed, every edit is a proposal by `authorID`
+   * (default "AI Assistant"), tracked whether or not the person is suggesting.
+   *
+   * A batch lands in up to three transactions, so up to three undo steps: image
+   * layouts, text edits, then structural ops.
    */
   applySemanticEdits(
     edits: SemanticEdit[],
@@ -470,9 +651,8 @@ export class AiToolkitAPI {
       : { applied: false, changed: [], stale: [], notFound: [], rejected: [] };
     if (structural.length === 0) return richResult;
 
-    // One transaction for the whole structural batch: one undo step, and one
-    // review unit for the tracked changes it produces.
-    const tr = this.editor.getState().tr;
+    // One transaction: the structural batch is one undo step.
+    const tr = trackAsSuggestion(this.editor.getState().tr, options.authorID ?? "AI Assistant");
     const structuralResult = applyStructuralEdits(tr, structural);
     const touched = tr.docChanged;
     if (touched) this.editor.applyTransaction(tr);
@@ -507,7 +687,7 @@ export class AiToolkitAPI {
     let accumulated = "";
 
     // Position the AI caret at the end of the anchor block
-    const found = findNodeById(editor.getState().doc, nodeId);
+    const found = findLiveNodeById(editor.getState().doc, nodeId);
     if (found) {
       const endPos = found.pos + found.node.nodeSize;
       editor.applyTransaction(
@@ -582,7 +762,7 @@ export class AiToolkitAPI {
    *   1. Cosmetic streaming → ghost text grows, AI caret pulses
    *   2. Stream ends → ghost text cleared, AI caret cleared
    *   3. Content inserted after anchor block as a real document transaction
-   *      tagged with `track-author` so TrackChanges (Phase 4) wraps it
+   *      tagged with `track-author` so TrackChanges wraps it
    *
    * @param nodeId   Anchor block to insert content after
    * @param stream   AsyncIterable of text chunks
@@ -604,9 +784,9 @@ export class AiToolkitAPI {
 
     if (!generated) return;
 
-    // Phase 3: atomic insert tagged for TrackChanges (Phase 4)
+    // Phase 3: one atomic insert, which TrackChanges records as a single change.
     const state = this.editor.getState();
-    const found = findNodeById(state.doc, nodeId);
+    const found = findLiveNodeById(state.doc, nodeId);
     if (!found) return;
 
     const schema = state.schema as Schema;
@@ -623,7 +803,7 @@ export class AiToolkitAPI {
 
     const tr = state.tr
       .insert(insertPos, newNode)
-      .setMeta("track-author", authorId)  // TrackChanges (Phase 4) reads this
+      .setMeta("track-author", authorId)  // TrackChanges reads this
       .scrollIntoView();
 
     this.editor.applyTransaction(tr);

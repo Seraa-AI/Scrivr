@@ -1,5 +1,6 @@
 import { Extension } from "../Extension";
-import type { PdfNodeHandler } from "../../exports/pdf";
+import { imagePlacementAttrs, imagePlacementOf } from "./imagePlacement";
+import type { PdfEmbedSource, PdfNodeHandler } from "../../exports/pdf";
 import { NodeSelection, type Command } from "prosemirror-state";
 import type { InlineStrategy } from "../../layout/BlockRegistry";
 import type { IEditor } from "../types";
@@ -452,6 +453,9 @@ function buildAnchoredDrawing(
   const id = nextDocxPicId(ctx);
   const marginEmu = String(pxToEmu(anchor.marginPx));
   const behindDoc = anchor.wrapMode === "behind" ? "1" : "0";
+  // Layout moves a square image below earlier square images it would overlap;
+  // Word does the same only when overlap is disallowed.
+  const allowOverlap = anchor.wrapMode === "square" ? "0" : "1";
 
   const positionH = ((): XmlNode => {
     if (typeof anchor.xCustom === "number") {
@@ -485,7 +489,7 @@ function buildAnchoredDrawing(
         "xmlns:wp": NS_WP,
         distT: marginEmu, distB: marginEmu, distL: marginEmu, distR: marginEmu,
         simplePos: "0", relativeHeight: "0", behindDoc,
-        locked: "0", layoutInCell: "1", allowOverlap: "1",
+        locked: "0", layoutInCell: "1", allowOverlap,
       },
       [
         xml("wp:simplePos", { x: "0", y: "0" }),
@@ -538,7 +542,7 @@ const imageDocxHandler: DocxNodeHandler = (node, _children, ctx) => {
     yOffset: typeof node.attrs["yOffset"] === "number" ? node.attrs["yOffset"] : 0,
     marginPx: typeof node.attrs["margin"] === "number" ? node.attrs["margin"] : 12,
   };
-  if (typeof node.attrs["x"] === "number") anchor.xCustom = node.attrs["x"];
+  if (anchor.xAlign === "custom" && typeof node.attrs["x"] === "number") anchor.xCustom = node.attrs["x"];
 
   return xml("w:r", undefined, [
     buildAnchoredDrawing(ctx, record.filename, relId, width, height, anchor),
@@ -602,6 +606,24 @@ const imagePdf: PdfNodeHandler = (block, ctx) => {
   ctx.draw.image({ ...box, image: { src } });
 };
 
+/**
+ * Attrs that only place an anchored image on its page. Dragging an image within
+ * its page writes these and nothing else, so a change to them alone is a move.
+ * `floatOffset` is the older offset that `yOffset` replaced; it still places.
+ */
+export const IMAGE_PLACEMENT_ATTRS: readonly string[] = ["xAlign", "x", "yOffset", "floatOffset"];
+
+/** A 1×1 transparent GIF: what a pasted image shows while its bytes are read or uploaded. */
+const PENDING_IMAGE_SRC = "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=";
+
+/** Where an image's bytes live, for the PDF to fetch and embed. */
+const imageEmbed: PdfEmbedSource = (node) => {
+  const src = node.attrs["src"];
+  return typeof src === "string" && src !== "" ? src : null;
+};
+
+
+
 export const Image = Extension.create({
   name: "image",
 
@@ -612,6 +634,7 @@ export const Image = Extension.create({
   addNodes() {
     return {
       image: {
+        anchored: { read: imagePlacementOf, write: imagePlacementAttrs },
         inline: true,
         group: "inline",
         attrs: {
@@ -641,10 +664,10 @@ export const Image = Extension.create({
           zIndex: { default: 0 },
           /** Wrap-zone breathing room in px (Word's ~0.13" Square default). */
           margin: { default: 12 },
-          // ── Legacy attrs (read-side compat — see normalizeImageAttrs) ────
+          // ── Legacy attrs (read-side compat — see imagePlacementOf) ────
           /** @deprecated — replaced by `wrapMode` + `xAlign`. Mapped on read. */
           wrappingMode: { default: "inline" },
-          /** @deprecated — `floatOffset.y` is read-side mapped to `yOffset` by normalizeImageAttrs. */
+          /** @deprecated — `floatOffset.y` is read-side mapped to `yOffset` by imagePlacementOf. */
           floatOffset: { default: { x: 0, y: 0 } },
         },
         parseDOM: [
@@ -698,6 +721,20 @@ export const Image = Extension.create({
 
   addInlineHandlers() {
     return { image: createInlineImageStrategy() };
+  },
+
+  addPasteFiles() {
+    return {
+      image: {
+        accepts: (file) => file.type.startsWith("image/"),
+        pending: (id) => ({ src: PENDING_IMAGE_SRC, alt: "Uploading image…", pendingPasteId: id }),
+        pendingIdOf: (node) => {
+          const id = node.attrs["pendingPasteId"];
+          return typeof id === "string" ? id : null;
+        },
+        resolved: ({ src, width, height }) => ({ src, width, height, alt: "", pendingPasteId: null }),
+      },
+    };
   },
 
   onViewReady(editor: IEditor) {
@@ -754,7 +791,7 @@ export const Image = Extension.create({
         nodes: { image: imageDocxHandler },
       },
       semantic: { nodes: { image: semanticHandler } },
-      pdf: { nodes: { image: imagePdf } },
+      pdf: { nodes: { image: imagePdf }, embeds: { image: imageEmbed } },
     };
   },
 
@@ -837,9 +874,9 @@ declare module "@scrivr/core" {
       yOffset: number;
       zIndex: number;
       margin: number;
-      /** @deprecated read-side compat — mapped by normalizeImageAttrs */
+      /** @deprecated read-side compat — mapped by imagePlacementOf */
       wrappingMode: string;
-      /** @deprecated read-side compat — mapped by normalizeImageAttrs */
+      /** @deprecated read-side compat — mapped by imagePlacementOf */
       floatOffset: { x: number; y: number };
     };
   }

@@ -31,6 +31,7 @@ import {
   type PdfMarkHandler,
   type PdfBox,
   type PdfBlockDrawSurface,
+  type PdfEllipseOp,
   type PdfNodeContext,
   type PdfImageOp,
   type PdfLineOp,
@@ -199,6 +200,25 @@ export function createDrawHelpers(
     });
   }
 
+  function drawEllipse(op: PdfEllipseOp): void {
+    // The same refusal as drawRect: pdf-lib fills black when asked for nothing.
+    if (op.color === undefined && op.border === undefined) return;
+    getPage().drawEllipse({
+      x: op.center.x * PT_PER_PX,
+      y: flipY(op.center.y, pageHeightPt),
+      xScale: op.radiusX * PT_PER_PX,
+      yScale: op.radiusY * PT_PER_PX,
+      ...(op.color === undefined ? {} : { color: toPdfColor(op.color) }),
+      ...(op.border === undefined
+        ? {}
+        : {
+            borderColor: toPdfColor(op.border.color),
+            borderWidth: op.border.widthPx * PT_PER_PX,
+          }),
+      ...alphaWithBorder(op.opacity),
+    });
+  }
+
   function drawImage(op: PdfImageOp): void {
     const image = images.get(op.image.src) ?? null;
     if (!image) return drawImagePlaceholder(op, op.opacity);
@@ -347,34 +367,7 @@ export function createDrawHelpers(
 
   function drawLines(block: LayoutBlock, ctx: PdfNodeContext): void {
     const page = getPage();
-    const themeListMarker = parseCssColor(theme.listMarker);
     const themeDefaultText = parseCssColor(theme.defaultText);
-
-    // Draw list marker if present.
-    const firstLine = block.lines[0];
-    if (block.listMarker && block.listMarkerX !== undefined && firstLine) {
-      // A marker labels its line, so it takes that line's face as well as its
-      // size. Pinning it to the fallback puts the number of a numbered clause
-      // in a different typeface from the clause.
-      const firstSpan = firstLine.spans[0];
-      const markerFont =
-        firstSpan?.kind === "text"
-          ? fontRegistry.resolve(firstSpan.font, firstSpan.resolution)
-          : fontRegistry.fallback;
-      const fontSize = extractFontSizePx(
-        (firstSpan?.kind === "text" ? firstSpan.font : undefined) ?? "12px sans-serif",
-      );
-      const markerText = fontRegistry.isUnicode(markerFont)
-        ? stripInvisible(block.listMarker)
-        : sanitizeForWinAnsi(block.listMarker);
-      page.drawText(markerText, {
-        x: block.listMarkerX * PT_PER_PX,
-        y: flipY(block.y + firstLine.ascent, pageHeightPt),
-        size: fontSize * PT_PER_PX,
-        font: markerFont,
-        color: themeListMarker,
-      });
-    }
 
     let lineY = block.y;
     for (let li = 0; li < block.lines.length; li++) {
@@ -576,6 +569,7 @@ export function createDrawHelpers(
     text: drawText,
     line: drawLine,
     rect: drawRect,
+    ellipse: drawEllipse,
     image: drawImage,
     imagePlaceholder: drawImagePlaceholder,
   };

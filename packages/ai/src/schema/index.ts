@@ -7,6 +7,7 @@ export {
   EditPositionSchema,
   SemanticBlockInputSchema,
   SemanticCellInputSchema,
+  SemanticImageAttrsSchema,
   StructuralSemanticEditSchema,
 } from "./edit";
 export type {
@@ -19,5 +20,6 @@ export type {
   EditPosition,
   SemanticBlockInput,
   SemanticCellInput,
+  SemanticImageAttrs,
   StructuralSemanticEdit,
 } from "./edit";

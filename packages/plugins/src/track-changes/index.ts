@@ -3,10 +3,11 @@ export { applyDiffAsSuggestion, applyMultiBlockDiff } from "./lib/applyDiffAsSug
 export type { ApplyDiffOptions, MultiBlockDiffOptions, ApplyDiffResult } from "./lib/applyDiffAsSuggestion";
 export { buildParagraphContexts } from "./lib/buildParagraphContexts";
 export type { ParagraphContext } from "./lib/buildParagraphContexts";
-export { diffText, pairReplacements } from "./lib/diffText";
+export { diffText, pairReplacements, phraseReplacements } from "./lib/diffText";
 export type { DiffOp, PairedDiffOp } from "./lib/diffText";
 export {
   buildAcceptedTextMap,
+  bridgeable,
   acceptedOffsetToDocPos,
   acceptedRangeToDocRange,
   docRangeToAcceptedRange,
@@ -20,12 +21,16 @@ export {
   createNewDeleteAttrs,
   createNewInsertAttrs,
   createNewPendingAttrs,
+  proposedForDeletion,
 } from "./helpers";
-export { createChangePopover } from "./createChangePopover";
+export { changePreviewText, createChangePopover } from "./createChangePopover";
+export { changedAttrKeys, describeAttrChanges } from "./attrChanges";
 export type { ChangePopoverInfo, ChangePopoverCallbacks } from "./createChangePopover";
 export { isTrackedMark } from "./helpers";
 export { trackChangesPluginKey } from "./engine/trackChangesPlugin";
 export { findChanges } from "./findChanges";
+export { findLiveNodeById, isShadowNode, moveShadowRanges, shadowRanges } from "./liveNode";
+export type { ShadowRange } from "./liveNode";
 export { applyChanges } from "./applyChanges";
 export { ChangeSet } from "./ChangeSet";
 export {
@@ -38,6 +43,7 @@ export {
 } from "./actions";
 export type { TrackChangesActionParams } from "./actions";
 export { TrackChangesStatus, CHANGE_STATUS, CHANGE_OPERATION } from "./types";
+export type { TrackChangesState } from "./engine/trackChangesPlugin";
 export type {
   TrackChangesOptions,
   TrackedAttrs,
@@ -50,6 +56,9 @@ export type {
   ReferenceChange,
   ChangeStep,
   IncompleteChange,
+  TrackingResult,
+  TrackingRefusal,
+  ListLevel,
 } from "./types";
 
 // Rich (leaf-based) semantic edits → tracked suggestions. The write-side merge
@@ -57,3 +66,18 @@ export type {
 export { applyRichDiffAsSuggestion, pickAgentAttrs } from "./lib/applyRichDiffAsSuggestion";
 export type { RichBlockEdit, RichDiffOptions, RichDiffResult } from "./lib/applyRichDiffAsSuggestion";
 export { clearAuthorPendingMarks } from "./lib/applyDiffAsSuggestion";
+
+export { planChangeReview, changeActs } from "./reviewPlan";
+export { planReview, planReviewIn, reviewChanges } from "./reviewChanges";
+export type {
+  ChangeAct,
+  ReviewPlan,
+  ReviewOutcome,
+  ReviewRefusal,
+  ReviewUnavailable,
+  ReviewPlanResult,
+  ReviewDependency,
+  ReviewDecision,
+  ReviewDecisions,
+} from "./reviewPlan";
+

@@ -55,10 +55,10 @@ function docWithFloat(wrapMode: string) {
   };
 }
 
-function setup(wrapMode: string) {
+function setup(wrapMode: string, json: Record<string, unknown> = docWithFloat(wrapMode)) {
   const editor = createTestEditor({
     pageConfig: defaultPageConfig,
-    extensions: [StarterKit, DefaultContent.configure({ json: docWithFloat(wrapMode) })],
+    extensions: [StarterKit.configure({ table: true }), DefaultContent.configure({ json })],
   });
   const container = document.createElement("div");
   document.body.appendChild(container);
@@ -312,3 +312,71 @@ describe("a short line's empty tail", () => {
     expect(h.cursor()).toBe("move");
   });
 });
+
+/** A table, then the image's paragraph, its `yOffset` reaching back over the rows. */
+function docWithFloatOverTable(wrapMode: string) {
+  const cell = (text: string) => ({ type: "tableCell", content: [{ type: "paragraph", content: [{ type: "text", text }] }] });
+  return {
+    type: "doc",
+    content: [
+      {
+        type: "table",
+        content: Array.from({ length: 6 }, (_, row) => ({
+          type: "tableRow",
+          content: [cell(`Row ${row} first`), cell(`Row ${row} second`)],
+        })),
+      },
+      {
+        type: "paragraph",
+        content: [
+          { type: "image", attrs: { src: PNG, width: 160, height: 100, wrapMode, xAlign: "left", yOffset: -150 } },
+          { type: "text", text: "After the table." },
+        ],
+      },
+    ],
+  };
+}
+
+describe("clicking an anchored image painted over a table", () => {
+  for (const wrapMode of ["square", "front"]) {
+    it(`${wrapMode}: the image takes the click, not the cell under it`, () => {
+      const h = setup(wrapMode, docWithFloatOverTable(wrapMode));
+      clean = h.cleanup;
+
+      const float = h.float();
+      const x = float.x + float.width / 2;
+      const y = float.y + float.height / 2;
+      // The premise: the image is painted over a table row.
+      const row = h.editor.layout.pages[0]?.blocks.find(
+        (b) => b.kind === "composite" && b.y <= y && y < b.y + b.height,
+      );
+      expect(row).toBeDefined();
+
+      h.hoverAt(x, y);
+      expect(h.cursor()).toBe("move");
+      h.clickAt(x, y);
+      expect(h.editor.getState().selection).toBeInstanceOf(NodeSelection);
+    });
+  }
+});
+
+describe("a behind image reaching over a table", () => {
+  it("leaves the click in empty cell space to the cell, because it paints under the table", () => {
+    const h = setup("behind", docWithFloatOverTable("behind"));
+    clean = h.cleanup;
+    const float = h.float();
+    // A point inside the image where no cell text is painted.
+    let point: { x: number; y: number } | null = null;
+    for (let y = float.y + 2; y < float.y + float.height && !point; y += 4) {
+      for (let x = float.x + float.width - 2; x > float.x; x -= 4) {
+        if (!h.editor.charMap.hasTextAt(x, y, 1)) { point = { x, y }; break; }
+      }
+    }
+    if (!point) throw new Error("no empty point inside the image");
+    h.hoverAt(point.x, point.y);
+    expect(h.cursor()).toBe("text");
+    h.clickAt(point.x, point.y);
+    expect(h.editor.getState().selection).not.toBeInstanceOf(NodeSelection);
+  });
+});
+

@@ -6,8 +6,16 @@ import { updateChangeAttrs } from "../engine/updateAttributes";
 import { genId } from "../helpers";
 import { CHANGE_STATUS } from "../types";
 
+/** A split piece's id: derived, so every client repairing the same document agrees. */
+const pieceId = (id: string, from: number) => `${id}~${from}`;
+
 /**
- * Iterates over a ChangeSet and repairs changes that are missing required attributes or have duplicate IDs.
+ * Repairs records the change set cannot represent: one id carried by more than
+ * one span, and records missing required attributes.
+ *
+ * An id names one contiguous span. When later work splits a record — typing
+ * inside a deletion — each piece after the first gets its own id, and keeps the
+ * original as `continuesId` so the pieces are still reviewed as one change.
  */
 export function fixInconsistentChanges(
   changeSet: ChangeSet,
@@ -15,14 +23,15 @@ export function fixInconsistentChanges(
   newTr: Transaction,
   schema: Schema,
 ) {
-  const iteratedIds = new Set();
-  const validIds = new Set(changeSet.changes.map(c => c.id));
+  const claimed = new Set(changeSet.changes.map(c => c.id));
   let changed = false;
 
   changeSet.invalidChanges.forEach(c => {
     const { id, authorID, reviewedByID, status, createdAt, statusUpdateAt, updatedAt } = c.dataTracked;
+    const piece = !!id && claimed.has(id);
     const newAttrs = {
-      ...((!id || iteratedIds.has(id) || validIds.has(id) || id.length === 0) && { id: genId() }),
+      ...(piece && { id: pieceId(id, c.from), continuesId: c.dataTracked.continuesId ?? id }),
+      ...(!id && { id: genId() }),
       ...(!authorID && { authorID: currentUserID }),
       ...(!reviewedByID && { reviewedByID: null }),
       ...(!status && { status: CHANGE_STATUS.pending }),
@@ -34,7 +43,8 @@ export function fixInconsistentChanges(
       updateChangeAttrs(newTr, c, { ...c.dataTracked, ...newAttrs }, schema);
       changed = true;
     }
-    iteratedIds.add(newAttrs.id || id);
+    const claimedId = newAttrs.id ?? id;
+    if (claimedId) claimed.add(claimedId);
   });
 
   return changed;

@@ -118,12 +118,7 @@ export function renderTrackedInsert(
   }
 
   // Pass 2 — empty lines
-  const lineIndexesWithGlyphs = new Set(glyphs.map((g) => g.lineIndex));
-  for (const line of lines) {
-    if (!lineIndexesWithGlyphs.has(line.lineIndex)) {
-      snappedFillRect(ctx, line.x, line.y, line.height, line.height);
-    }
-  }
+  fillEmptyLines(ctx, glyphs, lines);
 
   // Underline
   ctx.strokeStyle = color.startsWith("#") ? hexToRgba(color, 0.8) : color;
@@ -158,12 +153,7 @@ export function renderTrackedDelete(
   }
 
   // Pass 2 — empty lines
-  const lineIndexesWithGlyphs = new Set(glyphs.map((g) => g.lineIndex));
-  for (const line of lines) {
-    if (!lineIndexesWithGlyphs.has(line.lineIndex)) {
-      snappedFillRect(ctx, line.x, line.y, line.height, line.height);
-    }
-  }
+  fillEmptyLines(ctx, glyphs, lines);
 
   // Strikethrough — one segment per contiguous docPos run on each line.
   // Sorting by docPos then checking adjacency ensures that non-deleted text
@@ -235,6 +225,111 @@ export function renderTrackedAttrChange(
 }
 
 /**
+ * Marks a whole table row a change added or removed: a wash across the row and
+ * a frame around it, dashed when the row is removed.
+ */
+export function renderTrackedRow(
+  ctx: CanvasRenderingContext2D,
+  rect: { x: number; y: number; width: number; height: number },
+  color: string,
+  removed: boolean,
+): void {
+  ctx.save();
+  ctx.fillStyle = color.startsWith("#") ? hexToRgba(color, 0.1) : color;
+  snappedFillRect(ctx, rect.x, rect.y, rect.width, rect.height);
+  ctx.strokeStyle = color.startsWith("#") ? hexToRgba(color, 0.9) : color;
+  ctx.lineWidth = 2;
+  ctx.setLineDash(removed ? [6, 4] : []);
+  ctx.strokeRect(rect.x + 1, rect.y + 1, rect.width - 2, rect.height - 2);
+  ctx.restore();
+}
+
+/**
+ * Marks moved content as Word does: double-underlined where it moved to,
+ * double-struck where it moved from, over a light wash. Edits made inside a
+ * moved block are painted over it with their own marks.
+ */
+export function renderTrackedMove(
+  ctx: CanvasRenderingContext2D,
+  glyphs: GlyphEntry[],
+  lines: LineEntry[],
+  color: string,
+  removed: boolean,
+): void {
+  if (glyphs.length === 0 && lines.length === 0) return;
+  ctx.save();
+  ctx.fillStyle = color.startsWith("#") ? hexToRgba(color, 0.08) : color;
+  for (const g of glyphs) snappedFillRect(ctx, g.x, g.y, g.width, g.height);
+  fillEmptyLines(ctx, glyphs, lines);
+  ctx.strokeStyle = color.startsWith("#") ? hexToRgba(color, 0.9) : color;
+  ctx.lineWidth = 1;
+  // One pair of lines per run of glyphs on a line, not per glyph.
+  const runs = new Map<string, { x: number; end: number; y: number; height: number }>();
+  for (const g of glyphs) {
+    const key = `${g.page}:${g.lineIndex}`;
+    const run = runs.get(key);
+    if (run) {
+      run.x = Math.min(run.x, g.x);
+      run.end = Math.max(run.end, g.x + g.width);
+    } else {
+      runs.set(key, { x: g.x, end: g.x + g.width, y: g.y, height: g.height });
+    }
+  }
+  for (const { x, end, y, height } of runs.values()) {
+    const first = removed ? y + height * 0.45 : y + height - 3;
+    for (const lineY of [first, first + 2.5]) {
+      ctx.beginPath();
+      ctx.moveTo(x, lineY);
+      ctx.lineTo(end, lineY);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+/**
+ * Washes text whose formatting a tracked change altered. No underline: the text
+ * is neither added nor removed, and an underline would read as underlining.
+ */
+export function renderTrackedFormatting(
+  ctx: CanvasRenderingContext2D,
+  glyphs: GlyphEntry[],
+  color: string,
+): void {
+  ctx.save();
+  ctx.fillStyle = color.startsWith("#") ? hexToRgba(color, 0.18) : color;
+  for (const g of glyphs) snappedFillRect(ctx, g.x, g.y, g.width, g.height);
+  ctx.restore();
+}
+
+/**
+ * Frames an object with a tracked change — an image, a rule, a page break —
+ * which has no text to underline or strike through. Added content gets a
+ * coloured frame and wash; removed content is also struck through, corner to
+ * corner, as Word marks a deleted object.
+ */
+export function renderTrackedObject(
+  ctx: CanvasRenderingContext2D,
+  rect: { x: number; y: number; width: number; height: number },
+  color: string,
+  removed: boolean,
+): void {
+  ctx.save();
+  ctx.fillStyle = color.startsWith("#") ? hexToRgba(color, 0.12) : color;
+  snappedFillRect(ctx, rect.x, rect.y, rect.width, rect.height);
+  ctx.strokeStyle = color.startsWith("#") ? hexToRgba(color, 0.9) : color;
+  ctx.lineWidth = 2;
+  ctx.strokeRect(rect.x + 1, rect.y + 1, rect.width - 2, rect.height - 2);
+  if (removed) {
+    ctx.beginPath();
+    ctx.moveTo(rect.x, rect.y + rect.height);
+    ctx.lineTo(rect.x + rect.width, rect.y);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/**
  * Draws an amber conflict indicator over glyphs where two authors' marks
  * overlap on the same segment. Rendered on top of the normal insert/delete
  * colour — the underlying green/red is still visible through the amber wash.
@@ -257,12 +352,7 @@ export function renderTrackedConflict(
   for (const g of glyphs) {
     snappedFillRect(ctx, g.x, g.y, g.width, g.height);
   }
-  const lineIndexesWithGlyphs = new Set(glyphs.map((g) => g.lineIndex));
-  for (const line of lines) {
-    if (!lineIndexesWithGlyphs.has(line.lineIndex)) {
-      snappedFillRect(ctx, line.x, line.y, line.height, line.height);
-    }
-  }
+  fillEmptyLines(ctx, glyphs, lines);
 
   // Dashed amber underline — visually distinct from the solid insert underline
   ctx.strokeStyle = hexToRgba(AMBER, 0.9);
@@ -410,6 +500,18 @@ export function snapRect(
 }
 
 /** fillRect snapped to the device pixel grid. */
+/**
+ * Marks each line that holds no text with a line-high square at its start, so
+ * an empty paragraph still shows its change. The caret's zero-width glyph on
+ * an empty line is not text.
+ */
+function fillEmptyLines(ctx: CanvasRenderingContext2D, glyphs: GlyphEntry[], lines: LineEntry[]): void {
+  const linesWithText = new Set(glyphs.filter((g) => g.width > 0).map((g) => g.lineIndex));
+  for (const line of lines) {
+    if (!linesWithText.has(line.lineIndex)) snappedFillRect(ctx, line.x, line.y, line.height, line.height);
+  }
+}
+
 function snappedFillRect(
   ctx: CanvasRenderingContext2D,
   x: number,

@@ -4,7 +4,7 @@ import type { DocumentLayout, LayoutFragment } from "../layout/PageLayout";
 import { pageRegionAt } from "../layout/pagePoint";
 import { setupCanvas, clearCanvas, watchDpr } from "./canvas";
 import { renderPage } from "./PageRenderer";
-import { drawBlock } from "./PageRenderer";
+import { paintBlock } from "./paintBlock";
 import {
   clearOverlay,
   paintSelectionPrimitives,
@@ -70,6 +70,12 @@ export interface TileEntry {
    * with the cursor during mousemove without waiting for mouseup.
    */
   lastPendingAnchoredDragKey: string;
+  /**
+   * The content paint the overlay was last drawn over. Repainting content
+   * resizes the overlay canvas, which clears it, so a newer content paint means
+   * the overlay has to be drawn again even when nothing it shows has changed.
+   */
+  lastOverlayContentKey: string;
 }
 
 /** Helpers */
@@ -161,7 +167,7 @@ export function routePageClick(
  *
  * Within this class the two modes differ in:
  *   - `docYToVisualY` — page-local y to scroll-space y
- *   - `paintContent` — paged calls renderPage(); pageless calls drawBlock() with translate
+ *   - `paintContent` — paged calls renderPage(); pageless calls paintBlock() with translate
  * The inverse mapping, and where a pageless page ends, are `resolvePagePoint`
  * and `pageRegionAt` in layout/pagePoint.ts.
  */
@@ -401,6 +407,7 @@ export class TileManager {
         tile.lastPmState = null;
         tile.lastPendingResizeKey = "";
         tile.lastPendingAnchoredDragKey = "";
+        tile.lastOverlayContentKey = "";
         tile.wrapper.style.top = `${idx * sh}px`;
         tile.wrapper.style.height = `${this.tileHeight}px`;
         tile.wrapper.style.display = "block";
@@ -588,44 +595,28 @@ export class TileManager {
 
     let lineIndexOffset = 0;
     for (const frag of fragments) {
-      const strategy = this.editor.blockRegistry?.get(frag.block.blockType);
-      if (strategy) {
-        lineIndexOffset = strategy.render(
-          frag.block,
-          {
-            ctx,
-            pageNumber: 1,
-            lineIndexOffset,
-            dpr,
-            measurer: this.editor.measurer,
-            theme,
-            ...(this.editor.blockRegistry
-              ? { blockRegistry: this.editor.blockRegistry }
-              : {}),
-            ...(this.editor.markDecorators
-              ? { markDecorators: this.editor.markDecorators }
-              : {}),
-            ...(this.editor.inlineRegistry
-              ? { inlineRegistry: this.editor.inlineRegistry }
-              : {}),
-            ...(layout.fontResolutions ? { fontResolutions: layout.fontResolutions } : {}),
-          },
-          this.editor.charMap,
-        );
-      } else {
-        lineIndexOffset = drawBlock(
+      lineIndexOffset = paintBlock(
+        frag.block,
+        {
           ctx,
-          frag.block,
-          this.editor.measurer,
-          this.editor.charMap,
-          1,
+          pageNumber: 1,
           lineIndexOffset,
+          dpr,
+          measurer: this.editor.measurer,
           theme,
-          this.editor.markDecorators,
-          this.editor.inlineRegistry,
-          layout.fontResolutions,
-        );
-      }
+          ...(this.editor.blockRegistry
+            ? { blockRegistry: this.editor.blockRegistry }
+            : {}),
+          ...(this.editor.markDecorators
+            ? { markDecorators: this.editor.markDecorators }
+            : {}),
+          ...(this.editor.inlineRegistry
+            ? { inlineRegistry: this.editor.inlineRegistry }
+            : {}),
+          ...(layout.fontResolutions ? { fontResolutions: layout.fontResolutions } : {}),
+        },
+        this.editor.charMap,
+      );
     }
 
     ctx.restore();
@@ -703,7 +694,10 @@ export class TileManager {
     // blinks correctly and selection updates are visible. The header cursor
     // is drawn by an overlay handler that needs blink-tick repaints.
     const surfaceStateDirty = surfaceActive;
+    const contentKey = `${tile.lastPaintedVersion}:${tile.lastRenderGeneration}`;
+    const contentDirty = tile.lastOverlayContentKey !== contentKey;
     if (
+      !contentDirty &&
       !blinkDirty &&
       !moveDirty &&
       !pluginStateDirty &&
@@ -719,6 +713,7 @@ export class TileManager {
     tile.lastPmState = pmState;
     tile.lastPendingResizeKey = pendingKey;
     tile.lastPendingAnchoredDragKey = pendingAnchoredKey;
+    tile.lastOverlayContentKey = contentKey;
 
     const dpr = tile.dpr || (window.devicePixelRatio ?? 1);
     const w = pageConfig.pageWidth;
@@ -898,6 +893,7 @@ export class TileManager {
       lastPmState: null,
       lastPendingResizeKey: "",
       lastPendingAnchoredDragKey: "",
+      lastOverlayContentKey: "",
     };
   }
 

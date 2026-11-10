@@ -1,4 +1,4 @@
-import { parseFont, substituteFamily } from "../layout/StyleResolver";
+import { parseFont, substituteFamily, type ParsedFont } from "../layout/StyleResolver";
 import type { FontProvider, FontResolution, FontResolutionConstraints } from "./types";
 
 /** Identifies one resolution within a layout. Opaque: the table owns the shape. */
@@ -73,14 +73,16 @@ export const primaryFamily = (family: string): string => {
 };
 
 /** Weight and slant as the CSS shorthand spells them, in the terms a key uses. */
+export function faceOf(parsed: ParsedFont): { weight: number; style: "normal" | "italic" } {
+  return {
+    weight: /^\d+$/.test(parsed.weight) ? Number(parsed.weight) : parsed.weight === "bold" ? 700 : 400,
+    style: parsed.style === "italic" || parsed.style === "oblique" ? "italic" : "normal",
+  };
+}
+
 function requestFrom(cssFont: string, size: number) {
   const parsed = parseFont(cssFont);
-  return {
-    family: primaryFamily(parsed.family),
-    weight: /^\d+$/.test(parsed.weight) ? Number(parsed.weight) : parsed.weight === "bold" ? 700 : 400,
-    style: parsed.style === "italic" || parsed.style === "oblique" ? ("italic" as const) : ("normal" as const),
-    size,
-  };
+  return { family: primaryFamily(parsed.family), ...faceOf(parsed), size };
 }
 
 /**

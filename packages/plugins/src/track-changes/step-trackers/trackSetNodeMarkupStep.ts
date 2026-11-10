@@ -1,6 +1,6 @@
 import { Node as PMNode } from "@scrivr/core/pm";
 import { Transaction } from "@scrivr/core/pm";
-import { ReplaceAroundStep } from "@scrivr/core/pm";
+import { type Mapping, ReplaceAroundStep } from "@scrivr/core/pm";
 
 import { NewEmptyAttrs } from "../helpers";
 import { ChangeStep } from "../types";
@@ -22,26 +22,29 @@ export function trackSetNodeMarkupStep(
   newTr: Transaction,
   _attrs: NewEmptyAttrs,
   currentDoc: PMNode,
+  replayBridge: Mapping,
 ): ChangeStep[] {
   const currentNode = currentDoc.nodeAt(step.from);
   const newNode = step.slice.content.firstChild;
   if (!currentNode || !newNode) return [];
+  const currentNodeAttrs: Record<string, unknown> = currentNode.attrs;
+  const newNodeAttrs: Record<string, unknown> = newNode.attrs;
 
   // Strip internal bookkeeping before comparing so nodeId/dataTracked
   // assignments don't generate spurious tracking entries.
-  const { dataTracked: _a, nodeId: _b, ...oldMeaningful } = currentNode.attrs as Record<string, unknown>;
-  const { dataTracked: _c, nodeId: _d, ...newMeaningful } = newNode.attrs as Record<string, unknown>;
+  const { dataTracked: _a, nodeId: _b, ...oldMeaningful } = currentNodeAttrs;
+  const { dataTracked: _c, nodeId: _d, ...newMeaningful } = newNodeAttrs;
   const typeChanged = currentNode.type !== newNode.type;
 
   if (!typeChanged && JSON.stringify(oldMeaningful) === JSON.stringify(newMeaningful)) {
     return [];
   }
 
-  const inverted = step.invert(currentDoc);
-  if (newTr.maybeStep(inverted).failed) return [];
+  const inverted = step.invert(currentDoc).map(replayBridge);
+  if (!inverted || newTr.maybeStep(inverted).failed) return [];
 
-  const { dataTracked: _dt, nodeId, ...currentAttrs } = currentNode.attrs as Record<string, unknown>;
-  const { dataTracked: _dt2, nodeId: _nid, ...sliceAttrs } = newNode.attrs as Record<string, unknown>;
+  const { dataTracked: _dt, nodeId, ...currentAttrs } = currentNodeAttrs;
+  const { dataTracked: _dt2, nodeId: _nid, ...sliceAttrs } = newNodeAttrs;
 
   // For type changes: use only the new type's attrs (avoid leaking attrs like
   // `level` from heading into paragraph). For attr-only changes: merge so that
@@ -51,7 +54,7 @@ export function trackSetNodeMarkupStep(
     : { ...currentAttrs, ...sliceAttrs, nodeId };
 
   return [{
-    pos: step.from,
+    pos: replayBridge.map(step.from, 1),
     type: "update-node-attrs",
     node: currentNode,
     newAttrs,

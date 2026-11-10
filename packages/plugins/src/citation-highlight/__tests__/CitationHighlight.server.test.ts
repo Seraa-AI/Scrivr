@@ -8,6 +8,7 @@ import { describe, it, expect } from "vitest";
 import { TextSelection } from "@scrivr/core/pm";
 import { ServerEditor, StarterKit } from "@scrivr/core";
 import { CitationHighlight, citationHighlightPluginKey } from "../CitationHighlight";
+import { TrackChanges, TrackChangesStatus } from "../../track-changes";
 
 function makeEditor() {
   return new ServerEditor({
@@ -184,6 +185,25 @@ describe("CitationHighlight on ServerEditor", () => {
     // Unknown nodeId → command fails, state untouched.
     editor.commands.citeNode("no-such-node");
     expect(citations(editor)).toHaveLength(1);
+  });
+
+  it("citeNode still cites a block proposed for deletion, which is on screen until decided", () => {
+    const editor = new ServerEditor({
+      extensions: [StarterKit, CitationHighlight, TrackChanges.configure({ userID: "agent", initialStatus: TrackChangesStatus.enabled })],
+      content: {
+        type: "doc",
+        content: [
+          { type: "paragraph", attrs: { nodeId: "b1" }, content: [{ type: "text", text: "First block." }] },
+          { type: "paragraph", attrs: { nodeId: "b2" }, content: [{ type: "text", text: "Second block." }] },
+        ],
+      },
+    });
+    const second = editor.getState().doc.child(1);
+    const from = editor.getState().doc.child(0).nodeSize;
+    editor.applyTransaction(editor.getState().tr.delete(from, from + second.nodeSize));
+
+    expect(editor.commands.citeNode("b2")).toBe(true);
+    expect(citations(editor)).toEqual([{ id: "b2", from: 15, to: 28 }]);
   });
 
   it("stays out of undo history", () => {

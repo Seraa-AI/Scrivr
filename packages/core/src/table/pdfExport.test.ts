@@ -3,7 +3,8 @@ import type { Node } from "prosemirror-model";
 import { ServerEditor } from "../ServerEditor";
 import { StarterKit } from "../extensions/StarterKit";
 import { renderTableRowPdf } from "./pdfExport";
-import type { LayoutBlock, CellSubBlock } from "../layout/BlockLayout";
+import { CELL_INSET } from "./layout";
+import type { LayoutBlock, LaidRegion } from "../layout/BlockLayout";
 
 // A structural stand-in for the PDF context — records draw calls so we can
 // assert borders and cell text without pdf-lib or the export pipeline.
@@ -39,6 +40,7 @@ function fakeCtx() {
         rects.push(op);
       },
       text: () => {},
+      ellipse: () => {},
       image: () => {},
       imagePlaceholder: () => {},
       lines(block: LayoutBlock) {
@@ -129,9 +131,9 @@ function continuationRowNode(): Node {
   return row;
 }
 
-function tableRowBlock(node: Node, cells: CellSubBlock[], isLastRow = true): LayoutBlock {
+function tableRowBlock(node: Node, cells: LaidRegion[], lastUnit = true): LayoutBlock {
   return {
-    kind: "tableRow",
+    kind: "composite",
     node,
     nodePos: 0,
     x: 50,
@@ -139,8 +141,8 @@ function tableRowBlock(node: Node, cells: CellSubBlock[], isLastRow = true): Lay
     width: 240,
     height: 40,
     lines: [],
-    cells,
-    isLastRow,
+    regions: cells,
+    ...(lastUnit ? { lastUnit: true } : {}),
     spaceBefore: 0,
     spaceAfter: 0,
     blockType: "tableRow",
@@ -150,21 +152,21 @@ function tableRowBlock(node: Node, cells: CellSubBlock[], isLastRow = true): Lay
 }
 
 describe("renderTableRowPdf", () => {
-  it("a last-row cell draws all four grid lines (left, top, bottom, right) and renders its child", () => {
+  it("a last-row cell draws all four grid lines (left, top, bottom, right)", () => {
     const node = rowNode([{}]);
-    const cell: CellSubBlock = { cellPos: 1, x: 50, y: 0, width: 120, height: 40, vMerge: "none", background: null, blocks: [childTextBlock(4)] };
+    const cell: LaidRegion = { pos: 1, x: 50, y: 0, width: 120, height: 40, inset: CELL_INSET, blocks: [childTextBlock(4)], data: { vMerge: "none", background: null } };
     const { ctx, lines, textBlocks } = fakeCtx();
 
     renderTableRowPdf(tableRowBlock(node, [cell], true), ctx);
 
     expect(lines).toHaveLength(4); // left, top, bottom (last row), right (row edge)
-    // child text rendered at absolute y (row y 200 + relative 4)
-    expect(textBlocks).toEqual([{ y: 204 }]);
+    // What the cell holds is dispatched by the exporter, as any composite's regions.
+    expect(textBlocks).toEqual([]);
   });
 
   it("a non-last row omits the bottom — the row below owns that line (3 lines)", () => {
     const node = rowNode([{}]);
-    const cell: CellSubBlock = { cellPos: 1, x: 50, y: 0, width: 120, height: 40, vMerge: "none", background: null, blocks: [] };
+    const cell: LaidRegion = { pos: 1, x: 50, y: 0, width: 120, height: 40, inset: CELL_INSET, blocks: [], data: { vMerge: "none", background: null } };
     const { ctx, lines } = fakeCtx();
 
     renderTableRowPdf(tableRowBlock(node, [cell], false), ctx);
@@ -176,7 +178,7 @@ describe("renderTableRowPdf", () => {
     // A lone "continue" gets normalized away, so build a real 2-row vertical
     // merge (restart over continue) and take the continuation row.
     const node = continuationRowNode();
-    const cell: CellSubBlock = { cellPos: 1, x: 50, y: 0, width: 120, height: 40, vMerge: "continue", background: null, blocks: [] };
+    const cell: LaidRegion = { pos: 1, x: 50, y: 0, width: 120, height: 40, inset: CELL_INSET, blocks: [], data: { vMerge: "continue", background: null } };
     const { ctx, lines } = fakeCtx();
 
     renderTableRowPdf(tableRowBlock(node, [cell]), ctx);
@@ -206,7 +208,7 @@ describe("renderTableRowPdf — cell shading", () => {
     ["red", 1, { r: 255, g: 0, b: 0 }],
     ["rgba(0, 0, 0, .5)", .5, { r: 0, g: 0, b: 0 }],
   ])("exports %s with its opacity", (background, opacity, color) => {
-    const cell: CellSubBlock = { cellPos: 1, x: 0, y: 0, width: 10, height: 10, vMerge: "none", background, blocks: [] };
+    const cell: LaidRegion = { pos: 1, x: 0, y: 0, width: 10, height: 10, inset: CELL_INSET, blocks: [], data: { vMerge: "none", background } };
     const { ctx, rects } = fakeCtx();
     renderTableRowPdf(tableRowBlock(rowNode([{}]), [cell], true), ctx);
     expect(rects).toHaveLength(1);
@@ -214,7 +216,7 @@ describe("renderTableRowPdf — cell shading", () => {
   });
 
   it.each(["rgba(0, 0, 0, 0)", "transparent", "#0000"])("omits the invisible fill %s", (background) => {
-    const cell: CellSubBlock = { cellPos: 1, x: 0, y: 0, width: 10, height: 10, vMerge: "none", background, blocks: [] };
+    const cell: LaidRegion = { pos: 1, x: 0, y: 0, width: 10, height: 10, inset: CELL_INSET, blocks: [], data: { vMerge: "none", background } };
     const { ctx, rects, lines } = fakeCtx();
     renderTableRowPdf(tableRowBlock(rowNode([{}]), [cell], true), ctx);
     expect(rects).toEqual([]);
@@ -222,7 +224,7 @@ describe("renderTableRowPdf — cell shading", () => {
   });
   it("fills a shaded cell with its own colour", () => {
     const node = rowNode([{}]);
-    const cell: CellSubBlock = { cellPos: 1, x: 50, y: 0, width: 120, height: 40, vMerge: "none", background: "rgb(238, 238, 238)", blocks: [] };
+    const cell: LaidRegion = { pos: 1, x: 50, y: 0, width: 120, height: 40, inset: CELL_INSET, blocks: [], data: { vMerge: "none", background: "rgb(238, 238, 238)" } };
     const { ctx, rects } = fakeCtx();
 
     renderTableRowPdf(tableRowBlock(node, [cell], true), ctx);
@@ -239,7 +241,7 @@ describe("renderTableRowPdf — cell shading", () => {
 
   it("reads the hex spelling of a fill as readily as the rgb one", () => {
     const node = rowNode([{}]);
-    const cell: CellSubBlock = { cellPos: 1, x: 0, y: 0, width: 10, height: 10, vMerge: "none", background: "#eeeeee", blocks: [] };
+    const cell: LaidRegion = { pos: 1, x: 0, y: 0, width: 10, height: 10, inset: CELL_INSET, blocks: [], data: { vMerge: "none", background: "#eeeeee" } };
     const { ctx, rects } = fakeCtx();
 
     renderTableRowPdf(tableRowBlock(node, [cell], true), ctx);
@@ -249,7 +251,7 @@ describe("renderTableRowPdf — cell shading", () => {
 
   it("draws nothing for an unshaded cell", () => {
     const node = rowNode([{}]);
-    const cell: CellSubBlock = { cellPos: 1, x: 0, y: 0, width: 10, height: 10, vMerge: "none", background: null, blocks: [] };
+    const cell: LaidRegion = { pos: 1, x: 0, y: 0, width: 10, height: 10, inset: CELL_INSET, blocks: [], data: { vMerge: "none", background: null } };
     const { ctx, rects } = fakeCtx();
 
     renderTableRowPdf(tableRowBlock(node, [cell], true), ctx);
@@ -260,7 +262,7 @@ describe("renderTableRowPdf — cell shading", () => {
   // The fill is the cell's own; a border drawn under it would disappear.
   it("fills before it strokes", () => {
     const node = rowNode([{}]);
-    const cell: CellSubBlock = { cellPos: 1, x: 0, y: 0, width: 10, height: 10, vMerge: "none", background: "#000000", blocks: [] };
+    const cell: LaidRegion = { pos: 1, x: 0, y: 0, width: 10, height: 10, inset: CELL_INSET, blocks: [], data: { vMerge: "none", background: "#000000" } };
     const order: string[] = [];
     const ctx = {
       layout: { pageConfig: { pageHeight: 1000 } },
@@ -269,6 +271,7 @@ describe("renderTableRowPdf — cell shading", () => {
         line: () => void order.push("line"),
         rect: () => void order.push("rect"),
         text: () => {},
+        ellipse: () => {},
         image: () => {},
         imagePlaceholder: () => {},
         lines: () => undefined,

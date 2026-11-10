@@ -2,7 +2,7 @@ import { Plugin, PluginKey } from "@scrivr/core/pm";
 import type { EditorState, Transaction } from "@scrivr/core/pm";
 import { Extension, renderGhostText } from "@scrivr/core";
 import type { IEditor, OverlayRenderHandler } from "@scrivr/core";
-import { findNodeById } from "./UniqueId";
+import { findLiveNodeById } from "@scrivr/plugins";
 
 // ── Plugin state ──────────────────────────────────────────────────────────────
 
@@ -86,7 +86,7 @@ export const GhostText = Extension.create({
       const pluginState = ghostTextPluginKey.getState(editor.getState());
       if (!pluginState?.nodeId || !pluginState.content) return;
 
-      const found = findNodeById(editor.getState().doc, pluginState.nodeId);
+      const found = findLiveNodeById(editor.getState().doc, pluginState.nodeId);
       if (!found) return;
 
       // Get the last position inside the block (just before the closing token)
