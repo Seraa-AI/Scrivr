@@ -1,5 +1,262 @@
 # @scrivr/export-pdf
 
+## 1.0.23
+
+### Patch Changes
+
+- a9e05e0: A node can lay itself out as a composite — units placed one at a time, each
+  of side-by-side regions — through `layout: { kind: "composite", composite }`.
+  Tables now lay out this way (each row a unit, each cell a region) and look,
+  paginate, hit-test, export and copy exactly as before; the engine no longer
+  knows what a table is.
+
+  - New: `CompositeLayout`, `CompositeUnit`, `RegionPlacement`, `RegionInset`,
+    `LaidRegion`, `RegionFloat`, `regionAtCoords`; `LayoutBlock.regions`,
+    `unitData`, `lastUnit`.
+  - A composite unit's block strategy and PDF handler draw only its decoration;
+    the engine paints and exports what its regions hold.
+
+  **Breaking:**
+
+  - `LayoutBlockKind` `"tableRow"` is `"composite"`; `LayoutBlock.cells` is
+    `regions` (`LaidRegion`: a region's `pos`, `inset` and `data`, where a cell's
+    merge and background now live), and `isLastRow` is `lastUnit`.
+  - `BlockLayoutOptions.tableColumns` is removed (a unit carries its own data).
+
+- f72a5b3: Any inline node can float: its spec declares `anchored: { read, write }` and
+  the engine places, wraps, hits, drags, resizes and exports it as it does an
+  image, writing every placement change through `write`. Images behave exactly
+  as before.
+
+  - `anchoredOf(node)`, `floats(node)`, `placementAttrs(node, patch)`,
+    `AnchoredPlacement`, `AnchoredSpec` and `PlacementPatch` are new;
+    `isXAlignValue` is exported. A node that declares a placement is laid out at
+    the size it declares.
+  - `addPasteFiles()` declares which pasted files become which nodes
+    (`PasteFileSpec`, `PasteFileHandler`); `ExtensionManager.buildPasteFiles()`
+    and the `pasteFiles` option of `PasteTransformer` carry them.
+  - `addExports().pdf.embeds` (`PdfEmbedSource`) declares where a node's
+    embedded file lives.
+  - A later-registered extension takes a pasted file first, and
+    `normalizeDocument`'s new `pasteFiles` option sweeps any extension's
+    orphaned placeholder.
+  - An agent's image layout is written through the node's declaration.
+
+  **Breaking:**
+
+  - `normalizeImageAttrs` and `NormalizedImageAttrs` are removed: read a node's
+    placement with `anchoredOf` (`AnchoredPlacement`).
+  - `Editor.convertImageToInlineAtVisualPosition(docPos)` is now
+    `placeInlineAtVisualPosition(docPos)`, for any anchored node.
+  - `dropPendingPlaceholders(doc, isPending)` takes the predicate;
+    `normalizeDocument` sweeps placeholders only for the `pasteFiles` it is
+    given (the editors pass theirs).
+  - A `PasteTransformer` built without `pasteFiles` inserts no pasted files;
+    `Editor` passes them.
+  - `ResolvedExtension.pasteFiles` is required: a hand-built resolved extension
+    passes `{}`.
+
+- 3d45744: A node declares that it breaks the page or the line. Page breaks and line
+  breaks work exactly as before, now from `PageBreak` and `HardBreak` instead of
+  by name in the engine. (Which blocks are bookmarked in a PDF is declared by
+  `outlineLevel` on the node spec; see the outline-level note.)
+
+  - **`NodeLayout` gains `{ kind: "break", breaks: "page" | "line" }`** (`BreakKind`).
+    A block that breaks the page starts the next block on a new page; an inline
+    node that breaks the line ends its line. A break its context cannot honour
+    lays out as a plain leaf; a node that holds content ignores it. A page
+    break's flow `blockType` is its node's name. `breakOf(type)` reads it, and
+    the semantic exporter, the agent's rich diff and the header/footer surfaces
+    honour declared breaks as they do the built-in ones.
+  - **Pasted markdown goes through the tokens extensions declare.**
+    `Strikethrough` declares `~~text~~`, so it pastes struck through. Markdown
+    holding a construct no extension declares (a pipe table without `Table`)
+    pastes as plain text, one paragraph per line. Inline code, links,
+    blockquotes and images that no extension declares paste as their markdown
+    text; inline code was dropped before.
+
+  **Breaking:**
+
+  - Removed the `addMarkdownRules()` extension hook, `MarkdownBlockRule`,
+    `ExtensionManager.buildMarkdownRules()` and `ResolvedExtension.markdownRules`.
+    Declare markdown tokens with `addMarkdownParserTokens()` instead.
+  - `PasteTransformer`'s constructor drops its `extraMarkdownRules` argument:
+    `new PasteTransformer(schema, markdownParserTokens, options)`.
+
+- 07b6e41: A block declares its outline level on its node spec (`outlineLevel`), read
+  by both the PDF bookmarks and the semantic outline, so a custom block heads a
+  section in both. `Heading` declares it; headings bookmark, nest and head
+  breadcrumbs as before.
+
+  - `outlineLevelOf(node)` reads the declaration.
+  - The semantic walker, its heading-led grouping and `toDocumentOutline` read
+    the declared level instead of the name `heading`.
+
+  **Breaking:**
+
+  - A node whose semantic handler returns `{ type: "heading" }` but whose spec
+    declares no `outlineLevel` no longer opens a section in `toDocumentOutline`
+    or heads breadcrumbs: declare `outlineLevel` on its spec.
+
+- f72a5b3: The PDF bookmarks and the semantic outline visit the same headings.
+
+  - A heading nested in a list, sourced block or table cell heads the semantic
+    breadcrumbs of what follows it and opens a section in `toDocumentOutline`,
+    as it is a PDF bookmark. A unit lists the headings it holds in the new
+    `SemanticUnit.headings` (`SemanticHeading`).
+  - A heading whose proposed text is empty (blank, or all proposed for deletion)
+    heads nothing in either outline; `headingLevel` is absent on such a unit.
+  - A section's title is its heading's text, without a grouped lede.
+  - `outlineTitleOf(node, isRemoved)` is the one title rule: the proposed text,
+    a line break as a space, trimmed. Bookmark and semantic titles now match.
+
+- ba07451: Lists lay out, print and export like Word's.
+
+  - **Nested lists and multi-block items are drawn.** Layout used to lay out
+    only each list item's first paragraph, so an item nested with Tab, a second
+    paragraph in an item (which Backspace at the start of an item makes), and any
+    text in them vanished from the canvas and the PDF while staying in the
+    document. Every block of an item is now laid out, with the number on its
+    first block — as in Word, even when that paragraph holds only a floating
+    image, which then keeps one line for its number. A heading or code block in
+    an item keeps its own style and painter; a table in an item is indented with
+    it.
+  - **Word's geometry.** Each level's text sits half an inch further in than
+    the level above (the first level half an inch from the margin, where it was a
+    quarter inch), and the marker hangs a quarter inch before the text,
+    left-aligned. The text is never drawn over the number. Existing lists move a
+    quarter inch to the right.
+  - **Lists inside table cells are drawn.** A list in a cell (pasting one
+    there makes one) used to lay out as one empty line, its text never painted
+    on canvas or in PDF. A cell now lays out its blocks as the page body does:
+    numbered, nested, indented and spaced, the number and the first word kept
+    inside even a narrow cell, and a table nested in a cell shows its rows and
+    its bottom border.
+    A block that holds other blocks but is not a list or a table — a custom
+    container, say — lays out the blocks it holds instead of one empty line
+    (and still takes a line when it holds none), unless its node spec declares
+    `layout: { kind: "block" }`, which keeps its own box and the painter it
+    registered.
+  - **No block is indented past an inch from the right margin.** Any block's
+    indent — a deeply nested list, or a paragraph's own `indent` — leaves at
+    least an inch of the line for its text.
+  - **Markers by depth.** Bullets cycle •, ◦, ▪; ordered levels number
+    1. / a. / i., each nested list counting from its own start. Lists nested
+       past nine levels stay at the ninth. A list's start is kept within
+       0–32767 on the page, in copied HTML and in markdown.
+  - **Numbers stay right while editing.** A renumbered item is laid out
+    afresh, so Tab, Shift-Tab and joining items never leave an old number on
+    screen.
+  - **Bullets are drawn as shapes**, on the canvas and in the PDF alike, so a
+    second- or third-level bullet no longer prints as `?` with a standard PDF
+    font. Numbers are drawn in the face and size of the item's first text, past
+    any image that opens the line, on the canvas and in the PDF. Lists in
+    headers and footers draw their numbers again. In the PDF a block's number
+    is drawn once, after its handler, so a custom PDF handler that never calls
+    `draw.lines` keeps it.
+  - **DOCX levels match the screen.** Numbering has nine levels with the same
+    formats, glyphs and indents the editor draws; an item's further blocks
+    export as Word's unnumbered continuation paragraphs, a table in an item with
+    `w:tblInd` and a width that fits the rest of the column, and a sourced block
+    indented with them; list properties are written in schema order.
+
+  **API changes**
+
+  - `@scrivr/core` exports `isListType`, moved here from track changes and
+    now what the list extension, Clear formatting, the semantic exporter and
+    track changes ask.
+  - `ListItemStrategy` is removed, and blocks are no longer relabelled
+    `blockType: "list_item"`. Core draws a block's list marker itself, over
+    whatever painter draws the block, through the new `paintBlock` export —
+    use it in any loop that paints laid-out blocks. **Migration:** a painter
+    registered under `list_item` is never called now; register it under the
+    node type (`paragraph`, …) instead.
+  - `isListType` holds only for a node whose content allows list items and
+    nothing else.
+  - `nodeLayout` now defaults an undeclared node whose content is blocks to
+    `{ kind: "transparent" }`: its blocks lay out in its place.
+    `DEFAULT_NODE_LAYOUT` (`{ kind: "block" }`) is the default for undeclared
+    nodes that hold inline content or nothing. **Migration:** a container node
+    that holds blocks must declare `layout: { kind: "block" }` to keep its
+    registered painter; left undeclared, its painter is never called.
+  - `AvailableSegment.indentFrom` (new) records where a first line started
+    before its indent moved it.
+  - `LineBreaker.breakIntoLines` takes `firstLineMayStayEmpty` (new: a first
+    word that fits only the next line leaves the first line empty, as a list
+    number's push does) and `firstLineIndent` (new: how far the provider's first
+    line is indented, for a line a float starts some way in, so a float's
+    narrowing is told apart from the indent's).
+  - Up and Down step over a line that holds no text: a number left alone on
+    its line, and the gap a full-width image leaves in any paragraph, on the
+    same page or across one.
+  - `DocxContext.textWidthTwips` (new, required): the width of the exported
+    section's text column. Code that builds a `DocxContext` by hand must now
+    set it; contexts from `@scrivr/docx` have it.
+  - `DocxNumberingLevel.format` accepts `"lowerLetter"` and `"lowerRoman"`, and
+    takes optional `left` / `hanging` indents in twips.
+
+- 22fb8f1: A wrapper node shapes the blocks it wraps, and its extension paints the marker
+  it hangs. Lists now lay out and paint through this from `List`, so a task
+  list, legal numbering or a custom bullet is an extension, not an engine change.
+  Lists look and export exactly as before.
+
+  - **`NodeLayout`'s `transparent` kind takes `wrap: WrapperLayout`.** `enter`
+    hands a scope down; `place` is called for each block laid out inside, at any
+    depth, and returns its `indent`, an optional `marker` (`BlockMarker`) and an
+    optional `styleKey`. Indents add up; the innermost marker and style win. A
+    table row inside a wrapper takes its indent through `place`.
+  - **`addMarkerPainters()`** returns `{ [key]: { canvas, pdf } }`, side by side
+    so a marker never ships on one surface only. Canvas and PDF draw from the
+    same anchor, `markerAnchorOf(block)` (`PlacedMarker`).
+  - **A list container from another extension** declares List's wrapper,
+    `layout: { kind: "transparent", wrap: listWrap }`, to be drawn as a list.
+  - **`PdfDrawSurface` gains `ellipse(op: PdfEllipseOp)`**, which a marker painter
+    needs for a disc or ring.
+  - New: `WrapperLayout`, `WrapPlacement`, `WrapScope`, `BlockMarker`,
+    `LaidMarker`, `MarkerFace`, `MarkerPainter`, `PlacedMarker`, `MarkerLine`,
+    `markerAnchorOf`, `listWrap`, `PdfEllipseOp`; `LayoutBlock.marker`;
+    `BlockLayoutOptions.marker`; `BlockRegistry.registerMarkerPainter` and
+    `markerPainter`; `IBaseEditor.getMarkerPainters()`.
+
+  **Breaking:**
+
+  - Removed `LayoutBlock.listMarker` and `listMarkerX`; read
+    `LayoutBlock.marker` (`data` holds a list's bullet or number) and
+    `markerAnchorOf(block)` for where it is drawn.
+  - The `listMarker` theme token is renamed `marker`: the colour of any block
+    marker, a list's included. Same defaults, still resolved per surface, so the
+    PDF keeps its own print theme.
+  - A container holding only `listItem`s that does not declare `listWrap` is no
+    longer drawn as a bullet list; its items lay out as plain blocks.
+  - A custom `PdfDrawSurface` must implement `ellipse`.
+  - `IBaseEditor.getMarkerPainters()` and `ResolvedExtension.markerPainters` are
+    required: an editor double or a hand-built resolved extension must provide
+    them (`new Map()` and `{}` will do).
+
+- Updated dependencies [31a013e]
+- Updated dependencies [4657757]
+- Updated dependencies [288119e]
+- Updated dependencies [e40e3d9]
+- Updated dependencies [a9e05e0]
+- Updated dependencies [5603fff]
+- Updated dependencies [aec0e05]
+- Updated dependencies [189b6fa]
+- Updated dependencies [6330e0a]
+- Updated dependencies [f72a5b3]
+- Updated dependencies [5287a8d]
+- Updated dependencies [544d74e]
+- Updated dependencies [fb180bb]
+- Updated dependencies [3d45744]
+- Updated dependencies [07b6e41]
+- Updated dependencies [f72a5b3]
+- Updated dependencies [01cc927]
+- Updated dependencies [31a013e]
+- Updated dependencies [7aca935]
+- Updated dependencies [a395c98]
+- Updated dependencies [ba07451]
+- Updated dependencies [22fb8f1]
+  - @scrivr/core@1.0.23
+
 ## 1.0.22
 
 ### Patch Changes

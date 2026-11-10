@@ -1,5 +1,433 @@
 # @scrivr/export-semantic
 
+## 1.0.23
+
+### Patch Changes
+
+- 31a013e: Agents can read the document as originally agreed, and structural edits know
+  when what they name has changed.
+
+  - **The original view.** `toSemanticUnits(editor, { view: "original" })` and
+    `ai.getRichBlocks({ view: "original" })` read the document as it was before
+    every pending proposal — what rejecting all of them would leave, computed by
+    TrackChanges' own Reject on a copy. Its units say `view: "original"` and carry
+    no `changes`. `SemanticTextView` is now `"proposed" | "original"`, and
+    `SemanticHandlers` gains `documentIn(doc, view)`.
+  - **Only the proposed view is editable.** `applyRichEdit` reports a unit read in
+    another view under the new `wrongView` list and writes nothing for it. A unit
+    hash covers its view when it is not the proposed one; proposed hashes are
+    unchanged.
+  - **Structural ops carry hashes.** `expectedContentHash` on an op's own block
+    and `anchorContentHash` on its anchor; a mismatch is reported in `stale` and
+    nothing is written. `applySemanticEdits` returns `SemanticEditResult`, which
+    adds `alreadyProposed` (a delete whose block another author already proposed
+    for deletion) and `anchorProposedForDeletion` (an anchor that disappears on
+    Accept). Both were refused before, inside `rejected`. Hashes are judged
+    against the units `getRichBlocks` hands out; an id the document does not hold
+    is `notFound`, not `stale`.
+  - `@scrivr/export-semantic` exports `resolveNodeId`, the id rule units are
+    keyed by; `@scrivr/plugins` exports `originalDocument(doc)`, the original
+    document with the mapping into it.
+
+- 4657757: Agents read pending tracked changes and can review them.
+
+  - `SemanticChange` gains `at`, `length`, `moveId`, `oldAttrs` and `image`.
+    Each change is placed by offset into the text it belongs to: `unit.text`,
+    `part.text` or `cell.text`. Its `id` is the act's id, the one to pass to
+    `reviewChanges`, shared by every piece of the act.
+  - `SemanticPart` gains `changes`. `UnitRichInput.changes` and
+    `SemanticPartRichInput.changes` carry them into the rich hashes.
+  - `SemanticUnit` and `SemanticPart` gain `proposedForDeletion: true` when the
+    block itself — not only its text — is proposed for deletion. Such a unit
+    cannot be edited (`applyRichEdit` rejects it) or placed after.
+  - `@scrivr/export-semantic` re-exports `SemanticImage` and `SemanticPart`.
+  - `SemanticHandlers` gains `nodeChanges`, which runs for every node, text
+    included: it reports records on a block's own attrs and on a text node's
+    formatting marks, returning `SemanticNodeChange[]` (exported from
+    `@scrivr/core` and `@scrivr/export-semantic`). It also gains
+    `isMarkRemoved`, so a formatting mark proposed for removal is left off the
+    proposed spans.
+  - `UnitCtx` gains `doc`, the document being read. **It is required:** code
+    that builds a `UnitCtx` itself, such as a mock in a handler test, must now
+    supply it.
+  - `semanticImage(node)` is exported from `@scrivr/core`; `moveShadowRanges(doc)`
+    from `@scrivr/plugins`.
+  - TrackChanges reports pending insertions, deletions (including line breaks),
+    block insertions and deletions, paragraph joins and splits, heading, list and
+    formatting changes, wrapped and structurally moved nodes, table rows and
+    moves. An act reads as one change per type: a replacement or a move is its
+    two halves under one id, a formatting change over text with different
+    prior marks is one change per run, and each image an act adds or removes is
+    a change of its own — all under the act's id. An insertion reads what
+    remains of it in the proposed text. Text whose deletion is already decided
+    stays in the proposed text, as `proposedForDeletion` reads it.
+  - A tracked record naming an operation the engine does not know — including
+    one like `"toString"` from a synced document — is read as an unknown
+    operation instead of breaking `findChanges`.
+  - `ai.reviewChanges(decisions)` accepts or rejects changes by the ids an agent
+    read, returning the `ReviewOutcome` type from `@scrivr/plugins`. It is a
+    pass-through to `reviewChanges`, so the host's `canAcceptReject` still
+    decides whether an agent may review.
+
+  **`SemanticChange.type` gains two members**, `suggestedInsert` and
+  `suggestedAttrs`. An exhaustive `switch` on it, or code that assumed every
+  change is a deletion, must handle both.
+
+  One-time changes to watch for:
+
+  - **Hashes change once for any unit with a pending change.** `unitRichHash` and
+    `semanticPartRichHash` now cover `changes` when there are any. A unit with
+    none hashes exactly as before. An `expectedContentHash` pinned before the
+    upgrade on a unit with any pending change reads `stale` once.
+  - **Change ids stored before the upgrade can change.** `SemanticChange.id` is
+    now the act's id: both halves of a replacement or a move, and every piece of
+    a block act, report one id.
+  - **A block proposed for deletion now appears in `getRichBlocks`,** reading
+    `text: ""` with its deletion in `changes`. Only the copy a pending move
+    leaves behind stays out.
+  - **A deleted hard break, and a formatting mark proposed for removal, leave the
+    proposed view,** where they used to read as present.
+  - **`markdown` is omitted on units with any pending change,** not only those
+    with pending deletions.
+  - **Block ids are now unique after a split.** `UniqueId` gives the block an
+    edit creates — a split's new half, a list Enter's new item, a pasted copy
+    (rules and page breaks included) — a fresh id when another block already
+    carries its id. The copy holding the block's first words keeps it: Enter at
+    the start of a paragraph or a list item makes the empty one before it the
+    new block. Only the
+    author's client assigns it; a change arriving through sync is never
+    re-keyed, and undo and redo never rename. A pending move's two copies still
+    share their id. A tracked cut pasted elsewhere is a move, as Word tracks it,
+    so a pasted block the cut took whole keeps its id (approved by the user,
+    2026-11-09). A pasted copy of a block that is still in place is not that
+    cut, even when it reads the same.
+    Documents saved with duplicates keep them; edits never repair them.
+  - **An id two live blocks carry is refused.**
+    `findLiveNodeById` returns `null` for an id two live blocks carry, so every
+    write that resolves an id through it — the agent's edits and structural ops,
+    ghost text, suggestions, image layout — refuses that id rather than acting
+    on the first copy. That can happen in a document saved with duplicates, or
+    after concurrent cut-and-paste of one block in collaboration.
+  - `blockIdOf(node)` is exported from `@scrivr/core` (approved by the user,
+    2026-11-09): the one answer to which nodes carry a block id. An empty
+    `nodeId` counts as none, so `UniqueId` now stamps it as it stamps `null`.
+  - `ReferenceAttrs` gains `originalNodeId`, the id the block had when a tracked
+    split was made. Rejecting the split gives the rejoined block that id back.
+  - **Track changes marks its own recording transaction `NORMALIZATION_META`,**
+    as bookkeeping nobody authored.
+  - **A tracked Enter in a list item is recorded as a split** of the item and
+    its paragraph, as Enter in a paragraph is, no longer as an inserted item.
+    Rejecting it joins both levels back under the ids they had (user decision,
+    2026-11-09). Which half of a split keeps its ids is core's rule in either
+    order of registering `UniqueId` and `TrackChanges`: `planDuplicateIdAssignments`
+    is exported from `@scrivr/core` for it (approved by the user, 2026-11-09).
+  - Deleting the moved copy of a pending move proposes its deletion and drops
+    its move record. Before, the move record was stripped from whatever block
+    then sat at the copy's old place: the block after it lost its id, level and
+    records, or, with nothing after it, the deletion threw.
+  - An agent's reply is diffed against the proposed view it read: another
+    author's pending formatting removal stays theirs, and a pending deleted line
+    break no longer turns a small edit into a rewrite of the block.
+  - An inserted, deleted or moved empty line — a new empty list item or
+    paragraph — is marked on the canvas again. The caret's zero-width glyph on
+    the line counted as text, so it was left unmarked.
+  - Review cards and the change popover name a block added or removed by what
+    it is — "List item added", "Paragraph added", "Image removed" — instead of
+    "Block added", and leave out the preview line of a block with no words.
+    `ChangePopoverInfo.nodeTypeName` (new) says which block a node change is on,
+    so a host can name it too (asked for by the user, 2026-11-09).
+  - An attribute change reads its values in words on cards and in the popover:
+    an object value is spelled out (`x 0, y 48`), never `[object Object]`, and an
+    equal value written anew is not listed. `describeAttrChanges` and
+    `changedAttrKeys` (new, `@scrivr/plugins`) are that one description, shared
+    by the popover and the panel. An image whose older `floatOffset` changed
+    with its `yOffset` reads as moved: `IMAGE_PLACEMENT_ATTRS` includes
+    `floatOffset`.
+  - Deleting what you added yourself takes it back out, as Word does: Backspace
+    on a list item you added with Enter, or Delete from the item above it, joins
+    it back and leaves no change, as it already did for a paragraph. The caret
+    stays in the line it was in. An image or horizontal line you added and then
+    delete leaves no change either.
+  - `editor.getMarkdown()` no longer throws on a document with formatting
+    Markdown cannot write: a colour or a font size is dropped and its words
+    kept. With TrackChanges installed, a pending change is written as
+    CriticMarkup.
+
+- 288119e: An agent edits like a person: it moves blocks, list items, headings and images,
+  its rewrites land as the phrases a person would change, and every edit is a
+  tracked suggestion a reviewer decides in one click.
+
+  **Agents — what they can do**
+
+  - `moveBlock` and `moveListItem` join `StructuralSemanticEditSchema`: an agent
+    reorders a document by naming a node and an anchor. `moveListItem` takes an
+    item id or a leaf inside it, and refuses a cross-list move before writing any
+    steps. The engine pairs the delete-at-old and insert-at-new into one
+    `CHANGE_OPERATION.move`, accepted or rejected as one decision.
+  - A heading's level is set with `richText` `attrs.level`: 1–6 on a heading
+    changes its level and on a paragraph makes it a heading; 0 makes a heading a
+    paragraph. It is tracked with the old type, so rejecting it restores the block.
+  - Images go through the protocol an agent already has. A paragraph holding one
+    image is an `image` unit carrying `image` (`src`, `alt`, `width`, `height`,
+    `wrap`, `align`); `insertBlock` adds one with `block.type: "image"` (`src`
+    must pass `safeImageUrl`); `richText` `attrs`, or the unit handed back with its
+    `image` edited, change `wrap`, `align`, size or `alt`; `deleteBlock` removes
+    it. Only the fields that change are checked, so an image placed by drag
+    (`align: "custom"`) can be handed back untouched. A new `src`, paragraph
+    styling on an image unit, and invalid values are rejected. Setting `wrap` or
+    `align` on an image laid out by the legacy `wrappingMode` takes effect.
+  - Every edit an agent makes is its suggestion: with TrackChanges installed,
+    `applySemanticEdits` tracks text, image and structural edits as `authorID`'s
+    (default "AI Assistant") whether or not the person is suggesting.
+  - The result says what happened. An edit that changes nothing — the level a
+    heading already has, attrs an agent may not set, an image layout it already
+    has, a move to where the block already is — is `rejected`, never `changed`
+    and never silently dropped. An edit is taken whole or not at all: attrs it
+    cannot apply refuse its text too. Restating the original to withdraw the
+    agent's own earlier suggestion is a change.
+  - A batch touches content once. A move or delete overlapping content the batch
+    already moved or added to, or adding an item or row inside content it moved,
+    is refused; so is a list or table op named by a node holding several of what
+    it acts on, such as a nested list.
+  - `getRichBlocks(from, to)` keeps image units inside the range.
+
+  **Rewrites read as a person's edit**
+
+  - `applyDiffAsSuggestion` and `applyRichDiffAsSuggestion`, for any caller, turn
+    a rewrite into phrase replacements: each run of changes is one deletion and
+    one insertion, a short unchanged gap inside a replacement is taken in, and no
+    change is made inside a word. A gap holding a line break, a newline, an
+    inline image, formatting or another author's suggestion is never taken in,
+    and words added near each other stay additions.
+  - A replacement is decided as one. Its two halves share a `groupId` nothing
+    else carries, from this diff or any other, and accepting or rejecting either
+    half — through a card,
+    `setChangeStatuses`, `reviewChanges` or accept-at-caret — decides both.
+  - The AI suggestion overlay groups the same way, so a proposal reads the same
+    before it is applied as after. `phraseReplacements` and `bridgeable` are
+    exported from `@scrivr/plugins` for hosts that build their own diffs;
+    `pairReplacements` stays for word-pair grouping.
+
+  **Resolving ids in a tracked document**
+
+  - A pending move leaves a deleted shadow and a live copy with the same `nodeId`.
+    `findLiveNodeById` in `@scrivr/plugins` decides which is live, and every
+    consumer uses it — rich and structural edits, drift detection, suggestion
+    overlays and popovers, ghost text, streamed insertion, block markers and
+    citation reveal. Writing into a shadow used to succeed and then vanish when
+    the deletion was accepted. `@scrivr/ai` re-exports it beside `findNodeById`.
+  - `findNodeById` in `@scrivr/core` takes an optional `accept` predicate and
+    returns the first match that satisfies it. It used to return the last match.
+  - `shadowRanges`, `isShadowNode` and `ShadowRange` are exported for a host
+    resolving ids itself. The ranges are memoised per document.
+  - **Hosts:** a helper that takes the first node with a `nodeId`
+    reads the shadow of a block moved down. Switch it to `findLiveNodeById`.
+
+  **Tracking**
+
+  - A deletion pairs with an insertion as a move only when they match, by content
+    and by id. Two blocks that only read the same — two empty paragraphs, a
+    `deleteBlock` beside an `insertBlock` of the same text — are a deletion and an
+    insertion.
+  - Rejecting a block added after a list or table, together with a later move, no
+    longer deletes the list's text; deleting a paragraph while typing its words
+    elsewhere in one transaction no longer errors.
+
+  **Review surfaces**
+
+  - Moves read as moves: double-underlined where the content went and
+    double-struck where it was, in one move colour (`renderTrackedMove`).
+  - A table row added or removed is washed and framed as a row, dashed when
+    removed (`renderTrackedRow`). With the caret anywhere in it, the popover
+    offers the row: "Accept row", "Reject row", previewed as "Adding row:
+    Headset · On request · Yes".
+  - `changePreviewText(doc, change, pending)` previews a block change as it will
+    read, and a move once, by where it went; the popover and the panel both use
+    it. A move's card reads "Moving".
+
+  **Semantic view**
+
+  - A semantic contribution can name what the proposed view leaves out
+    (`isRemoved`). Track changes supplies `proposedForDeletion`, exported, so an
+    image proposed for deletion is not read as present, and a paragraph whose
+    other text is proposed for deletion reads as its image. **Breaking** for a
+    hand-built `UnitCtx`: `isRemoved` is a required member.
+  - An image unit's rich hash covers its `image`, so an edited image is seen as
+    changed. Other units' hashes are unchanged.
+  - Core names the image values: `ImageWrap`, `ImageAlign`, `IMAGE_WRAPS`,
+    `IMAGE_ALIGNS` and `IMAGE_NODE_ATTRS`, with `SemanticImage`;
+    `SemanticImageAttrsSchema` in `@scrivr/ai` is built from them.
+
+  **Markdown**
+
+  - `getMarkdown()` writes pending changes as CriticMarkup — `{++added++}`,
+    `{--removed--}` — instead of throwing.
+  - Pasting a markdown table, or loading markdown that holds one, makes a table,
+    with the header row as header cells.
+
+- 3d45744: A node declares that it breaks the page or the line. Page breaks and line
+  breaks work exactly as before, now from `PageBreak` and `HardBreak` instead of
+  by name in the engine. (Which blocks are bookmarked in a PDF is declared by
+  `outlineLevel` on the node spec; see the outline-level note.)
+
+  - **`NodeLayout` gains `{ kind: "break", breaks: "page" | "line" }`** (`BreakKind`).
+    A block that breaks the page starts the next block on a new page; an inline
+    node that breaks the line ends its line. A break its context cannot honour
+    lays out as a plain leaf; a node that holds content ignores it. A page
+    break's flow `blockType` is its node's name. `breakOf(type)` reads it, and
+    the semantic exporter, the agent's rich diff and the header/footer surfaces
+    honour declared breaks as they do the built-in ones.
+  - **Pasted markdown goes through the tokens extensions declare.**
+    `Strikethrough` declares `~~text~~`, so it pastes struck through. Markdown
+    holding a construct no extension declares (a pipe table without `Table`)
+    pastes as plain text, one paragraph per line. Inline code, links,
+    blockquotes and images that no extension declares paste as their markdown
+    text; inline code was dropped before.
+
+  **Breaking:**
+
+  - Removed the `addMarkdownRules()` extension hook, `MarkdownBlockRule`,
+    `ExtensionManager.buildMarkdownRules()` and `ResolvedExtension.markdownRules`.
+    Declare markdown tokens with `addMarkdownParserTokens()` instead.
+  - `PasteTransformer`'s constructor drops its `extraMarkdownRules` argument:
+    `new PasteTransformer(schema, markdownParserTokens, options)`.
+
+- 07b6e41: A block declares its outline level on its node spec (`outlineLevel`), read
+  by both the PDF bookmarks and the semantic outline, so a custom block heads a
+  section in both. `Heading` declares it; headings bookmark, nest and head
+  breadcrumbs as before.
+
+  - `outlineLevelOf(node)` reads the declaration.
+  - The semantic walker, its heading-led grouping and `toDocumentOutline` read
+    the declared level instead of the name `heading`.
+
+  **Breaking:**
+
+  - A node whose semantic handler returns `{ type: "heading" }` but whose spec
+    declares no `outlineLevel` no longer opens a section in `toDocumentOutline`
+    or heads breadcrumbs: declare `outlineLevel` on its spec.
+
+- f72a5b3: The PDF bookmarks and the semantic outline visit the same headings.
+
+  - A heading nested in a list, sourced block or table cell heads the semantic
+    breadcrumbs of what follows it and opens a section in `toDocumentOutline`,
+    as it is a PDF bookmark. A unit lists the headings it holds in the new
+    `SemanticUnit.headings` (`SemanticHeading`).
+  - A heading whose proposed text is empty (blank, or all proposed for deletion)
+    heads nothing in either outline; `headingLevel` is absent on such a unit.
+  - A section's title is its heading's text, without a grouped lede.
+  - `outlineTitleOf(node, isRemoved)` is the one title rule: the proposed text,
+    a line break as a space, trimmed. Bookmark and semantic titles now match.
+
+- ba07451: Lists lay out, print and export like Word's.
+
+  - **Nested lists and multi-block items are drawn.** Layout used to lay out
+    only each list item's first paragraph, so an item nested with Tab, a second
+    paragraph in an item (which Backspace at the start of an item makes), and any
+    text in them vanished from the canvas and the PDF while staying in the
+    document. Every block of an item is now laid out, with the number on its
+    first block — as in Word, even when that paragraph holds only a floating
+    image, which then keeps one line for its number. A heading or code block in
+    an item keeps its own style and painter; a table in an item is indented with
+    it.
+  - **Word's geometry.** Each level's text sits half an inch further in than
+    the level above (the first level half an inch from the margin, where it was a
+    quarter inch), and the marker hangs a quarter inch before the text,
+    left-aligned. The text is never drawn over the number. Existing lists move a
+    quarter inch to the right.
+  - **Lists inside table cells are drawn.** A list in a cell (pasting one
+    there makes one) used to lay out as one empty line, its text never painted
+    on canvas or in PDF. A cell now lays out its blocks as the page body does:
+    numbered, nested, indented and spaced, the number and the first word kept
+    inside even a narrow cell, and a table nested in a cell shows its rows and
+    its bottom border.
+    A block that holds other blocks but is not a list or a table — a custom
+    container, say — lays out the blocks it holds instead of one empty line
+    (and still takes a line when it holds none), unless its node spec declares
+    `layout: { kind: "block" }`, which keeps its own box and the painter it
+    registered.
+  - **No block is indented past an inch from the right margin.** Any block's
+    indent — a deeply nested list, or a paragraph's own `indent` — leaves at
+    least an inch of the line for its text.
+  - **Markers by depth.** Bullets cycle •, ◦, ▪; ordered levels number
+    1. / a. / i., each nested list counting from its own start. Lists nested
+       past nine levels stay at the ninth. A list's start is kept within
+       0–32767 on the page, in copied HTML and in markdown.
+  - **Numbers stay right while editing.** A renumbered item is laid out
+    afresh, so Tab, Shift-Tab and joining items never leave an old number on
+    screen.
+  - **Bullets are drawn as shapes**, on the canvas and in the PDF alike, so a
+    second- or third-level bullet no longer prints as `?` with a standard PDF
+    font. Numbers are drawn in the face and size of the item's first text, past
+    any image that opens the line, on the canvas and in the PDF. Lists in
+    headers and footers draw their numbers again. In the PDF a block's number
+    is drawn once, after its handler, so a custom PDF handler that never calls
+    `draw.lines` keeps it.
+  - **DOCX levels match the screen.** Numbering has nine levels with the same
+    formats, glyphs and indents the editor draws; an item's further blocks
+    export as Word's unnumbered continuation paragraphs, a table in an item with
+    `w:tblInd` and a width that fits the rest of the column, and a sourced block
+    indented with them; list properties are written in schema order.
+
+  **API changes**
+
+  - `@scrivr/core` exports `isListType`, moved here from track changes and
+    now what the list extension, Clear formatting, the semantic exporter and
+    track changes ask.
+  - `ListItemStrategy` is removed, and blocks are no longer relabelled
+    `blockType: "list_item"`. Core draws a block's list marker itself, over
+    whatever painter draws the block, through the new `paintBlock` export —
+    use it in any loop that paints laid-out blocks. **Migration:** a painter
+    registered under `list_item` is never called now; register it under the
+    node type (`paragraph`, …) instead.
+  - `isListType` holds only for a node whose content allows list items and
+    nothing else.
+  - `nodeLayout` now defaults an undeclared node whose content is blocks to
+    `{ kind: "transparent" }`: its blocks lay out in its place.
+    `DEFAULT_NODE_LAYOUT` (`{ kind: "block" }`) is the default for undeclared
+    nodes that hold inline content or nothing. **Migration:** a container node
+    that holds blocks must declare `layout: { kind: "block" }` to keep its
+    registered painter; left undeclared, its painter is never called.
+  - `AvailableSegment.indentFrom` (new) records where a first line started
+    before its indent moved it.
+  - `LineBreaker.breakIntoLines` takes `firstLineMayStayEmpty` (new: a first
+    word that fits only the next line leaves the first line empty, as a list
+    number's push does) and `firstLineIndent` (new: how far the provider's first
+    line is indented, for a line a float starts some way in, so a float's
+    narrowing is told apart from the indent's).
+  - Up and Down step over a line that holds no text: a number left alone on
+    its line, and the gap a full-width image leaves in any paragraph, on the
+    same page or across one.
+  - `DocxContext.textWidthTwips` (new, required): the width of the exported
+    section's text column. Code that builds a `DocxContext` by hand must now
+    set it; contexts from `@scrivr/docx` have it.
+  - `DocxNumberingLevel.format` accepts `"lowerLetter"` and `"lowerRoman"`, and
+    takes optional `left` / `hanging` indents in twips.
+
+- Updated dependencies [31a013e]
+- Updated dependencies [4657757]
+- Updated dependencies [288119e]
+- Updated dependencies [e40e3d9]
+- Updated dependencies [a9e05e0]
+- Updated dependencies [5603fff]
+- Updated dependencies [aec0e05]
+- Updated dependencies [189b6fa]
+- Updated dependencies [6330e0a]
+- Updated dependencies [f72a5b3]
+- Updated dependencies [5287a8d]
+- Updated dependencies [544d74e]
+- Updated dependencies [fb180bb]
+- Updated dependencies [3d45744]
+- Updated dependencies [07b6e41]
+- Updated dependencies [f72a5b3]
+- Updated dependencies [01cc927]
+- Updated dependencies [31a013e]
+- Updated dependencies [7aca935]
+- Updated dependencies [a395c98]
+- Updated dependencies [ba07451]
+- Updated dependencies [22fb8f1]
+  - @scrivr/core@1.0.23
+
 ## 1.0.22
 
 ### Patch Changes
