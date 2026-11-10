@@ -61,13 +61,16 @@ import {
  *   - `tableIntegrityPlugin()` — document-validity normalization on every
  *     doc-changing transaction (grid/gridSpan/vMerge repair, row padding).
  *   - `tableEditingGuards()` — editing-UX layer: Tab/Shift-Tab cell navigation
- *     (Tab past the last cell appends a row), Backspace/Delete cell-boundary
- *     guards, and paste distribution into a multi-cell selection.
+ *     (Tab past the last cell appends a row) and Backspace/Delete cell-boundary
+ *     guards. A cell selection deletes itself (`CellSelection.replace`):
+ *     cut, Delete and typing empty its cells and keep the grid.
  *   - HTML clipboard round trip: spans, column widths, alignment, and fill
  *     survive a copy in either direction, including to and from Word.
  *
  * What is intentionally deferred:
  *   - Cell merge/split commands — Phase 6.
+ *   - Pasting cells across a multi-cell selection; today the paste goes into
+ *     its top-left cell — Phase 7.
  *   - Markdown export — Phase 8.
  */
 

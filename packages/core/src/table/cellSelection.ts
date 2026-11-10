@@ -1,5 +1,5 @@
 import { Selection, SelectionRange, TextSelection } from "prosemirror-state";
-import type { EditorState } from "prosemirror-state";
+import type { EditorState, Transaction } from "prosemirror-state";
 import { Fragment, Slice } from "prosemirror-model";
 import type { DOMSerializer, Node, ResolvedPos } from "prosemirror-model";
 import type { Mappable } from "prosemirror-transform";
@@ -304,6 +304,19 @@ export class CellSelection extends Selection {
     return new Slice(Fragment.from(sub), 0, 0);
   }
 
+  /**
+   * Deleting or typing over the cells: each is emptied to a paragraph and the
+   * grid stays, as Word clears a cell selection; what was typed goes into the
+   * top-left cell. Cut, Delete and `deleteSelection` all come here.
+   */
+  override replace(tr: Transaction, content: Slice = Slice.empty): void {
+    clearCells(tr, this.ranges.map((range) => range.$from.pos - 1), content);
+  }
+
+  override replaceWith(tr: Transaction, node: Node): void {
+    this.replace(tr, new Slice(Fragment.from(node), 0, 0));
+  }
+
   override eq(other: Selection): boolean {
     return (
       other instanceof CellSelection &&
@@ -434,4 +447,36 @@ export function enclosingCell(state: EditorState): EnclosingCell | null {
     }
   }
   return { tablePos: info.tablePos, cellPos: info.cellPos, cellDepth };
+}
+
+/**
+ * Empty each cell at `cellPositions` (in `tr.doc`) to the one block its
+ * content starts with by default (a paragraph), keeping the grid, then write
+ * `content` into the top-left cell and leave the caret there. A cell already
+ * that one empty block is left alone; when nothing was left to clear or
+ * write, neither the document nor the selection changes. Cells are cleared
+ * from the highest position down, so each edit leaves the lower positions
+ * valid.
+ */
+function clearCells(tr: Transaction, cellPositions: readonly number[], content: Slice): void {
+  const steps = tr.steps.length;
+  for (const cellPos of [...cellPositions].sort((a, b) => b - a)) {
+    const cell = tr.doc.nodeAt(cellPos);
+    const block = cell?.type.contentMatch.defaultType?.createAndFill();
+    if (!cell || !block || isOnly(cell, block)) continue;
+    tr.replaceWith(cellPos + 1, cellPos + cell.nodeSize - 1, block);
+  }
+  // The top-left cell has the smallest position and nothing before it was
+  // edited, so the start of its now-single block is stable.
+  const start = Math.min(...cellPositions) + 2;
+  const written = tr.steps.length;
+  if (content.size > 0) tr.replaceRange(start, start, content);
+  if (tr.steps.length === steps) return;
+  const end = tr.mapping.slice(written).map(start, 1);
+  tr.setSelection(Selection.near(tr.doc.resolve(Math.min(end, tr.doc.content.size)), -1));
+}
+
+/** Whether `cell` holds exactly `block`, as an empty cell holds its one empty paragraph. */
+function isOnly(cell: Node, block: Node): boolean {
+  return cell.childCount === 1 && cell.firstChild?.eq(block) === true;
 }

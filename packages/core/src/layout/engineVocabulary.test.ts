@@ -54,6 +54,10 @@ describe("the engine's vocabulary", () => {
     expect(linesMatching(dir, TABLE_WORDS)).toEqual([]);
   });
 
+  it("input reaches a table only through the selection and extension seams", () => {
+    expect(linesMatching("input", /from ["'`]\.\.\/table\//)).toEqual([]);
+  });
+
   it("the copy serializer runs what extensions declare, not a node's own rewrite", () => {
     const serializer = readFileSync(join(__dirname, "..", "input", "ClipboardSerializer.ts"), "utf8");
     expect(serializer.split("\n").filter((line) => /from ["'`]\.\.\/table\//.test(line))).toEqual([]);
