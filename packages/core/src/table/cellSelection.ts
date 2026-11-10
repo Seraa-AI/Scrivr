@@ -1,7 +1,8 @@
 import { Selection, SelectionRange, TextSelection } from "prosemirror-state";
 import type { EditorState } from "prosemirror-state";
 import { Fragment, Slice } from "prosemirror-model";
-import type { Node, ResolvedPos } from "prosemirror-model";
+import type { DOMSerializer, Node, ResolvedPos } from "prosemirror-model";
+import { collapseRowSpans } from "./clipboardHtml";
 import type { Mappable } from "prosemirror-transform";
 import { getTableMap, type Rect, type TableMap } from "./TableMap";
 import { cellGridSpan } from "./attrs";
@@ -47,7 +48,7 @@ interface CellInfo {
   tableStart: number;
 }
 
-function isCellType(name: string): boolean {
+export function isCellType(name: string): boolean {
   return name === "tableCell" || name === "tableHeader";
 }
 
@@ -192,6 +193,33 @@ export class CellSelection extends Selection {
   readonly $headCell: ResolvedPos;
   /** Normalized grid rect covering every cell in the selection. */
   readonly rect: Rect;
+
+  /**
+   * This selection as clipboard HTML: a standalone table of its cells. The
+   * cells carry their merge role as an attr, which `collapseRowSpans` turns
+   * into the `rowspan` other editors read.
+   */
+  clipboardHtml(serializer: DOMSerializer): string {
+    const tableNode = this.content().content.firstChild;
+    if (!tableNode) return "";
+    const container = document.createElement("div");
+    container.appendChild(serializer.serializeNode(tableNode));
+    collapseRowSpans(container);
+    return container.innerHTML;
+  }
+
+  /** This selection as plain text: tab-separated columns, newline-separated rows (the spreadsheet convention). */
+  clipboardText(): string {
+    const table = this.content().content.firstChild;
+    if (!table) return "";
+    const rows: string[] = [];
+    table.forEach((row) => {
+      const cells: string[] = [];
+      row.forEach((cell) => cells.push(cell.textContent));
+      rows.push(cells.join("\t"));
+    });
+    return rows.join("\n");
+  }
 
   constructor($anchorCell: ResolvedPos, $headCell: ResolvedPos = $anchorCell) {
     if (

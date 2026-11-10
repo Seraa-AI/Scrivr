@@ -66,10 +66,10 @@ export function advanceFlowGlobalY(
   const pageStart = (p: number): number => geometry.startOf(p);
   const pageBottom = (p: number): number => geometry.bottomOf(p);
 
-  // Atomic blocks (image / hr / tableRow) never split: if the block overflows
+  // Atomic blocks (image / hr / a composite unit) never split: if the block overflows
   // its page and fits on a fresh one, it moves whole (the gap). `paginateFlow`
   // keeps a too-tall block or a first-on-page block where it is.
-  const isAtomic = flow.kind === "leaf" || flow.kind === "tableRow";
+  const isAtomic = flow.kind === "leaf" || flow.kind === "composite";
   if (isAtomic || flow.lines.length === 0) {
     let start = naturalStart;
     const page = pageOf(start);

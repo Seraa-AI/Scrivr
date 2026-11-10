@@ -4,7 +4,11 @@ import { ServerEditor } from "../ServerEditor";
 import { StarterKit } from "../extensions/StarterKit";
 import { SourcedBlockExtension } from "../extensions/built-in/SourcedBlock";
 import { createMeasurer } from "../test-utils";
-import { layoutTableRowCells, CELL_PADDING_H, CELL_PADDING_V } from "./TableLayoutEngine";
+import { layoutRegions } from "./compositeLayout";
+import { CELL_INSET, tableLayout } from "../table/layout";
+
+const CELL_PADDING_H = CELL_INSET.left;
+const CELL_PADDING_V = CELL_INSET.top;
 
 interface CellSpec {
   text?: string;
@@ -71,10 +75,16 @@ const baseCtx = (grid: number[], rowNodePos: number, x = 50, availableWidth?: nu
   measurer: createMeasurer(),
 });
 
-describe("TableLayoutEngine — geometry", () => {
+/** A table row laid out as the engine lays a composite unit: its cells where the table places them. */
+function layoutTableRowCells(row: Node, ctx: ReturnType<typeof baseCtx>) {
+  const placements = tableLayout.regions({ node: row, pos: ctx.rowNodePos, data: { columns: ctx.columns } }, ctx.availableWidth);
+  return layoutRegions(placements, { x: ctx.x, page: ctx.page, measurer: ctx.measurer });
+}
+
+describe("composite layout of a table row — geometry", () => {
   it("places cells at cumulative column x offsets with grid-derived widths", () => {
     const { row, rowNodePos, grid } = rowFixture([120, 80], [{ text: "A" }, { text: "B" }]);
-    const { cells } = layoutTableRowCells(row, baseCtx(grid, rowNodePos, 50));
+    const { regions: cells } = layoutTableRowCells(row, baseCtx(grid, rowNodePos, 50));
 
     expect(cells).toHaveLength(2);
     expect(cells[0]!.x).toBe(50); // ctx.x + columnX[0]
@@ -87,19 +97,19 @@ describe("TableLayoutEngine — geometry", () => {
     const { row, rowNodePos, grid } = rowFixture([100, 100, 100], [{ text: "A" }, { text: "B" }, { text: "C" }]);
 
     // Wide grid (300) shrunk into 150 → each column 50, no overflow past x+150.
-    const shrunk = layoutTableRowCells(row, baseCtx(grid, rowNodePos, 0, 150)).cells;
+    const shrunk = layoutTableRowCells(row, baseCtx(grid, rowNodePos, 0, 150)).regions;
     expect(shrunk.map((c) => c.width)).toEqual([50, 50, 50]);
     const lastRight = shrunk[2]!.x + shrunk[2]!.width;
     expect(lastRight).toBeCloseTo(150, 5);
 
     // Narrow grid stretched to fill 600 → each column 200.
-    const stretched = layoutTableRowCells(row, baseCtx(grid, rowNodePos, 0, 600)).cells;
+    const stretched = layoutTableRowCells(row, baseCtx(grid, rowNodePos, 0, 600)).regions;
     expect(stretched.map((c) => c.width)).toEqual([200, 200, 200]);
   });
 
   it("a gridSpan>1 cell spans the summed column widths", () => {
     const { row, rowNodePos, grid } = rowFixture([100, 100, 100], [{ text: "AB", gridSpan: 2 }, { text: "C" }]);
-    const { cells } = layoutTableRowCells(row, baseCtx(grid, rowNodePos, 0));
+    const { regions: cells } = layoutTableRowCells(row, baseCtx(grid, rowNodePos, 0));
 
     expect(cells[0]!.width).toBe(200); // spans columns 0+1
     expect(cells[1]!.x).toBe(200); // third column starts after the span
@@ -108,21 +118,21 @@ describe("TableLayoutEngine — geometry", () => {
 
   it("cell x is absolute but cell y is relative to the row top (0)", () => {
     const { row, rowNodePos, grid } = rowFixture([100, 100], [{ text: "A" }, { text: "B" }]);
-    const { cells } = layoutTableRowCells(row, baseCtx(grid, rowNodePos, 200));
+    const { regions: cells } = layoutTableRowCells(row, baseCtx(grid, rowNodePos, 200));
     expect(cells[0]!.x).toBe(200);
     expect(cells.every((c) => c.y === 0)).toBe(true);
   });
 
-  it("cellPos matches each cell node's absolute document position", () => {
+  it("a cell's pos matches its node's absolute document position", () => {
     const { row, rowNodePos, grid } = rowFixture([100, 100], [{ text: "A" }, { text: "B" }]);
-    const { cells } = layoutTableRowCells(row, baseCtx(grid, rowNodePos, 0));
+    const { regions: cells } = layoutTableRowCells(row, baseCtx(grid, rowNodePos, 0));
     // first cell sits at rowNodePos + 1; second after the first cell's nodeSize.
-    expect(cells[0]!.cellPos).toBe(rowNodePos + 1);
-    expect(cells[1]!.cellPos).toBe(rowNodePos + 1 + row.child(0).nodeSize);
+    expect(cells[0]!.pos).toBe(rowNodePos + 1);
+    expect(cells[1]!.pos).toBe(rowNodePos + 1 + row.child(0).nodeSize);
   });
 });
 
-describe("TableLayoutEngine — height", () => {
+describe("composite layout of a table row — height", () => {
   it("row height is driven by content and exceeds padding for a single line", () => {
     const { row, rowNodePos, grid } = rowFixture([100, 100], [{ text: "A" }, { text: "B" }]);
     const { height } = layoutTableRowCells(row, baseCtx(grid, rowNodePos, 0));
@@ -142,7 +152,7 @@ describe("TableLayoutEngine — height", () => {
 
     expect(tallHeight).toBeGreaterThan(short);
     // every cell fills the row height
-    const { cells } = layoutTableRowCells(tall.row, baseCtx(tall.grid, tall.rowNodePos, 0));
+    const { regions: cells } = layoutTableRowCells(tall.row, baseCtx(tall.grid, tall.rowNodePos, 0));
     expect(cells.every((c) => c.height === tallHeight)).toBe(true);
   });
 
@@ -157,14 +167,14 @@ describe("TableLayoutEngine — height", () => {
 
   it("each cell's child blocks start below the top padding", () => {
     const { row, rowNodePos, grid } = rowFixture([100, 100], [{ text: "A" }, { text: "B" }]);
-    const { cells } = layoutTableRowCells(row, baseCtx(grid, rowNodePos, 30));
+    const { regions: cells } = layoutTableRowCells(row, baseCtx(grid, rowNodePos, 30));
     const firstBlock = cells[0]!.blocks[0]!;
     expect(firstBlock.y).toBe(CELL_PADDING_V); // relative to row top
     expect(firstBlock.x).toBe(30 + CELL_PADDING_H); // absolute content x
   });
 });
 
-describe("TableLayoutEngine — layout participation", () => {
+describe("composite layout of a table row — layout participation", () => {
   it("lays out a transparent node in a cell as its children, as the body flow does", () => {
     const paragraph = (text: string) => ({ type: "paragraph", content: [{ type: "text", text }] });
     const editor = new ServerEditor({
@@ -203,7 +213,7 @@ describe("TableLayoutEngine — layout participation", () => {
     });
 
     const rowNodePos = 1;
-    const { cells } = layoutTableRowCells(doc.child(0).child(0), baseCtx([200], rowNodePos));
+    const { regions: cells } = layoutTableRowCells(doc.child(0).child(0), baseCtx([200], rowNodePos));
 
     expect(cells[0]!.blocks.map((block) => block.nodePos)).toEqual(paragraphPositions);
     expect(cells[0]!.blocks.map((block) => block.node.type.name)).toEqual(["paragraph", "paragraph"]);

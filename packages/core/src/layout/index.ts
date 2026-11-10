@@ -16,7 +16,7 @@ export { LineBreaker } from "./LineBreaker";
 export type { InputSpan, LayoutSpan, LayoutLine, LineSpaceProvider } from "./LineBreaker";
 export { layoutBlock, resolveLeafBlockDimensions, computeAlignmentOffset, computeJustifySpaceBonus, countSpaces } from "./BlockLayout";
 export { chromeBlocks } from "./chromeBlocks";
-export type { LayoutBlock, BlockLayoutOptions, MarkerLine } from "./BlockLayout";
+export type { LayoutBlock, LayoutBlockKind, BlockLayoutOptions, MarkerLine, LaidRegion, RegionFloat } from "./BlockLayout";
 export { runPipeline, buildFragments, defaultPageConfig, defaultPagelessConfig, collapseMargins } from "./PageLayout";
 export type { PageConfig, LayoutPage, DocumentLayout, PageLayoutOptions, LayoutFragment } from "./PageLayout";
 export type {
@@ -63,13 +63,18 @@ export { runMiniPipeline } from "./runMiniPipeline";
 export type { MiniPipelineOptions } from "./runMiniPipeline";
 export { resolveFont } from "./StyleResolver";
 export { BlockRegistry, InlineRegistry, breakOf, nodeLayout, DEFAULT_NODE_LAYOUT } from "./BlockRegistry";
+export { regionAtCoords } from "./regionHitTest";
 export { LayoutCoordinator } from "./LayoutCoordinator";
 export type { LayoutCoordinatorOptions } from "./LayoutCoordinator";
 export type {
   BlockStrategy,
   BlockRenderContext,
   BreakKind,
+  CompositeLayout,
+  CompositeUnit,
   InlineStrategy,
+  RegionInset,
+  RegionPlacement,
   NodeLayout,
   WrapperLayout,
   WrapPlacement,

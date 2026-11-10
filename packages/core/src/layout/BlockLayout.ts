@@ -4,7 +4,7 @@ import { parseFontSizePx } from "../fonts/activeFontSize";
 import type { FontResolutionId, LayoutFontResolver } from "../fonts/layoutResolver";
 import type { FontModifier } from "../extensions/types";
 import type { TextMeasurerLike } from "./TextMeasurer";
-import { breakOf, type InlineRegistry } from "./BlockRegistry";
+import { breakOf, type CompositeLayout, type CompositeUnit, type InlineRegistry, type RegionInset } from "./BlockRegistry";
 import { anchoredOf, type WrapMode } from "./AnchoredObjects";
 import { LineBreaker, LayoutLine, InputSpan, indentFirstSegment, spanEndDocPos, computeObjectRenderY, type InlineObjectVerticalAlign, type LineSpaceProvider } from "./LineBreaker";
 import { CharacterMap } from "./CharacterMap";
@@ -17,7 +17,7 @@ import {
   BlockStyle,
 } from "./FontConfig";
 import { resolveFont, parseFont } from "./StyleResolver";
-import { layoutTableRowCells } from "./TableLayoutEngine";
+import { layoutRegions } from "./compositeLayout";
 
 /**
  * Resolves the rendered height and block spacing for a leaf block node.
@@ -72,50 +72,42 @@ export function resolveLeafBlockDimensions(
  *   - `"leaf"`     — block has no inline content and contributes no lines
  *                    (image, horizontal rule, page break, and inline-atom
  *                    sub-blocks dispatched by the PDF exporter). `lines` is `[]`.
- *   - `"tableRow"` — produced by the Table extension; carries per-cell
- *                    sub-blocks (`cells`) instead of `lines`. `lines` is `[]`.
- *                    In Phase 1 the row is a fixed-height placeholder with
- *                    `cells: []`; Phase 4 fills `cells` with sandboxed cell
- *                    layouts.
+ *   - `"composite"` — one unit of a composite node (a table's row): carries
+ *                    its laid-out `regions` instead of `lines`. `lines` is `[]`.
  *
  * Consumers branch on `kind` instead of probing `lines.length === 0`, so the
  * shape of the discriminator is the single source of truth for renderer,
  * pagination, hit-testing, and export dispatch.
  */
-export type LayoutBlockKind = "text" | "leaf" | "tableRow";
+export type LayoutBlockKind = "text" | "leaf" | "composite";
 
 /**
- * One cell laid out inside a `kind: "tableRow"` LayoutBlock. Phase 1 always
- * carries an empty `cells` array; Phase 4 populates this with cell bounds and
- * the cell's child block layouts.
+ * One region of a composite unit, laid out: where it sits, and the blocks and
+ * images it holds. `x` is absolute; `y`, its blocks' `y` and its images' `y`
+ * are relative to the unit's top, so a cached unit lands on any page.
  */
-export interface CellSubBlock {
-  /** ProseMirror position of the tableCell or tableHeader node. */
-  cellPos: number;
-  /** Absolute x position of the cell in CSS pixels. */
+export interface LaidRegion {
+  /** Document position of the region's node (a cell). */
+  pos: number;
   x: number;
-  /** Y position RELATIVE to the row block's top (add `rowBlock.y` for absolute). */
   y: number;
-  /** Cell width including padding. */
+  /** The region's width and height, inset included. */
   width: number;
-  /** Cell height including padding. */
   height: number;
-  /** Vertical-merge state from the cell node — drives render border ownership. */
-  vMerge: "none" | "restart" | "continue";
-  /** Cell background color, or null. */
-  background: string | null;
-  /** Layout for the cell's child blocks. Empty array in Phase 1. */
+  inset: RegionInset;
   blocks: LayoutBlock[];
-  /** Images anchored in the cell's blocks, laid out inside the cell. Absent when there are none. */
-  floats?: CellFloat[];
+  /** Images anchored in the region's blocks, laid out inside it. Absent when there are none. */
+  floats?: RegionFloat[];
+  /** The extension's own (`RegionPlacement.data`). */
+  data?: unknown;
 }
 
 /**
- * An image laid out inside its table cell. `x` is absolute; `y` and
- * `anchorY` (its paragraph's top) are relative to the row's top, like the
- * cell's blocks, so a cached row carries its images to any page.
+ * An image laid out inside its region. `x` is absolute; `y` and `anchorY`
+ * (its paragraph's top) are relative to the unit's top, like the region's
+ * blocks, so a cached unit carries its images to any page.
  */
-export interface CellFloat {
+export interface RegionFloat {
   docPos: number;
   node: Node;
   x: number;
@@ -183,13 +175,12 @@ export interface LayoutBlock {
    * Same as nodePos for the first part; allows grouping all parts of a split back to their origin.
    */
   sourceNodePos?: number;
-  /**
-   * Sub-cell layouts for `kind: "tableRow"` blocks. Empty in Phase 1; Phase 4
-   * fills this with the cell rectangles and their child block layouts.
-   */
-  cells?: CellSubBlock[];
-  /** True for the last row of a table — only it paints the table's bottom border. */
-  isLastRow?: boolean;
+  /** A composite unit's regions, laid out. */
+  regions?: LaidRegion[];
+  /** A composite unit's own data (`CompositeUnit.data`). */
+  unitData?: unknown;
+  /** True for the last unit of its composite: a table's last row. */
+  lastUnit?: true;
 }
 
 /** The first-line indent a node asks for itself, through its `textIndent` attr. */
@@ -264,12 +255,8 @@ export interface BlockLayoutOptions {
   lineSpaceProvider?: LineSpaceProvider;
   /** Inline object registry — used to call measure() on tokens during layout. */
   inlineRegistry?: InlineRegistry | undefined;
-  /**
-   * Column widths (CSS px) for a `tableRow` node, from the parent table's
-   * `grid` attr. Only consulted when laying out a `tableRow`; ignored for
-   * every other block kind.
-   */
-  tableColumns?: number[];
+  /** The composite unit this block is, laid out as its regions. */
+  unit?: { composite: CompositeLayout; unit: CompositeUnit };
   /**
    * The first-line room a marker takes. A block with a marker keeps a line
    * for it even when it holds only floating images' anchors.
@@ -295,7 +282,6 @@ export interface MarkerLine {
 const IMAGE_DEFAULT_HEIGHT = 200;
 const IMAGE_SPACE = 8;
 /** Fallback column width when a table row is laid out without a `grid`. */
-const TABLE_DEFAULT_COLUMN_WIDTH = 100;
 
 
 /**
@@ -374,40 +360,20 @@ export function layoutLeafBlock(
 }
 
 
-/** Sum of `gridSpan` across a row's physical cells — the column count. */
-function rowColumnCount(rowNode: Node): number {
-  let n = 0;
-  rowNode.forEach((cell) => {
-    const v = cell.attrs["gridSpan"];
-    n += typeof v === "number" && Number.isInteger(v) && v >= 1 ? v : 1;
-  });
-  return n;
-}
-
 /**
- * Layout for a `tableRow` node: delegates to `TableLayoutEngine` to lay out
- * each cell's child blocks inside its column box and size the row to its
- * tallest cell. Column widths come from `options.tableColumns` (the parent
- * table's `grid`); when absent, a uniform default grid is derived from the
- * row's column count so a row is never zero-width.
+ * Layout for one unit of a composite node: its regions where its extension
+ * places them, each region's content laid out by the shared walk, the unit as
+ * tall as its tallest region.
  */
-export function layoutTableRow(
+function layoutCompositeUnit(
   node: Node,
+  unit: { composite: CompositeLayout; unit: CompositeUnit },
   options: BlockLayoutOptions,
 ): LayoutBlock {
-  const { nodePos, x, y, availableWidth, page, measurer, fontConfig, fontModifiers, inlineRegistry, fonts, tableColumns } = options;
-
-  const columns =
-    tableColumns && tableColumns.length > 0
-      ? tableColumns
-      : Array.from({ length: Math.max(rowColumnCount(node), 1) }, () => TABLE_DEFAULT_COLUMN_WIDTH);
-
-  const { cells, height } = layoutTableRowCells(node, {
+  const { nodePos, x, y, availableWidth, page, measurer, fontConfig, fontModifiers, inlineRegistry, fonts } = options;
+  const { regions, height } = layoutRegions(unit.composite.regions(unit.unit, availableWidth), {
     x,
-    columns,
-    availableWidth,
     page,
-    rowNodePos: nodePos,
     measurer,
     ...(fontConfig ? { fontConfig } : {}),
     ...(fontModifiers ? { fontModifiers } : {}),
@@ -416,7 +382,7 @@ export function layoutTableRow(
   });
 
   return {
-    kind: "tableRow",
+    kind: "composite",
     node,
     nodePos,
     x,
@@ -424,10 +390,11 @@ export function layoutTableRow(
     width: availableWidth,
     height,
     lines: [],
-    cells,
+    regions,
+    unitData: unit.unit.data,
     spaceBefore: 0,
     spaceAfter: 0,
-    blockType: "tableRow",
+    blockType: node.type.name,
     align: "left",
     availableWidth,
   };
@@ -453,8 +420,8 @@ export function layoutBlock(
   node: Node,
   options: BlockLayoutOptions,
 ): LayoutBlock {
-  // Table rows are atomic units in v1: dispatch to the stub row engine.
-  if (node.type.name === "tableRow") return layoutTableRow(node, options);
+  // A composite unit (a table's row) is laid out as its regions.
+  if (options.unit) return layoutCompositeUnit(node, options.unit, options);
   // Leaf block nodes (no inline content): use fixed-height path.
   // TODO: Add isInline to extensions and use it here instead of isTextblock
   if (!node.childCount && !node.isTextblock)
@@ -975,15 +942,15 @@ export function computeJustifySpaceBonus(
 /**
  * Number of CharacterMap line indices a block occupies — the amount the caller
  * advances the page-global line offset after registering this block. Text
- * blocks contribute one per line; leaf blocks one; table rows the sum across
- * every cell's child blocks.
+ * blocks contribute one per line; leaf blocks one; a composite unit the sum
+ * across every region's child blocks.
  */
 export function registeredLineCount(block: LayoutBlock): number {
   if (block.kind === "leaf") return 1;
-  if (block.kind === "tableRow") {
+  if (block.kind === "composite") {
     let n = 0;
-    for (const cell of block.cells ?? []) {
-      for (const child of cell.blocks) {
+    for (const region of block.regions ?? []) {
+      for (const child of region.blocks) {
         n += child.kind === "leaf" ? 1 : child.lines.length;
       }
     }
@@ -1027,13 +994,13 @@ export function populateCharMap(
     return;
   }
 
-  // Table row: register each cell's child blocks at their absolute y (the row
-  // block's final y plus the child's row-relative offset). Recursion reuses the
-  // text/leaf branches above for the actual cell content.
-  if (block.kind === "tableRow") {
+  // A composite unit: register each region's child blocks at their absolute y
+  // (the unit's final y plus the child's unit-relative offset). Recursion
+  // reuses the text/leaf branches above for the content.
+  if (block.kind === "composite") {
     let offset = lineIndexOffset;
-    for (const cell of block.cells ?? []) {
-      for (const child of cell.blocks) {
+    for (const region of block.regions ?? []) {
+      for (const child of region.blocks) {
         const absolute: LayoutBlock = { ...child, y: block.y + child.y };
         populateCharMap(absolute, map, page, offset, measurer);
         offset += child.kind === "leaf" ? 1 : child.lines.length;

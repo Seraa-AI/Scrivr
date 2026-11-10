@@ -123,7 +123,7 @@ describe("a laid-out document's font record", () => {
 
     const spans = layoutOf(doc)
       .pages.flatMap((page) => page.blocks)
-      .flatMap((row) => row.cells ?? [])
+      .flatMap((row) => row.regions ?? [])
       .flatMap((c) => c.blocks ?? [])
       .flatMap((b) => b.lines ?? [])
       .flatMap((l) => l.spans)

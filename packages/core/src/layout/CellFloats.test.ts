@@ -6,7 +6,7 @@ import { createMeasurer } from "../test-utils";
 import { runPipeline, defaultPageConfig } from "./PageLayout";
 import type { DocumentLayout } from "./PageLayout";
 import type { AnchoredObjectPlacement } from "./AnchoredObjects";
-import type { CellSubBlock, LayoutBlock } from "./BlockLayout";
+import type { LaidRegion, LayoutBlock } from "./BlockLayout";
 import { markerAnchorOf } from "./markers";
 import { ANCHORED_OBJECT_MARGIN } from "./AnchoredObjects";
 
@@ -48,14 +48,14 @@ function layout(...blocks: Node[]): DocumentLayout {
 
 function rowBlock(l: DocumentLayout, label: string): { block: LayoutBlock; page: number } {
   for (const page of l.pages) {
-    const block = page.blocks.find((b) => b.kind === "tableRow" && b.node.textContent.endsWith(`${label} other`));
+    const block = page.blocks.find((b) => b.kind === "composite" && b.node.textContent.endsWith(`${label} other`));
     if (block) return { block, page: page.pageNumber };
   }
   throw new Error(`missing row ${label}`);
 }
 
-function cellOf(block: LayoutBlock, index: number): CellSubBlock {
-  return must(block.cells?.[index], `cell ${index}`);
+function cellOf(block: LayoutBlock, index: number): LaidRegion {
+  return must(block.regions?.[index], `cell ${index}`);
 }
 
 function floatIn(l: DocumentLayout): AnchoredObjectPlacement {
@@ -63,7 +63,7 @@ function floatIn(l: DocumentLayout): AnchoredObjectPlacement {
 }
 
 /** The cell's lines in page-local y, with their x extent. */
-function cellLines(block: LayoutBlock, cell: CellSubBlock) {
+function cellLines(block: LayoutBlock, cell: LaidRegion) {
   return cell.blocks.flatMap((b) =>
     b.lines.map((line, i) => {
       const top = block.y + cell.y + b.y + b.lines.slice(0, i).reduce((sum, l) => sum + l.lineHeight, 0);
@@ -220,7 +220,7 @@ describe("an image anchored in a table cell", () => {
   it("marks the placement with the cell that holds it", () => {
     const l = layout(tableOf(row("R", [para("Short", image({}))])));
     const { block } = rowBlock(l, "R");
-    expect(floatIn(l).cellPos).toBe(cellOf(block, 0).cellPos);
+    expect(floatIn(l).regionPos).toBe(cellOf(block, 0).pos);
   });
 
   it("a list item in a cell with an image wraps in its own indented box, never past the cell", () => {

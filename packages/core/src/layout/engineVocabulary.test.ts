@@ -15,6 +15,9 @@ const LIST_WORDS = /bullet|numbered|\blists\b|\b(a|the|nested|ordered) list\b|li
  */
 const FONT_MARKS = /(name ?[!=]==? ?|case |includes\(|marks\[)["'`](bold|italic|fontSize|fontFamily)["'`]/;
 
+/** A table's node names, or the table-shaped layout vocabulary composites replaced. */
+const TABLE_WORDS = /["'`](table|tableRow|tableCell|tableHeader)["'`]|\b(TableRow\w*|tableColumns|isLastRow|CellSubBlock|CellFloat|cellPos|CELL_PADDING\w*)\b/;
+
 /** A node read by name as an image: compared, or looked up in the schema. */
 const IMAGE_NODE = /name ?[!=]==? ?["'`]image["'`]|nodes\[["'`]image["'`]\]/;
 
@@ -45,6 +48,10 @@ describe("the engine's vocabulary", () => {
 
   it.each(Object.entries(NODE_NAMES))("no source file under %s/ names a node or mark that declares itself", (dir, words) => {
     expect(linesMatching(dir, words)).toEqual([]);
+  });
+
+  it.each(["layout", "renderer", "input"])("no source file under %s/ lays out or paints a table as a table", (dir) => {
+    expect(linesMatching(dir, TABLE_WORDS)).toEqual([]);
   });
 
   it("the sections model finds a section boundary by its declaration, not its name", () => {

@@ -144,4 +144,34 @@ guards keep `table`, `tableRow`, `tableCell` and `tableHeader` out of
 
 ## What shipped
 
-Nothing yet.
+All of it, in one PR on `feat/composite-layout`, as designed, with these
+details:
+
+- **Types**: `CompositeLayout` (`units`, `regions`), `CompositeUnit`,
+  `RegionPlacement`, `RegionInset` on `NodeLayout`; `LaidRegion` and
+  `RegionFloat` (today's cell types, renamed: a region's `pos`, its `inset`,
+  its extension's `data`). `NodeLayout` is validated through a typed lookup
+  table, one check per kind (user, 2026-11-10).
+- **`lastUnit`** marks a composite's last unit on items, flows and blocks. The
+  solver uses it to keep a composite's units on a page together around a float
+  (what it did for a table's rows), and the Table painter for the bottom edge.
+- **Region layout** is `layout/compositeLayout.ts` (`layoutRegions`): the
+  shared walk inside each region's inset box, floats placed and wrapped in it,
+  the unit as tall as its tallest region. The table's grid, spans, padding
+  (`CELL_INSET`), merges and backgrounds are `table/layout.ts`; the row
+  painter is `table/rowPainter.ts`.
+- **Painting**: a composite unit's strategy draws only its decoration, and
+  `paintBlock` paints what its regions hold; the PDF exporter does the same,
+  so a composite with no handler still prints its content. The table's PDF
+  op log now draws the whole grid before the cells' text, as the canvas
+  always did (same ops, reordered).
+- **Hit-testing**: `regionAtCoords`; the Table's cell selection keeps a hit
+  only when the region is a cell. Drops into a region use its inset.
+- **Clipboard**: a selection that writes its own clipboard forms is asked for
+  them (`CellSelection.clipboardHtml` / `clipboardText`); the serializer no
+  longer imports the cell selection or names a table.
+- **Still table-aware in `input/`**: the copy path runs the Table's
+  `collapseRowSpans` on every copied slice; a copy-transform hook, beside the
+  paste transforms, is where it moves.
+- The vocabulary guard keeps table names and the old row vocabulary out of
+  `layout/`, `renderer/` and `input/`.

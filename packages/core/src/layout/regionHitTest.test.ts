@@ -5,7 +5,7 @@ import { StarterKit } from "../extensions/StarterKit";
 import { DefaultContent } from "../extensions/built-in/DefaultContent";
 import type { Editor } from "../Editor";
 import type { LayoutBlock } from "./BlockLayout";
-import { cellAtCoords } from "./cellHitTest";
+import { regionAtCoords } from "./regionHitTest";
 
 /**
  * Regression: clicking a cell must land the caret inside THAT cell.
@@ -42,7 +42,7 @@ function tableDoc(cells: ReturnType<typeof cell>[]) {
 
 function rowBlock(editor: Editor): LayoutBlock {
   for (const page of editor.layout.pages) {
-    for (const b of page.blocks) if (b.kind === "tableRow") return b;
+    for (const b of page.blocks) if (b.kind === "composite") return b;
   }
   throw new Error("no row block");
 }
@@ -75,7 +75,7 @@ function mount(doc: Record<string, unknown>): { editor: Editor; cleanup: () => v
 
 function assertClicksLandInOwnCell(editor: Editor) {
   const row = rowBlock(editor);
-  const cells = row.cells ?? [];
+  const cells = row.regions ?? [];
   expect(cells.length).toBeGreaterThan(1);
 
   const doc = editor.getState().doc;
@@ -87,7 +87,7 @@ function assertClicksLandInOwnCell(editor: Editor) {
       // empty-cell end would snap the selection into the next cell)...
       expect(doc.resolve(pos).parent.isTextblock, `click x=${cx} → pos ${pos} is not a caret position`).toBe(true);
       // ...and it must resolve inside the cell that was clicked.
-      expect(enclosingCellPos(editor, pos), `click x=${cx} → pos ${pos} landed in the wrong cell`).toBe(c.cellPos);
+      expect(enclosingCellPos(editor, pos), `click x=${cx} → pos ${pos} landed in the wrong cell`).toBe(c.pos);
     }
   }
 }
@@ -106,14 +106,14 @@ describe("table cell hit-testing — click lands in the clicked cell", () => {
   });
 });
 
-describe("cellAtCoords — point → cell doc position", () => {
+describe("regionAtCoords — point → cell doc position", () => {
   it("returns the cellPos of the cell whose rect contains the point", () => {
     const { editor, cleanup } = mount(tableDoc([cell("A"), cell("B"), cell("C")]));
     const row = rowBlock(editor);
-    for (const c of row.cells ?? []) {
+    for (const c of row.regions ?? []) {
       const cy = row.y + c.y + c.height / 2;
       for (const cx of [c.x + 4, c.x + c.width / 2, c.x + c.width - 4]) {
-        expect(cellAtCoords(editor.layout.pages, cx, cy, 1)).toBe(c.cellPos);
+        expect(regionAtCoords(editor.layout.pages, cx, cy, 1)).toBe(c.pos);
       }
     }
     cleanup();
@@ -122,20 +122,20 @@ describe("cellAtCoords — point → cell doc position", () => {
   it("a shared vertical border resolves to exactly one cell (half-open)", () => {
     const { editor, cleanup } = mount(tableDoc([cell("A"), cell("B")]));
     const row = rowBlock(editor);
-    const [a, b] = row.cells!;
+    const [a, b] = row.regions!;
     const y = row.y + a!.y + a!.height / 2;
     // The border x = a.x + a.width = b.x belongs to b (left edge inclusive).
-    expect(cellAtCoords(editor.layout.pages, b!.x, y, 1)).toBe(b!.cellPos);
+    expect(regionAtCoords(editor.layout.pages, b!.x, y, 1)).toBe(b!.pos);
     cleanup();
   });
 
   it("returns null outside any cell and for a page with no table", () => {
     const { editor, cleanup } = mount(tableDoc([cell("A"), cell("B")]));
     const row = rowBlock(editor);
-    const midY = row.y + row.cells![0]!.y + row.cells![0]!.height / 2;
-    expect(cellAtCoords(editor.layout.pages, -50, midY, 1)).toBeNull();
-    expect(cellAtCoords(editor.layout.pages, 5, row.y + 100000, 1)).toBeNull();
-    expect(cellAtCoords(editor.layout.pages, 5, midY, 99)).toBeNull();
+    const midY = row.y + row.regions![0]!.y + row.regions![0]!.height / 2;
+    expect(regionAtCoords(editor.layout.pages, -50, midY, 1)).toBeNull();
+    expect(regionAtCoords(editor.layout.pages, 5, row.y + 100000, 1)).toBeNull();
+    expect(regionAtCoords(editor.layout.pages, 5, midY, 99)).toBeNull();
     cleanup();
   });
 });
@@ -151,7 +151,7 @@ describe("table rows stack flush — one contiguous grid, not stacked boxes", ()
 
     const rows: LayoutBlock[] = [];
     for (const page of editor.layout.pages) {
-      for (const b of page.blocks) if (b.kind === "tableRow") rows.push(b);
+      for (const b of page.blocks) if (b.kind === "composite") rows.push(b);
     }
     expect(rows).toHaveLength(3);
     for (let i = 1; i < rows.length; i++) {

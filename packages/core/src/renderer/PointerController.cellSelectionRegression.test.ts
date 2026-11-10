@@ -71,7 +71,7 @@ function setup() {
 
   const blocks = (): LayoutBlock[] => editor.layout.pages.flatMap((p) => p.blocks);
   const rowBlock = (): LayoutBlock => {
-    for (const b of blocks()) if (b.kind === "tableRow") return b;
+    for (const b of blocks()) if (b.kind === "composite") return b;
     throw new Error("no row block");
   };
   return {
@@ -84,7 +84,7 @@ function setup() {
 }
 
 function cellCenter(row: LayoutBlock, i: number): { x: number; y: number } {
-  const c = row.cells![i]!;
+  const c = row.regions![i]!;
   return { x: c.x + c.width / 2, y: row.y + c.y + c.height / 2 };
 }
 
@@ -119,7 +119,7 @@ describe("cell-selection regressions", () => {
     document.dispatchEvent(pointerEvent("pointerup", b.x, b.y));
     expect(s.editor.getState().selection).toBeInstanceOf(CellSelection);
 
-    const after = s.blocks().find((bl) => bl.kind !== "tableRow" && bl.y > row.y)!;
+    const after = s.blocks().find((bl) => bl.kind !== "composite" && bl.y > row.y)!;
     const y = after.y + after.height / 2;
     s.container.dispatchEvent(pointerEvent("pointerdown", 60, y));
     document.dispatchEvent(pointerEvent("pointerup", 60, y));
@@ -132,8 +132,8 @@ describe("cell-selection regressions", () => {
     const s = setup();
     clean = s.cleanup;
     const row = s.rowBlock();
-    const before = s.blocks().find((bl) => bl.kind !== "tableRow" && bl.y < row.y)!;
-    const after = s.blocks().find((bl) => bl.kind !== "tableRow" && bl.y > row.y)!;
+    const before = s.blocks().find((bl) => bl.kind !== "composite" && bl.y < row.y)!;
+    const after = s.blocks().find((bl) => bl.kind !== "composite" && bl.y > row.y)!;
 
     const startY = before.y + before.height / 2;
     const endY = after.y + after.height / 2;
@@ -151,7 +151,7 @@ describe("cell-selection regressions", () => {
     clean = s.cleanup;
     const row = s.rowBlock();
     const a = cellCenter(row, 0);
-    const after = s.blocks().find((bl) => bl.kind !== "tableRow" && bl.y > row.y)!;
+    const after = s.blocks().find((bl) => bl.kind !== "composite" && bl.y > row.y)!;
     const endY = after.y + after.height / 2;
 
     s.container.dispatchEvent(pointerEvent("pointerdown", a.x, a.y));
@@ -337,7 +337,7 @@ describe("cell-selection regressions", () => {
     const s = setup();
     clean = s.cleanup;
     const row = s.rowBlock();
-    const before = s.blocks().find((bl) => bl.kind !== "tableRow" && bl.y < row.y)!;
+    const before = s.blocks().find((bl) => bl.kind !== "composite" && bl.y < row.y)!;
     const startY = before.y + before.height / 2;
     const cell = cellCenter(row, 1);
 

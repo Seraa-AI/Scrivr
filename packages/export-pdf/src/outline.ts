@@ -137,10 +137,9 @@ function collectEntries(layout: DocumentLayout, isRemoved: (node: Node) => boole
       if (entry) {
         entries.push({ ...entry, pageIndex, topPt: pageHeightPt - pageY * PT_PER_PX });
       }
-      // Cell blocks store y relative to their row, including cell padding,
-      // exactly as the table PDF renderer consumes them. Keep document order
-      // through cells and carry the row origin into each nested traversal.
-      for (const cell of block.cells ?? []) visit(cell.blocks, pageIndex, pageY);
+      // A region's blocks store y relative to their unit's top. Keep document
+      // order through regions and carry the unit's origin into each one.
+      for (const region of block.regions ?? []) visit(region.blocks, pageIndex, pageY);
     }
   };
   layout.pages.forEach((page, pageIndex) => visit(page.blocks, pageIndex, 0));

@@ -1,13 +1,13 @@
 /**
  * Layout items: the blocks a flow lays out, one after another, with the
  * indent, style and marker the wrappers around each give it. The page body and
- * every table cell collect their blocks here and measure them through
+ * every region of a composite collect their blocks here and measure them through
  * `layoutBlockWithMarker`, so a wrapped block draws the same wherever it sits.
  */
 import type { Node } from "prosemirror-model";
 import { coerceSectionSettings, isSectionBreak, type SectionBreakType } from "../model/sections";
 import { layoutBlock, ownFirstLineIndent, type BlockLayoutOptions, type LayoutBlock, type MarkerLine } from "./BlockLayout";
-import { breakOf, nodeLayout, type WrapperLayout, type WrapScope } from "./BlockRegistry";
+import { breakOf, nodeLayout, type CompositeLayout, type CompositeUnit, type WrapperLayout, type WrapScope } from "./BlockRegistry";
 import { getBlockStyle, type BlockStyle, type FontConfig } from "./FontConfig";
 import type { LayoutLine, LineSpaceProvider } from "./LineBreaker";
 import type { TextMeasurerLike } from "./TextMeasurer";
@@ -41,10 +41,10 @@ export interface LayoutItem {
   marker?: BlockMarker;
   /** Overrides the FontConfig key the block's style is looked up by: a wrapper's restyle. */
   styleKey?: string;
-  /** Column widths (from the parent table's `grid`) — set on table row items. */
-  tableColumns?: number[];
-  /** True for a table's last row — drives table bottom-border ownership. */
-  isLastRow?: boolean;
+  /** The composite unit this item is, laid out as its regions. */
+  unit?: { composite: CompositeLayout; unit: CompositeUnit };
+  /** True for the last unit of its composite. */
+  lastUnit?: true;
 }
 
 /** Width of one step of a block's own `indent` attr. */
@@ -74,7 +74,7 @@ interface WrapFrame {
  * shapes every block collected inside it: their indents add up, and the
  * innermost wrapper's marker and style win.
  *
- * A table is expanded into its rows, the unit pagination places.
+ * A composite node is expanded into its units, what pagination places.
  */
 export function collectChildItems(parent: Node, base: number): LayoutItem[] {
   const items: LayoutItem[] = [];
@@ -115,22 +115,20 @@ export function collectChildItems(parent: Node, base: number): LayoutItem[] {
       return;
     }
 
-    if (node.type.name === "table") {
-      // One item per row: a row moves to the next page whole, so it is the
-      // unit pagination places. A row takes its wrappers' indent only: it has
-      // no first line to hang a marker on, and its cells style their own text.
-      const gridAttr = node.attrs["grid"];
-      const tableColumns = Array.isArray(gridAttr)
-        ? gridAttr.filter((w): w is number => typeof w === "number" && Number.isFinite(w))
-        : [];
-      const lastRowIndex = node.childCount - 1;
-      node.forEach((rowNode, rowOffset, rowIndex) => {
+    // A composite node gives one item per unit: a unit moves to the next page
+    // whole, so it is what pagination places. A unit takes its wrappers'
+    // indent only: it has no first line to hang a marker on, and its regions
+    // style their own text.
+    const layout = nodeLayout(node.type);
+    if (layout.kind === "composite") {
+      const units = layout.composite.units(node, offset);
+      units.forEach((unit, index) => {
         items.push({
-          node: rowNode,
-          nodePos: offset + 1 + rowOffset,
-          indentLeft: placeInWrappers(rowNode).indentLeft,
-          tableColumns,
-          isLastRow: rowIndex === lastRowIndex,
+          node: unit.node,
+          nodePos: unit.pos,
+          indentLeft: placeInWrappers(unit.node).indentLeft,
+          unit: { composite: layout.composite, unit },
+          ...(index === units.length - 1 ? { lastUnit: true } : {}),
         });
       });
       return;
@@ -138,7 +136,6 @@ export function collectChildItems(parent: Node, base: number): LayoutItem[] {
 
     // A node laid out in place that holds nothing still takes its line, so an
     // empty container does not vanish from the page.
-    const layout = nodeLayout(node.type);
     if (layout.kind === "transparent" && node.childCount > 0) {
       if (!layout.wrap) {
         walk(node, offset + 1, scope);
@@ -210,7 +207,7 @@ export interface ResolvedItem {
 
 /**
  * Resolves an item against the content box it is laid out in — the page body
- * or a table cell — so both lay a wrapped block out by the same rules: the
+ * or a composite's region — so both lay a wrapped block out by the same rules: the
  * indent fits the box, the marker stays inside it, and the block takes the
  * style its wrapper names (`styleKey`) rather than its own.
  */
@@ -307,8 +304,8 @@ export function layoutBlockWithMarker(
 
 /**
  * Lays an item out in a content box that has no pagination of its own — a
- * table cell — fully resolved: indent, marker, the item's spacing, and a
- * table row's columns and last-row edge, as the page body resolves them.
+ * composite's region — fully resolved: indent, marker, the item's spacing, and
+ * a unit's regions and last-unit edge, as the page body resolves them.
  */
 export function layoutItem(
   item: LayoutItem,
@@ -324,11 +321,11 @@ export function layoutItem(
     x: resolved.x,
     availableWidth: resolved.width,
     ...(lineSpaceIn ? { lineSpaceProvider: lineSpaceIn(resolved.x, resolved.width) } : {}),
-    ...(item.tableColumns ? { tableColumns: item.tableColumns } : {}),
+    ...(item.unit ? { unit: item.unit } : {}),
   }, resolved.marker);
   return {
     ...block,
     ...itemSpacing(resolved, block),
-    ...(item.isLastRow ? { isLastRow: true } : {}),
+    ...(item.lastUnit ? { lastUnit: true } : {}),
   };
 }

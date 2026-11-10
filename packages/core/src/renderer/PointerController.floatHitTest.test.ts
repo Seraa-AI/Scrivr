@@ -350,7 +350,7 @@ describe("clicking an anchored image painted over a table", () => {
       const y = float.y + float.height / 2;
       // The premise: the image is painted over a table row.
       const row = h.editor.layout.pages[0]?.blocks.find(
-        (b) => b.kind === "tableRow" && b.y <= y && y < b.y + b.height,
+        (b) => b.kind === "composite" && b.y <= y && y < b.y + b.height,
       );
       expect(row).toBeDefined();
 

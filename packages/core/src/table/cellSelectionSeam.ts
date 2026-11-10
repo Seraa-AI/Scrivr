@@ -10,8 +10,8 @@ import type {
   SelectionGesture,
   SelectionGestureProvider,
 } from "../selection/types";
-import { cellAtCoords } from "../layout/cellHitTest";
-import { CellSelection, enclosingCellPos, resolveCellRange, selectedCells } from "./cellSelection";
+import { regionAtCoords } from "../layout/regionHitTest";
+import { CellSelection, enclosingCellPos, isCellType, resolveCellRange, selectedCells } from "./cellSelection";
 import { getTableMap } from "./TableMap";
 
 /**
@@ -134,8 +134,11 @@ export const cellHitTester: HitTester = {
   // the registry) — a point inside a cell is a cell hit first.
   priority: 10,
   hitTest: (docX, docY, page, ctx) => {
-    const cellPos = cellAtCoords(ctx.editor.layout.pages, docX, docY, page);
-    if (cellPos == null) return null;
+    // A cell is a region of the table composite; a region of any other
+    // composite is not a cell.
+    const cellPos = regionAtCoords(ctx.editor.layout.pages, docX, docY, page);
+    const cell = cellPos == null ? null : ctx.state.doc.nodeAt(cellPos);
+    if (cellPos == null || !cell || !isCellType(cell.type.name)) return null;
     // Region-first: the cell rect is authoritative for *which* cell; the caret
     // is then resolved constrained to that cell so the two never disagree.
     const rawPos = ctx.posAtCoords(docX, docY, page);
@@ -333,9 +336,8 @@ export function tableCellWashHandler(editor: IEditor): OverlayRenderHandler {
     ctx.save();
     ctx.fillStyle = theme.selectionFill;
     for (const block of page.blocks) {
-      if (block.kind !== "tableRow" || !block.cells) continue;
-      for (const c of block.cells) {
-        if (covered.has(c.cellPos)) ctx.fillRect(c.x, block.y + c.y, c.width, c.height);
+      for (const region of block.regions ?? []) {
+        if (covered.has(region.pos)) ctx.fillRect(region.x, block.y + region.y, region.width, region.height);
       }
     }
     ctx.restore();

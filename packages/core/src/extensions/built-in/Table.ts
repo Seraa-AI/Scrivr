@@ -4,7 +4,8 @@ import type { Command } from "prosemirror-state";
 import type { Node, NodeSpec, Schema } from "prosemirror-model";
 import type { IEditor } from "../types";
 import { KeymapPriority } from "../types";
-import { TableRowStrategy } from "../../renderer/TableRowStrategy";
+import { tableRowPainter } from "../../table/rowPainter";
+import { tableLayout } from "../../table/layout";
 import { tableIntegrityPlugin } from "../../table/normalize";
 import {
   tabToNextCell,
@@ -52,7 +53,8 @@ import {
  *   - Word-shaped schema for `table` / `tableRow` / `tableCell` / `tableHeader`.
  *   - `insertTable({ rows, cols })` / `deleteTable()` + row/column structural
  *     commands and cell navigation.
- *   - Real canvas cell layout + rendering (TableRowStrategy) and PDF/DOCX parity.
+ *   - Real canvas cell layout (a composite: rows are units, cells regions),
+ *     row painting (tableRowPainter) and PDF/DOCX parity.
  *   - PageLayout dispatches each row as an atomic block (whole-row pagination).
  *   - `tableIntegrityPlugin()` — document-validity normalization on every
  *     doc-changing transaction (grid/gridSpan/vMerge repair, row padding).
@@ -128,6 +130,8 @@ function tableSpec(): NodeSpec {
     group: "block",
     content: "tableRow+",
     isolating: true,
+    // Laid out as a composite: each row a unit, each cell a region.
+    layout: { kind: "composite", composite: tableLayout },
     // A selection that spans the table washes its cells (tableCellWashHandler),
     // so the text behavior defers the table's interior instead of banding it.
     selectionWash: true,
@@ -386,7 +390,7 @@ export const Table = Extension.create({
   },
 
   addLayoutHandlers() {
-    return { tableRow: TableRowStrategy };
+    return { tableRow: tableRowPainter };
   },
 
   addToolbarItems() {
