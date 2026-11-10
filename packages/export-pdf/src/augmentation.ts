@@ -6,6 +6,7 @@
 import type {
   LayoutPage,
   PdfMarkHandler,
+  PdfEmbedSource,
   PdfNodeHandler,
 } from "@scrivr/core";
 import type { PdfContext } from "./context";
@@ -30,6 +31,8 @@ export type PdfChromeHandler<P = unknown> = (
 export interface PdfHandlers {
   /** Per-block drawing + inline atom dispatch table, keyed by node.type.name. */
   nodes?: Record<string, PdfNodeHandler>;
+  /** Where each node's embedded file lives, keyed by node.type.name: its bytes are fetched once. */
+  embeds?: Record<string, PdfEmbedSource>;
   /** Per-mark inline styling, keyed by mark.type.name. */
   marks?: Record<string, PdfMarkHandler>;
   /** Per-page chrome, keyed by chrome contributor name. */

@@ -336,7 +336,7 @@ describe("clipboard serialization of a CellSelection", () => {
     editor.applyTransaction(s0.tr.setSelection(sel));
     const state = editor.getState();
     expect(serializeSelectionToText(state)).toBe("A\tB\nC\tD");
-    const html = serializeSelectionToHtml(state, state.schema);
+    const html = serializeSelectionToHtml(state, state.schema, editor.getCopyHtmlTransforms());
     expect(html).toContain("<table");
     expect(html).toContain("<td");
     expect(html).toContain("A");
@@ -362,7 +362,7 @@ describe("clipboard serialization of a CellSelection", () => {
     )!;
     editor.applyTransaction(state.tr.setSelection(sel));
 
-    const html = serializeSelectionToHtml(editor.getState(), editor.getState().schema);
+    const html = serializeSelectionToHtml(editor.getState(), editor.getState().schema, editor.getCopyHtmlTransforms());
     expect(html).toContain('colspan="2"');
     expect(html).toContain('rowspan="2"');
   });

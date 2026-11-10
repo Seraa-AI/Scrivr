@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { AiTestEditor, doc, p } from "./helpers";
+import { AiTestEditor, doc, moveFirstBlockToEnd, p } from "./helpers";
 import type { AiSuggestion } from "../types";
 import { AI_SUGGESTION_SET_STALE } from "../AiSuggestionPlugin";
 
@@ -230,5 +230,17 @@ describe("showHideApply — state consistency", () => {
     // Setting a new suggestion should clear stale
     editor.showSuggestion({ blocks: [{ ...s.blocks[0]!, nodeId: "n1" }] });
     expect(editor.suggestionState!.staleBlockIds.size).toBe(0);
+  });
+});
+
+describe("applyAiSuggestion — a block with a pending move", () => {
+  it("applies the suggestion to the moved block, not the copy it left behind", () => {
+    const editor = new AiTestEditor(doc(p("The quick fox", "b1"), p("tail", "b2")));
+    editor.showSuggestion(rewriteSuggestion("b1"));
+    moveFirstBlockToEnd(editor);
+
+    expect(editor.apply({ mode: "direct" })).toBe(true);
+    const { doc: after } = editor.getState();
+    expect(after.child(after.childCount - 1).textContent).toBe("The slow fox");
   });
 });

@@ -13,9 +13,11 @@ import type {
   ToolbarItemSpec,
   SlashCommandContribution,
   InputHandler,
-  MarkdownBlockRule,
   PasteTransform,
   PasteHtmlTransform,
+  CopyHtmlTransform,
+  PasteFileHandler,
+  PasteFileSpec,
   MarkdownParserTokenSpec,
   MarkdownSerializerRules,
   MarkdownNodeSerializer,
@@ -25,12 +27,14 @@ import type {
 import type { IBaseEditor, IEditor } from "./types";
 import type { SelectionBehavior, HitTester, SelectionGestureProvider, NodeActionContribution } from "../selection/types";
 import { BlockRegistry, InlineRegistry } from "../layout/BlockRegistry";
+import type { MarkerPainter } from "../layout/markers";
 import type { FontConfig } from "../layout/FontConfig";
 import type { PageConfig } from "../layout/PageLayout";
 import type { PageChromeContribution } from "../layout/PageMetrics";
 import type { SurfaceOwnerRegistration } from "../surfaces/types";
 import type { ExportContributionMap, FormatContribution, ImportContributionMap } from "./export";
 import { parseMarkdownToDoc } from "../model/parseMarkdown";
+import { isTrackedMark } from "../model/spansToFragment";
 
 interface Phase1SchemaContributions {
   nodes: Record<string, NodeSpec>;
@@ -212,6 +216,17 @@ function buildSchemaFromPhase1(contribs: Phase1SchemaContributions): Schema {
       ...baseDoc,
       attrs: { ...(baseDoc.attrs ?? {}), ...contribs.docAttrs },
     };
+  }
+
+  // A node's `marks` restricts formatting. Review marks record who changed the
+  // text rather than how it looks, so an edit inside a node that forbids
+  // formatting — a code block — can still be recorded.
+  const reviewMarks = Object.keys(marks).filter(isTrackedMark);
+  if (reviewMarks.length) {
+    for (const [name, spec] of Object.entries(nodes)) {
+      if (typeof spec.marks !== "string" || spec.marks === "_") continue;
+      nodes[name] = { ...spec, marks: [spec.marks, ...reviewMarks].join(" ").trim() };
+    }
   }
 
   return new Schema({ nodes, marks });
@@ -527,6 +542,11 @@ export class ExtensionManager {
     return this.resolved.map((ext) => ext.exports);
   }
 
+  /** Marker painters from all extensions, by key; a later extension's replaces an earlier one's. */
+  getMarkerPainters(): ReadonlyMap<string, MarkerPainter> {
+    return new Map(this.resolved.flatMap((ext) => Object.entries(ext.markerPainters)));
+  }
+
   /**
    * Import contributions from all extensions, in registration order.
    * Format packages call this at import time to collect parse handlers.
@@ -559,8 +579,8 @@ export class ExtensionManager {
   }
 
   /**
-   * Builds a BlockRegistry from all extensions that implement addLayoutHandlers().
-   * PageRenderer uses this to dispatch rendering to the correct strategy per block type.
+   * Builds a BlockRegistry from all extensions' addLayoutHandlers() and
+   * addMarkerPainters(). `paintBlock` dispatches each block and its marker through it.
    */
   buildBlockRegistry(): BlockRegistry {
     const registry = new BlockRegistry();
@@ -570,6 +590,9 @@ export class ExtensionManager {
       )) {
         registry.register(nodeTypeName, strategy);
       }
+    }
+    for (const [key, painter] of this.getMarkerPainters()) {
+      registry.registerMarkerPainter(key, painter);
     }
     return registry;
   }
@@ -685,14 +708,6 @@ export class ExtensionManager {
   }
 
   /**
-   * All markdown block rules from all extensions, in registration order.
-   * Passed to PasteTransformer so custom nodes are recognised on paste.
-   */
-  buildMarkdownRules(): MarkdownBlockRule[] {
-    return this.resolved.flatMap((ext) => ext.markdownRules);
-  }
-
-  /**
    * All paste transforms from all extensions, in registration order.
    * Passed to PasteTransformer, which applies them to every parsed slice.
    */
@@ -707,6 +722,31 @@ export class ExtensionManager {
    */
   buildPasteHtmlTransforms(): PasteHtmlTransform[] {
     return this.resolved.flatMap((ext) => ext.pasteHtmlTransforms);
+  }
+
+  /**
+   * All copy HTML transforms from all extensions, in registration order.
+   * Run by the clipboard serializer on copied markup.
+   */
+  buildCopyHtmlTransforms(): CopyHtmlTransform[] {
+    return this.resolved.flatMap((ext) => ext.copyHtmlTransforms);
+  }
+
+  /**
+   * The pasted files each node type takes, most recently registered first: a
+   * file goes to the first that accepts it, so a later extension takes a file
+   * an earlier one would, and its declaration for a node replaces an earlier
+   * one's.
+   */
+  buildPasteFiles(): PasteFileHandler[] {
+    const byNode = new Map<string, PasteFileSpec>();
+    for (const ext of this.resolved) {
+      for (const [node, spec] of Object.entries(ext.pasteFiles)) {
+        byNode.delete(node);
+        byNode.set(node, spec);
+      }
+    }
+    return [...byNode].reverse().map(([node, spec]) => ({ node, spec }));
   }
 
   /**

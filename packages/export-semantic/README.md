@@ -32,7 +32,7 @@ interface SemanticUnit {
   spans?: InlineSpan[];    // inline formatting runs — bold/italic/color/highlight/link, with attrs
   markdown?: string;       // convenience projection only; omitted when changes are present
   cells?: TableCells;      // structured rows/cells with gridSpan/vMerge (spanned tables)
-  changes?: SemanticChange[]; // review metadata (e.g. suggested deletions), excluded from text
+  changes?: SemanticChange[]; // pending review changes, each placed in text by `at`/`length`
 }
 ```
 
@@ -164,13 +164,39 @@ addExports() {
 
 Formatting marks (bold, italic, …) need no handler — plain text is unaffected by default.
 
+### Review records on a node (`nodeChanges`)
+
+A record written on a node's own attrs — a block inserted, a paragraph break
+deleted, a heading's level changed — or on a formatting mark of its text is
+invisible to mark handlers. Contribute `nodeChanges`, which returns
+`SemanticNodeChange[]` for every node, text included. The walker places each
+one: `covers` spans the node's text, `after` sits where it ends (as a paragraph
+break does). A deletion has `length: 0`; a covering insertion with no text of
+its own reads the text it covers. Changes sharing an `id` and `type` merge into
+one wherever they fall, their text keeping the break between blocks; a
+`suggestedAttrs` change merges only with touching runs that had the same
+`oldAttrs`. Contribute `isMarkRemoved` to leave a formatting mark proposed for
+removal off the spans.
+
+```ts
+const nodeChanges: SemanticHandlers['nodeChanges'] = (node) =>
+  node.attrs.flagged
+    ? [{ change: { type: 'suggestedAttrs', text: '', id: 'flag-1' }, place: 'covers' }]
+    : [];
+
+addExports() {
+  return { semantic: { nodeChanges } };
+}
+```
+
 ### The producer context (`UnitCtx`)
 
 Handlers receive a `ctx` with:
 
 - `toText(nodes)` — mark-aware plain text (folds mark handlers; excludes dropped runs).
 - `toMarkdown(nodes)` — structure-preserving markdown via the editor's serializer.
-- `toChanges(nodes)` — the review `changes` a mark handler emitted.
+- `toChanges(nodes)` — the review `changes` from mark handlers and `nodeChanges`, placed in `toText`'s text.
+- `doc` — the document being read, for a contributor whose records span nodes.
 - `physicalColumns(table)` — a table's physical column count (Σ gridSpan, the safe basis).
 
 ### Per-call overrides
@@ -211,7 +237,9 @@ Both are emitted only when there's something to report — a plain, default-styl
 
 ## Track changes
 
-If `@scrivr/plugins`' `TrackChanges` is loaded, suggested-**deletion** text is excluded from `text`, breadcrumbs, and table-cell text (never embedded), and preserved as `changes` on the unit (and cell) with author / status / id / timestamps. Units with review changes omit `markdown`; use `text`/`spans`/`cells`/`changes` as the canonical data. Suggested-**insertion** text is kept, since it is proposed content.
+If `@scrivr/plugins`' `TrackChanges` is loaded, suggested-**deletion** text (and a deleted line break) is excluded from `text`, breadcrumbs, and table-cell text (never embedded); suggested-**insertion** text is kept, since it is proposed content. Every pending act — insertion, deletion, paragraph join or split, heading, list or formatting change, row, move — is reported in `changes` on the unit, the part and the cell it falls in, placed by `at`/`length`, with author / status / timestamps and the act's `id` to pass to `reviewChanges`. Units with review changes omit `markdown`; use `text`/`spans`/`cells`/`changes` as the canonical data.
+
+A change's `text` is the act's own content, its pieces in separate blocks joined by `"\n"`. `at`/`length` give its extent in the owning text, from its first piece to its last: for an insertion with nothing else inside it, `text.slice(at, at + length) === change.text`; when another author's change or untouched text lies between its pieces, the slice holds that too and `change.text` does not. A deletion, and an inserted paragraph break (which sits between units), have `length: 0`.
 
 ## Determinism & stable ids
 

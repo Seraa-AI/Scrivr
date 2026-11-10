@@ -20,7 +20,7 @@ describe("theme — defaults", () => {
       "imagePlaceholderBg",
       "imagePlaceholderBorder",
       "imagePlaceholderText",
-      "listMarker",
+      "marker",
       "hrColor",
       "resizeHandle",
     ];

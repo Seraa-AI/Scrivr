@@ -452,7 +452,7 @@ describe("Table — browser Editor parses initial content with a table", () => {
 // DefaultContent extension, renders properly in the browser Editor:
 //   - the doc contains the parsed table structure,
 //   - mounting + layout doesn't crash on tableRow blocks,
-//   - the layout pipeline emits one `kind: "tableRow"` LayoutBlock per row.
+//   - the layout pipeline emits one `kind: "composite"` LayoutBlock per row.
 
 describe("Table — DefaultContent + browser Editor integration", () => {
   function tableJsonDoc(rows: number, cols: number): Record<string, unknown> {
@@ -480,7 +480,7 @@ describe("Table — DefaultContent + browser Editor integration", () => {
     const rows: LayoutBlock[] = [];
     for (const page of editor.layout.pages) {
       for (const block of page.blocks) {
-        if (block.kind === "tableRow") rows.push(block);
+        if (block.kind === "composite") rows.push(block);
       }
     }
     return rows;
@@ -526,12 +526,12 @@ describe("Table — DefaultContent + browser Editor integration", () => {
     const rowBlocks = findRowBlocks(editor);
     expect(rowBlocks.length).toBe(3);
     for (const block of rowBlocks) {
-      expect(block.kind).toBe("tableRow");
+      expect(block.kind).toBe("composite");
       expect(block.lines).toEqual([]);
       // Phase 4: each row carries one cell sub-block per column, each with its
       // laid-out child blocks.
-      expect(block.cells).toHaveLength(2);
-      expect(block.cells!.every((c) => c.blocks.length > 0)).toBe(true);
+      expect(block.regions).toHaveLength(2);
+      expect(block.regions!.every((c) => c.blocks.length > 0)).toBe(true);
       expect(block.height).toBeGreaterThan(0);
       expect(block.availableWidth).toBeGreaterThan(0);
     }

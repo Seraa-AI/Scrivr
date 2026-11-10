@@ -212,18 +212,6 @@ export const HorizontalRule = Extension.create({
     };
   },
 
-  addMarkdownRules() {
-    return [
-      {
-        // "---" (or more dashes) on its own line → horizontal rule (legacy paste fallback)
-        pattern: /^-{3,}$/,
-        createNode(_match, schema) {
-          return schema.nodes["horizontalRule"]?.create() ?? null;
-        },
-      },
-    ];
-  },
-
   addInputRules() {
     const hr = this.schema.nodes["horizontalRule"];
     const paragraph = this.schema.nodes["paragraph"];

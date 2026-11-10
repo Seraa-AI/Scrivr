@@ -1242,6 +1242,31 @@ describe("ExtensionManager", () => {
   });
 });
 
+describe("review marks are not formatting", () => {
+  // A review mark records who changed text, so a node that forbids formatting
+  // must still let an edit inside it be recorded.
+  const ReviewMarks = Extension.create({
+    name: "reviewMarks",
+    addMarks() {
+      return { trackedInsert: { attrs: { dataTracked: { default: null } } } };
+    },
+  });
+
+  it("admits review marks where a node forbids formatting", () => {
+    const schema = getSchema([StarterKit, ReviewMarks]);
+    const codeBlock = schema.nodes["codeBlock"]!;
+
+    expect(codeBlock.allowsMarkType(schema.marks["trackedInsert"]!)).toBe(true);
+    expect(codeBlock.allowsMarkType(schema.marks["bold"]!)).toBe(false);
+  });
+
+  it("builds the same restriction when no review marks are installed", () => {
+    const schema = getSchema([StarterKit]);
+
+    expect(schema.nodes["codeBlock"]!.allowsMarkType(schema.marks["bold"]!)).toBe(false);
+  });
+});
+
 describe("getFormatContributions", () => {
   it("names each extension's contributions, in the order the unnamed lists use", () => {
     const manager = new ExtensionManager([StarterKit]);

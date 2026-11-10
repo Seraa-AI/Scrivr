@@ -129,7 +129,7 @@ describe("bookmarks built from headings", () => {
     });
     const row = tableRowBlock();
     row.y = 180;
-    row.cells = row.cells!.map((cell, index) => ({
+    row.regions = row.regions!.map((cell, index) => ({
       ...cell,
       blocks: [heading(index === 0 ? "Left" : "Right", 2, index === 0 ? 12 : 24)],
     }));

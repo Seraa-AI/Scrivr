@@ -1,12 +1,12 @@
 import { describe, it, expect } from "vitest";
 import type { Node } from "prosemirror-model";
 import {
-  assignGlobalY,
   buildBlockFlow,
-  collectLayoutItems,
   defaultPageConfig,
   type MeasureCacheEntry,
 } from "./PageLayout";
+import { collectLayoutItems } from "./layoutItems";
+import { assignGlobalY } from "./FlowPlacement";
 import {
   createPageGeometry,
   EMPTY_RESOLVED_CHROME,
@@ -51,7 +51,7 @@ function buildDoc(blocks: number): Node {
 /** Number of page-metric lookups `assignGlobalY` performs for a document. */
 function metricLookups(blocks: number): { calls: number; perBlock: number } {
   const doc = buildDoc(blocks);
-  const items = collectLayoutItems(doc, fontConfig);
+  const items = collectLayoutItems(doc);
   const flowConfig = {
     margins: defaultPageConfig.margins,
     contentWidth:

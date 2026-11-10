@@ -495,16 +495,6 @@ exports[`baseline — node rendering > a table row, shaded and merged 1`] = `
     "thickness": 0.75,
   },
   {
-    "color": "rgb(0, 0, 0)",
-    "font": "font(Helvetica)",
-    "op": "text",
-    "page": 0,
-    "size": 12,
-    "value": "Cell",
-    "x": 54,
-    "y": 472.5,
-  },
-  {
     "color": "rgb(0.612, 0.639, 0.686)",
     "end": {
       "x": 234,
@@ -533,16 +523,6 @@ exports[`baseline — node rendering > a table row, shaded and merged 1`] = `
     "thickness": 0.75,
   },
   {
-    "color": "rgb(0, 0, 0)",
-    "font": "font(Helvetica)",
-    "op": "text",
-    "page": 0,
-    "size": 12,
-    "value": "Cell",
-    "x": 54,
-    "y": 472.5,
-  },
-  {
     "color": "rgb(0.612, 0.639, 0.686)",
     "end": {
       "x": 324,
@@ -555,6 +535,26 @@ exports[`baseline — node rendering > a table row, shaded and merged 1`] = `
       "y": 540,
     },
     "thickness": 0.75,
+  },
+  {
+    "color": "rgb(0, 0, 0)",
+    "font": "font(Helvetica)",
+    "op": "text",
+    "page": 0,
+    "size": 12,
+    "value": "Cell",
+    "x": 54,
+    "y": 472.5,
+  },
+  {
+    "color": "rgb(0, 0, 0)",
+    "font": "font(Helvetica)",
+    "op": "text",
+    "page": 0,
+    "size": 12,
+    "value": "Cell",
+    "x": 54,
+    "y": 472.5,
   },
 ]
 `;

@@ -9,6 +9,7 @@ import {
 } from "../layout/AnchoredObjects";
 import { LayoutBlock, computeAlignmentOffset, isHiddenAnchorLine } from "../layout/BlockLayout";
 import { CharacterMap } from "../layout/CharacterMap";
+import { paintBlock } from "./paintBlock";
 import { atomStyle, computeObjectRenderY, paintInSpanStyle } from "../layout/LineBreaker";
 import type { TextMeasurerLike } from "../layout/TextMeasurer";
 import { clearCanvas } from "./canvas";
@@ -148,38 +149,22 @@ export function renderPage(options: RenderPageOptions): boolean {
   // and posAtCoords can't distinguish lines in different paragraphs.
   let lineIndexOffset = 0;
   for (const block of page.blocks) {
-    const strategy = blockRegistry?.get(block.blockType);
-    if (strategy) {
-      lineIndexOffset = strategy.render(
-        block,
-        {
-          ctx,
-          pageNumber: page.pageNumber,
-          lineIndexOffset,
-          dpr,
-          measurer,
-          theme,
-          ...(blockRegistry ? { blockRegistry } : {}),
-          ...(markDecorators ? { markDecorators } : {}),
-          ...(inlineRegistry ? { inlineRegistry } : {}),
-          ...(fontResolutions ? { fontResolutions } : {}),
-        },
-        map,
-      );
-    } else {
-      lineIndexOffset = drawBlock(
+    lineIndexOffset = paintBlock(
+      block,
+      {
         ctx,
-        block,
-        measurer,
-        map,
-        page.pageNumber,
+        pageNumber: page.pageNumber,
         lineIndexOffset,
+        dpr,
+        measurer,
         theme,
-        markDecorators,
-        inlineRegistry,
-        fontResolutions,
-      );
-    }
+        ...(blockRegistry ? { blockRegistry } : {}),
+        ...(markDecorators ? { markDecorators } : {}),
+        ...(inlineRegistry ? { inlineRegistry } : {}),
+        ...(fontResolutions ? { fontResolutions } : {}),
+      },
+      map,
+    );
   }
 
   // ── Draw front/square floats AFTER blocks ─────────────────────────────────

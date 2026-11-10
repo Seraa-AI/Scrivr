@@ -1,20 +1,16 @@
 /**
- * Font config for chrome bands (headers/footers) — zero paragraph spacing.
- * Shared by resolveChrome (measure) and drawPageChrome (paint).
+ * Font config for chrome bands (headers/footers): the editor's block styles,
+ * with a paragraph's spacing dropped. Measured with in resolveChrome and
+ * carried on its payload, so a band re-laid out while it is edited is styled
+ * as it was measured.
  */
 
-import { defaultFontConfig, type FontConfig } from "@scrivr/core";
+import type { FontConfig } from "@scrivr/core";
 
-const baseParagraph = defaultFontConfig["paragraph"];
-
-export const chromeFontConfig: FontConfig = {
-  ...defaultFontConfig,
-  ...(baseParagraph ? {
-    paragraph: {
-      font: baseParagraph.font,
-      align: baseParagraph.align,
-      spaceBefore: 0,
-      spaceAfter: 0,
-    },
-  } : {}),
-};
+export function chromeFontConfigOf(config: FontConfig): FontConfig {
+  const paragraph = config["paragraph"];
+  return {
+    ...config,
+    ...(paragraph ? { paragraph: { ...paragraph, spaceBefore: 0, spaceAfter: 0 } } : {}),
+  };
+}

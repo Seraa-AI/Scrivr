@@ -8,7 +8,7 @@
  * and applying it anyway is the failure this exists to prevent.
  */
 import { describe, it, expect } from "vitest";
-import { AiTestEditor, doc, p, markedText } from "./helpers";
+import { AiTestEditor, doc, moveFirstBlockToEnd, p, markedText } from "./helpers";
 // Through the package barrel: a host annotates against these, so one dropped
 // from `index.ts` fails here rather than there.
 import type { AiSuggestionData as AiSuggestion, AcceptedSpan } from "../../index";
@@ -232,15 +232,16 @@ describe("a span measured against a stale snapshot", () => {
     const editor = threeEditor();
     editor.apply({ blockId: "b1", range: { from: 0, to: 10, acceptedText: THREE }, mode: "direct" });
 
+    // Re-read, the last two sentences' changes sit close enough to be one phrase.
     const live = editor.suggestionState!.suggestion!.blocks[0]!.acceptedText;
     const wrote = editor.apply({
       blockId: "b1",
-      range: { from: live.indexOf("Three"), to: live.length, acceptedText: live },
+      range: { from: live.indexOf("Two"), to: live.length, acceptedText: live },
       mode: "direct",
     });
 
     expect(wrote).toBe(true);
-    expect(editor.text).toBe("One held. Two changes. Three shifts.");
+    expect(editor.text).toBe("One held. Two moved. Three shifts.");
   });
 });
 
@@ -281,4 +282,16 @@ describe("a span whose bounds say nothing coherent", () => {
       expect(editor.text).toBe(THREE);
     });
   }
+});
+
+describe("a span in a block with a pending move", () => {
+  it("is applied to the moved block, not the copy it left behind", () => {
+    const editor = new AiTestEditor(doc(p(ACCEPTED, "b1"), p("tail", "b2")));
+    editor.showSuggestion(twoSentences("b1"));
+    moveFirstBlockToEnd(editor);
+
+    expect(editor.apply({ blockId: "b1", range: { from: 11, to: 24, acceptedText: ACCEPTED }, mode: "direct" })).toBe(true);
+    const { doc: after } = editor.getState();
+    expect(after.child(after.childCount - 1).textContent).toBe("One stays. Two moved. Three stays.");
+  });
 });

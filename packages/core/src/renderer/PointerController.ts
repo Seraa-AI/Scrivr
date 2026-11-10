@@ -6,7 +6,9 @@ import {
   hitHandle,
   computeNewSize,
 } from "./ResizeController";
-import { normalizeImageAttrs } from "../layout/AnchoredObjects";
+import type { Node as PmNode } from "prosemirror-model";
+import { anchoredOf, placementAttrs, type AnchoredObjectPlacement, type PlacementPatch } from "../layout/AnchoredObjects";
+import type { LaidRegion, LayoutBlock } from "../layout/BlockLayout";
 import { resolvePointOwner, type PointOwner } from "../layout/pointOwnership";
 import {
   type PageFlowMetrics,
@@ -24,6 +26,16 @@ const EDGE_BAND_PX = 12;
 const DRAG_THRESHOLD_PX = 3;
 const AXIS_STILL_THRESHOLD_PX = 3;
 const RE_ANCHOR_THRESHOLD_PX = 24;
+
+/**
+ * The image's painted offset from its anchor. That is the user's `yOffset`
+ * unless the solver moved the image — clamped onto the page or stacked below
+ * another float — in which case it is where the image actually is.
+ */
+function paintedYOffset(placement: AnchoredObjectPlacement): number {
+  const moved = placement.clamped === true || placement.stackOffset !== undefined;
+  return moved ? placement.globalY - placement.anchorGlobalY : (anchoredOf(placement.node)?.yOffset ?? 0);
+}
 
 /**
  * Minimal view of a tile entry — PointerController only needs access to
@@ -84,6 +96,8 @@ export class PointerController {
     startClientY: number;
     /** Image's painted X at drag start, in page-local coordinates. */
     startImageX: number;
+    /** The dragged node: its declaration writes the placement a drop commits. */
+    node: PmNode;
     /**
      * Anchor flow's globalY snapshot. Frozen at pointerdown — never recomputed
      * during the gesture. Phase 2 spec ("snapshot or die"): drag math reads
@@ -93,10 +107,16 @@ export class PointerController {
     anchorGlobalY: number;
     /** Image's painted globalY at gesture start. Used to derive yOffset on commit. */
     startImageGlobalY: number;
-    /** yOffset attr value at pointerdown (= startImageGlobalY - anchorGlobalY). */
+    /**
+     * Where the image paints relative to its anchor at pointerdown. A drop
+     * commits this plus the drag, so the image lands where it was dropped;
+     * stacking re-applies only if it still overlaps another float.
+     */
     startYOffset: number;
     /** wrapMode at pointerdown. */
     wrapMode: string;
+    /** The composite region (a table cell) the image is laid out in at pointerdown; absent in the body. */
+    regionPos?: number;
     /** Image's docPos rect at drag start (for posBelow / posAbove fallback). */
     rect: { x: number; y: number; width: number; height: number; page: number };
     /** Pointer position relative to the image's top-left at pointerdown. */
@@ -360,9 +380,12 @@ export class PointerController {
     const resizeHit = this.hitHandleAt(hit.docX, hit.docY, hit.page);
     if (resizeHit) return resizeHit.cursor;
 
-    return this.ownerAt(hit.docX, hit.docY, hit.page).kind === "text"
-      ? "text"
-      : "move";
+    const owner = this.ownerAt(hit.docX, hit.docY, hit.page);
+    if (owner.kind === "text") return "text";
+    // A behind image under a table leaves the point to the cell, as a press does.
+    const underTable = owner.kind === "anchored" && owner.object.wrapMode === "behind" &&
+      this.deps.editor.resolveHitTarget(hit.docX, hit.docY, hit.page) !== null;
+    return underTable ? "text" : "move";
   }
 
 
@@ -415,7 +438,14 @@ export class PointerController {
     // precedes body hit testing.
     if (!editor.readOnly && this.deps.onPageClick?.(page, docX, docY, this.clickCount)) return;
 
-    const semanticHit = editor.resolveHitTarget(docX, docY, page);
+    // An image painted over the point owns it, as the hover cursor promised;
+    // resize handles are chrome over the selected node. Either outranks the
+    // block underneath, a table cell included. A behind image paints under
+    // the table, so the cell keeps the click.
+    const owner = this.ownerAt(docX, docY, page);
+    const resizeHit = this.hitHandleAt(docX, docY, page);
+    const paintedOver = owner.kind === "anchored" && owner.object.wrapMode !== "behind";
+    const semanticHit = paintedOver || resizeHit ? null : editor.resolveHitTarget(docX, docY, page);
     if (semanticHit) {
       // Pass the authoritative click count — `event.detail` isn't reliable on
       // pointerdown, so a gesture that treats double/triple-click specially (a
@@ -429,7 +459,6 @@ export class PointerController {
     }
 
     // Resize handle — mutation, block in read-only
-    const resizeHit = this.hitHandleAt(docX, docY, page);
     if (resizeHit) {
       if (editor.readOnly) return;
       const sel = this.activeSelection();
@@ -456,9 +485,8 @@ export class PointerController {
     // horizontal movement updates `xAlign: "custom"` + `x`; vertical
     // movement updates the docPos. Diagonal drag commits both atomically
     // via Editor.moveAndUpdateNode.
-    // Resolved once for this pointerdown and reused below, so the anchored and
+    // `owner` is resolved once for this pointerdown, so the anchored and
     // inline branches cannot reach different conclusions about the same point.
-    const owner = this.ownerAt(docX, docY, page);
     const anchoredHit = owner.kind === "anchored" ? owner.object : null;
     if (anchoredHit) {
       if (editor.readOnly) return;
@@ -474,10 +502,12 @@ export class PointerController {
         startClientX: e.clientX,
         startClientY: e.clientY,
         startImageX: anchoredHit.x,
+        node: anchoredHit.node,
         anchorGlobalY: anchoredHit.anchorGlobalY,
         startImageGlobalY: anchoredHit.globalY,
-        startYOffset: anchoredHit.globalY - anchoredHit.anchorGlobalY,
+        startYOffset: paintedYOffset(anchoredHit),
         wrapMode: anchoredHit.wrapMode,
+        ...(anchoredHit.regionPos !== undefined ? { regionPos: anchoredHit.regionPos } : {}),
         rect: {
           x: anchoredHit.x,
           y: anchoredHit.y,
@@ -686,7 +716,11 @@ export class PointerController {
     }
     if (this.resizeDrag) {
       const { docPos, pendingWidth, pendingHeight } = this.resizeDrag;
-      editor.setNodeAttrs(docPos, { width: pendingWidth, height: pendingHeight });
+      // A node that declares its placement stores its size there; any other
+      // object is sized by its width and height attrs, as layout reads it.
+      const node = editor.getState().doc.nodeAt(docPos);
+      const size = { width: pendingWidth, height: pendingHeight };
+      editor.setNodeAttrs(docPos, (node && placementAttrs(node, size)) ?? size);
       this.resizeDrag = null;
       this.setCursorAll("text");
     }
@@ -825,6 +859,8 @@ export class PointerController {
       return;
     }
 
+    if (finalHit && this.commitContainerChange(finalHit)) return;
+
     const { docPos, startYOffset } = this.anchoredDrag;
     const sourcePage = this.anchoredDrag.rect.page;
     const samePage = !finalHit || finalHit.page === sourcePage;
@@ -857,30 +893,30 @@ export class PointerController {
         return;
       }
 
-      const attrs: Record<string, unknown> = {};
+      const patch: PlacementPatch = {};
       if (!horizontallyStill && newX !== null) {
-        attrs["xAlign"] = "custom";
-        attrs["x"] = newX;
+        patch.xAlign = "custom";
+        patch.x = this.contentRelativeX(newX);
       }
       if (!verticallyStill) {
-        attrs["yOffset"] = newYOffset;
+        patch.yOffset = newYOffset;
       }
       const reanchor = !verticallyStill
-        ? this.resolveSamePageReanchor(newYOffset, attrs)
+        ? this.resolveSamePageReanchor(newYOffset, patch)
         : null;
       if (reanchor) {
-        editor.moveAndUpdateNode(docPos, reanchor.docPos, reanchor.attrs);
+        this.movePlacement(docPos, reanchor.docPos, reanchor.patch);
         dragDebugLog(editor, "commit", {
           commitPath: "moveAndUpdateNode",
           docPos,
           newDocPos: reanchor.docPos,
           newX,
-          newYOffset: reanchor.attrs["yOffset"],
+          newYOffset: reanchor.patch.yOffset,
           reanchor: true,
         });
         return;
       }
-      editor.setNodeAttrs(docPos, attrs);
+      this.setPlacement(docPos, patch);
       dragDebugLog(editor, "commit", {
         commitPath: "setNodeAttrs",
         docPos,
@@ -908,22 +944,21 @@ export class PointerController {
     }
 
     let commitPath: "moveAndUpdateNode" | "moveNode" | "setNodeAttrs";
-    const crossPageYOffset = newDocPos !== null
-      ? this.resolveCrossPageDropYOffset(e, newDocPos)
-      : 0;
+    const drop = newDocPos !== null ? this.resolveCrossPageDrop(e, newDocPos) : null;
+    const crossPageYOffset = drop?.yOffset ?? 0;
 
-    if (!horizontallyStill && !verticallyStill && newX !== null && newDocPos !== null) {
-      editor.moveAndUpdateNode(docPos, newDocPos, {
+    if (!horizontallyStill && !verticallyStill && newX !== null && drop) {
+      this.movePlacement(docPos, drop.docPos, {
         xAlign: "custom",
-        x: newX,
+        x: this.contentRelativeX(newX),
         yOffset: crossPageYOffset,
       });
       commitPath = "moveAndUpdateNode";
-    } else if (!verticallyStill && newDocPos !== null) {
-      editor.moveAndUpdateNode(docPos, newDocPos, { yOffset: crossPageYOffset });
+    } else if (!verticallyStill && drop) {
+      this.movePlacement(docPos, drop.docPos, { yOffset: crossPageYOffset });
       commitPath = "moveAndUpdateNode";
     } else if (newX !== null) {
-      editor.setNodeAttrs(docPos, { xAlign: "custom", x: newX });
+      this.setPlacement(docPos, { xAlign: "custom", x: this.contentRelativeX(newX) });
       commitPath = "setNodeAttrs";
     } else {
       return;
@@ -933,7 +968,7 @@ export class PointerController {
       commitPath,
       docPos,
       newX,
-      newDocPos,
+      newDocPos: drop?.docPos ?? newDocPos,
       newYOffset: crossPageYOffset,
       crossPage: true,
     });
@@ -956,62 +991,166 @@ export class PointerController {
     const HORIZONTAL_THRESHOLD = 3;
     if (Math.abs(dx) < HORIZONTAL_THRESHOLD) return null;
 
-    const node = editor.getState().doc.nodeAt(this.anchoredDrag.docPos);
-    if (!node) return null;
-
+    // The painted width snapshotted at pointerdown, as the rest of the drag
+    // reads its geometry.
     const { pageWidth } = editor.layout.pageConfig;
-    const attrs = normalizeImageAttrs(node);
-
     const proposedX = this.anchoredDrag.startImageX + dx;
-    const clampedX = Math.max(0, Math.min(proposedX, pageWidth - attrs.width));
+    const clampedX = Math.max(0, Math.min(proposedX, pageWidth - this.anchoredDrag.rect.width));
     return clampedX;
+  }
+
+  /**
+   * A drop over a table cell anchors the image in that cell's paragraph
+   * nearest the drop, laid out inside the cell as Word does; a drop outside
+   * every table takes an image out of its cell into the body. In both, the
+   * image lands where it was dropped. Returns false only for a body image
+   * dropped in the body, which the body's own drop rules handle.
+   */
+  private commitContainerChange(hit: { page: number; docX: number; docY: number }): boolean {
+    if (!this.anchoredDrag) return false;
+    const { editor } = this.deps;
+    const { docPos, grabOffsetX, grabOffsetY } = this.anchoredDrag;
+    const ghostX = hit.docX - grabOffsetX;
+    const ghostY = hit.docY - grabOffsetY;
+    const ownParagraph = editor.getState().doc.resolve(docPos).start();
+
+    const target = this.regionAt(hit.page, hit.docX, hit.docY);
+    if (target) {
+      // A region with no paragraph (only a nested composite) cannot take the image.
+      const paragraph = nearestRegionParagraph(target.unit, target.region, ghostY);
+      if (!paragraph) return true;
+      const patch: PlacementPatch = {
+        xAlign: "custom",
+        x: ghostX - (target.region.x + target.region.inset.left),
+        yOffset: ghostY - (target.unit.y + paragraph.y),
+      };
+      const anchorPos = paragraph.nodePos + 1;
+      if (anchorPos === ownParagraph) this.setPlacement(docPos, patch);
+      else this.movePlacement(docPos, anchorPos, patch);
+      dragDebugLog(editor, "commit", { commitPath: "region", docPos, newDocPos: anchorPos, regionPos: target.region.pos });
+      return true;
+    }
+
+    if (this.anchoredDrag.regionPos === undefined) return false;
+    // An image leaving its region needs a body paragraph on the drop page; with
+    // none, the drop does nothing rather than move it inside its region.
+    const ghostGlobalY = this.pageLocalYToGlobal(hit.page, ghostY);
+    const nearest = this.nearestAnchorStartingOn(hit.page, ghostGlobalY, () => false);
+    if (!nearest) return true;
+    this.movePlacement(docPos, nearest.docPos, {
+      xAlign: "custom",
+      x: this.contentRelativeX(ghostX),
+      yOffset: ghostGlobalY - nearest.globalY,
+    });
+    dragDebugLog(editor, "commit", { commitPath: "leaveRegion", docPos, newDocPos: nearest.docPos });
+    return true;
+  }
+
+  /** Sets the dragged object's placement, written through its own declaration. */
+  private setPlacement(docPos: number, patch: PlacementPatch): void {
+    const attrs = this.anchoredDrag ? placementAttrs(this.anchoredDrag.node, patch) : null;
+    if (attrs) this.deps.editor.setNodeAttrs(docPos, attrs);
+  }
+
+  /** Moves the dragged object to `to` with its placement, written through its own declaration. */
+  private movePlacement(docPos: number, to: number, patch: PlacementPatch): void {
+    const attrs = this.anchoredDrag ? placementAttrs(this.anchoredDrag.node, patch) : null;
+    if (attrs) this.deps.editor.moveAndUpdateNode(docPos, to, attrs);
+  }
+
+  /**
+   * A body image's custom `x` is measured from the content area's left edge,
+   * Word's `relativeFrom="column"`; drag math works in page-local x.
+   */
+  private contentRelativeX(pageX: number): number {
+    return pageX - this.deps.editor.layout.pageConfig.margins.left;
+  }
+
+  /** The innermost composite unit and region under a page-local point, if any. */
+  private regionAt(pageNumber: number, x: number, y: number): { unit: LayoutBlock; region: LaidRegion } | null {
+    return innermostRegion(this.deps.editor.layout.pages?.[pageNumber - 1]?.blocks ?? [], x, y, 0);
   }
 
   private resolveSamePageReanchor(
     committedYOffset: number,
-    attrs: Record<string, unknown>,
-  ): { docPos: number; attrs: Record<string, unknown> } | null {
+    patch: PlacementPatch,
+  ): { docPos: number; patch: PlacementPatch } | null {
     if (!this.anchoredDrag) return null;
     const sourcePage = this.anchoredDrag.rect.page;
     const imageGlobalY = this.anchoredDrag.anchorGlobalY + committedYOffset;
-    const sourceFrom = this.anchoredDrag.docPos;
-    const sourceTo = sourceFrom + this.anchoredDrag.nodeSize;
-
-    let best: { docPos: number; globalY: number; distance: number } | null = null;
-    const page = this.deps.editor.layout.pages?.[sourcePage - 1];
-    if (!page) return null;
-
-    for (const block of page.blocks) {
-      const docPos = block.nodePos + 1;
-      if (docPos >= sourceFrom && docPos <= sourceTo) continue;
-      const globalY = this.pageLocalYToGlobal(sourcePage, block.y);
-      const distance = Math.abs(imageGlobalY - globalY);
-      if (!best || distance < best.distance) {
-        best = { docPos, globalY, distance };
-      }
-    }
-
+    // The image's own paragraph is where it is measured from already. A
+    // locked image is measured from where that paragraph started when it
+    // locked, not where its wrap has since moved it.
+    const ownParagraph = this.deps.editor.getState().doc.resolve(this.anchoredDrag.docPos).start();
+    const best = this.nearestAnchorStartingOn(sourcePage, imageGlobalY, (docPos) => docPos === ownParagraph);
     if (!best) return null;
     const wouldReduce = Math.abs(committedYOffset) - best.distance;
     if (wouldReduce <= RE_ANCHOR_THRESHOLD_PX) return null;
     return {
       docPos: best.docPos,
-      attrs: {
-        ...attrs,
+      patch: {
+        ...patch,
         yOffset: imageGlobalY - best.globalY,
       },
     };
   }
 
-  private resolveCrossPageDropYOffset(e: PointerEvent, newDocPos: number): number {
-    if (!this.anchoredDrag) return 0;
+  /**
+   * Where a cross-page drop anchors and its offset from that anchor. The
+   * paragraph under the drop keeps the image if it starts on the drop page;
+   * one carried over from an earlier page gives way, as in Word, to the
+   * nearest paragraph that starts on the drop page.
+   */
+  private resolveCrossPageDrop(e: PointerEvent, newDocPos: number): { docPos: number; yOffset: number } | null {
+    if (!this.anchoredDrag) return null;
     const hit = this.hitTest(e.clientX, e.clientY);
-    if (!hit || hit.gap) return 0;
+    if (!hit || hit.gap) return null;
+    const ghostGlobalY = this.pageLocalYToGlobal(hit.page, hit.docY - this.anchoredDrag.grabOffsetY);
 
-    const ghostTopLocalY = hit.docY - this.anchoredDrag.grabOffsetY;
-    const ghostGlobalY = this.pageLocalYToGlobal(hit.page, ghostTopLocalY);
-    const anchorGlobalY = this.globalYForDocPos(newDocPos, hit.page);
-    return ghostGlobalY - anchorGlobalY;
+    const { doc } = this.deps.editor.getState();
+    const $pos = newDocPos <= doc.content.size ? doc.resolve(newDocPos) : null;
+    const paragraph = $pos?.parent.isTextblock && $pos.depth > 0 ? this.anchorStartOf($pos.before()) : null;
+    if (paragraph && paragraph.page === hit.page) {
+      return { docPos: newDocPos, yOffset: ghostGlobalY - paragraph.globalY };
+    }
+    const nearest = this.nearestAnchorStartingOn(hit.page, ghostGlobalY, () => false);
+    if (nearest) return { docPos: nearest.docPos, yOffset: ghostGlobalY - nearest.globalY };
+    return paragraph ? { docPos: newDocPos, yOffset: ghostGlobalY - paragraph.globalY } : null;
+  }
+
+  /**
+   * The global Y layout measures an anchor in a paragraph from: the top of
+   * the paragraph's first part, which is the anchor flow's start.
+   */
+  private anchorStartGlobalY(pageNumber: number, block: LayoutBlock): number {
+    return this.pageLocalYToGlobal(pageNumber, block.y);
+  }
+
+  /** Where the paragraph at `nodePos` starts, as `anchorStartGlobalY` measures it. */
+  private anchorStartOf(nodePos: number): { page: number; globalY: number } | null {
+    for (const page of this.deps.editor.layout.pages ?? []) {
+      const block = page.blocks.find((b) => b.nodePos === nodePos && !b.isContinuation);
+      if (block) return { page: page.pageNumber, globalY: this.anchorStartGlobalY(page.pageNumber, block) };
+    }
+    return null;
+  }
+
+  /** The paragraph starting on `pageNumber` whose anchor start is nearest `globalY`. */
+  private nearestAnchorStartingOn(
+    pageNumber: number,
+    globalY: number,
+    skip: (docPos: number) => boolean,
+  ): { docPos: number; globalY: number; distance: number } | null {
+    let best: { docPos: number; globalY: number; distance: number } | null = null;
+    for (const block of this.deps.editor.layout.pages?.[pageNumber - 1]?.blocks ?? []) {
+      if (block.kind !== "text" || block.isContinuation) continue;
+      const docPos = block.nodePos + 1;
+      if (skip(docPos)) continue;
+      const start = this.anchorStartGlobalY(pageNumber, block);
+      const distance = Math.abs(globalY - start);
+      if (!best || distance < best.distance) best = { docPos, globalY: start, distance };
+    }
+    return best;
   }
 
   private metricsForPage(pageNumber: number): PageFlowMetrics {
@@ -1054,33 +1193,6 @@ export class PointerController {
       this.pageStartGlobal(pageNumber) +
       (localY - this.metricsForPage(pageNumber).contentTop)
     );
-  }
-
-  private globalYForDocPos(docPos: number, preferredPage: number): number {
-    const { editor } = this.deps;
-    editor.ensurePagePopulated(preferredPage);
-    const coords = editor.charMap.coordsAtPos(docPos, preferredPage);
-    if (coords && coords.page === preferredPage) {
-      return this.pageLocalYToGlobal(coords.page, coords.y);
-    }
-
-    const layout = editor.layout;
-    const page = layout.pages?.[preferredPage - 1];
-    if (page) {
-      let nearestBlockY: number | null = null;
-      for (const block of page.blocks) {
-        const nodeSize = block.node?.nodeSize;
-        const containsDocPos = nodeSize === undefined
-          ? docPos === block.nodePos || docPos === block.nodePos + 1
-          : docPos >= block.nodePos && docPos <= block.nodePos + nodeSize;
-        if (containsDocPos) {
-          return this.pageLocalYToGlobal(preferredPage, block.y);
-        }
-        if (block.nodePos <= docPos) nearestBlockY = block.y;
-      }
-      if (nearestBlockY !== null) return this.pageLocalYToGlobal(preferredPage, nearestBlockY);
-    }
-    return this.pageStartGlobal(preferredPage);
   }
 
   /**
@@ -1283,4 +1395,34 @@ export class PointerController {
     }
   }
 
+}
+
+/**
+ * The innermost region at a page-local point among `blocks` (their `y`
+ * relative to `originY`), with its unit placed at its page-local top: a cell
+ * of a table nested in a cell wins over its outer cell.
+ */
+function innermostRegion(
+  blocks: readonly LayoutBlock[],
+  x: number,
+  y: number,
+  originY: number,
+): { unit: LayoutBlock; region: LaidRegion } | null {
+  for (const block of blocks) {
+    const unit = { ...block, y: originY + block.y };
+    if (y < unit.y || y >= unit.y + unit.height) continue;
+    const region = unit.regions?.find((r) => x >= r.x && x < r.x + r.width);
+    if (region) return innermostRegion(region.blocks, x, y, unit.y) ?? { unit, region };
+  }
+  return null;
+}
+
+/** The paragraph in a region whose top is nearest a page-local y; an image anchors only in a textblock. */
+function nearestRegionParagraph(unit: LayoutBlock, region: LaidRegion, y: number): LayoutBlock | null {
+  let best: LayoutBlock | null = null;
+  for (const block of region.blocks) {
+    if (!block.node.isTextblock) continue;
+    if (!best || Math.abs(unit.y + block.y - y) < Math.abs(unit.y + best.y - y)) best = block;
+  }
+  return best;
 }

@@ -21,7 +21,7 @@
  */
 
 import type { Node as PmNode } from "@scrivr/core/pm";
-import { assignBlockIds, prepareDocumentFonts, type FontKey, type FontSynthesis } from "@scrivr/core";
+import { applyPageFont, assignBlockIds, prepareDocumentFonts, type FontKey, type FontSynthesis } from "@scrivr/core";
 import type {
   DocxImports,
   IBaseEditor,
@@ -251,7 +251,10 @@ export async function importDocx(
     // does not. Asking before anything is measured is the only point at which
     // the answer is still cheap to act on.
     if (editor.fonts) {
-      for (const shortfall of await prepareDocumentFonts(doc, editor.fonts)) {
+      for (const shortfall of await prepareDocumentFonts(doc, editor.fonts, {
+        fontModifiers: editor.getFontModifiers(),
+        fontConfig: applyPageFont(editor.getBlockStyles(), editor.fonts.defaultRequest().family),
+      })) {
         ctx.diagnostics.warn({
           code: "font-substituted",
           message:

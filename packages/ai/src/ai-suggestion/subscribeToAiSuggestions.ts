@@ -20,7 +20,7 @@ import {
   AI_SUGGESTION_SET_HOVER,
 } from "./AiSuggestionPlugin";
 import { applyAiSuggestion, rejectAiSuggestion } from "./showHideApply";
-import { findNodeById } from "../ai-toolkit/UniqueId";
+import { findLiveNodeById } from "@scrivr/plugins";
 import type { AiSuggestionBlock, AiOp, AiSuggestionPluginState } from "./types";
 import type { AcceptedSpan } from "./groupSpans";
 
@@ -214,7 +214,7 @@ export function subscribeToAiSuggestions(
       );
     },
     activate(blockId) {
-      const found = findNodeById(editor.getState().doc, blockId);
+      const found = findLiveNodeById(editor.getState().doc, blockId);
       if (!found) return;
       // `selection` only lives on the view-side `IEditor`. Headless callers
       // (e.g. ServerEditor in tests) skip the cursor move — they have no

@@ -35,6 +35,7 @@
 import { Node, type Schema } from "prosemirror-model";
 import { sanitizeDocUrls } from "./sanitizeDocUrls";
 import { dropPendingPlaceholders } from "./dropPendingPlaceholders";
+import type { PasteFileHandler } from "../extensions/types";
 import {
   assignBlockIds,
   planBlockIdAssignments,
@@ -71,6 +72,12 @@ export interface NormalizeDocumentOptions {
   maxNodes?: number;
   /** Reject docs deeper than this many nesting levels. */
   maxDepth?: number;
+  /**
+   * The pasted files each node type takes (`ExtensionManager.buildPasteFiles()`):
+   * a placeholder one of them recognises is left by a paste that never
+   * finished, and dropped. Without them no placeholder is recognised.
+   */
+  pasteFiles?: readonly PasteFileHandler[];
 }
 
 export interface NormalizeResult {
@@ -128,7 +135,8 @@ export function normalizeDocument(
   // 4. Orphaned paste placeholders. A document being loaded has no upload in
   //    flight, so any reservation in it died with the page that made it.
   //    Runs before table repair so that repair sees the final node set.
-  const swept = dropPendingPlaceholders(doc);
+  const handlers = options.pasteFiles ?? [];
+  const swept = dropPendingPlaceholders(doc, (node) => handlers.some(({ spec }) => spec.pendingIdOf(node) !== null));
   if (swept.dropped > 0) {
     warnings.push({
       code: "placeholders-dropped",

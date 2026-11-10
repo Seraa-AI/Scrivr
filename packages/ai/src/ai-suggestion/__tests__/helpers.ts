@@ -131,3 +131,14 @@ export function markedText(editor: ServerEditor, markName: string): string {
   });
   return out;
 }
+
+/**
+ * Moves the first block to the end as a tracked move. The deleted copy it
+ * leaves stays first, so a resolver taking the first match by id finds it.
+ */
+export function moveFirstBlockToEnd(editor: ServerEditor): void {
+  const state = editor.getState();
+  const first = state.doc.child(0);
+  const tr = state.tr.delete(0, first.nodeSize);
+  editor.applyTransaction(tr.insert(tr.doc.content.size, first));
+}

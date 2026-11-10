@@ -91,8 +91,8 @@ export function buildAcceptedTextMap(
         m.type === insertMarkType ||
         m.type === deleteMarkType
       ) {
-        authorID = (m.attrs.dataTracked as { authorID?: string } | null)
-          ?.authorID;
+        const dataTracked: { authorID?: string } | null = m.attrs.dataTracked;
+        authorID = dataTracked?.authorID;
         break;
       }
     }
@@ -132,6 +132,30 @@ export function buildAcceptedTextMap(
     decoratedText: decoratedParts.join(""),
     map,
   };
+}
+
+/**
+ * Whether the accepted text in `[from, to)` is a plain run a replacement may
+ * take in. Taking it in deletes and re-inserts it, so it must be what a
+ * re-insert can restore: characters side by side in the document, with no
+ * break, inline object or newline between them, and no mark — neither
+ * formatting a plain insertion would drop nor a suggestion of its own.
+ */
+export function bridgeable(doc: PMNode, map: readonly PosMapEntry[], from: number, to: number): boolean {
+  const lo = Math.max(0, from - 1);
+  const hi = Math.min(map.length - 1, to);
+  for (let k = lo; k < hi; k++) {
+    const here = map[k];
+    const next = map[k + 1];
+    if (!here || !next || next.docPos !== here.docPos + 1) return false;
+  }
+  for (let k = from; k < to; k++) {
+    const entry = map[k];
+    const node = entry && doc.nodeAt(entry.docPos);
+    if (!entry || !node?.isText || node.marks.length > 0) return false;
+    if (doc.textBetween(entry.docPos, entry.docPos + 1) === "\n") return false;
+  }
+  return true;
 }
 
 /**

@@ -403,7 +403,8 @@ function parseParagraphProperties(el: OoxmlElement): DocxParagraphAttrs {
     // poison every downstream comparison.
     const ilvl = ilvlRaw !== undefined ? Number(ilvlRaw) : NaN;
     const numId = numIdRaw !== undefined ? Number(numIdRaw) : NaN;
-    if (Number.isInteger(ilvl) && Number.isInteger(numId)) {
+    // numId 0 is Word's "no numbering": a paragraph that turns a list off.
+    if (Number.isInteger(ilvl) && Number.isInteger(numId) && numId > 0) {
       attrs.numbering = { numId, ilvl };
     }
   }

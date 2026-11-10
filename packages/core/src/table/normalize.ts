@@ -1,6 +1,6 @@
 import { EditorState, Plugin, type Transaction } from "prosemirror-state";
 import type { Node, NodeType, Schema } from "prosemirror-model";
-import { COLLAB_SYNC_META } from "../extensions/built-in/UniqueId";
+import { COLLAB_SYNC_META, NORMALIZATION_META } from "../extensions/built-in/UniqueId";
 import { cellGridSpan, cellVMerge, tableGrid } from "./attrs";
 
 /**
@@ -223,7 +223,9 @@ export function tableIntegrityPlugin(): Plugin {
       // on selection-only changes (which fire constantly during cursor moves).
       if (!transactions.some((t) => t.docChanged)) return null;
       const tr = normalizeTables(newState);
-      if (tr && transactions.some((t) => t.docChanged && t.getMeta(COLLAB_SYNC_META))) {
+      if (!tr) return null;
+      tr.setMeta(NORMALIZATION_META, true);
+      if (transactions.some((t) => t.docChanged && t.getMeta(COLLAB_SYNC_META))) {
         tr.setMeta(COLLAB_SYNC_META, true);
       }
       return tr;

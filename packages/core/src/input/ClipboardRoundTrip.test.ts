@@ -5,6 +5,7 @@ import { ExtensionManager } from "../extensions/ExtensionManager";
 import { StarterKit } from "../extensions/StarterKit";
 import { serializeSelectionToHtml, serializeSelectionToText } from "./ClipboardSerializer";
 import { PasteTransformer } from "./PasteTransformer";
+import type { CopyHtmlTransform } from "../extensions/types";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -14,7 +15,6 @@ function makeContext() {
   const plugins = manager.buildPlugins();
   const transformer = new PasteTransformer(
     schema,
-    manager.buildMarkdownRules(),
     manager.buildMarkdownParserTokens(),
   );
   return { schema, plugins, transformer };
@@ -67,8 +67,8 @@ function shape(doc: PMNode): string[] {
 }
 
 /** Copy the current selection the way `handleCopy` does, as clipboard payloads. */
-function copy(state: EditorState, schema: Schema): Record<string, string> {
-  const html = serializeSelectionToHtml(state, schema);
+function copy(state: EditorState, schema: Schema, copyHtmlTransforms: readonly CopyHtmlTransform[] = []): Record<string, string> {
+  const html = serializeSelectionToHtml(state, schema, copyHtmlTransforms);
   const text = serializeSelectionToText(state);
   const data: Record<string, string> = {};
   if (text !== null) data["text/plain"] = text;
@@ -325,11 +325,10 @@ describe("clipboard round-trip — tables", () => {
     const plugins = manager.buildPlugins();
     const transformer = new PasteTransformer(
       schema,
-      manager.buildMarkdownRules(),
       manager.buildMarkdownParserTokens(),
       { pasteHtmlTransforms: manager.buildPasteHtmlTransforms() },
     );
-    return { schema, plugins, transformer };
+    return { schema, plugins, transformer, copyTransforms: manager.buildCopyHtmlTransforms() };
   }
 
   /** Each cell as `text/gridSpan/vMerge`, one entry per row. */
@@ -358,18 +357,42 @@ describe("clipboard round-trip — tables", () => {
   }
 
   it("copies a merged table out as rowspan, the merge other editors read", () => {
-    const { schema, plugins } = tableContext();
+    const { schema, plugins, copyTransforms } = tableContext();
     const state = stateWith(schema, plugins, [mergedTable(schema)]);
-    const html = copy(select(state, 0, state.doc.content.size), schema)["text/html"] ?? "";
+    const html = copy(select(state, 0, state.doc.content.size), schema, copyTransforms)["text/html"] ?? "";
 
     expect(html).toContain(`rowspan="2"`);
     expect(html).not.toContain("data-vmerge");
   });
 
+  // A range from partway into a row copies that row without the cells before
+  // it; the merge still belongs to the column it is in.
+  it("keeps a merge in its column when the copied range starts partway into a row", () => {
+    const { schema, plugins, copyTransforms } = tableContext();
+    const cell = (text: string, attrs: Record<string, unknown> = {}) =>
+      schema.nodes["tableCell"]!.create(attrs, para(schema, text));
+    const row = (kids: PMNode[]) => schema.nodes["tableRow"]!.create(null, kids);
+    const table = schema.nodes["table"]!.create({ grid: [100, 100, 100] }, [
+      row([cell("A1"), cell("B1", { vMerge: "restart" }), cell("C1")]),
+      row([cell("A2"), cell("", { vMerge: "continue" }), cell("C2")]),
+    ]);
+    const state = stateWith(schema, plugins, [table, para(schema, "after")]);
+    let insideB1 = -1;
+    state.doc.descendants((node, pos) => {
+      if (node.isText && node.text === "B1") insideB1 = pos + 1;
+    });
+    const html = copy(select(state, insideB1, state.doc.content.size - 1), schema, copyTransforms)["text/html"] ?? "";
+    const container = document.createElement("div");
+    container.innerHTML = html;
+    const cells = Array.from(container.querySelectorAll("td")).map((td) => `${td.textContent}:${td.getAttribute("rowspan") ?? 1}`);
+
+    expect(cells).toEqual(["1:2", "C1:1", "A2:1", "C2:1"]);
+  });
+
   it("pastes its own merged table back unchanged", () => {
-    const { schema, plugins, transformer } = tableContext();
+    const { schema, plugins, transformer, copyTransforms } = tableContext();
     const original = stateWith(schema, plugins, [mergedTable(schema)]);
-    const data = copy(select(original, 0, original.doc.content.size), schema);
+    const data = copy(select(original, 0, original.doc.content.size), schema, copyTransforms);
 
     const empty = stateWith(schema, plugins, [para(schema, "")]);
     const pasted = paste(transformer, empty, data);
@@ -379,7 +402,7 @@ describe("clipboard round-trip — tables", () => {
 
   // A merge covers rows, which are not bounded by the column allocation limit.
   it("preserves a vertical merge longer than the column allocation limit", () => {
-    const { schema, plugins, transformer } = tableContext();
+    const { schema, plugins, transformer, copyTransforms } = tableContext();
     const rows = Array.from({ length: 65 }, (_, index) =>
       schema.nodes["tableRow"]!.create(null, [
         schema.nodes["tableCell"]!.create(
@@ -391,7 +414,7 @@ describe("clipboard round-trip — tables", () => {
     );
     const table = schema.nodes["table"]!.create({ grid: [200, 100] }, rows);
     const original = stateWith(schema, plugins, [table]);
-    const data = copy(select(original, 0, original.doc.content.size), schema);
+    const data = copy(select(original, 0, original.doc.content.size), schema, copyTransforms);
     const pasted = paste(transformer, stateWith(schema, plugins, [para(schema, "")]), data);
 
     expect(tableShape(pasted)).toEqual(tableShape(original.doc));

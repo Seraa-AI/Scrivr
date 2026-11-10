@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
-import type { Editor } from "@scrivr/core";
+import type { IBaseEditor } from "@scrivr/core";
 import {
   CHANGE_OPERATION,
   CHANGE_STATUS,
+  changeActs,
   trackChangesPluginKey,
 } from "@scrivr/plugins";
+import { useReviewAction } from "./useReviewAction";
 import type { TextChange, TrackedChange } from "@scrivr/plugins";
 
 export type TrackChangesDisplayItem =
@@ -12,15 +14,24 @@ export type TrackChangesDisplayItem =
       kind: "replacement";
       deleteChange: TextChange;
       insertChange: TextChange;
+      /** The replaced and replacing text, joined when later work split them apart. */
+      deletedText: string;
+      insertedText: string;
       ids: string[];
       authorID: string;
     }
   | {
       kind: "single";
       change: TrackedChange;
+      /**
+       * Every record of the act, in document order: more than one when later
+       * work split it apart, or when it covers a node and the text inside.
+       * Deciding `change` decides them all.
+       */
+      pieces: TrackedChange[];
     };
 
-export function useTrackChangesPanel(editor: Editor | null) {
+export function useTrackChangesPanel(editor: IBaseEditor | null) {
   const [changes, setChanges] = useState<TrackedChange[]>([]);
 
   useEffect(() => {
@@ -38,26 +49,19 @@ export function useTrackChangesPanel(editor: Editor | null) {
 
   const items = buildDisplayItems(changes);
   const allIds = changes.map((c) => c.id);
+  const review = useReviewAction(editor);
 
-  function acceptAll() {
-    editor?.commands.setChangeStatuses?.(CHANGE_STATUS.accepted, allIds);
-  }
-
-  function rejectAll() {
-    editor?.commands.setChangeStatuses?.(CHANGE_STATUS.rejected, allIds);
-  }
-
-  function accept(ids: string[]) {
-    editor?.commands.setChangeStatuses?.(CHANGE_STATUS.accepted, ids);
-  }
-
-  function reject(ids: string[]) {
-    editor?.commands.setChangeStatuses?.(CHANGE_STATUS.rejected, ids);
-  }
+  // These return the outcome: a caller driving the hook directly needs the same
+  // answer the panel gets.
+  const acceptAll = () => review.decide("accepted", allIds);
+  const rejectAll = () => review.decide("rejected", allIds);
+  const accept = (ids: string[]) => review.decide("accepted", ids);
+  const reject = (ids: string[]) => review.decide("rejected", ids);
 
   return {
     changes,
     items,
+    review,
     isEmpty: items.length === 0,
     acceptAll,
     rejectAll,
@@ -65,6 +69,17 @@ export function useTrackChangesPanel(editor: Editor | null) {
     reject,
   };
 }
+
+/** One act is one card, whatever it took to record it. */
+function singles(changes: TrackedChange[]): TrackChangesDisplayItem[] {
+  return changeActs(changes).map(({ primary, records }) => ({ kind: "single", change: primary, pieces: records }));
+}
+
+const textOf = (changes: TrackedChange[], operation: CHANGE_OPERATION) =>
+  changes
+    .filter((c): c is TextChange => c.type === "text-change" && c.dataTracked.operation === operation)
+    .map(c => c.text)
+    .join("");
 
 function buildDisplayItems(changes: TrackedChange[]): TrackChangesDisplayItem[] {
   const byGroupId = new Map<string, TrackedChange[]>();
@@ -101,15 +116,17 @@ function buildDisplayItems(changes: TrackedChange[]): TrackChangesDisplayItem[] 
         kind: "replacement",
         deleteChange: del,
         insertChange: ins,
+        deletedText: textOf(group, CHANGE_OPERATION.delete),
+        insertedText: textOf(group, CHANGE_OPERATION.insert),
         ids: group.map((c) => c.id),
         authorID: del.dataTracked.authorID,
       });
     } else {
-      group.forEach((c) => items.push({ kind: "single", change: c }));
+      items.push(...singles(group));
     }
   }
 
-  ungrouped.forEach((c) => items.push({ kind: "single", change: c }));
+  items.push(...singles(ungrouped));
 
   items.sort((a, b) => {
     const af =

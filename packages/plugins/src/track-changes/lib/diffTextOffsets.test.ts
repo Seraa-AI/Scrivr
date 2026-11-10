@@ -11,34 +11,36 @@
  * stamped where the order still is the proposal's own.
  */
 import { describe, expect, it } from "vitest";
-import { diffText, expandCharLevel, pairReplacements } from "./diffText";
+import { diffText, pairReplacements, phraseReplacements } from "./diffText";
 
 const CLAUSE = "Neither party shall be liable for any indirect loss.";
+
+/** The text each op that consumes proposed text was built from, read back through its offset. */
+const readBack = (ops: ReturnType<typeof pairReplacements>, proposed: string) =>
+  ops.flatMap((op) => {
+    if (op.type === "delete") return [];
+    const at = op.proposedOffset ?? -1;
+    return [{ text: op.text, at: proposed.slice(at, at + op.text.length) }];
+  });
 
 describe("proposedOffset", () => {
   it("points at the text the op was built from", () => {
     const proposed = "beta delta epsilon";
-    for (const op of diffText("alpha beta gamma delta", proposed)) {
-      // The type says a delete has no proposal offset; this says the value
-      // agrees with the type.
-      if (op.type === "delete") {
-        expect("proposedOffset" in op).toBe(false);
-        continue;
-      }
-      expect(op.proposedOffset).toBeDefined();
-      expect(proposed.slice(op.proposedOffset!, op.proposedOffset! + op.text.length)).toBe(op.text);
-    }
+    const ops = diffText("alpha beta gamma delta", proposed);
+    // The type says a delete has no proposal offset; this says the value agrees.
+    expect(ops.filter((op) => op.type === "delete").every((op) => !("proposedOffset" in op))).toBe(true);
+    const read = readBack(ops, proposed);
+    expect(read.length).toBeGreaterThan(0);
+    for (const { text, at } of read) expect(at).toBe(text);
   });
 
   it("survives the reordering pairReplacements does", () => {
     // This pairing has both a sandwiched keep (rewritten as delete+insert) and
     // a boundary keep, which is what puts the output out of proposal order.
     const proposed = "beta delta epsilon";
-    for (const op of pairReplacements(diffText("alpha beta gamma delta", proposed))) {
-      if (op.type === "delete") continue;
-      expect(op.proposedOffset).toBeDefined();
-      expect(proposed.slice(op.proposedOffset!, op.proposedOffset! + op.text.length)).toBe(op.text);
-    }
+    const read = readBack(pairReplacements(diffText("alpha beta gamma delta", proposed)), proposed);
+    expect(read.length).toBeGreaterThan(0);
+    for (const { text, at } of read) expect(at).toBe(text);
   });
 });
 
@@ -74,26 +76,15 @@ describe("the quadratic guard still protects genuinely different long text", () 
   });
 });
 
-describe("character-level expansion", () => {
-  it("never reports an offset measured from the token it re-diffed", () => {
-    // Expansion re-diffs one word pair, so an offset it produced would be
-    // counted from that word and point into a different one. An op that still
-    // carries an offset must still be telling the truth about the proposal.
-    const proposed = "the indemnity clause";
-    const ops = expandCharLevel(
-      pairReplacements(diffText("the indemnification clause", proposed)),
-    );
-
-    let expandedOps = 0;
+describe("phrase replacements", () => {
+  it("keep their offsets on what they leave unchanged", () => {
+    // A replacement joins words from across a gap, so it carries no offset of
+    // its own; what it leaves kept still points at the proposal truthfully.
+    const proposed = "All staff; contractors are covered.";
+    const ops = phraseReplacements(diffText("All staff, contractors is covered.", proposed));
     for (const op of ops) {
-      if (op.type === "delete") continue;
-      if (!("proposedOffset" in op) || op.proposedOffset === undefined) {
-        expandedOps += 1;
-        continue;
-      }
+      if (op.type !== "keep" || op.proposedOffset === undefined) continue;
       expect(proposed.slice(op.proposedOffset, op.proposedOffset + op.text.length)).toBe(op.text);
     }
-    // The case does expand, so the assertion above is not vacuous.
-    expect(expandedOps).toBeGreaterThan(0);
   });
 });

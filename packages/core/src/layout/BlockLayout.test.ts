@@ -30,7 +30,7 @@ function sumLineHeights(block: { lines: ReadonlyArray<{ lineHeight: number }> })
 }
 
 // StarterKit schema has the fontFamily attr on paragraph and heading nodes.
-const { schema } = buildStarterKitContext();
+const { schema, fontConfig, fontModifiers } = buildStarterKitContext();
 
 // Helper: paragraph node with a fontFamily attr set
 function paragraphWithFamily(text: string, fontFamily: string) {
@@ -117,6 +117,7 @@ describe("layoutBlock — basic", () => {
       availableWidth: 400,
       page: 1,
       measurer: createMeasurer(),
+      fontConfig,
     });
     // h1 spaceBefore=24, spaceAfter=12
     expect(block.spaceBefore).toBe(24);
@@ -184,6 +185,7 @@ describe("layoutBlock — mark resolution", () => {
       availableWidth: 400,
       page: 1,
       measurer: m,
+      fontModifiers,
     });
 
     const fontUsed = spy.mock.calls[0]?.[1];
@@ -963,6 +965,7 @@ describe("layoutBlock — node fontFamily attr", () => {
       availableWidth: 400,
       page: 1,
       measurer: createMeasurer(),
+      fontConfig,
     });
     const span = block.lines[0]?.spans[0];
     const font = span?.kind === "text" ? span.font : "";

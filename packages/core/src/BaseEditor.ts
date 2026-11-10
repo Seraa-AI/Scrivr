@@ -1,6 +1,8 @@
 import { EditorState, Transaction } from "prosemirror-state";
 import type { FontProvider } from "./fonts/types";
+import type { FontConfig } from "./layout/FontConfig";
 import type { InlineRegistry } from "./layout/BlockRegistry";
+import type { MarkerPainter } from "./layout/markers";
 import { MarkdownSerializer } from "prosemirror-markdown";
 import { Node, type Schema } from "prosemirror-model";
 
@@ -8,6 +10,9 @@ import { ExtensionManager } from "./extensions/ExtensionManager";
 import { StarterKit } from "./extensions/StarterKit";
 import type { Extension } from "./extensions/Extension";
 import type {
+  BlockInfo,
+  CopyHtmlTransform,
+  FontModifier,
   IBaseEditor,
   MarkdownParserTokenSpec,
   SlashCommandSpec,
@@ -178,7 +183,7 @@ export class BaseEditor implements IBaseEditor {
    * argument list into `commands` does not typecheck, because it is a union of
    * fixed-arity signatures; `runCommand` reads this instead.
    */
-  private readonly boundCommands: Record<string, (...args: unknown[]) => void> = {};
+  private readonly boundCommands: Record<string, (...args: unknown[]) => boolean> = {};
 
   /**
    * Per-extension storage. Augment `ExtensionStorage` in your extension
@@ -233,6 +238,7 @@ export class BaseEditor implements IBaseEditor {
       // assignment — its throwaway ids would otherwise pollute the clone map.
       const result = normalizeDocument(rawInitialDoc, {
         schema: this.manager.schema,
+        pasteFiles: this.manager.buildPasteFiles(),
         assignIds: clone ? false : this.assignsBlockIdsOnLoad(),
       });
       this.lastNormalizeResultValue = result;
@@ -274,6 +280,7 @@ export class BaseEditor implements IBaseEditor {
         clonedDoc.check();
         const postClone = normalizeDocument(clonedDoc, {
           schema: this.manager.schema,
+          pasteFiles: this.manager.buildPasteFiles(),
           assignIds: false,
         });
         initialDoc = postClone.doc;
@@ -336,14 +343,14 @@ export class BaseEditor implements IBaseEditor {
    * signatures, which only typechecks behind a cast — so every such surface
    * grew its own. This is that dispatch, once, where the loose map already is.
    *
-   * Unknown names are ignored: a spec can name a command from an extension
-   * this editor was not built with.
+   * Unknown names report false, like any command that did not run: a spec can
+   * name a command from an extension this editor was not built with.
    */
-  runCommand(name: keyof SafeFlatCommands, args: unknown[] = []): void {
+  runCommand(name: keyof SafeFlatCommands, args: unknown[] = []): boolean {
     // `hasOwn`, not a plain lookup: a name that happens to match something on
-    // Object.prototype would otherwise be invoked rather than ignored.
-    if (!Object.hasOwn(this.boundCommands, name)) return;
-    this.boundCommands[name]?.(...args);
+    // Object.prototype would otherwise be invoked rather than reporting false.
+    if (!Object.hasOwn(this.boundCommands, name)) return false;
+    return this.boundCommands[name]?.(...args) ?? false;
   }
 
   /**
@@ -527,6 +534,22 @@ export class BaseEditor implements IBaseEditor {
     return this.manager.getImportContributions();
   }
 
+  getMarkerPainters(): ReadonlyMap<string, MarkerPainter> {
+    return this.manager.getMarkerPainters();
+  }
+
+  getFontModifiers(): ReadonlyMap<string, FontModifier> {
+    return this.manager.buildFontModifiers();
+  }
+
+  getBlockStyles(): FontConfig {
+    return this.manager.buildBlockStyles();
+  }
+
+  getCopyHtmlTransforms(): CopyHtmlTransform[] {
+    return this.manager.buildCopyHtmlTransforms();
+  }
+
   getFormatContributions(): FormatContribution[] {
     return this.manager.getFormatContributions();
   }
@@ -537,7 +560,12 @@ export class BaseEditor implements IBaseEditor {
 
   getMarkdownSerializer(): MarkdownSerializer {
     const { nodes, marks } = this.manager.buildMarkdownSerializerRules();
-    return new MarkdownSerializer(nodes, marks);
+    // A mark Markdown cannot write, such as a colour or a tracked change,
+    // keeps its words and drops only the formatting.
+    const plain = Object.fromEntries(
+      Object.keys(this.manager.schema.marks).filter((name) => !(name in marks)).map((name) => [name, { open: "", close: "" }]),
+    );
+    return new MarkdownSerializer(nodes, { ...plain, ...marks });
   }
 
   /** Returns the merged markdown parser token map from all extensions. */
@@ -626,26 +654,24 @@ export class BaseEditor implements IBaseEditor {
     return result;
   }
 
-  getBlockInfo(): { blockType: string; blockAttrs: Record<string, unknown> } {
+  /**
+   * The node holding the selection's start — its textblock for a text
+   * selection — and the nodes around it up to the doc, innermost first.
+   */
+  getBlockInfo(): BlockInfo {
     const { $from } = this.getActiveState().selection;
-    for (let d = 1; d <= $from.depth; d++) {
+    const ancestors: BlockInfo["ancestors"] = [];
+    for (let d = $from.depth - 1; d >= 1; d--) {
       const node = $from.node(d);
-      if (node.isBlock && d === 1) {
-        return {
-          blockType: node.type.name,
-          blockAttrs: node.attrs as Record<string, unknown>,
-        };
-      }
+      ancestors.push({ type: node.type.name, attrs: node.attrs });
     }
-    return {
-      blockType: $from.parent.type.name,
-      blockAttrs: $from.parent.attrs as Record<string, unknown>,
-    };
+    return { blockType: $from.parent.type.name, blockAttrs: $from.parent.attrs, ancestors };
   }
 
   /**
-   * Returns true when the named mark or block type is active at the cursor.
-   * Mirrors TipTap's `editor.isActive()` signature.
+   * Returns true when the named mark is active at the cursor, or the named
+   * node is the cursor's textblock or around it (the nearest one's attrs are
+   * matched). Mirrors TipTap's `editor.isActive()` signature.
    */
   isActive(name: string, attrs?: Record<string, unknown>): boolean {
     if (this.schema.marks[name]) {
@@ -655,10 +681,11 @@ export class BaseEditor implements IBaseEditor {
       if (!ma) return false;
       return Object.entries(attrs).every(([k, v]) => ma[k] === v);
     }
-    const { blockType, blockAttrs } = this.getBlockInfo();
-    if (blockType !== name) return false;
+    const { blockType, blockAttrs, ancestors } = this.getBlockInfo();
+    const nodeAttrs = blockType === name ? blockAttrs : ancestors.find((node) => node.type === name)?.attrs;
+    if (!nodeAttrs) return false;
     if (!attrs) return true;
-    return Object.entries(attrs).every(([k, v]) => blockAttrs[k] === v);
+    return Object.entries(attrs).every(([k, v]) => nodeAttrs[k] === v);
   }
 
   // ── Lifecycle ────────────────────────────────────────────────────────────────
@@ -779,9 +806,10 @@ export class BaseEditor implements IBaseEditor {
     const rawCommands = this.manager.buildCommands();
     for (const [name, factory] of Object.entries(rawCommands)) {
       this.boundCommands[name] = (...args: unknown[]) => {
-        if (this.readOnlyValue) return;
+        // Read-only is a refusal like any other, not an absent answer.
+        if (this.readOnlyValue) return false;
         const cmd = factory(...args);
-        cmd(this.getActiveState(), (tr) => this.dispatchToActive(tr));
+        return cmd(this.getActiveState(), (tr) => this.dispatchToActive(tr));
       };
     }
     return this.boundCommands as SafeFlatCommands;

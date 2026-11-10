@@ -1,13 +1,15 @@
 import type { IEditor } from "@scrivr/core";
 import { subscribeViewUpdates, subscribeEditorFocusOutside, isAnchorInsideContainer } from "@scrivr/core";
+import type { Node as PMNode } from "@scrivr/core/pm";
 
 import { trackChangesPluginKey } from "./engine/trackChangesPlugin";
+import { describeAttrChanges } from "./attrChanges";
+import { changeActs } from "./reviewPlan";
 import {
   CHANGE_OPERATION,
   CHANGE_STATUS,
-  NodeAttrChange,
-  MarkChange,
 } from "./types";
+import type { TrackedChange } from "./types";
 
 export interface ChangePopoverInfo {
   id: string;
@@ -65,6 +67,8 @@ export interface ChangePopoverInfo {
    * destination insertion (or vice-versa). Use this to locate the paired change.
    */
   moveNodeId?: string;
+  /** The move this text is half of, when it was moved rather than written or removed. */
+  moveId?: string;
   /**
    * For move operations: whether this end of the move is the source block
    * (content was cut from here) or the destination (content was pasted here).
@@ -88,6 +92,12 @@ export interface ChangePopoverInfo {
    *   "reference" — reference annotation
    */
   changeKind: "text" | "mark" | "node-attr" | "node" | "wrap" | "reference";
+  /**
+   * The block a "node" or "node-attr" change is on — "listItem", "paragraph",
+   * "image", "tableRow" — so a UI can say what was added, removed or changed,
+   * not only that a block was.
+   */
+  nodeTypeName?: string;
 }
 
 export interface ChangePopoverCallbacks {
@@ -100,6 +110,54 @@ export interface ChangePopoverCallbacks {
    * Reject buttons) don't trigger an immediate hide.
    */
   getPopoverElement?: () => HTMLElement | null;
+}
+
+/**
+ * The change a popover offers at the caret: the act that owns the innermost
+ * pending record there, shown by that act's primary. Inside a row someone
+ * added, that is the row — its words are part of adding it — while an edit
+ * someone else made inside the row is its own act and shows as itself.
+ */
+export function changeAtCaret(pending: readonly TrackedChange[], head: number): TrackedChange | undefined {
+  const atCaret = pending.filter((c) => head >= c.from && head <= c.to);
+  const innermost = atCaret.reduce<TrackedChange | undefined>(
+    (best, c) => (!best || c.to - c.from < best.to - best.from ? c : best),
+    undefined,
+  );
+  if (!innermost) return undefined;
+  return changeActs(pending).find((act) => act.records.includes(innermost))?.primary ?? innermost;
+}
+
+/**
+ * A block change as the block will read: one moved or added without the words
+ * proposed for deletion inside it, one removed without the words proposed for
+ * insertion. A move reads from where it went, whichever half is given. Blocks,
+ * such as the cells of a row, are joined by " · ".
+ */
+export function changePreviewText(doc: PMNode, change: TrackedChange, pending: readonly TrackedChange[]): string {
+  const { moveNodeId } = change.dataTracked;
+  const copy = moveNodeId
+    ? pending.find((o) => o.dataTracked.moveNodeId === moveNodeId && o.dataTracked.operation === CHANGE_OPERATION.move)
+    : undefined;
+  return copy
+    ? blockPreviewText(doc, copy.from, copy.to, false)
+    : blockPreviewText(doc, change.from, change.to, change.dataTracked.operation === CHANGE_OPERATION.delete);
+}
+
+function blockPreviewText(doc: PMNode, from: number, to: number, removed: boolean): string {
+  const left = removed ? "trackedInsert" : "trackedDelete";
+  const blocks: string[] = [];
+  doc.nodesBetween(from, to, (node, pos) => {
+    if (node.isTextblock) blocks.push("");
+    if (!node.isText || node.marks.some((mark) => mark.type.name === left)) return true;
+    const text = node.text ?? "";
+    const start = Math.max(from, pos) - pos;
+    const end = Math.min(to, pos + text.length) - pos;
+    if (blocks.length === 0) blocks.push("");
+    blocks[blocks.length - 1] += text.slice(start, end);
+    return true;
+  });
+  return blocks.filter(Boolean).join(" · ");
 }
 
 /**
@@ -138,8 +196,7 @@ export function createChangePopover(
       (c) => c.dataTracked.status === CHANGE_STATUS.pending,
     );
 
-    // Primary: first pending change whose range contains the cursor
-    const primary = pending.find((c) => head >= c.from && head <= c.to);
+    const primary = changeAtCaret(pending, head);
 
     if (!primary) {
       if (visible) {
@@ -163,9 +220,7 @@ export function createChangePopover(
       return;
     }
 
-    const primaryIsConflict = !!(
-      primary.dataTracked as { isConflict?: boolean }
-    ).isConflict;
+    const primaryIsConflict = !!primary.dataTracked.isConflict;
 
     // When the primary change is flagged as a conflict, collect ALL pending
     // changes that overlap its range — not just those at the cursor.
@@ -209,19 +264,16 @@ export function createChangePopover(
     };
 
     // Build group information for the primary change.
-    // When char-level expansion produces many 1-char marks sharing a groupId,
-    // we aggregate them here so the popover shows the full replacement text
-    // and accept/reject applies to the whole group atomically.
-    const primaryGroupId = (primary.dataTracked as { groupId?: string })
-      .groupId;
+    // A replacement's deletion and insertion share a groupId; aggregate them so
+    // the popover shows the whole replacement. Deciding either half decides both.
+    const primaryGroupId = primary.dataTracked.groupId;
     let groupIds: string[] = [primary.id];
     let replacedText: string | undefined;
     let insertedText: string | undefined;
 
     if (primaryGroupId) {
       const groupChanges = pending.filter(
-        (c) =>
-          (c.dataTracked as { groupId?: string }).groupId === primaryGroupId,
+        (c) => c.dataTracked.groupId === primaryGroupId,
       );
       groupIds = groupChanges.map((c) => c.id);
 
@@ -244,15 +296,6 @@ export function createChangePopover(
       }
     }
 
-    const ATTR_LABELS: Record<string, string> = {
-      level: "Heading level",
-      align: "Alignment",
-      fontFamily: "Font",
-      fontSize: "Font size",
-      indent: "Indent",
-      order: "Start number",
-    };
-
     const NODE_TYPE_LABELS: Record<string, string> = {
       bulletList: "Bullet list",
       orderedList: "Ordered list",
@@ -262,27 +305,8 @@ export function createChangePopover(
       codeBlock: "Code block",
     };
 
-    /** Human-readable value for a known attribute key. */
-    const attrValueLabel = (key: string, val: unknown): string => {
-      if (val == null) {
-        if (key === "level") return "Paragraph";
-        return "default";
-      }
-      if (key === "level") return `Heading ${val}`;
-      if (key === "align") {
-        const MAP: Record<string, string> = {
-          left: "Left",
-          center: "Center",
-          right: "Right",
-          justify: "Justify",
-        };
-        return MAP[String(val)] ?? String(val);
-      }
-      return String(val);
-    };
-
     const toInfo = (c: typeof primary): ChangePopoverInfo => {
-      const op = c.dataTracked.operation as CHANGE_OPERATION;
+      const op = c.dataTracked.operation;
 
       // ── Change kind ─────────────────────────────────────────────────────────
       const changeKind: ChangePopoverInfo["changeKind"] =
@@ -303,16 +327,15 @@ export function createChangePopover(
       let newAttrs: Record<string, any> | undefined;
       let oldNodeTypeName: string | undefined;
       let newNodeTypeName: string | undefined;
-      if (op === CHANGE_OPERATION.set_node_attributes) {
-        const attrChange = c as NodeAttrChange;
-        oldAttrs = attrChange.oldAttrs;
-        newAttrs = attrChange.newAttrs;
-        oldNodeTypeName = attrChange.oldNodeTypeName;
-        newNodeTypeName = attrChange.newNodeTypeName;
+      if (op === CHANGE_OPERATION.set_node_attributes && c.type === "node-attr-change") {
+        oldAttrs = c.oldAttrs;
+        newAttrs = c.newAttrs;
+        oldNodeTypeName = c.oldNodeTypeName;
+        newNodeTypeName = c.newNodeTypeName;
       }
 
       // ── Move operation fields ────────────────────────────────────────────────
-      const moveNodeId = (c.dataTracked as { moveNodeId?: string }).moveNodeId;
+      const moveNodeId = c.dataTracked.moveNodeId;
       let moveRole: "source" | "destination" | undefined;
       if (moveNodeId) {
         moveRole = op === CHANGE_OPERATION.delete ? "source" : "destination";
@@ -321,7 +344,7 @@ export function createChangePopover(
       // ── Mark change fields ───────────────────────────────────────────────────
       let markName: string | undefined;
       if (c.type === "mark-change") {
-        markName = (c as MarkChange).mark.type.name;
+        markName = c.mark.type.name;
       }
 
       // ── Text preview — kind-aware ────────────────────────────────────────────
@@ -336,23 +359,11 @@ export function createChangePopover(
         const toLabel   = NODE_TYPE_LABELS[newNodeTypeName] ?? newNodeTypeName;
         text = `${fromLabel} → ${toLabel}`;
       } else if (changeKind === "node-attr" && oldAttrs && newAttrs) {
-        const parts: string[] = [];
-        const keys = new Set([
-          ...Object.keys(oldAttrs),
-          ...Object.keys(newAttrs),
-        ]);
-        for (const key of keys) {
-          if (key === "nodeId" || key === "dataTracked") continue;
-          if (oldAttrs[key] !== newAttrs[key]) {
-            const label = ATTR_LABELS[key] ?? key;
-            const from = attrValueLabel(key, oldAttrs[key]);
-            const to = attrValueLabel(key, newAttrs[key]);
-            parts.push(`${label}: ${from} → ${to}`);
-          }
-        }
         // Empty string when no meaningful attrs differ — the popover will show
         // the "Style changed" badge without a misleading preview row.
-        text = parts.join(" · ");
+        text = describeAttrChanges(oldAttrs, newAttrs);
+      } else if (c.type === "node-change") {
+        text = changePreviewText(state.doc, c, pending);
       } else {
         text = readText(c.from, c.to);
       }
@@ -361,11 +372,11 @@ export function createChangePopover(
         id: c.id,
         operation: op,
         authorID: c.dataTracked.authorID ?? "unknown",
-        status: c.dataTracked.status as CHANGE_STATUS,
+        status: c.dataTracked.status,
         from: c.from,
         to: c.to,
         text,
-        isConflict: !!(c.dataTracked as { isConflict?: boolean }).isConflict,
+        isConflict: !!c.dataTracked.isConflict,
         conflictChanges: [],
         groupIds,
         changeKind,
@@ -376,14 +387,19 @@ export function createChangePopover(
         ...(oldNodeTypeName !== undefined ? { oldNodeTypeName } : {}),
         ...(newNodeTypeName !== undefined ? { newNodeTypeName } : {}),
         ...(moveNodeId !== undefined ? { moveNodeId } : {}),
+        ...(c.dataTracked.moveId !== undefined ? { moveId: c.dataTracked.moveId } : {}),
         ...(moveRole !== undefined ? { moveRole } : {}),
         ...(markName !== undefined ? { markName } : {}),
+        ...(c.type === "node-change" || c.type === "node-attr-change" ? { nodeTypeName: c.node.type.name } : {}),
       };
     };
 
     const primaryInfo = toInfo(primary);
     primaryInfo.isConflict = isConflict;
-    primaryInfo.conflictChanges = isConflict ? conflictGroup.map(toInfo) : [];
+    // One party per act: a whole-paragraph change is recorded on the node and on
+    // its text, and those are one thing to keep or to discard.
+    const parties = changeActs(conflictGroup).map((act) => act.primary);
+    primaryInfo.conflictChanges = isConflict ? parties.map(toInfo) : [];
 
     // Stable key: use groupId when available (so moving across chars within the
     // same replacement group doesn't re-trigger onShow), or sorted ids for conflicts.

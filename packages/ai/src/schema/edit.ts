@@ -13,6 +13,7 @@
  * success that changed nothing.
  */
 import { z } from "zod";
+import { IMAGE_ALIGNS, IMAGE_WRAPS } from "@scrivr/core";
 
 /** A formatting mark on an inline run — its type name and open attrs. */
 export const InlineMarkSchema = z.strictObject({
@@ -47,17 +48,39 @@ export type RichSemanticEdit = z.infer<typeof RichSemanticEditSchema>;
 export const EditPositionSchema = z.enum(["before", "after"]);
 export type EditPosition = z.infer<typeof EditPositionSchema>;
 
+/** px, capped above the largest page so a runaway number is refused rather than laid out. */
+const ImageSizeSchema = z.number().positive().max(4000);
+
 /**
- * A block the agent can ask for. Limited to the textblock types a semantic unit
- * is made of — a container (list, table) is built by its own ops, not dropped in
- * whole, because the agent would have to get its internal structure right.
+ * How an image sits, as an agent sets it: on a new image, or through `richText`
+ * `attrs` or an edited unit's `image` on an image unit. An edit is checked
+ * strictly, so a key it does not know is refused. `align` is never `custom`:
+ * that is a position only a drag sets.
  */
-export const SemanticBlockInputSchema = z.strictObject({
-  type: z.enum(["paragraph", "heading", "codeBlock"]),
-  attrs: z.record(z.string(), z.unknown()).optional(),
-  spans: z.array(InlineSpanSchema).optional(),
-  level: z.number().int().min(1).max(6).optional(),
+export const SemanticImageAttrsSchema = z.object({
+  alt: z.string().optional(),
+  width: ImageSizeSchema.optional(),
+  height: ImageSizeSchema.optional(),
+  wrap: z.enum(IMAGE_WRAPS).optional(),
+  align: z.enum(IMAGE_ALIGNS).optional(),
 });
+export type SemanticImageAttrs = z.infer<typeof SemanticImageAttrsSchema>;
+
+/**
+ * A block the agent can ask for: one of the textblock types a semantic unit is
+ * made of, or an image (a paragraph holding it). A container (list, table) is
+ * built by its own ops, not dropped in whole, because the agent would have to
+ * get its internal structure right.
+ */
+export const SemanticBlockInputSchema = z.discriminatedUnion("type", [
+  z.strictObject({
+    type: z.enum(["paragraph", "heading", "codeBlock"]),
+    attrs: z.record(z.string(), z.unknown()).optional(),
+    spans: z.array(InlineSpanSchema).optional(),
+    level: z.number().int().min(1).max(6).optional(),
+  }),
+  z.strictObject({ type: z.literal("image"), src: z.string().min(1), ...SemanticImageAttrsSchema.shape }),
+]);
 export type SemanticBlockInput = z.infer<typeof SemanticBlockInputSchema>;
 
 /** One cell of an inserted table row. */
@@ -70,7 +93,7 @@ export type SemanticCellInput = z.infer<typeof SemanticCellInputSchema>;
 const structuralOp = <Op extends string, Shape extends z.ZodRawShape>(op: Op, shape: Shape) =>
   z.strictObject({ kind: z.literal("structural"), op: z.literal(op), ...shape });
 
-/** Insert relative to a named neighbour — `strictObject` refuses `index`. */
+/** Placement relative to a named neighbour — `strictObject` refuses `index`. */
 const anchored = { position: EditPositionSchema, anchorNodeId: z.string().min(1) };
 
 /**
@@ -79,11 +102,13 @@ const anchored = { position: EditPositionSchema, anchorNodeId: z.string().min(1)
  * item after this one", and the engine resolves that to a position.
  *
  * Discriminated on `op` so a malformed edit is reported against the one op it
- * claimed to be, rather than against all six.
+ * claimed to be, rather than against every operation.
  */
 export const StructuralSemanticEditSchema = z.discriminatedUnion("op", [
   structuralOp("insertBlock", { ...anchored, block: SemanticBlockInputSchema }),
   structuralOp("deleteBlock", { nodeId: z.string().min(1) }),
+  // A top-level block; moved once per batch.
+  structuralOp("moveBlock", { ...anchored, nodeId: z.string().min(1) }),
   structuralOp("insertListItem", {
     ...anchored,
     item: z.strictObject({
@@ -92,6 +117,8 @@ export const StructuralSemanticEditSchema = z.discriminatedUnion("op", [
     }),
   }),
   structuralOp("deleteListItem", { nodeId: z.string().min(1) }),
+  // Named by the item or its text; stays in its own list, moved once per batch.
+  structuralOp("moveListItem", { ...anchored, nodeId: z.string().min(1) }),
   structuralOp("insertTableRow", { ...anchored, cells: z.array(SemanticCellInputSchema).optional() }),
   structuralOp("deleteTableRow", { nodeId: z.string().min(1) }),
 ]);

@@ -89,7 +89,7 @@ export function useImageMenu(editor: Editor | null) {
   function setWrapMode(mode: ImageWrappingMode) {
     setWrappingMode(mode);
     if (mode === "inline" && wrappingMode !== "inline") {
-      if (info) editor?.convertImageToInlineAtVisualPosition(info.docPos);
+      if (info) editor?.placeInlineAtVisualPosition(info.docPos);
       return;
     }
     applyAttr({ wrapMode: mode, wrappingMode: "inline" });

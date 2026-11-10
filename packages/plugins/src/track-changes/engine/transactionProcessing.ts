@@ -1,19 +1,23 @@
-import { Node } from "@scrivr/core/pm";
+import { Node, Slice } from "@scrivr/core/pm";
 import { Transaction } from "@scrivr/core/pm";
 import { isHistoryTransaction } from "@scrivr/core/pm";
-import { ReplaceStep, Step } from "@scrivr/core/pm";
+import {
+  AddMarkStep,
+  AddNodeMarkStep,
+  AttrStep,
+  DocAttrStep,
+  RemoveMarkStep,
+  RemoveNodeMarkStep,
+  ReplaceAroundStep,
+  ReplaceStep,
+  Step,
+} from "@scrivr/core/pm";
 
 import { isIndentationAction, TrackChangesAction } from "../actions";
-import { ChangeSet } from "../ChangeSet";
 import { genId } from "../helpers";
 import {
-  isDeletingPendingMovedNode,
-  isDirectPendingMoveDeletion,
-} from "../step-trackers/qualifiers";
-import {
-  CHANGE_OPERATION,
-  CHANGE_STATUS,
-  TrackedAttrs,
+  TrackingRefusal,
+  TrackingResult,
   TrTrackingContext,
 } from "../types";
 
@@ -41,6 +45,26 @@ function nodeContentEquals(a: Node, b: Node): boolean {
   return true;
 }
 
+/** Content taken or written whole; a slice cut open is part of something else. */
+const whole = (slice: Slice) => slice.openStart === 0 && slice.openEnd === 0;
+
+/**
+ * A moved node keeps its id, so a deleted block with one is only moved by a copy
+ * carrying the same id — not by a new block, or another, that only reads the same.
+ */
+const sameIdentity = (inserted: Node, deleted: Node) =>
+  !deleted.attrs["nodeId"] || inserted.attrs["nodeId"] === deleted.attrs["nodeId"];
+
+/**
+ * Is `inserted` what `deleted` took away? A floating object alone in its
+ * paragraph leaves with the paragraph, which holds nothing else to move.
+ */
+function movedContent(inserted: Node, deleted: Node): boolean {
+  return (sameIdentity(inserted, deleted) && nodeContentEquals(inserted, deleted)) ||
+    (deleted.isTextblock && deleted.childCount === 1 && !!deleted.firstChild && !deleted.firstChild.isText &&
+      sameIdentity(inserted, deleted.firstChild) && nodeContentEquals(inserted, deleted.firstChild));
+}
+
 export function passThroughMeta(oldTr: Transaction, newTr: Transaction) {
   oldTr.getMeta("inputType") &&
     newTr.setMeta("inputType", oldTr.getMeta("inputType"));
@@ -49,7 +73,8 @@ export function passThroughMeta(oldTr: Transaction, newTr: Transaction) {
   return newTr;
 }
 
-export function getIndentationOperationSteps(
+/** Records an indentation's steps as one move, by grouping them under one id. */
+export function groupIndentationSteps(
   tr: Transaction,
   trContext: TrTrackingContext,
 ) {
@@ -71,70 +96,137 @@ export const excludeFromTracking = (node: Node) => {
   return node && !node.type.spec.attrs?.dataTracked;
 };
 
-/**
- * Upper bound on tracked steps per transaction for typical edits.
- * Cut operations and mass-replace bypass this limit because they legitimately
- * generate large step counts. If a normal edit exceeds this limit it most
- * likely indicates a loop or unsupported step type — tracking is skipped and
- * an error is logged so the issue can be reproduced and reported.
- */
-const MAX_TRACKED_STEPS_PER_TR = 20;
-
-export function iterationIsValid(
-  iterations: number,
-  oldTr: Transaction,
-  newTr: Transaction,
-  step: Step,
-) {
-  const uiEvent = oldTr.getMeta("uiEvent");
-  const isMassReplace = oldTr.getMeta("massSearchReplace");
-  if (iterations > MAX_TRACKED_STEPS_PER_TR && uiEvent != "cut" && !isMassReplace) {
-    console.error(
-      "@scrivr/plugins track-changes: Possible infinite loop in iterating tr.steps, tracking skipped!\n" +
-        "This is probably an error with the library, please report back to maintainers with a reproduction if possible",
-      newTr,
-    );
-    return false;
-  } else if (
-    !(step instanceof ReplaceStep) &&
-    step.constructor.name === "ReplaceStep"
-  ) {
-    console.error(
-      "@scrivr/plugins track-changes: Multiple prosemirror-transform packages imported, alias/dedupe them " +
-        "or instanceof checks fail as well as creating new steps",
-    );
-    return false;
-  }
-  return true;
+/** Step kinds the replay knows how to re-apply as tracked content. */
+function isTrackableStep(step: Step) {
+  return (
+    step instanceof ReplaceStep ||
+    step instanceof ReplaceAroundStep ||
+    step instanceof AttrStep ||
+    step instanceof AddMarkStep ||
+    step instanceof RemoveMarkStep ||
+    step instanceof AddNodeMarkStep ||
+    step instanceof RemoveNodeMarkStep
+  );
 }
 
-export const getMoveOperationsSteps = (
+/**
+ * Not content, so no record can be attached to it and none is missing by its
+ * absence. Doc attributes carry page and section settings, written through
+ * `tr.setDocAttribute`; refusing a gesture for containing one would call a
+ * normal operation untrackable.
+ */
+function isNonContentStep(step: Step) {
+  return step instanceof DocAttrStep;
+}
+
+/**
+ * The span a step says it affects, in the document it applied to. Mark and
+ * attribute steps carry an empty StepMap, so a position map cannot describe
+ * what they touched — only the step can.
+ */
+export function stepRange(step: Step): { from: number; to: number } | null {
+  if (
+    step instanceof ReplaceStep ||
+    step instanceof ReplaceAroundStep ||
+    step instanceof AddMarkStep ||
+    step instanceof RemoveMarkStep
+  ) {
+    return { from: step.from, to: step.to };
+  }
+  if (
+    step instanceof AttrStep ||
+    step instanceof AddNodeMarkStep ||
+    step instanceof RemoveNodeMarkStep
+  ) {
+    return { from: step.pos, to: step.pos };
+  }
+  return null;
+}
+
+function refusalFor(step: Step): TrackingRefusal | null {
+  if (!(step instanceof ReplaceStep) && step.constructor.name === "ReplaceStep") {
+    // Two copies of prosemirror-transform make every instanceof silently false.
+    return { reason: "duplicate-transform-package" };
+  }
+  if (isNonContentStep(step) || isTrackableStep(step)) return null;
+  // Anything else would fall straight through the replay and land untracked, so
+  // the gesture is refused whole instead of recorded in part.
+  return { reason: "unsupported-step", stepType: step.constructor.name };
+}
+
+/**
+ * Which outcome speaks for a dispatch. One dispatch can carry several
+ * transactions, and a refusal is the one a host must act on — so the last
+ * transaction must not be allowed to report success on behalf of all of them.
+ */
+export function reportedTracking(
+  reported: TrackingResult | undefined,
+  next: TrackingResult,
+): TrackingResult {
+  return reported?.status === "refused" ? reported : next;
+}
+
+/** Steps that carry authored content, and so count toward what was tracked. */
+export const contentSteps = (steps: readonly Step[]) =>
+  steps.filter(step => !isNonContentStep(step));
+
+/**
+ * Decided before the replay touches anything, so a gesture is refused whole
+ * rather than recorded in part. Size is deliberately not consulted: what
+ * matters is whether every step can be represented, not how many there are.
+ *
+ * The question here is only about step kinds; whether the steps fit together is
+ * `composeGesture`'s to answer.
+ */
+export function trackingRefusal(steps: readonly Step[]) {
+  for (const step of steps) {
+    const refusal = refusalFor(step);
+    if (refusal) return refusal;
+  }
+  return null;
+}
+
+/** A step that replaces a range with a slice. */
+type ContentStep = ReplaceStep | ReplaceAroundStep;
+
+const contentStep = (step: Step | undefined): ContentStep | undefined =>
+  step instanceof ReplaceStep || step instanceof ReplaceAroundStep ? step : undefined;
+
+/** Records which steps belong to one move, by grouping them under one id. */
+export const groupMoveSteps = (
   tr: Transaction,
   context: TrTrackingContext,
-) => {
+): void => {
   const movingAssoc = context.stepsByGroupIDMap;
 
-  if (tr.steps.length < 2) {
-    return movingAssoc;
-  }
+  if (tr.steps.length < 2) return;
 
   if (tr.getMeta(TrackChangesAction.structuralChangeAction)) {
     const commonID = genId();
-    movingAssoc.set(tr.steps[0] as ReplaceStep, commonID);
-    movingAssoc.set(tr.steps[1] as ReplaceStep, commonID);
-    return movingAssoc;
+    for (const step of tr.steps.slice(0, 2)) {
+      if (step instanceof ReplaceStep) movingAssoc.set(step, commonID);
+    }
+    return;
   }
 
   const matched: number[] = [];
+  // Text has no node to carry, so its move is the deletion and insertion
+  // linked; a node is carried, keeping its identity.
+  const pair = (a: ContentStep, b: ContentStep, moved: Node) => {
+    const moves = moved.isText ? context.textMoves : movingAssoc;
+    const id = genId();
+    if (a instanceof ReplaceStep) moves.set(a, id);
+    if (b instanceof ReplaceStep) moves.set(b, id);
+  };
 
   for (let i = 0; i < tr.steps.length; i++) {
     if (matched.includes(i)) {
       continue;
     }
-    const step = tr.steps[i] as ReplaceStep;
+    const step = contentStep(tr.steps[i]);
     const doc = tr.docs[i];
 
-    if (!step.slice) {
+    if (!step) {
       continue;
     }
     const stepDeletesContent = step.from !== step.to && step.slice.size === 0;
@@ -145,9 +237,9 @@ export const getMoveOperationsSteps = (
       if (g === i || matched.includes(g)) {
         continue;
       }
-      const peerStep = tr.steps[g] as ReplaceStep;
+      const peerStep = contentStep(tr.steps[g]);
 
-      if (!peerStep.slice) {
+      if (!peerStep) {
         continue;
       }
       const peerStepInsertsContent =
@@ -160,16 +252,17 @@ export const getMoveOperationsSteps = (
 
         if (
           peerStepInsertsContent &&
+          whole(peerStep.slice) &&
+          whole(deletedContent) &&
           deletedContent.content.firstChild &&
-          nodeContentEquals(
+          movedContent(
             peerStep.slice.content.firstChild,
             deletedContent.content.firstChild,
           )
         ) {
-          const commonID = genId();
-          movingAssoc.set(peerStep, commonID);
-          movingAssoc.set(step, commonID);
+          pair(peerStep, step, deletedContent.content.firstChild);
           matched.push(i, g);
+          break;
         }
         continue;
       }
@@ -181,100 +274,22 @@ export const getMoveOperationsSteps = (
           peerStep.to,
         );
         if (
+          whole(insertedContent) &&
+          whole(deletedPeerContent) &&
           insertedContent.content.firstChild &&
           deletedPeerContent.content.firstChild &&
-          nodeContentEquals(
+          movedContent(
             insertedContent.content.firstChild,
             deletedPeerContent.content.firstChild,
           )
         ) {
-          const commonID = genId();
-          movingAssoc.set(peerStep, commonID);
-          movingAssoc.set(step, commonID);
+          pair(peerStep, step, insertedContent.content.firstChild);
+          matched.push(i, g);
+          break;
         }
-        matched.push(i, g);
       }
     }
   }
 };
-
-export const filterMeaninglessMoveSteps = (
-  tr: Transaction,
-  context: TrTrackingContext,
-) => {
-  const cleanSteps: Array<Step | null> = [];
-
-  for (let i = 0; i < tr.steps.length; i++) {
-    const step = tr.steps[i];
-    const moveID = context.stepsByGroupIDMap.get(step as ReplaceStep);
-
-    if (moveID) {
-      const prevMoveID = isDeletingPendingMovedNode(
-        step as ReplaceStep,
-        tr.docs[i]!,
-      );
-      if (prevMoveID) {
-        context.stepsByGroupIDMap.forEach((replaceStepMoveID, replaceStep) => {
-          if (replaceStep !== step && moveID === replaceStepMoveID) {
-            context.stepsByGroupIDMap.set(replaceStep, prevMoveID);
-          }
-        });
-        cleanSteps.push(null);
-        continue;
-      }
-
-      if (
-        step instanceof ReplaceStep &&
-        !tr.getMeta(TrackChangesAction.structuralChangeAction)
-      ) {
-        const { slice } = step;
-        if (slice?.content?.firstChild) {
-          const insertedNode = slice.content.firstChild;
-          if (insertedNode.attrs.dataTracked) {
-            const isPendingInsert = ChangeSet.isPendingChange(
-              insertedNode.attrs.dataTracked as TrackedAttrs[],
-              CHANGE_OPERATION.insert,
-            );
-            if (isPendingInsert) {
-              cleanSteps.push(null);
-              continue;
-            }
-          }
-        }
-      }
-    }
-
-    cleanSteps.push(step || null);
-  }
-  return cleanSteps;
-};
-
 
 export const trFromHistory = (tr: Transaction): boolean => isHistoryTransaction(tr);
-export const changeMovedToInsertsOnSourceDeletion = (
-  tr: Transaction,
-  newTr: Transaction,
-  trContext: TrTrackingContext,
-) => {
-  for (let i = 0; i < tr.steps.length; i++) {
-    const step = tr.steps[i];
-    if (step instanceof ReplaceStep) {
-      const doc = tr.docs[tr.steps.indexOf(step)]!;
-      if (isDirectPendingMoveDeletion(step, doc, trContext.stepsByGroupIDMap)) {
-        const node = doc.nodeAt(step.from);
-        if (node?.attrs.dataTracked) {
-          newTr.setNodeMarkup(step.from, undefined, {
-            ...node.attrs,
-            dataTracked: node.attrs.dataTracked.filter(
-              (t: TrackedAttrs) =>
-                !(
-                  t.operation === CHANGE_OPERATION.move &&
-                  t.status === CHANGE_STATUS.pending
-                ),
-            ),
-          });
-        }
-      }
-    }
-  }
-};

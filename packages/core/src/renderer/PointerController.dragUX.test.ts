@@ -29,6 +29,7 @@ import {
 } from "../test-utils";
 import type { PointerControllerSetup } from "../test-utils";
 import type { AnchoredObjectPlacement } from "../layout/AnchoredObjects";
+import { StarterKit } from "../extensions/StarterKit";
 
 // ── Local test fixtures ──────────────────────────────────────────────────────
 
@@ -42,6 +43,7 @@ interface ImageRect {
 }
 
 interface LayoutBlockFixture {
+  kind: "text";
   nodePos: number;
   y: number;
   height: number;
@@ -251,8 +253,8 @@ describe("PointerController — drag UX", () => {
       overrideLayout(setup.editor, {
         anchoredObjects: [makePlacement(setup)],
         pages: [
-          { pageNumber: 1, blocks: [{ nodePos: 0, y: 0, height: 200 }] },
-          { pageNumber: 2, blocks: [{ nodePos: 42, y: 50, height: 120 }] },
+          { pageNumber: 1, blocks: [{ kind: "text", nodePos: 0, y: 0, height: 200 }] },
+          { pageNumber: 2, blocks: [{ kind: "text", nodePos: 42, y: 50, height: 120 }] },
         ] satisfies { pageNumber: number; blocks: LayoutBlockFixture[] }[],
       });
       // posAtCoords returns 0 on page 2 (virtualized), 5 on page 1.
@@ -279,8 +281,8 @@ describe("PointerController — drag UX", () => {
   describe("Step 7 — same-page re-anchor", () => {
     it("dy past threshold re-anchors to the closer paragraph", () => {
       setup = makePointerControllerSetup({ isPageless: true });
-      const sourceBlock = { nodePos: 4, y: 50, height: 100 };
-      const targetBlock = { nodePos: 20, y: 200, height: 100 };
+      const sourceBlock: LayoutBlockFixture = { kind: "text", nodePos: 4, y: 50, height: 100 };
+      const targetBlock: LayoutBlockFixture = { kind: "text", nodePos: 20, y: 200, height: 100 };
       overrideLayout(setup.editor, {
         anchoredObjects: [makePlacement(setup)],
         pages: [
@@ -302,10 +304,91 @@ describe("PointerController — drag UX", () => {
       expect(setNodeAttrs).not.toHaveBeenCalled();
     });
 
+    it.each([5, 50, 150])("a stacked float dragged %ipx lands where it was dropped", (dy) => {
+      const words = "word ".repeat(40).trim();
+      const image = (height: number) => ({
+        type: "image",
+        attrs: { src: "x", wrapMode: "square", xAlign: "left", width: 400, height },
+      });
+      setup = makePointerControllerSetup({
+        content: {
+          type: "doc",
+          content: [
+            // Both anchored in one paragraph, so the second overlaps the first
+            // whatever the fonts, and stacks below it.
+            { type: "paragraph", content: [image(150), image(120), { type: "text", text: `A ${words}` }] },
+            { type: "paragraph", content: [{ type: "text", text: words }] },
+          ],
+        },
+      });
+      const editor = setup.editor;
+      const stacked = editor.layout.anchoredObjects?.[1];
+      if (!stacked) throw new Error("no stacked float");
+      expect(stacked.stackOffset ?? 0).toBeGreaterThan(0);
+
+      const grabX = stacked.x + 30;
+      const grabY = stacked.y + 30;
+      mousedown(setup.container, grabX, grabY);
+      mousemove(grabX, grabY + dy);
+      mouseup(grabX, grabY + dy);
+
+      const landed = editor.layout.anchoredObjects?.find((p) => p.node.attrs["height"] === 120);
+      if (!landed) throw new Error("float vanished");
+      expect(landed.page).toBe(stacked.page);
+      expect(landed.globalY).toBeCloseTo(stacked.globalY + dy, 6);
+    });
+
+    function dragFirstImage(content: unknown[], dy: number): { before: AnchoredObjectPlacement; anchorY: number; after: AnchoredObjectPlacement } {
+      setup = makePointerControllerSetup({ content: { type: "doc", content } });
+      const before = setup.editor.layout.anchoredObjects?.[0];
+      if (!before) throw new Error("no image");
+      const anchorY = setup.editor.layout.pages[0]?.blocks.at(-1)?.y ?? 0;
+      const grabX = before.x + 20;
+      const grabY = before.y + 10;
+      mousedown(setup.container, grabX, grabY);
+      mousemove(grabX, grabY + dy);
+      mouseup(grabX, grabY + dy);
+      const after = setup.editor.layout.anchoredObjects?.[0];
+      if (!after) throw new Error("image vanished");
+      return { before, anchorY, after };
+    }
+
+    it("an image clamped to the page top lands where it was dropped", () => {
+      const { before, after } = dragFirstImage([
+        { type: "paragraph", content: [{ type: "text", text: "word ".repeat(40).trim() }] },
+        { type: "paragraph", content: [{ type: "text", text: "A" }, { type: "image", attrs: { src: "x", wrapMode: "front", xAlign: "left", width: 80, height: 40, yOffset: -5000 } }] },
+      ], 60);
+      expect(before.clamped).toBe(true);
+      expect(after.globalY).toBeCloseTo(before.globalY + 60, 6);
+    });
+
+    it("an image locked off its offset lands where it was dropped", () => {
+      // A top-bottom image over the last line of the paragraph above its own
+      // has no fixed point and is locked where the line it covers leaves it.
+      const above = { type: "paragraph", content: [{ type: "text", text: `Above ${"word ".repeat(40).trim()}` }] };
+      setup = makePointerControllerSetup({ content: { type: "doc", content: [above, { type: "paragraph", content: [{ type: "text", text: "Anchor" }] }] } });
+      const [aboveBlock, anchorBlock] = setup.editor.layout.pages[0]?.blocks ?? [];
+      const lastLine = aboveBlock?.lines.at(-1);
+      if (!aboveBlock || !anchorBlock || !lastLine) throw new Error("no blocks");
+      const yOffset = aboveBlock.y + aboveBlock.height - lastLine.lineHeight - anchorBlock.y;
+      setup.cleanup();
+
+      const { before, anchorY, after } = dragFirstImage([
+        above,
+        { type: "paragraph", content: [
+          { type: "text", text: `Anchor ${"word ".repeat(40).trim()}` },
+          { type: "image", attrs: { src: "x", wrapMode: "top-bottom", xAlign: "left", width: 200, height: 60, yOffset } },
+        ] },
+      ], 150);
+      // Page 1: global and page-local Y differ by nothing.
+      expect(before.globalY).not.toBeCloseTo(anchorY + yOffset, 1);
+      expect(after.globalY).toBeCloseTo(before.globalY + 150, 6);
+    });
+
     it("no closer paragraph → keeps the original anchor (setNodeAttrs path)", () => {
       setup = makePointerControllerSetup({ isPageless: true });
-      const sourceBlock = { nodePos: 4, y: 50, height: 100 };
-      const farBlock = { nodePos: 20, y: 400, height: 100 };
+      const sourceBlock: LayoutBlockFixture = { kind: "text", nodePos: 4, y: 50, height: 100 };
+      const farBlock: LayoutBlockFixture = { kind: "text", nodePos: 20, y: 400, height: 100 };
       overrideLayout(setup.editor, {
         anchoredObjects: [makePlacement(setup)],
         pages: [
@@ -325,6 +408,95 @@ describe("PointerController — drag UX", () => {
     });
   });
 
+  describe("a drop measures from where layout measures the anchor", () => {
+    const PAGE = 1123;
+    const SLOT = PAGE + 24;
+    const words = (n: number) => "word ".repeat(n).trim();
+    const text = (t: string) => ({ type: "text", text: t });
+    const front = { type: "image", attrs: { src: "x", wrapMode: "front", xAlign: "left", width: 80, height: 40 } };
+    const fillers = (n: number) => Array.from({ length: n }, (_, i) => ({ type: "paragraph", content: [text(`F${i}`)] }));
+
+    function dragImage(content: unknown[], to: (layout: PointerControllerSetup["editor"]["layout"]) => { page: number; y: number }) {
+      setup = makePointerControllerSetup({ tileHeight: PAGE, slotHeight: SLOT, content: { type: "doc", content } });
+      const editor = setup.editor;
+      const source = editor.layout.anchoredObjects?.[0];
+      if (!source) throw new Error("no image");
+      const grabX = source.x + 20;
+      const grabY = (source.page - 1) * SLOT + source.y + 10;
+      const target = to(editor.layout);
+      const dropY = (target.page - 1) * SLOT + target.y + 10;
+      mousedown(setup.container, grabX, grabY);
+      mousemove(grabX, dropY);
+      mouseup(grabX, dropY);
+      const landed = editor.layout.anchoredObjects?.[0];
+      if (!landed) throw new Error("image vanished");
+      return landed;
+    }
+
+    function startOn(layout: PointerControllerSetup["editor"]["layout"], prefix: string) {
+      for (const page of layout.pages) {
+        const block = page.blocks.find((b) => !b.isContinuation && b.node.textContent.startsWith(prefix));
+        if (block) return { page: page.pageNumber, block };
+      }
+      throw new Error(`no ${prefix}`);
+    }
+
+    it("an image dragged into the middle of a paragraph on another page lands where it was dropped", () => {
+      const landed = dragImage(
+        [{ type: "paragraph", content: [text("Img"), front] }, ...fillers(40), { type: "paragraph", content: [text(`P2 ${words(400)}`)] }],
+        (layout) => {
+          const { page, block } = startOn(layout, "P2");
+          expect(page).toBe(2);
+          const lineFive = block.lines.slice(0, 5).reduce((sum, line) => sum + line.lineHeight, 0);
+          return { page, y: block.y + lineFive };
+        },
+      );
+      const { page, block } = startOn(setup.editor.layout, "P2");
+      const lineFive = block.lines.slice(0, 5).reduce((sum, line) => sum + line.lineHeight, 0);
+      expect(landed.page).toBe(page);
+      expect(landed.y).toBeCloseTo(block.y + lineFive, 6);
+    });
+
+    it("an image dropped on a paragraph carried over from the previous page stays on the page it was dropped on", () => {
+      let target = { page: 0, y: 0 };
+      const landed = dragImage(
+        [
+          { type: "paragraph", content: [text("Img"), front] },
+          ...fillers(25),
+          { type: "paragraph", content: [text(`P2 ${words(400)}`)] },
+          { type: "paragraph", content: [text(`Q ${words(40)}`)] },
+        ],
+        (layout) => {
+          const carried = layout.pages[1]?.blocks[0];
+          expect(carried?.isContinuation).toBe(true);
+          target = { page: 2, y: (carried?.y ?? 0) + 20 };
+          return target;
+        },
+      );
+      expect(landed.page).toBe(target.page);
+      expect(landed.y).toBeCloseTo(target.y, 6);
+    });
+
+    it("an image dragged up onto a carried-over paragraph on its own page stays on that page", () => {
+      let target = { page: 0, y: 0 };
+      const landed = dragImage(
+        [
+          ...fillers(25),
+          { type: "paragraph", content: [text(`P2 ${words(400)}`)] },
+          { type: "paragraph", content: [front, text(`Q ${words(40)}`)] },
+        ],
+        (layout) => {
+          const carried = layout.pages[1]?.blocks[0];
+          expect(carried?.isContinuation).toBe(true);
+          target = { page: 2, y: (carried?.y ?? 0) + 10 };
+          return target;
+        },
+      );
+      expect(landed.page).toBe(target.page);
+      expect(landed.y).toBeCloseTo(target.y, 6);
+    });
+  });
+
   describe("Step 8 — cross-page yOffset preserves visual position", () => {
     it("drop on a destination page commits non-zero yOffset against the new anchor", () => {
       setup = makePointerControllerSetup({
@@ -335,8 +507,8 @@ describe("PointerController — drag UX", () => {
       overrideLayout(setup.editor, {
         anchoredObjects: [makePlacement(setup)],
         pages: [
-          { pageNumber: 1, blocks: [{ nodePos: 0, y: 0, height: 200 }] },
-          { pageNumber: 2, blocks: [{ nodePos: 42, y: 50, height: 120 }] },
+          { pageNumber: 1, blocks: [{ kind: "text", nodePos: 0, y: 0, height: 200 }] },
+          { pageNumber: 2, blocks: [{ kind: "text", nodePos: 42, y: 50, height: 120 }] },
         ] satisfies { pageNumber: number; blocks: LayoutBlockFixture[] }[],
       });
       vi.spyOn(setup.editor.charMap, "posAtCoords").mockImplementation((_x, _y, page) =>
@@ -435,6 +607,137 @@ describe("PointerController — drag UX", () => {
       mousedown(setup.container, SQUARE_RECT.x + 40, SQUARE_RECT.y + 40);
       expect(setup.controller.pendingAnchoredDrag).not.toBeNull();
       expect(selectNode).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe("a drop over a table anchors the image in the cell under it, as Word does", () => {
+    const cell = (text: string) => ({ type: "tableCell", content: [{ type: "paragraph", content: [{ type: "text", text }] }] });
+    const tableRows = Array.from({ length: 4 }, (_, r) => ({
+      type: "tableRow",
+      content: [cell(`Row ${r} first`), cell(`Row ${r} second`)],
+    }));
+    const image = { type: "image", attrs: { src: "x", wrapMode: "square", xAlign: "left", width: 80, height: 60 } };
+
+    function cellUnder(x: number, y: number) {
+      for (const block of setup.editor.layout.pages[0]?.blocks ?? []) {
+        if (block.kind !== "composite" || y < block.y || y >= block.y + block.height) continue;
+        const hit = block.regions?.find((c) => x >= c.x && x < c.x + c.width);
+        if (hit) return { block, cell: hit };
+      }
+      throw new Error("no cell there");
+    }
+
+    function drag(from: AnchoredObjectPlacement, toX: number, toY: number): void {
+      const grabX = from.x + 10;
+      const grabY = from.y + 10;
+      mousedown(setup.container, grabX, grabY);
+      mousemove(toX, toY);
+      mouseup(toX, toY);
+    }
+
+    it("a body image dropped on a cell is laid out in that cell, where it was dropped", () => {
+      setup = makePointerControllerSetup({
+        extensions: [StarterKit.configure({ table: true })],
+        content: {
+          type: "doc",
+          content: [
+            { type: "paragraph", content: [{ type: "text", text: "Lead" }, image] },
+            { type: "paragraph", content: [{ type: "text", text: "Spacer ".repeat(30) }] },
+            { type: "table", content: tableRows },
+          ],
+        },
+      });
+      const before = setup.editor.layout.anchoredObjects?.[0];
+      if (!before) throw new Error("no image");
+      const target = cellUnder(400, (setup.editor.layout.pages[0]?.blocks.at(-2)?.y ?? 0) + 5);
+      const dropX = target.cell.x + target.cell.width / 2;
+      const dropY = target.block.y + 20;
+      drag(before, dropX, dropY);
+
+      const after = setup.editor.layout.anchoredObjects?.[0];
+      if (!after) throw new Error("image vanished");
+      expect(after.regionPos).toBe(cellUnder(dropX, dropY).cell.pos);
+      expect(after.page).toBe(before.page);
+      expect(after.y).toBeCloseTo(dropY - 10, 6);
+      expect(after.x).toBeCloseTo(dropX - 10, 6);
+    });
+
+    it("a drop on a cell with no paragraph of its own leaves the image as it was", () => {
+      const nested = { type: "table", content: [{ type: "tableRow", content: [cell("Inner a"), cell("Inner b")] }] };
+      setup = makePointerControllerSetup({
+        extensions: [StarterKit.configure({ table: true })],
+        content: {
+          type: "doc",
+          content: [
+            { type: "table", content: [
+              { type: "tableRow", content: [{ type: "tableCell", content: [{ type: "paragraph", content: [{ type: "text", text: "In cell" }, image] }] }, cell("Other")] },
+              { type: "tableRow", content: [{ type: "tableCell", content: [nested] }, cell("Beside nested")] },
+            ] },
+          ],
+        },
+      });
+      const before = setup.editor.layout.anchoredObjects?.[0];
+      if (!before?.regionPos) throw new Error("image not in a cell");
+      const docBefore = setup.editor.getState().doc;
+      const rows = (setup.editor.layout.pages[0]?.blocks ?? []).filter((b) => b.kind === "composite");
+      const nestedRow = rows.find((b) => b.node.textContent.includes("Beside nested"));
+      const nestedCell = nestedRow?.regions?.[0];
+      if (!nestedRow || !nestedCell) throw new Error("no nested cell");
+      drag(before, nestedCell.x + 20, nestedRow.y + nestedRow.height - 3);
+
+      const after = setup.editor.layout.anchoredObjects?.[0];
+      expect(after?.docPos).toBe(before.docPos);
+      expect(after?.node.attrs).toEqual(before.node.attrs);
+      expect(setup.editor.getState().doc.textContent).toBe(docBefore.textContent);
+    });
+
+    it("an image dragged out of a cell into the body is anchored in the body again", () => {
+      setup = makePointerControllerSetup({
+        extensions: [StarterKit.configure({ table: true })],
+        content: {
+          type: "doc",
+          content: [
+            { type: "table", content: [{ type: "tableRow", content: [{ type: "tableCell", content: [{ type: "paragraph", content: [{ type: "text", text: "In cell" }, image] }] }, cell("Other")] }, ...tableRows] },
+            { type: "paragraph", content: [{ type: "text", text: "After ".repeat(60) }] },
+          ],
+        },
+      });
+      const before = setup.editor.layout.anchoredObjects?.[0];
+      if (!before?.regionPos) throw new Error("image not in a cell");
+      const after = setup.editor.layout.pages[0]?.blocks.at(-1);
+      if (!after) throw new Error("no paragraph after");
+      drag(before, before.x + 10, after.y + 30);
+
+      const landed = setup.editor.layout.anchoredObjects?.[0];
+      if (!landed) throw new Error("image vanished");
+      expect(landed.regionPos).toBeUndefined();
+      // The emptied row shrinks and the text below moves up; the image keeps
+      // its place relative to the paragraph it was dropped on.
+      expect(landed.globalY - landed.anchorGlobalY).toBeCloseTo(after.y + 30 - 10 - after.y, 6);
+    });
+  });
+
+  describe("a sideways drag stores x from the content area's left edge, as Word's column does", () => {
+    it("the stored x plus the left margin is where the image paints", () => {
+      setup = makePointerControllerSetup({
+        content: {
+          type: "doc",
+          content: [{ type: "paragraph", content: [
+            { type: "text", text: "Lead " },
+            { type: "image", attrs: { src: "x", wrapMode: "square", xAlign: "left", width: 80, height: 60 } },
+          ] }],
+        },
+      });
+      const before = setup.editor.layout.anchoredObjects?.[0];
+      if (!before) throw new Error("no image");
+      mousedown(setup.container, before.x + 10, before.y + 10);
+      mousemove(before.x + 110, before.y + 10);
+      mouseup(before.x + 110, before.y + 10);
+
+      const after = setup.editor.layout.anchoredObjects?.[0];
+      if (!after) throw new Error("image vanished");
+      expect(after.x).toBeCloseTo(before.x + 100, 6);
+      expect(after.node.attrs["x"]).toBeCloseTo(after.x - setup.editor.layout.pageConfig.margins.left, 6);
     });
   });
 });

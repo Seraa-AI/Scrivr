@@ -67,7 +67,14 @@ export function textLine(
 export function block(
   nodeType: string,
   lines: LayoutLine[],
-  opts: { y?: number; align?: LayoutBlock["align"]; listMarker?: string; attrs?: Record<string, unknown> } = {},
+  opts: {
+    y?: number;
+    align?: LayoutBlock["align"];
+    /** A list's bullet or number, drawn when `markerX` places it. */
+    marker?: string;
+    markerX?: number;
+    attrs?: Record<string, unknown>;
+  } = {},
 ): LayoutBlock {
   const type = schema.nodes[nodeType];
   if (!type) throw new Error(`fixture: schema has no \`${nodeType}\``);
@@ -85,7 +92,9 @@ export function block(
     blockType: nodeType,
     align: opts.align ?? "left",
     availableWidth: AVAIL_W,
-    ...(opts.listMarker ? { listMarker: opts.listMarker } : {}),
+    ...(opts.marker !== undefined && opts.markerX !== undefined
+      ? { marker: { painter: "list", data: opts.marker, x: opts.markerX } }
+      : {}),
   } as unknown as LayoutBlock;
 }
 
@@ -115,23 +124,24 @@ export function tableRowBlock(): LayoutBlock {
     width: number,
     opts: { background?: string; vMerge?: string } = {},
   ) => ({
-    cellPos: 1,
+    pos: 1,
     x,
     y: 0,
     width,
     height: 40,
-    vMerge: opts.vMerge ?? "none",
-    background: opts.background ?? null,
+    inset: { top: 4, right: 6, bottom: 4, left: 6 },
     blocks: [block("paragraph", [textLine("Cell")])],
+    data: { vMerge: opts.vMerge ?? "none", background: opts.background ?? null },
   });
 
   return {
     ...block("tableRow", []),
-    cells: [
+    kind: "composite",
+    regions: [
       cell(MARGIN, 240, { background: "rgb(238, 238, 238)" }),
       cell(MARGIN + 240, 120, { vMerge: "continue" }),
     ],
-    isLastRow: true,
+    lastUnit: true,
   } as unknown as LayoutBlock;
 }
 

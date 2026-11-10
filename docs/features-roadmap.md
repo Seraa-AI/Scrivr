@@ -543,7 +543,7 @@ The `TrackChanges` extension in `@scrivr/plugins` is far more complete than a ty
 - **Accept / Reject** — two-pass `applyChanges()` handles text, node attributes, and move operations; `setChangeStatuses(status, ids)` command accepts an array of IDs
 - **Canvas rendering** — `onEditorReady` registers an overlay handler that draws inserts in a 6-shade green family (rotated by author ID hash), deletes in a 6-shade red family, and conflicts in amber (rendered on top); deduplicates when two authors share the same pixel
 - **Conflict popover** — headless `createChangePopover(editor, callbacks)` controller fires `onShow(rect, info)`, `onMove`, and `onHide`. `info.conflictChanges` carries all overlapping parties so the React layer can render per-author accept/reject buttons
-- **AI suggestion pipeline** — `insertAsSuggestion(text, from, to, authorID)` and `applyDiffAsSuggestion({ nodeId, proposedText, authorID })` insert AI edits as tracked changes using a legal-aware LCS tokenizer with character-level refinement and `groupId` pairing so delete + insert pairs can be accepted/rejected atomically
+- **AI suggestion pipeline** — `insertAsSuggestion(text, from, to, authorID)` and `applyDiffAsSuggestion({ nodeId, proposedText, authorID })` insert AI edits as tracked changes using a legal-aware word-level LCS diff grouped into phrase replacements; a replacement's delete and insert share a `groupId` and are accepted or rejected as one
 - **`ChangeSet` API** — `changeSet.changes`, `.pending`, `.groupChanges`, `.changeTree`, `.get(id)`, `.hasDuplicateIds`, `.hasInconsistentData`
 
 Configuration:

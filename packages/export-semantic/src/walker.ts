@@ -1,5 +1,5 @@
 import type { Node as PmNode } from "@scrivr/core/pm";
-import type { SemanticNodeResult, SemanticPart, SemanticUnit, UnitCtx } from "@scrivr/core";
+import { outlineLevelOf, outlineTitleOf, type SemanticChange, type SemanticHeading, type SemanticNodeResult, type SemanticPart, type SemanticUnit, type UnitCtx } from "@scrivr/core";
 import type { ResolvedHandlers } from "./collectHandlers";
 import { groupBlocks } from "./grouping";
 import { resolveNodeId, type BlockEntry } from "./id";
@@ -16,9 +16,8 @@ function warnUnknown(name: string): void {
   console.warn(`[semantic] no handler for node type "${name}" — emitting type:"unknown"`);
 }
 
-function headingLevelOf(node: PmNode): number {
-  const raw = node.attrs["level"];
-  return typeof raw === "number" ? raw : 1;
+function unplaced({ at: _at, length: _length, ...change }: SemanticChange): SemanticChange {
+  return change;
 }
 
 /**
@@ -49,6 +48,27 @@ export function walkSemantic(
   const stack: { level: number; title: string }[] = [];
   let order = 0;
 
+  // What the proposed view leaves out of a title: what the lane reports
+  // removed, and a text run its mark handlers drop (a tracked deletion).
+  const removed = (node: PmNode): boolean =>
+    ctx.isRemoved(node) || (node.isText && (node.text ?? "") !== "" && ctx.toText(node) === "");
+  // A block heads a section when its spec declares an outline level and its
+  // title is not empty, titled by the rule the PDF bookmarks use.
+  const headingOf = (node: PmNode): { level: number; title: string } | null => {
+    const level = outlineLevelOf(node);
+    if (level === null) return null;
+    const title = outlineTitleOf(node, removed);
+    return title === "" ? null : { level, title };
+  };
+  // A heading sits under the open headings shallower than it, then heads
+  // what follows it.
+  const enter = (heading: { level: number; title: string }): string[] => {
+    while (stack.length > 0 && stack[stack.length - 1]!.level >= heading.level) stack.pop();
+    const under = stack.map((s) => s.title);
+    stack.push(heading);
+    return under;
+  };
+
   for (const group of groups) {
     const anchor = group[0]!.node;
     const nodes = group.map((e) => e.node);
@@ -62,27 +82,27 @@ export function walkSemantic(
       result = { type: "unknown" };
     }
 
-    // Breadcrumb is the ancestor heading path. For a heading unit, pop
-    // same/shallower-level entries FIRST so its own breadcrumb reflects only
-    // true ancestors (a sibling heading — or a top-level heading with none —
-    // must not inherit the previous section). Body units then read the full
-    // active-heading stack.
-    const isHeading = anchor.type.name === "heading";
-    let headingLevel: number | undefined;
-    if (isHeading) {
-      headingLevel = headingLevelOf(anchor);
-      while (stack.length > 0 && stack[stack.length - 1]!.level >= headingLevel) {
-        stack.pop();
-      }
-    }
-    const breadcrumb = stack.map((s) => s.title);
-    if (isHeading && headingLevel !== undefined) {
-      // Breadcrumbs are embedding input too, so they must use the same
-      // mark-aware extraction as unit text (notably excluding tracked deletes).
-      stack.push({ level: headingLevel, title: ctx.toText(anchor) });
+    // A heading unit's breadcrumb is its true ancestors (a sibling heading
+    // must not inherit the previous section); any other unit reads the open
+    // headings. Headings nested inside the unit then head what follows it.
+    const nodeIds = group.map(resolveNodeId);
+    const anchorHeading = headingOf(anchor);
+    const breadcrumb = anchorHeading ? enter(anchorHeading) : stack.map((s) => s.title);
+    const headings: SemanticHeading[] = anchorHeading
+      ? [{ nodeId: nodeIds[0]!, ...anchorHeading, breadcrumb }]
+      : [];
+    for (const node of nodes) {
+      node.descendants((child) => {
+        const nested = headingOf(child);
+        if (nested) {
+          const raw = child.attrs["nodeId"];
+          const nodeId = typeof raw === "string" && raw.length > 0 ? raw : `${nodeIds[0]!}/h${headings.length}`;
+          headings.push({ nodeId, ...nested, breadcrumb: enter(nested) });
+        }
+        return !child.isTextblock;
+      });
     }
 
-    const nodeIds = group.map(resolveNodeId);
     const text = result.text ?? ctx.toText(nodes);
     const unit: SemanticUnit = {
       id: nodeIds[0]!,
@@ -94,9 +114,12 @@ export function walkSemantic(
       order: order++,
       text,
     };
-    const changes = ctx.toChanges(nodes);
+    // Offsets index the walker's own text; a handler that overrides it gets none.
+    const placed = ctx.toChanges(nodes);
+    const changes = result.text === undefined || result.text === ctx.toText(nodes) ? placed : placed.map(unplaced);
     if (changes.length > 0) unit.changes = changes;
-    if (headingLevel !== undefined) unit.headingLevel = headingLevel;
+    if (anchorHeading) unit.headingLevel = anchorHeading.level;
+    if (headings.length > 0) unit.headings = headings;
     // Block styling markdown can't express (alignment, indent, font, …), taken
     // from the anchor block. Only present when non-default.
     const attrs = ctx.attrsOf(anchor);
@@ -113,6 +136,9 @@ export function walkSemantic(
     const markdown = result.markdown ?? ctx.toMarkdown(nodes);
     if (changes.length === 0 && markdown.length > 0) unit.markdown = markdown;
     if (result.cells !== undefined) unit.cells = result.cells;
+    if (result.image !== undefined) unit.image = result.image;
+    // A grouped unit is gone only when every block in it is.
+    if (nodes.every((node) => ctx.isRemoved(node))) unit.proposedForDeletion = true;
     // Container units (list, table, …) expose their inner leaf textblocks as
     // individually addressable `parts` — the edit surface. A leaf unit has none.
     const parts = extractParts(nodes, ctx, breadcrumb);
@@ -192,6 +218,9 @@ function collectParts(
         }
         const attrs = ctx.attrsOf(child);
         if (attrs) part.attrs = attrs;
+        const changes = ctx.toChanges(child);
+        if (changes.length > 0) part.changes = changes;
+        if (ctx.isRemoved(child)) part.proposedForDeletion = true;
         out.push(part);
       }
       return; // textblocks hold only inline content — nothing deeper to collect

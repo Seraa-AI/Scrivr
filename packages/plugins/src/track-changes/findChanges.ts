@@ -2,6 +2,7 @@ import { Node as PMNode } from "@scrivr/core/pm";
 import { EditorState } from "@scrivr/core/pm";
 
 import { ChangeSet } from "./ChangeSet";
+import { joinedBlockAt } from "./lib/deleteBreak";
 import { getMarkTrackedData, getNodeTrackedData } from "./helpers";
 import {
   CHANGE_OPERATION,
@@ -13,7 +14,76 @@ import {
   PartialChange,
   ReferenceChange,
   TextChange,
+  TrackedAttrs,
 } from "./types";
+
+type PartialNodeTrackedChange =
+  | PartialChange<TextChange>
+  | PartialChange<NodeAttrChange>
+  | PartialChange<ReferenceChange>
+  | PartialChange<NodeChange>;
+
+type ChangeBuilder = (
+  node: PMNode,
+  pos: number,
+  id: string,
+  dataTracked: Partial<TrackedAttrs>,
+  doc: PMNode,
+) => PartialNodeTrackedChange;
+
+const changeBase = (node: PMNode, pos: number, id: string, dataTracked: Partial<TrackedAttrs>) => ({
+  id,
+  from: pos,
+  to: pos + node.nodeSize,
+  dataTracked: { ...dataTracked },
+});
+
+const textChange: ChangeBuilder = (node, pos, id, dataTracked) => ({
+  ...changeBase(node, pos, id, dataTracked),
+  type: "text-change",
+  text: node.text ?? "",
+  nodeType: node.type,
+});
+
+const nodeAttrChange: ChangeBuilder = (node, pos, id, dataTracked) => {
+  const update = dataTracked.operation === CHANGE_OPERATION.set_node_attributes ? dataTracked : undefined;
+  const oldNodeTypeName = update?.oldNodeTypeName;
+  return {
+    ...changeBase(node, pos, id, dataTracked),
+    type: "node-attr-change",
+    node,
+    newAttrs: { ...node.attrs },
+    oldAttrs: { ...update?.oldAttrs },
+    ...(oldNodeTypeName ? { oldNodeTypeName, newNodeTypeName: node.type.name } : {}),
+  };
+};
+
+const referenceChange: ChangeBuilder = (node, pos, id, dataTracked) => ({
+  ...changeBase(node, pos, id, dataTracked),
+  type: "reference-change",
+});
+
+const nodeChange: ChangeBuilder = (node, pos, id, dataTracked, doc) => {
+  const joinsAt = dataTracked.operation === CHANGE_OPERATION.node_join ? joinedBlockAt(doc, pos + node.nodeSize) : undefined;
+  return {
+    ...changeBase(node, pos, id, dataTracked),
+    type: "node-change",
+    node,
+    children: [],
+    attrs: { ...node.attrs },
+    ...(joinsAt !== undefined ? { joinsAt } : {}),
+  };
+};
+
+/**
+ * Block changes whose shape depends on the operation; any other operation is a
+ * node-change. A map, not an object: a synced record may name any operation,
+ * "toString" included, which an object lookup finds on its prototype.
+ */
+const BUILD = new Map<string, ChangeBuilder>([
+  [CHANGE_OPERATION.set_node_attributes, nodeAttrChange],
+  [CHANGE_OPERATION.reference, referenceChange],
+]);
 
 /**
  * Finds all tracked changes (text marks or node attributes) in the document.
@@ -22,9 +92,9 @@ export function findChanges(state: EditorState): ChangeSet {
   const changes: IncompleteChange[] = [];
   // Map from change ID → active group. Supports multiple marks per text node
   // (e.g. trackedInsert + trackedDelete stacked from different authors).
-  const currentMap = new Map<string, { change: IncompleteChange; node: PMNode }>();
+  const currentMap = new Map<string, { change: PartialNodeTrackedChange; node: PMNode }>();
   // Parallel map for inline mark-based changes (trackedInsert / trackedDelete marks).
-  const markMap = new Map<string, { change: IncompleteChange; node: PMNode }>();
+  const markMap = new Map<string, { change: PartialChange<MarkChange>; node: PMNode }>();
 
   state.doc.descendants((node, pos) => {
     // ── Mark grouping ─────────────────────────────────────────────────────────
@@ -60,7 +130,7 @@ export function findChanges(state: EditorState): ChangeSet {
             const existing = markMap.get(id)!;
             existing.change.to = pos + node.nodeSize;
             existing.node = node;
-            (existing.change as PartialChange<MarkChange>).text += node.text ?? "";
+            existing.change.text += node.text ?? "";
           } else {
             markMap.set(id, {
               change: {
@@ -73,7 +143,7 @@ export function findChanges(state: EditorState): ChangeSet {
                 node,
                 mark,
                 text: node.text ?? "",
-              } as PartialChange<MarkChange>,
+              },
               node,
             });
           }
@@ -99,67 +169,26 @@ export function findChanges(state: EditorState): ChangeSet {
 
     for (let i = 0; i < tracked.length; i += 1) {
       const dataTracked = tracked[i];
-      // Fix 1: skip entries with no valid ID — avoids merging unrelated changes
+      // Skip entries with no valid ID — avoids merging unrelated changes
       // under the "" key.
       const id = dataTracked?.id;
-      if (!id) continue;
+      if (!dataTracked || !id) continue;
 
       if (currentMap.has(id)) {
         // Extend the existing group to cover this node.
         const existing = currentMap.get(id)!;
         existing.change.to = pos + node.nodeSize;
         existing.node = node;
-        // Fix 2: accumulate text so multi-node text groups contain full content.
+        // Accumulate text so multi-node text groups contain full content.
         if (node.isText && existing.change.type === "text-change") {
-          (existing.change as PartialChange<TextChange>).text += node.text ?? "";
+          existing.change.text += node.text ?? "";
         }
         continue;
       }
 
-      let change: IncompleteChange;
-      if (node.isText) {
-        change = {
-          id,
-          type: "text-change",
-          from: pos,
-          to: pos + node.nodeSize,
-          dataTracked: { ...dataTracked },
-          text: node.text,
-          nodeType: node.type,
-        } as PartialChange<TextChange>;
-      } else if (dataTracked?.operation === CHANGE_OPERATION.set_node_attributes) {
-        const oldNodeTypeName = (dataTracked as Record<string, unknown>).oldNodeTypeName as string | undefined;
-        change = {
-          id,
-          type: "node-attr-change",
-          from: pos,
-          to: pos + node.nodeSize,
-          dataTracked: { ...dataTracked },
-          node: node,
-          newAttrs: { ...node.attrs },
-          oldAttrs: { ...dataTracked?.oldAttrs },
-          ...(oldNodeTypeName ? { oldNodeTypeName, newNodeTypeName: node.type.name } : {}),
-        } as NodeAttrChange;
-      } else if (dataTracked?.operation === CHANGE_OPERATION.reference) {
-        change = {
-          id,
-          type: "reference-change",
-          from: pos,
-          to: pos + node.nodeSize,
-          dataTracked: { ...dataTracked },
-        } as ReferenceChange;
-      } else {
-        change = {
-          id,
-          type: "node-change",
-          from: pos,
-          to: pos + node.nodeSize,
-          dataTracked: { ...dataTracked },
-          node: node,
-          children: [],
-          attrs: { ...node.attrs },
-        } as PartialChange<NodeChange>;
-      }
+      const op = dataTracked.operation;
+      const build = node.isText ? textChange : (typeof op === "string" ? BUILD.get(op) : undefined) ?? nodeChange;
+      const change = build(node, pos, id, dataTracked, state.doc);
 
       currentMap.set(id, { change, node });
     }

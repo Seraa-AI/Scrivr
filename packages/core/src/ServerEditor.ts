@@ -160,6 +160,7 @@ export class ServerEditor extends BaseEditor {
     // preserves persisted ids and never fabricates non-deterministic ones.
     const result = normalizeDocument(json, {
       schema: this.manager.schema,
+      pasteFiles: this.manager.buildPasteFiles(),
       assignIds: false,
     });
     this.lastNormalizeResultValue = result;

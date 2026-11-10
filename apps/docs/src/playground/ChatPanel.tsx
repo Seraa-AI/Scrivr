@@ -1,10 +1,12 @@
 import { useRef, useEffect, useMemo, useState } from "react";
 import { useChat } from "@ai-sdk/react";
-import { DefaultChatTransport } from "ai";
+import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls } from "ai";
 import type { UIMessage, DataUIPart } from "ai";
-import type { Editor } from "@scrivr/core";
-import { getAiToolkit } from "@scrivr/ai";
-import type { ToolOutputData } from "../routes/api/ai";
+import type { Editor, InlineSpan } from "@scrivr/core";
+import { getAiToolkit, parseSemanticEdits } from "@scrivr/ai";
+import type { DocUnit, ToolOutputData } from "../routes/api/ai";
+import { clearAgentDebug, downloadAgentDebug, recordEdit, recordReview, recordThread } from "./agentDebug";
+import type { ReviewOutcome } from "@scrivr/plugins";
 
 type AppDataTypes = { tool_result: ToolOutputData };
 type AppUIMessage = UIMessage<unknown, AppDataTypes>;
@@ -14,8 +16,23 @@ interface ChatPanelProps {
   hideBorder?: boolean;
 }
 
+const stringList = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+
+/** The formatting the proposed text has between `at` and `at + length`. */
+function marksOver(spans: InlineSpan[], at: number, length: number): InlineSpan["marks"] {
+  const marks = new Map<string, InlineSpan["marks"][number]>();
+  let offset = 0;
+  for (const span of spans) {
+    const end = offset + span.text.length;
+    if (offset < at + length && end > at) for (const mark of span.marks) marks.set(JSON.stringify(mark), mark);
+    offset = end;
+  }
+  return [...marks.values()];
+}
+
 function getDocContext(editor: Editor | null): {
-  blocks?: Array<{ nodeId: string; text: string }>;
+  units?: DocUnit[];
   context?: string;
 } {
   if (!editor) return {};
@@ -30,8 +47,36 @@ function getDocContext(editor: Editor | null): {
   const { from, to } = state.selection;
   const hasSelection = from !== to;
 
-  const blocks = hasSelection ? ai.getBlocks(from, to) : ai.getBlocks();
-  return blocks.length > 0 ? { blocks } : {};
+  // The rich view carries the ids of list items and table cells, which
+  // structural edits address; a host sends the agent the same.
+  const units: DocUnit[] = (hasSelection ? ai.getRichBlocks(from, to) : ai.getRichBlocks()).map((unit) => ({
+    id: unit.id,
+    type: unit.type,
+    text: unit.text,
+    ...(unit.headingLevel ? { headingLevel: unit.headingLevel } : {}),
+    ...(unit.parts ? {
+      parts: unit.parts.map((part) => ({ nodeId: part.nodeId, text: part.text, ...(part.proposedForDeletion ? { proposedForDeletion: true } : {}) })),
+    } : {}),
+    ...(unit.image ? { image: unit.image } : {}),
+    ...(unit.proposedForDeletion ? { proposedForDeletion: true } : {}),
+    ...(unit.changes ? {
+      changes: unit.changes.map(({ type, text, id, at, length, authorId, oldAttrs, image }) => ({
+        type,
+        text,
+        ...(id ? { id } : {}),
+        ...(at !== undefined ? { at } : {}),
+        ...(length !== undefined ? { length } : {}),
+        ...(authorId ? { authorId } : {}),
+        ...(oldAttrs ? { oldAttrs } : {}),
+        // A formatting change says what the text had; the agent also needs what it has now.
+        ...(oldAttrs && "marks" in oldAttrs && at !== undefined && length !== undefined
+          ? { nowAttrs: { marks: marksOver(unit.spans ?? [{ text: unit.text, marks: [] }], at, length) } }
+          : {}),
+        ...(image ? { image: image.src } : {}),
+      })),
+    } : {}),
+  }));
+  return units.length > 0 ? { units } : {};
 }
 
 export function ChatPanel({ editor, hideBorder }: ChatPanelProps) {
@@ -72,6 +117,7 @@ export function ChatPanel({ editor, hideBorder }: ChatPanelProps) {
   );
 
   const [inputValue, setInputValue] = useState("");
+  const [lastEdit, setLastEdit] = useState<string | null>(null);
   const pendingSelection = useRef<{ from: number; to: number } | null>(null);
 
   function applyToolResult(dataPart: DataUIPart<AppDataTypes>) {
@@ -105,6 +151,31 @@ export function ChatPanel({ editor, hideBorder }: ChatPanelProps) {
       return;
     }
 
+    if (toolType === "edit_document") {
+      // What a host does with an agent's batch: validate it against the
+      // protocol, apply it as tracked changes, and report what landed.
+      const ai = getAiToolkit(ed);
+      if (!ai) return;
+      const parsed = parseSemanticEdits(output["edits"]);
+      const result = ai.applySemanticEdits(parsed.edits);
+      const parts = [
+        `changed ${result.changed.join(", ") || "nothing"}`,
+        result.rejected.length ? `rejected ${result.rejected.join(", ")}` : "",
+        result.notFound.length ? `not found ${result.notFound.join(", ")}` : "",
+        result.stale.length ? `stale ${result.stale.join(", ")}` : "",
+        parsed.rejected.length ? `invalid ${parsed.rejected.map((r) => r.error).join("; ")}` : "",
+      ].filter(Boolean);
+      setLastEdit(parts.join(" · "));
+      recordEdit({
+        at: new Date().toISOString(),
+        toolCallId: dataPart.data.toolCallId,
+        edits: parsed.edits,
+        invalid: parsed.rejected,
+        result: { applied: result.applied, changed: result.changed, rejected: result.rejected, notFound: result.notFound, stale: result.stale },
+      });
+      return;
+    }
+
     const isInsert  = toolType === "insert_text";
     const isReplace = toolType === "replace_selection";
     if (!(isInsert || isReplace)) return;
@@ -118,14 +189,39 @@ export function ChatPanel({ editor, hideBorder }: ChatPanelProps) {
     ed.commands["insertAsSuggestion"]?.(text, from, to, "AI Assistant");
   }
 
-  const { messages, sendMessage, status } = useChat<AppUIMessage>({
+  // `review_changes` runs here, against the document, and the editor's own
+  // outcome — refusals included — is the tool's output the model reads.
+  function reviewForAgent(toolCallId: string, input: unknown) {
+    const ed = editorRef.current;
+    const ai = ed ? getAiToolkit(ed) : null;
+    const field = (key: string) => (typeof input === "object" && input !== null && key in input ? Reflect.get(input, key) : undefined);
+    const decisions = { accepted: stringList(field("accepted")), rejected: stringList(field("rejected")) };
+    const outcome: ReviewOutcome = ai ? ai.reviewChanges(decisions) : { status: "unavailable", reason: "no-editor" };
+    setLastEdit(outcome.status === "applied"
+      ? `accepted ${outcome.accepted.join(", ") || "nothing"} · rejected ${outcome.rejected.join(", ") || "nothing"}`
+      : `review ${outcome.status}: ${outcome.reason}`);
+    recordReview({ at: new Date().toISOString(), toolCallId, decisions, outcome });
+    // A refused review goes back to the model once, with the user's next
+    // message, rather than being retried on its own without end.
+    reviewRefused.current ||= outcome.status !== "applied";
+    void addToolOutput({ tool: "review_changes", toolCallId, output: outcome });
+  }
+
+  const reviewRefused = useRef(false);
+  const { messages, sendMessage, status, setMessages, addToolOutput } = useChat<AppUIMessage>({
     transport,
     onData: applyToolResult,
+    onToolCall: ({ toolCall }) => {
+      if (toolCall.toolName === "review_changes") reviewForAgent(toolCall.toolCallId, toolCall.input);
+    },
+    sendAutomaticallyWhen: (options) => !reviewRefused.current && lastAssistantMessageIsCompleteWithToolCalls(options),
   });
   const isLoading = status === "streaming" || status === "submitted";
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    // A fresh page starts with no messages; keep the last run's record until there is a new one.
+    if (messages.length > 0) recordThread(messages);
   }, [messages]);
 
   function submit() {
@@ -135,6 +231,7 @@ export function ChatPanel({ editor, hideBorder }: ChatPanelProps) {
       const s = editorRef.current.getState().selection;
       pendingSelection.current = { from: s.from, to: s.to };
     }
+    reviewRefused.current = false;
     sendMessage({ text });
     setInputValue("");
   }
@@ -172,6 +269,28 @@ export function ChatPanel({ editor, hideBorder }: ChatPanelProps) {
         >
           Claude
         </span>
+        <button
+          type="button"
+          className="text-[11px] border rounded px-1.5 py-px"
+          style={{ borderColor: "var(--app-border)", color: "var(--app-text-muted)" }}
+          title="Download the document, its pending changes, the agent thread and every batch it applied"
+          onClick={() => downloadAgentDebug(editorRef.current)}
+        >
+          Export
+        </button>
+        <button
+          type="button"
+          className="text-[11px] border rounded px-1.5 py-px"
+          style={{ borderColor: "var(--app-border)", color: "var(--app-text-muted)" }}
+          title="Start a new thread and forget the recorded one"
+          onClick={() => {
+            setMessages([]);
+            setLastEdit(null);
+            clearAgentDebug();
+          }}
+        >
+          Clear
+        </button>
       </div>
 
       {/* Messages */}
@@ -197,6 +316,12 @@ export function ChatPanel({ editor, hideBorder }: ChatPanelProps) {
             <span className="text-[12px] italic" style={{ color: "var(--app-text-faint)" }}>
               Thinking…
             </span>
+          </div>
+        )}
+
+        {lastEdit && (
+          <div className="text-[11px] leading-snug px-1" style={{ color: "var(--app-text-muted)" }}>
+            Agent edit: {lastEdit}
           </div>
         )}
 
