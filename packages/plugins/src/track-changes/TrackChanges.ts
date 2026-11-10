@@ -21,6 +21,7 @@ import type { EditorState, Node, Transaction } from "@scrivr/core/pm";
 import { setAction, skipTracking, TrackChangesAction } from "./actions";
 import { trackChangesPlugin, trackChangesPluginKey } from "./engine/trackChangesPlugin";
 import { lastCutPlugin } from "./lib/cutAndPaste";
+import { suggestedContent } from "./lib/suggestedContent";
 import { addTrackIdIfDoesntExist, createNewDeleteAttrs, createNewInsertAttrs, createNewPendingAttrs, proposedForDeletion } from "./helpers";
 import { CHANGE_OPERATION, CHANGE_STATUS, TrackChangesOptions, TrackChangesStatus, type TrackedChange } from "./types";
 import { planReviewIn } from "./reviewChanges";
@@ -356,13 +357,8 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
           const now = Date.now();
           const baseAttrs = createNewPendingAttrs(now, authorID);
 
-          const insertMark = insertMarkType.create({
-            dataTracked: addTrackIdIfDoesntExist(createNewInsertAttrs(baseAttrs)),
-          });
-
-          // Sanitise the text — ProseMirror text nodes cannot contain raw newlines.
-          const safeText = text.replace(/\n/g, " ");
-          const textNode = schema.text(safeText, [insertMark]);
+          // A "\n" is the block's line break, as the semantic export reads one.
+          const content = suggestedContent([{ text, marks: [] }], schema, state.doc.resolve(from).parent.type, createNewInsertAttrs(baseAttrs));
 
           const tr = state.tr;
 
@@ -376,7 +372,7 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
           }
 
           // Insert the suggestion at `from` (before any "deleted" text).
-          tr.insert(from, textNode);
+          tr.insert(from, content);
 
           // Prevent appendTransaction from trying to re-track this transaction.
           skipTracking(tr);
@@ -392,6 +388,7 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
   onViewReady(editor: IEditor) {
     // Paint-only — tracked-changes data lives in plugin state regardless
     // of view. Headless editors never reach this hook.
+    if (this.options.renderMode === "none") return;
     const handler: OverlayRenderHandler = (ctx, pageNumber, _pageConfig, charMap) => {
       const state = editor.getState();
       const pluginState = trackChangesPluginKey.getState(state);

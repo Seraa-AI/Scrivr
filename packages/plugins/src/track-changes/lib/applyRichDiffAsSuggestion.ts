@@ -26,14 +26,14 @@
  * applications never invalidate later positions.
  */
 
-import { Fragment, type Mark, type NodeType, type Node as PMNode, type Schema } from "@scrivr/core/pm";
+import type { Mark, NodeType, Node as PMNode, Schema } from "@scrivr/core/pm";
+import { suggestedContent } from "./suggestedContent";
 import type { EditorState, Transaction } from "@scrivr/core/pm";
 import {
   describeInlineMark,
   isTrackedMark,
   resolveInlineMark,
   sameMark,
-  spansToFragment,
   stableStringify,
   type InlineMark,
   type InlineSpan,
@@ -323,11 +323,9 @@ function applyInlineChange(
         (acceptedText.length === 0 && aOff === 0 ? { from: found.pos + 1, to: found.pos + 1 } : null);
       if (range && insertType) {
         const subSpans = groupToSpans(proposedText, proposedMarks, pOff, pOff + len);
-        const fragment = spansToFragment(subSpans, schema, onWarn ? { onWarn } : {});
+        const fragment = suggestedContent(subSpans, schema, found.node.type, { ...createNewInsertAttrs(base()), ...grouped(op.groupId) }, onWarn);
         if (fragment.size > 0) {
-          const at = range.from + insertedChars;
-          const dataTracked = { ...addTrackIdIfDoesntExist(createNewInsertAttrs(base())), ...grouped(op.groupId) };
-          tr.insert(at, addMarkToFragment(fragment, insertType.create({ dataTracked })));
+          tr.insert(range.from + insertedChars, fragment);
           insertedChars += fragment.size;
           applied = true;
         }
@@ -337,18 +335,6 @@ function applyInlineChange(
   }
 
   return applied;
-}
-
-function addMarkToFragment(fragment: Fragment, mark: Mark): Fragment {
-  const nodes: PMNode[] = [];
-  fragment.forEach((node) => {
-    if (node.isText) {
-      nodes.push(node.mark(mark.addToSet(node.marks)));
-      return;
-    }
-    nodes.push(node.copy(addMarkToFragment(node.content, mark)));
-  });
-  return Fragment.fromArray(nodes);
 }
 
 /**
@@ -532,9 +518,9 @@ function expandSpans(spans: InlineSpan[]): { text: string; charMarks: InlineMark
 }
 
 /**
- * Group a proposed-text slice back into `InlineSpan`s for `spansToFragment`,
- * merging runs of identical marks. Newlines become spaces — a single-block
- * unit's inserted text can't introduce block breaks.
+ * Group a proposed-text slice back into `InlineSpan`s for `suggestedContent`,
+ * merging runs of identical marks. A newline stays: inside one block it is a
+ * line break, never a block boundary.
  */
 function groupToSpans(
   text: string,
@@ -549,7 +535,7 @@ function groupToSpans(
     const signature = markSignature(marks, []);
     let j = i + 1;
     while (j < end && markSignature(charMarks[j] ?? [], []) === signature) j++;
-    spans.push({ text: text.slice(i, j).replace(/\n/g, " "), marks });
+    spans.push({ text: text.slice(i, j), marks });
     i = j;
   }
   return spans;

@@ -6,8 +6,10 @@
  * The agent's spans are model output: untrusted. This never crashes the merge
  * and never poisons the document:
  *  - empty-text runs are skipped (`schema.text("")` throws);
- *  - the `NEWLINE_SPAN` sentinel is dropped (block boundaries can't occur
- *    inside a single-block unit — the edit path reads one unit per block);
+ *  - a `"\n"` is a line break, as the export writes one: it becomes the
+ *    schema's line-break node (`breakOf` → `"line"`) where the destination
+ *    takes one, stays a newline in a block that holds text only (code), and
+ *    is dropped where neither can stand;
  *  - an unknown mark type is dropped but its TEXT is kept, warned once;
  *  - url-bearing mark attrs (`link.href`) are sanitized through `safeUrl`;
  *    an unsafe url drops the mark, keeping the text;
@@ -16,6 +18,7 @@
 import { Fragment, Mark, type Node as PmNode, type Schema, type NodeType } from "prosemirror-model";
 import type { InlineMark, InlineSpan } from "../exports/semantic";
 import { safeUrl } from "./safeUrl";
+import { breakOf } from "../layout/BlockRegistry";
 import { stableStringify } from "./hash";
 
 /** Mark attrs that carry a URL and must pass the `safeUrl` gate. */
@@ -43,15 +46,26 @@ export function spansToFragment(
     options.onWarn?.(message);
   };
 
+  const lineBreak = lineBreakIn(schema, options.parentType);
+  const keepsNewlines = options.parentType?.spec.code === true;
   const nodes: PmNode[] = [];
   for (const span of spans) {
-    // Empty runs and the newline sentinel never become text nodes.
-    if (span.text === "" || (span.text === "\n" && span.marks.length === 0)) continue;
-
+    if (span.text === "") continue;
     const marks = resolveInlineMarks(span.marks, schema, options.parentType, warnOnce);
-    nodes.push(schema.text(span.text, marks.length > 0 ? marks : null));
+    const lines = keepsNewlines ? [span.text] : span.text.split("\n");
+    lines.forEach((line, index) => {
+      if (index > 0 && lineBreak) nodes.push(lineBreak.create());
+      if (line !== "") nodes.push(schema.text(line, marks.length > 0 ? marks : null));
+    });
   }
   return Fragment.fromArray(nodes);
+}
+
+/** The node a line break is, when `parentType` (or, unknown, any textblock) can hold it. */
+function lineBreakIn(schema: Schema, parentType: NodeType | undefined): NodeType | null {
+  const type = Object.values(schema.nodes).find((node) => breakOf(node) === "line");
+  if (!type) return null;
+  return !parentType || parentType.contentMatch.matchType(type) ? type : null;
 }
 
 /**

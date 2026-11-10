@@ -45,6 +45,7 @@ import { CHANGE_STATUS } from "../types";
 import { acceptedRangeToDocRange, bridgeable, buildAcceptedTextMap } from "./acceptedTextMap";
 import { computeEditDensity, diffText, phraseReplacements } from "./diffText";
 import { applyTrackedDelete } from "./splitRangeForNewMark";
+import { suggestedContent } from "./suggestedContent";
 import { skipTracking, TrackChangesAction, setAction } from "../actions";
 
 // ── Clear previous suggestions ────────────────────────────────────────────────
@@ -224,12 +225,12 @@ function applyBlockToTr(
       if (range) {
         const insertMarkType = schema.marks.trackedInsert;
         if (insertMarkType) {
-          const dataTracked: Record<string, unknown> = addTrackIdIfDoesntExist(createNewInsertAttrs(baseAttrs));
-          if (op.groupId) dataTracked["groupId"] = op.groupId;
-          const safeText = op.text.replace(/\n/g, " ");
-          tr.insert(range.from + insertedChars, schema.text(safeText, [insertMarkType.create({ dataTracked })]));
-          insertedChars += safeText.length;
-          applied = true;
+          const at = range.from + insertedChars;
+          const insertAttrs = { ...createNewInsertAttrs(baseAttrs), ...(op.groupId ? { groupId: op.groupId } : {}) };
+          const content = suggestedContent([{ text: op.text, marks: [] }], schema, tr.doc.resolve(at).parent.type, insertAttrs);
+          tr.insert(at, content);
+          insertedChars += content.size;
+          applied = content.size > 0 || applied;
         }
       }
       // acceptedOffset does NOT advance for inserts (they add new chars)

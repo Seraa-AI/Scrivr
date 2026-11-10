@@ -14,7 +14,7 @@ import type { IBaseEditor } from "@scrivr/core";
 import { resolveInlineMarks, describeInlineMark, sameMark, spansToFragment } from "@scrivr/core";
 import type { InlineMark } from "@scrivr/core";
 import { Fragment } from "@scrivr/core/pm";
-import type { EditorState, Mark, Node as PmNode, Schema, Transaction } from "@scrivr/core/pm";
+import type { EditorState, Mark, NodeType, Node as PmNode, Schema, Transaction } from "@scrivr/core/pm";
 import { findLiveNodeById } from "@scrivr/plugins";
 import { rebaseAfterSettle } from "./rebase";
 import { groupsWithin, withAcceptedOffsets, type AcceptedSpan } from "./groupSpans";
@@ -134,12 +134,13 @@ export function applyAiSuggestion(
   const before = editor.getState().doc;
 
   const scope = groupId ? new Set([groupId]) : undefined;
-  applyKeepFormatting(editor, affectedBlocks, scope, mode !== "direct");
+  const author = authorOf(ps.suggestion);
+  applyKeepFormatting(editor, affectedBlocks, scope, mode !== "direct", author);
 
   if (mode === "direct") {
     _applyDirect(editor, affectedBlocks, scope);
   } else {
-    _applyTracked(editor, affectedBlocks, scope);
+    _applyTracked(editor, affectedBlocks, scope, author);
   }
 
   if (groupId) {
@@ -195,9 +196,10 @@ function applyRange(
 
   const scope = new Set(covered);
   const before = state.doc;
-  applyKeepFormatting(editor, [block], scope, mode !== "direct");
+  const author = authorOf(suggestion);
+  applyKeepFormatting(editor, [block], scope, mode !== "direct", author);
   if (mode === "direct") _applyDirect(editor, [block], scope);
-  else _applyTracked(editor, [block], scope);
+  else _applyTracked(editor, [block], scope, author);
 
   if (editor.getState().doc === before) return false;
 
@@ -275,6 +277,11 @@ function settleGroups(
   editor.applyTransaction(tr);
 }
 
+/** Who applied changes are by: the suggestion's author, or the assistant for one built without one. */
+function authorOf(suggestion: AiSuggestion): string {
+  return suggestion.author ?? "ai:assistant";
+}
+
 /**
  * Apply the formatting a proposal asks for on the text it keeps.
  *
@@ -295,6 +302,7 @@ function applyKeepFormatting(
   blocks: AiSuggestionBlock[],
   scope: GroupScope,
   tracked: boolean,
+  author: string,
 ): void {
   if (tracked && !trackChangesPluginKey.getState(editor.getState())) return;
 
@@ -321,7 +329,7 @@ function applyKeepFormatting(
   }
 
   if (!touched || !tr.docChanged) return;
-  if (tracked) trackAsSuggestion(tr, "ai:assistant");
+  if (tracked) trackAsSuggestion(tr, author);
   else skipTracking(tr);
   editor.applyTransaction(tr);
 }
@@ -331,8 +339,9 @@ function applyKeepFormatting(
  * formatting the op proposed. An op made from plain text proposes none, which
  * `spansToFragment` renders as an unmarked run.
  */
-function insertedContent(op: AiOp, schema: Schema, extraMarks: readonly Mark[] = []) {
-  const fragment = spansToFragment([{ text: op.text, marks: op.marks ?? [] }], schema);
+/** An op's inserted text for a block of `parentType`: a "\n" is its line break. */
+function insertedContent(op: AiOp, schema: Schema, parentType: NodeType, extraMarks: readonly Mark[] = []) {
+  const fragment = spansToFragment([{ text: op.text, marks: op.marks ?? [] }], schema, { parentType });
   if (extraMarks.length === 0) return fragment;
   const marked: PmNode[] = [];
   fragment.forEach((child) => {
@@ -376,8 +385,9 @@ function _applyDirect(
       } else if (op.type === "insert") {
         const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset);
         if (range) {
-          const content = insertedContent(op, schema);
-          tr.insert(range.from + insertedChars, content);
+          const at = range.from + insertedChars;
+          const content = insertedContent(op, schema, tr.doc.resolve(at).parent.type);
+          tr.insert(at, content);
           insertedChars += content.size;
         }
       }
@@ -393,10 +403,10 @@ function _applyTracked(
   editor: IBaseEditor,
   blocks: AiSuggestionBlock[],
   scope: GroupScope,
+  authorID: string,
 ): void {
   const state    = editor.getState();
   const schema   = state.schema;
-  const authorID = "ai:assistant";
   const now      = Date.now();
 
   const resolved = resolveBlocksInReverse(state, blocks);
@@ -432,11 +442,11 @@ function _applyTracked(
           if (insertMarkType) {
             const dataTracked = addTrackIdIfDoesntExist(createNewInsertAttrs(baseAttrs)) as Record<string, unknown>;
             if (op.groupId) dataTracked["groupId"] = op.groupId;
-            const safeText = op.text.replace(/\n/g, " ");
-            const content = insertedContent({ ...op, text: safeText }, schema, [
+            const at = range.from + insertedChars;
+            const content = insertedContent(op, schema, tr.doc.resolve(at).parent.type, [
               insertMarkType.create({ dataTracked }),
             ]);
-            tr.insert(range.from + insertedChars, content);
+            tr.insert(at, content);
             insertedChars += content.size;
           }
         }

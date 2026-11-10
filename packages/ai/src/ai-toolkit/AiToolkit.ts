@@ -16,7 +16,7 @@ import { applyRichDiffAsSuggestion, buildAcceptedTextMap, type RichBlockEdit } f
 export { unitRichHash };
 import type { Node as PmNode, Schema } from "@scrivr/core/pm";
 import type { Command } from "@scrivr/core/pm";
-import { AiSuggestion as AiSuggestionExtension } from "../ai-suggestion/AiSuggestion";
+import { AiSuggestion as AiSuggestionExtension, type AiSuggestionOptions } from "../ai-suggestion/AiSuggestion";
 import { computeAiSuggestion } from "../ai-suggestion/computeAiSuggestion";
 import { showAiSuggestion, applyAiSuggestion, rejectAiSuggestion } from "../ai-suggestion/showHideApply";
 import { aiSuggestionPluginKey } from "../ai-suggestion/AiSuggestionPlugin";
@@ -819,8 +819,17 @@ interface AiToolkitOptions {
   ghostText?: false;
   /** Set false to exclude the AiCaret sub-extension. Default: true. */
   aiCaret?: false;
-  /** Set false to exclude the AiSuggestion sub-extension. Default: true. */
-  aiSuggestion?: false;
+  /**
+   * Set false to exclude the AiSuggestion sub-extension, or pass its options —
+   * `{ renderMode: "none" }` for a host that draws its own suggestion UI.
+   */
+  aiSuggestion?: false | Partial<AiSuggestionOptions>;
+}
+
+/** The AiSuggestion sub-extension as the toolkit's options configure it, or null when excluded. */
+function suggestionExtension(options: AiToolkitOptions) {
+  if (options.aiSuggestion === false) return null;
+  return options.aiSuggestion ? AiSuggestionExtension.configure(options.aiSuggestion) : AiSuggestionExtension;
 }
 
 // ── AiToolkit extension ───────────────────────────────────────────────────────
@@ -858,9 +867,8 @@ export const AiToolkit = Extension.create<AiToolkitOptions>({
     if (this.options.aiCaret !== false) {
       plugins.push(...AiCaret.resolve(this.schema).plugins);
     }
-    if (this.options.aiSuggestion !== false) {
-      plugins.push(...AiSuggestionExtension.resolve(this.schema).plugins);
-    }
+    const suggestion = suggestionExtension(this.options);
+    if (suggestion) plugins.push(...suggestion.resolve(this.schema).plugins);
     return plugins;
   },
 
@@ -904,8 +912,9 @@ export const AiToolkit = Extension.create<AiToolkitOptions>({
       const cleanup = AiCaret.resolve().viewReadyCallback?.(editor);
       if (cleanup) cleanups.push(cleanup);
     }
-    if (this.options.aiSuggestion !== false) {
-      const cleanup = AiSuggestionExtension.resolve().viewReadyCallback?.(editor);
+    const suggestion = suggestionExtension(this.options);
+    if (suggestion) {
+      const cleanup = suggestion.resolve().viewReadyCallback?.(editor);
       if (cleanup) cleanups.push(cleanup);
     }
 

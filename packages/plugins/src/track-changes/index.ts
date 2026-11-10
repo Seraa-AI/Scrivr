@@ -46,6 +46,7 @@ export { TrackChangesStatus, CHANGE_STATUS, CHANGE_OPERATION } from "./types";
 export type { TrackChangesState } from "./engine/trackChangesPlugin";
 export type {
   TrackChangesOptions,
+  TrackChangesRenderMode,
   TrackedAttrs,
   TrackedChange,
   TextChange,
