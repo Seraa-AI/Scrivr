@@ -1,7 +1,6 @@
 import { DOMSerializer } from "prosemirror-model";
-import type { Schema, Slice } from "prosemirror-model";
-import type { EditorState } from "prosemirror-state";
-import { CellSelection } from "../table/cellSelection";
+import type { Schema } from "prosemirror-model";
+import type { EditorState, Selection } from "prosemirror-state";
 import { collapseRowSpans } from "../table/clipboardHtml";
 
 /**
@@ -22,7 +21,8 @@ export const SLICE_DATA_ATTR = "data-pm-slice";
  *
  * Both the HTML and text forms read `state.selection.content()`, so every
  * selection kind serializes through one path: a text range yields its doc slice,
- * a `CellSelection` yields a standalone table slice. HTML uses ProseMirror's
+ * a selection that writes its own forms (a cell selection writes a table) is
+ * asked for them. HTML uses ProseMirror's
  * `DOMSerializer` (each node/mark's `toDOM`), so marks, headings, alignment,
  * etc. round-trip into Word / Google Docs / Notion automatically.
  *
@@ -36,9 +36,8 @@ export function serializeSelectionToHtml(
   if (sel.empty) return null;
 
   const serializer = DOMSerializer.fromSchema(schema);
-  if (sel instanceof CellSelection) {
-    return serializeCellSelectionToHtml(sel, serializer);
-  }
+  const ownHtml = ownClipboardForms(sel)?.html(serializer);
+  if (ownHtml !== undefined && ownHtml !== null) return ownHtml;
   const slice = sel.content();
   const container = document.createElement("div");
   container.setAttribute(
@@ -53,44 +52,30 @@ export function serializeSelectionToHtml(
 }
 
 /**
- * Serialize a rectangular cell slice as a standalone table. The cells carry
- * their merge role as an attr, which `collapseRowSpans` turns into the
- * `rowspan` other editors read.
+ * A selection's own clipboard forms, when it writes them: a cell selection
+ * writes a table. A form that is not text is null, and the document's own
+ * form is used instead.
  */
-function serializeCellSelectionToHtml(
-  selection: CellSelection,
-  serializer: DOMSerializer,
-): string {
-  const tableNode = selection.content().content.firstChild;
-  if (!tableNode || tableNode.type.name !== "table") return "";
-
-  const container = document.createElement("div");
-  container.appendChild(serializer.serializeNode(tableNode));
-  collapseRowSpans(container);
-  return container.innerHTML;
+function ownClipboardForms(sel: Selection): { html(serializer: DOMSerializer): string | null; text(): string | null } | null {
+  if (!("clipboardHtml" in sel) || typeof sel.clipboardHtml !== "function") return null;
+  if (!("clipboardText" in sel) || typeof sel.clipboardText !== "function") return null;
+  const { clipboardHtml, clipboardText } = sel;
+  const textOrNull = (value: unknown): string | null => (typeof value === "string" ? value : null);
+  return {
+    html: (serializer) => textOrNull(clipboardHtml.call(sel, serializer)),
+    text: () => textOrNull(clipboardText.call(sel)),
+  };
 }
 
 /**
- * Plain-text (`text/plain`) form of the current selection. A cell selection is
- * emitted as tab-separated columns / newline-separated rows (the spreadsheet
- * convention); any other selection uses the document text with block breaks.
+ * Plain-text (`text/plain`) form of the current selection: its own, when it
+ * writes one (a cell selection writes tab-separated columns), or the document
+ * text with block breaks.
  */
 export function serializeSelectionToText(state: EditorState): string | null {
   const sel = state.selection;
   if (sel.empty) return null;
-  if (sel instanceof CellSelection) return cellSliceToText(sel.content());
+  const ownText = ownClipboardForms(sel)?.text();
+  if (ownText !== undefined && ownText !== null) return ownText;
   return state.doc.textBetween(sel.from, sel.to, "\n");
-}
-
-/** Flatten a `CellSelection` table slice to tab/newline text. */
-function cellSliceToText(slice: Slice): string {
-  const table = slice.content.firstChild;
-  if (!table) return "";
-  const rows: string[] = [];
-  table.forEach((row) => {
-    const cells: string[] = [];
-    row.forEach((cell) => cells.push(cell.textContent));
-    rows.push(cells.join("\t"));
-  });
-  return rows.join("\n");
 }

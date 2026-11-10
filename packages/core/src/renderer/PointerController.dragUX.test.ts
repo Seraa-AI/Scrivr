@@ -620,8 +620,8 @@ describe("PointerController — drag UX", () => {
 
     function cellUnder(x: number, y: number) {
       for (const block of setup.editor.layout.pages[0]?.blocks ?? []) {
-        if (block.kind !== "tableRow" || y < block.y || y >= block.y + block.height) continue;
-        const hit = block.cells?.find((c) => x >= c.x && x < c.x + c.width);
+        if (block.kind !== "composite" || y < block.y || y >= block.y + block.height) continue;
+        const hit = block.regions?.find((c) => x >= c.x && x < c.x + c.width);
         if (hit) return { block, cell: hit };
       }
       throw new Error("no cell there");
@@ -656,7 +656,7 @@ describe("PointerController — drag UX", () => {
 
       const after = setup.editor.layout.anchoredObjects?.[0];
       if (!after) throw new Error("image vanished");
-      expect(after.cellPos).toBe(cellUnder(dropX, dropY).cell.cellPos);
+      expect(after.regionPos).toBe(cellUnder(dropX, dropY).cell.pos);
       expect(after.page).toBe(before.page);
       expect(after.y).toBeCloseTo(dropY - 10, 6);
       expect(after.x).toBeCloseTo(dropX - 10, 6);
@@ -677,11 +677,11 @@ describe("PointerController — drag UX", () => {
         },
       });
       const before = setup.editor.layout.anchoredObjects?.[0];
-      if (!before?.cellPos) throw new Error("image not in a cell");
+      if (!before?.regionPos) throw new Error("image not in a cell");
       const docBefore = setup.editor.getState().doc;
-      const rows = (setup.editor.layout.pages[0]?.blocks ?? []).filter((b) => b.kind === "tableRow");
+      const rows = (setup.editor.layout.pages[0]?.blocks ?? []).filter((b) => b.kind === "composite");
       const nestedRow = rows.find((b) => b.node.textContent.includes("Beside nested"));
-      const nestedCell = nestedRow?.cells?.[0];
+      const nestedCell = nestedRow?.regions?.[0];
       if (!nestedRow || !nestedCell) throw new Error("no nested cell");
       drag(before, nestedCell.x + 20, nestedRow.y + nestedRow.height - 3);
 
@@ -703,14 +703,14 @@ describe("PointerController — drag UX", () => {
         },
       });
       const before = setup.editor.layout.anchoredObjects?.[0];
-      if (!before?.cellPos) throw new Error("image not in a cell");
+      if (!before?.regionPos) throw new Error("image not in a cell");
       const after = setup.editor.layout.pages[0]?.blocks.at(-1);
       if (!after) throw new Error("no paragraph after");
       drag(before, before.x + 10, after.y + 30);
 
       const landed = setup.editor.layout.anchoredObjects?.[0];
       if (!landed) throw new Error("image vanished");
-      expect(landed.cellPos).toBeUndefined();
+      expect(landed.regionPos).toBeUndefined();
       // The emptied row shrinks and the text below moves up; the image keeps
       // its place relative to the paragraph it was dropped on.
       expect(landed.globalY - landed.anchorGlobalY).toBeCloseTo(after.y + 30 - 10 - after.y, 6);

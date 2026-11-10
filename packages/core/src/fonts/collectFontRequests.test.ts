@@ -167,7 +167,7 @@ describe("which faces a layout uses", () => {
   });
 
   it("counts a face used only in a table cell", () => {
-    const row = { lines: [], cells: [{ blocks: [blockUsing(3)] }] } as unknown as LayoutBlock;
+    const row = { lines: [], regions: [{ blocks: [blockUsing(3)] }] } as unknown as LayoutBlock;
     const layout = { pages: [pageOf(row)] } as unknown as DocumentLayout;
 
     expect([...usedResolutions(layout)]).toEqual([3]);

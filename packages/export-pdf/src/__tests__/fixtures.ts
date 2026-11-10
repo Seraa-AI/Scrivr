@@ -124,23 +124,24 @@ export function tableRowBlock(): LayoutBlock {
     width: number,
     opts: { background?: string; vMerge?: string } = {},
   ) => ({
-    cellPos: 1,
+    pos: 1,
     x,
     y: 0,
     width,
     height: 40,
-    vMerge: opts.vMerge ?? "none",
-    background: opts.background ?? null,
+    inset: { top: 4, right: 6, bottom: 4, left: 6 },
     blocks: [block("paragraph", [textLine("Cell")])],
+    data: { vMerge: opts.vMerge ?? "none", background: opts.background ?? null },
   });
 
   return {
     ...block("tableRow", []),
-    cells: [
+    kind: "composite",
+    regions: [
       cell(MARGIN, 240, { background: "rgb(238, 238, 238)" }),
       cell(MARGIN + 240, 120, { vMerge: "continue" }),
     ],
-    isLastRow: true,
+    lastUnit: true,
   } as unknown as LayoutBlock;
 }
 

@@ -16,7 +16,7 @@ import { Table } from "./Table";
 import { ExtensionManager } from "../ExtensionManager";
 import { Extension } from "../Extension";
 import { nodeLayout } from "../../layout/BlockRegistry";
-import { CELL_PADDING_H } from "../../layout/TableLayoutEngine";
+import { CELL_INSET } from "../../table/layout";
 import { ANCHORED_OBJECT_MARGIN } from "../../layout/AnchoredObjects";
 import { buildStarterKitContext, createMeasurer, createTestEditor, measureTextWidth } from "../../test-utils";
 import { listWrap } from "../../index";
@@ -517,7 +517,7 @@ describe("a first word that does not fit after its number (Word leaves the numbe
         ...grid.slice(1).map(() => ({ type: "tableCell", content: [p("b")] })),
       ] }] }] });
       const l = runPipeline(docNode, { pageConfig: defaultPageConfig, measurer: createMeasurer(), fontConfig: tableFont });
-      const cell = l.pages[0]?.blocks.find((block) => block.cells)?.cells?.[0];
+      const cell = l.pages[0]?.blocks.find((block) => block.regions)?.regions?.[0];
       const item = cell?.blocks.find((block) => block.node.textContent === text);
       if (!item) throw new Error("no item");
       const marker = markerAnchorOf(item);
@@ -1027,8 +1027,8 @@ describe("a list inside a table cell", () => {
       { type: "paragraph" },
     ] });
     const row = runPipeline(docNode, { pageConfig: defaultPageConfig, measurer: createMeasurer(), fontConfig: manager.buildBlockStyles() })
-      .pages.flatMap((page) => page.blocks).find((block) => block.cells !== undefined);
-    return row?.cells?.[0]?.blocks ?? [];
+      .pages.flatMap((page) => page.blocks).find((block) => block.regions !== undefined);
+    return row?.regions?.[0]?.blocks ?? [];
   };
 
   it("lays out every item, numbered and nested, at its level's indent", () => {
@@ -1060,7 +1060,7 @@ describe("a list inside a table cell", () => {
       content: [{ type: "tableRow", content: [cell("a"), cell("b")] }, { type: "tableRow", content: [cell("c"), cell("d")] }],
     };
     const rows = cellBlocks([p("before"), nested]).filter((block) => block.node.type.name === "tableRow");
-    expect(rows.map((row) => row.isLastRow === true)).toEqual([false, true]);
+    expect(rows.map((row) => row.lastUnit === true)).toEqual([false, true]);
   });
 
   /**
@@ -1082,8 +1082,8 @@ describe("a list inside a table cell", () => {
           { type: "paragraph" },
         ] });
         const row = runPipeline(docNode, { pageConfig: defaultPageConfig, measurer: createMeasurer(), fontConfig: manager.buildBlockStyles() })
-          .pages.flatMap((page) => page.blocks).find((block) => block.cells !== undefined);
-        const cell = row?.cells?.[0];
+          .pages.flatMap((page) => page.blocks).find((block) => block.regions !== undefined);
+        const cell = row?.regions?.[0];
         if (!cell) throw new Error("no cell");
         const block = blockOf(cell.blocks, "alphabet");
         const lineIndex = block.lines.findIndex((line) => line.spans.some((span) => span.kind === "text" && span.text.trim() !== "\u200b" && span.text.trim() !== ""));
@@ -1092,7 +1092,7 @@ describe("a list inside a table cell", () => {
         const wordStart = block.x + word.x;
         const numberEnd = (block.marker?.x ?? 0) + measureTextWidth(markerText(block), fontOf(block));
         const cellRight = cell.x + cell.width;
-        const wordFitsCell = word.width <= cell.width - 2 * CELL_PADDING_H;
+        const wordFitsCell = word.width <= cell.width - CELL_INSET.left - CELL_INSET.right;
         const where = `${columns} columns, order ${order}`;
         if (lineIndex === 0 && wordStart < numberEnd - 0.5) faults.push(`${where}: over the number`);
         if (wordFitsCell && wordStart + word.width > cellRight) faults.push(`${where}: past the cell`);
@@ -1111,8 +1111,8 @@ describe("a list inside a table cell", () => {
       { type: "paragraph" },
     ] });
     const row = runPipeline(docNode, { pageConfig: defaultPageConfig, measurer: createMeasurer(), fontConfig: manager.buildBlockStyles() })
-      .pages.flatMap((page) => page.blocks).find((block) => block.cells !== undefined);
-    const cell = row?.cells?.[0];
+      .pages.flatMap((page) => page.blocks).find((block) => block.regions !== undefined);
+    const cell = row?.regions?.[0];
     if (!cell) throw new Error("no cell");
     const first = blockOf(cell.blocks, "first");
     const markerX = first.marker?.x ?? Number.NEGATIVE_INFINITY;

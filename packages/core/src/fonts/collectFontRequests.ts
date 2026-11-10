@@ -53,7 +53,7 @@ export function usedResolutions(layout: DocumentLayout): Set<FontResolutionId> {
           if (span.resolution !== undefined) used.add(span.resolution);
         }
       }
-      for (const cell of block.cells ?? []) visitBlocks(cell.blocks);
+      for (const region of block.regions ?? []) visitBlocks(region.blocks);
     }
   };
   for (const page of layout.pages) visitBlocks(page.blocks);

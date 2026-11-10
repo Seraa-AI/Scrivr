@@ -278,25 +278,40 @@ async function writePdf(
    * over the collected handlers, and hung on the context so nested content and
    * chrome reach the same one rather than each re-deriving it.
    */
+  const inBlockBox = (block: LayoutBlock, draw: () => void): void => {
+    const { x, y, width } = ctx;
+    ctx.x = block.x;
+    ctx.y = block.y;
+    ctx.width = block.width;
+    try {
+      draw();
+    } finally {
+      // Nested dispatch must return the caller's box, even if a child fails.
+      ctx.x = x;
+      ctx.y = y;
+      ctx.width = width;
+    }
+  };
   const renderBlocks = (blocks: readonly LayoutBlock[]): void => {
     for (const block of blocks) {
+      if (block.kind === "composite") {
+        // A composite unit's handler draws only its decoration (a table row's
+        // grid), and a unit without one draws none; what its regions hold is
+        // drawn here, as the canvas paints it.
+        const decorate = nodeHandlers.get(block.node.type.name);
+        if (decorate) inBlockBox(block, () => decorate(block, ctx));
+        renderBlocks((block.regions ?? []).flatMap((region) =>
+          region.blocks.map((child) => ({ ...child, y: block.y + child.y }))));
+        continue;
+      }
       const handler = resolveNodeHandler(block.node.type.name);
       if (!handler) continue;
-      const { x, y, width } = ctx;
-      ctx.x = block.x;
-      ctx.y = block.y;
-      ctx.width = block.width;
-      try {
+      inBlockBox(block, () => {
         handler(block, ctx);
         // After the block, so its background cannot cover the marker.
         const marker = markerAnchorOf(block);
         if (marker) markerPainters.get(marker.painter)?.pdf(marker, ctx);
-      } finally {
-        // Nested dispatch must return the caller's box, even if a child fails.
-        ctx.x = x;
-        ctx.y = y;
-        ctx.width = width;
-      }
+      });
     }
   };
 
@@ -436,8 +451,8 @@ async function embedImages(
   for (const object of layout.anchoredObjects ?? []) add(object.node);
 
   const collectFromBlock = (block: DocumentLayout["pages"][0]["blocks"][number]) => {
-    for (const cell of block.cells ?? []) {
-      for (const child of cell.blocks) collectFromBlock(child);
+    for (const region of block.regions ?? []) {
+      for (const child of region.blocks) collectFromBlock(child);
     }
 
     add(block.node);

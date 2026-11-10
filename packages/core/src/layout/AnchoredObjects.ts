@@ -235,10 +235,10 @@ export interface AnchoredObjectPlacement {
    */
   clamped?: boolean;
   /**
-   * The table cell holding the image's anchor, laid out inside that cell as
-   * Word's `layoutInCell` does. Absent for an image anchored in the body.
+   * The composite region (a table cell) holding the image's anchor, laid out
+   * inside it as Word's `layoutInCell` does. Absent for an image in the body.
    */
-  cellPos?: number;
+  regionPos?: number;
 }
 
 /**

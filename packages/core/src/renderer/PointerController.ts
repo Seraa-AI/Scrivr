@@ -8,8 +8,7 @@ import {
 } from "./ResizeController";
 import type { Node as PmNode } from "prosemirror-model";
 import { anchoredOf, placementAttrs, type AnchoredObjectPlacement, type PlacementPatch } from "../layout/AnchoredObjects";
-import type { CellSubBlock, LayoutBlock } from "../layout/BlockLayout";
-import { CELL_PADDING_H } from "../layout/TableLayoutEngine";
+import type { LaidRegion, LayoutBlock } from "../layout/BlockLayout";
 import { resolvePointOwner, type PointOwner } from "../layout/pointOwnership";
 import {
   type PageFlowMetrics,
@@ -116,8 +115,8 @@ export class PointerController {
     startYOffset: number;
     /** wrapMode at pointerdown. */
     wrapMode: string;
-    /** The table cell the image is laid out in at pointerdown; absent in the body. */
-    cellPos?: number;
+    /** The composite region (a table cell) the image is laid out in at pointerdown; absent in the body. */
+    regionPos?: number;
     /** Image's docPos rect at drag start (for posBelow / posAbove fallback). */
     rect: { x: number; y: number; width: number; height: number; page: number };
     /** Pointer position relative to the image's top-left at pointerdown. */
@@ -508,7 +507,7 @@ export class PointerController {
         startImageGlobalY: anchoredHit.globalY,
         startYOffset: paintedYOffset(anchoredHit),
         wrapMode: anchoredHit.wrapMode,
-        ...(anchoredHit.cellPos !== undefined ? { cellPos: anchoredHit.cellPos } : {}),
+        ...(anchoredHit.regionPos !== undefined ? { regionPos: anchoredHit.regionPos } : {}),
         rect: {
           x: anchoredHit.x,
           y: anchoredHit.y,
@@ -1015,26 +1014,26 @@ export class PointerController {
     const ghostY = hit.docY - grabOffsetY;
     const ownParagraph = editor.getState().doc.resolve(docPos).start();
 
-    const target = this.cellAt(hit.page, hit.docX, hit.docY);
+    const target = this.regionAt(hit.page, hit.docX, hit.docY);
     if (target) {
-      // A cell with no paragraph (only a nested table) cannot take the image.
-      const paragraph = nearestCellParagraph(target.row, target.cell, ghostY);
+      // A region with no paragraph (only a nested composite) cannot take the image.
+      const paragraph = nearestRegionParagraph(target.unit, target.region, ghostY);
       if (!paragraph) return true;
       const patch: PlacementPatch = {
         xAlign: "custom",
-        x: ghostX - (target.cell.x + CELL_PADDING_H),
-        yOffset: ghostY - (target.row.y + paragraph.y),
+        x: ghostX - (target.region.x + target.region.inset.left),
+        yOffset: ghostY - (target.unit.y + paragraph.y),
       };
       const anchorPos = paragraph.nodePos + 1;
       if (anchorPos === ownParagraph) this.setPlacement(docPos, patch);
       else this.movePlacement(docPos, anchorPos, patch);
-      dragDebugLog(editor, "commit", { commitPath: "cell", docPos, newDocPos: anchorPos, cellPos: target.cell.cellPos });
+      dragDebugLog(editor, "commit", { commitPath: "region", docPos, newDocPos: anchorPos, regionPos: target.region.pos });
       return true;
     }
 
-    if (this.anchoredDrag.cellPos === undefined) return false;
-    // An image leaving its cell needs a body paragraph on the drop page; with
-    // none, the drop does nothing rather than move it inside its cell.
+    if (this.anchoredDrag.regionPos === undefined) return false;
+    // An image leaving its region needs a body paragraph on the drop page; with
+    // none, the drop does nothing rather than move it inside its region.
     const ghostGlobalY = this.pageLocalYToGlobal(hit.page, ghostY);
     const nearest = this.nearestAnchorStartingOn(hit.page, ghostGlobalY, () => false);
     if (!nearest) return true;
@@ -1043,7 +1042,7 @@ export class PointerController {
       x: this.contentRelativeX(ghostX),
       yOffset: ghostGlobalY - nearest.globalY,
     });
-    dragDebugLog(editor, "commit", { commitPath: "leaveCell", docPos, newDocPos: nearest.docPos });
+    dragDebugLog(editor, "commit", { commitPath: "leaveRegion", docPos, newDocPos: nearest.docPos });
     return true;
   }
 
@@ -1067,14 +1066,9 @@ export class PointerController {
     return pageX - this.deps.editor.layout.pageConfig.margins.left;
   }
 
-  /** The table row and cell under a page-local point, if any. */
-  private cellAt(pageNumber: number, x: number, y: number): { row: LayoutBlock; cell: CellSubBlock } | null {
-    for (const row of this.deps.editor.layout.pages?.[pageNumber - 1]?.blocks ?? []) {
-      if (row.kind !== "tableRow" || y < row.y || y >= row.y + row.height) continue;
-      const cell = row.cells?.find((c) => x >= c.x && x < c.x + c.width);
-      if (cell) return { row, cell };
-    }
-    return null;
+  /** The innermost composite unit and region under a page-local point, if any. */
+  private regionAt(pageNumber: number, x: number, y: number): { unit: LayoutBlock; region: LaidRegion } | null {
+    return innermostRegion(this.deps.editor.layout.pages?.[pageNumber - 1]?.blocks ?? [], x, y, 0);
   }
 
   private resolveSamePageReanchor(
@@ -1403,12 +1397,32 @@ export class PointerController {
 
 }
 
-/** The paragraph in a cell whose top is nearest a page-local y; an image anchors only in a textblock. */
-function nearestCellParagraph(row: LayoutBlock, cell: CellSubBlock, y: number): LayoutBlock | null {
+/**
+ * The innermost region at a page-local point among `blocks` (their `y`
+ * relative to `originY`), with its unit placed at its page-local top: a cell
+ * of a table nested in a cell wins over its outer cell.
+ */
+function innermostRegion(
+  blocks: readonly LayoutBlock[],
+  x: number,
+  y: number,
+  originY: number,
+): { unit: LayoutBlock; region: LaidRegion } | null {
+  for (const block of blocks) {
+    const unit = { ...block, y: originY + block.y };
+    if (y < unit.y || y >= unit.y + unit.height) continue;
+    const region = unit.regions?.find((r) => x >= r.x && x < r.x + r.width);
+    if (region) return innermostRegion(region.blocks, x, y, unit.y) ?? { unit, region };
+  }
+  return null;
+}
+
+/** The paragraph in a region whose top is nearest a page-local y; an image anchors only in a textblock. */
+function nearestRegionParagraph(unit: LayoutBlock, region: LaidRegion, y: number): LayoutBlock | null {
   let best: LayoutBlock | null = null;
-  for (const block of cell.blocks) {
+  for (const block of region.blocks) {
     if (!block.node.isTextblock) continue;
-    if (!best || Math.abs(row.y + block.y - y) < Math.abs(row.y + best.y - y)) best = block;
+    if (!best || Math.abs(unit.y + block.y - y) < Math.abs(unit.y + best.y - y)) best = block;
   }
   return best;
 }

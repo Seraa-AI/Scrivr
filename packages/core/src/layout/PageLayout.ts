@@ -10,8 +10,8 @@ import {
   BlockStyle,
   applyPageFont,
 } from "./FontConfig";
-import { layoutBlock, LayoutBlock, type LayoutBlockKind, type CellSubBlock } from "./BlockLayout";
-import type { InlineRegistry } from "./BlockRegistry";
+import { layoutBlock, LayoutBlock, type LayoutBlockKind, type LaidRegion } from "./BlockLayout";
+import type { CompositeLayout, CompositeUnit, InlineRegistry } from "./BlockRegistry";
 import { LineBreaker, isSpacerLine, type InputSpan, type LayoutLine } from "./LineBreaker";
 import type { MarkerLine } from "./BlockLayout";
 import type { LaidMarker, MarkerFace } from "./markers";
@@ -266,8 +266,10 @@ export interface MeasureCacheEntry {
   kind: LayoutBlockKind;
   height: number;
   lines: LayoutLine[];
-  /** Cell sub-blocks for `kind: "tableRow"` entries. */
-  cells?: CellSubBlock[];
+  /** A composite unit's regions, laid out. */
+  regions?: LaidRegion[];
+  /** A composite unit's own data. */
+  unitData?: unknown;
   spaceBefore: number;
   spaceAfter: number;
   blockType: string;
@@ -325,10 +327,12 @@ export interface FlowBlock {
   kind: LayoutBlockKind;
   /** Measured lines — position-independent (lineHeight only, no absolute Y). */
   lines: LayoutLine[];
-  /** Cell sub-blocks for `kind: "tableRow"` flows (y relative to the row top). */
-  cells?: CellSubBlock[];
-  /** True for a table's last row — drives table bottom-border ownership. */
-  isLastRow?: boolean;
+  /** A composite unit's regions (y relative to the unit's top). */
+  regions?: LaidRegion[];
+  /** A composite unit's own data. */
+  unitData?: unknown;
+  /** True for the last unit of its composite. */
+  lastUnit?: true;
   height: number;
   /** Block style spacing (styleKey-aware, e.g. list_item overrides paragraph). */
   spaceBefore: number;
@@ -414,10 +418,11 @@ export function clampPlacementsToPages(
 }
 
 /**
- * Images laid out inside table cells, in page coordinates. A row carries its
- * images row-relative, so they are read off the rows where pagination put them.
+ * Images laid out inside composite regions, in page coordinates. A unit carries
+ * its images unit-relative, so they are read off the units where pagination
+ * put them.
  */
-function cellFloatPlacements(
+function regionFloatPlacements(
   pages: readonly LayoutPage[],
   geometry: PageGeometry,
 ): AnchoredObjectPlacement[] {
@@ -425,30 +430,37 @@ function cellFloatPlacements(
   for (const page of pages) {
     const toGlobal = (localY: number) =>
       geometry.startOf(page.pageNumber) + localY - geometry.metricsFor(page.pageNumber).contentTop;
-    for (const block of page.blocks) {
-      for (const cell of block.cells ?? []) {
-        for (const f of cell.floats ?? []) {
-          const y = block.y + f.y;
-          placements.push({
-            docPos: f.docPos,
-            page: page.pageNumber,
-            x: f.x,
-            y,
-            width: f.width,
-            height: f.height,
-            wrapMode: f.wrapMode,
-            zIndex: f.zIndex,
-            node: f.node,
-            anchorGlobalY: toGlobal(block.y + f.anchorY),
-            anchorPage: page.pageNumber,
-            globalY: toGlobal(y),
-            cellPos: cell.cellPos,
-            ...(f.clamped ? { clamped: true } : {}),
-            ...(f.stackOffset ? { stackOffset: f.stackOffset } : {}),
-          });
+    // A composite nested in a region (a table in a cell) carries its own
+    // regions' images, relative to its own top.
+    const visit = (blocks: readonly LayoutBlock[], originY: number): void => {
+      for (const block of blocks) {
+        const unitTop = originY + block.y;
+        for (const region of block.regions ?? []) {
+          visit(region.blocks, unitTop);
+          for (const f of region.floats ?? []) {
+            const y = unitTop + f.y;
+            placements.push({
+              docPos: f.docPos,
+              page: page.pageNumber,
+              x: f.x,
+              y,
+              width: f.width,
+              height: f.height,
+              wrapMode: f.wrapMode,
+              zIndex: f.zIndex,
+              node: f.node,
+              anchorGlobalY: toGlobal(unitTop + f.anchorY),
+              anchorPage: page.pageNumber,
+              globalY: toGlobal(y),
+              regionPos: region.pos,
+              ...(f.clamped ? { clamped: true } : {}),
+              ...(f.stackOffset ? { stackOffset: f.stackOffset } : {}),
+            });
+          }
         }
       }
-    }
+    };
+    visit(page.blocks, 0);
   }
   return placements;
 }
@@ -708,7 +720,7 @@ export function runFlowPipeline(
   // disappear from rendering, hit testing, and PDF export.
   // In-cell images are read off the rows after pagination, so only body
   // placements carry over or decide whether the cached tail still holds.
-  const previousBodyPlacements = (previousLayout?.anchoredObjects ?? []).filter((p) => p.cellPos === undefined);
+  const previousBodyPlacements = (previousLayout?.anchoredObjects ?? []).filter((p) => p.regionPos === undefined);
   const carriedPlacements = cursor
     ? previousBodyPlacements.filter(
         (p) => !anchoredFlow.placements.some((q) => q.docPos === p.docPos),
@@ -764,7 +776,7 @@ export function runFlowPipeline(
       prevPageCount: pr.pages.length,
     };
     const partialPages = [...pr.pages, pr.currentPage];
-    const partialPlacements = [...mergedPlacements, ...cellFloatPlacements(partialPages, geometry)];
+    const partialPlacements = [...mergedPlacements, ...regionFloatPlacements(partialPages, geometry)];
     // Intentionally NOT clamped: the partial layout's anchoredObjects gets
     // carried forward to the next chunk as `previousLayout?.anchoredObjects`,
     // and earlier chunks are never re-solved. Clamping a partial would
@@ -795,7 +807,7 @@ export function runFlowPipeline(
 
   const allPages = pr.earlyTerminated ? pr.pages : [...pr.pages, pr.currentPage];
   const clampedFinal = clampPlacementsToPages(
-    [...mergedPlacements, ...cellFloatPlacements(allPages, geometry)],
+    [...mergedPlacements, ...regionFloatPlacements(allPages, geometry)],
     allPages.length,
   );
   const layout: DocumentLayout = {
@@ -1002,9 +1014,9 @@ export function paginateFlow(
     const blockX = margins.left + flow.indentLeft;
     const blockWidth = flow.availableWidth;
 
-    // Build a positioned LayoutBlock from the FlowBlock measurements.
-    // `tableRow` blocks carry their cell sub-blocks (y relative to the row top,
-    // x absolute) so the invariant "kind === tableRow → cells present" holds.
+    // Build a positioned LayoutBlock from the FlowBlock measurements. A
+    // composite unit carries its regions (y relative to the unit's top, x
+    // absolute), so "kind === composite → regions present" holds.
     const buildBlock = (x: number, bY: number): LayoutBlock => ({
       kind: flow.kind,
       node,
@@ -1019,8 +1031,8 @@ export function paginateFlow(
       blockType: flow.blockType,
       align: flow.align,
       availableWidth: blockWidth,
-      ...(flow.kind === "tableRow" ? { cells: flow.cells ?? [] } : {}),
-      ...(flow.isLastRow ? { isLastRow: true } : {}),
+      ...(flow.kind === "composite" ? { regions: flow.regions ?? [], unitData: flow.unitData } : {}),
+      ...(flow.lastUnit ? { lastUnit: true } : {}),
     });
 
     const block = normalizeWrappedBlockForPage(
@@ -1043,10 +1055,10 @@ export function paginateFlow(
     const blockBottom = targetY + block.height;
     const pageBottom = currentMetrics.contentBottom;
     const contentHeight = currentMetrics.contentHeight;
-    // Text blocks can always be split; leaf and tableRow blocks need the
+    // Text blocks can always be split; leaf and composite blocks need the
     // !isFirstOnPage guard to avoid infinite empty-page loops when the block
     // exceeds contentHeight (the "pathological row policy" — clip on next page).
-    const isAtomicBlock = flow.kind === "leaf" || flow.kind === "tableRow";
+    const isAtomicBlock = flow.kind === "leaf" || flow.kind === "composite";
     const overflows = !pageless && blockBottom > pageBottom && (!isFirstOnPage || !isAtomicBlock);
 
     // ── Layout debug log ──────────────────────────────────────────────────────
@@ -1400,7 +1412,7 @@ export function buildBlockFlow(
 
     // Measure — position-independent (targetY=0, page=1 are not stored in entry).
     const entry = resolveBlockEntry(
-      node, nodePos, blockX, 0, blockWidth, 1, ctx, item.tableColumns, marker,
+      node, nodePos, blockX, 0, blockWidth, 1, ctx, item.unit, marker,
     );
     const spacing = itemSpacing(resolved, entry);
 
@@ -1409,8 +1421,8 @@ export function buildBlockFlow(
       nodePos,
       kind: entry.kind,
       lines: entry.lines,
-      ...(entry.cells ? { cells: entry.cells } : {}),
-      ...(item.isLastRow ? { isLastRow: true } : {}),
+      ...(entry.regions ? { regions: entry.regions, unitData: entry.unitData } : {}),
+      ...(item.lastUnit ? { lastUnit: true } : {}),
       height: entry.height,
       spaceBefore: spacing.spaceBefore,
       spaceAfter: spacing.spaceAfter,
@@ -1596,15 +1608,14 @@ function resolveBlockEntry(
   blockWidth: number,
   pageNumber: number,
   ctx: MeasureContext,
-  tableColumns?: number[],
+  unit?: { composite: CompositeLayout; unit: CompositeUnit },
   marker?: MarkerPlacement,
 ): MeasureCacheEntry {
   const { measurer, fontConfig, fontModifiers, measureCache, inlineRegistry, fonts } = ctx;
-  // Table rows bypass the measure cache: their `cells` carry child-block span
-  // docPos values that the cache-hit delta-adjustment path does not rewrite, so
-  // re-measuring fresh each run keeps cell hit-testing correct. Tables are small
-  // relative to body text, so this is cheap.
-  if (node.type.name === "tableRow") {
+  // Composite units bypass the measure cache: their regions carry child-block
+  // span docPos values that the cache-hit delta-adjustment path does not
+  // rewrite, so re-measuring fresh each run keeps region hit-testing correct.
+  if (unit) {
     const measured = layoutBlock(node, {
       nodePos,
       x: blockX,
@@ -1616,7 +1627,7 @@ function resolveBlockEntry(
       ...(fontModifiers ? { fontModifiers } : {}),
       ...(inlineRegistry ? { inlineRegistry } : {}),
       ...(fonts ? { fonts } : {}),
-      ...(tableColumns ? { tableColumns } : {}),
+      unit,
     });
     return {
       availableWidth: blockWidth,
@@ -1624,7 +1635,7 @@ function resolveBlockEntry(
       kind: measured.kind,
       height: measured.height,
       lines: measured.lines,
-      ...(measured.cells ? { cells: measured.cells } : {}),
+      ...(measured.regions ? { regions: measured.regions, unitData: measured.unitData } : {}),
       spaceBefore: measured.spaceBefore,
       spaceAfter: measured.spaceAfter,
       blockType: measured.blockType,

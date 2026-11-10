@@ -14,7 +14,7 @@ import type { AnchoredObjectPlacement } from "./AnchoredObjects";
 import { ANCHORED_OBJECT_MARGIN } from "./AnchoredObjects";
 import { computePageMetrics, EMPTY_RESOLVED_CHROME } from "./PageMetrics";
 import type { LayoutBlock } from "./BlockLayout";
-import { cellAtCoords } from "./cellHitTest";
+import { regionAtCoords } from "./regionHitTest";
 import { renderTableRowPdf } from "../table/pdfExport";
 
 /**
@@ -99,7 +99,7 @@ function blocksOf(l: DocumentLayout): Placed[] {
 }
 
 function rowsOf(l: DocumentLayout, label: string): Placed[] {
-  return blocksOf(l).filter((b) => b.kind === "tableRow" && b.text.startsWith(label));
+  return blocksOf(l).filter((b) => b.kind === "composite" && b.text.startsWith(label));
 }
 
 function floatOf(l: DocumentLayout, n = 0): AnchoredObjectPlacement {
@@ -353,7 +353,7 @@ describe("float beside a table — the table moves below the float", () => {
 
     function firstRowBlock(l: DocumentLayout): LayoutBlock {
       return must(
-        l.pages.flatMap((page) => page.blocks).find((b) => b.kind === "tableRow"),
+        l.pages.flatMap((page) => page.blocks).find((b) => b.kind === "composite"),
         "first row block",
       );
     }
@@ -361,13 +361,13 @@ describe("float beside a table — the table moves below the float", () => {
     it("13: a click lands in the moved cell, not where the row used to be", () => {
       const l = moved();
       const row = firstRowBlock(l);
-      const cell = must(row.cells?.[0], "first cell");
+      const cell = must(row.regions?.[0], "first cell");
       const centreX = cell.x + cell.width / 2;
       const centreY = row.y + cell.y + cell.height / 2;
-      expect(cellAtCoords(l.pages, centreX, centreY, 1)).toBe(cell.cellPos);
+      expect(regionAtCoords(l.pages, centreX, centreY, 1)).toBe(cell.pos);
 
       const plainRow = must(rowsOf(layout(docOf(para("Anchor"), table("T", 3))), "T")[0], "plain row");
-      expect(cellAtCoords(l.pages, centreX, plainRow.y + plainRow.height / 2, 1)).not.toBe(cell.cellPos);
+      expect(regionAtCoords(l.pages, centreX, plainRow.y + plainRow.height / 2, 1)).not.toBe(cell.pos);
     });
 
     it("14: PDF draws the moved row where the layout put it", () => {
@@ -383,8 +383,9 @@ describe("float beside a table — the table moves below the float", () => {
           line: (op) => { lineYs.push(op.from.y, op.to.y); },
           lines: () => {},
         },
-        blocks: (blocks) => { for (const b of blocks) childYs.push(b.y); },
       });
+      // What the cells hold is dispatched at the row's y plus its own.
+      for (const region of row.regions ?? []) for (const b of region.blocks) childYs.push(row.y + b.y);
       expect(Math.min(...lineYs)).toBe(row.y);
       expect(Math.min(...lineYs)).toBeGreaterThanOrEqual(f.y + f.height);
       expect(Math.min(...childYs)).toBeGreaterThanOrEqual(row.y);
@@ -393,7 +394,7 @@ describe("float beside a table — the table moves below the float", () => {
 
   // Known gap, pinned: a float anchored inside a cell is not resolved as a
   // float, because a row's own lines are empty and cells are not scanned.
-  it("15: a square float anchored in a cell is laid out in its cell (CellFloats.test.ts)", () => {
+  it("15: a square float anchored in a cell is laid out in its cell (RegionFloats.test.ts)", () => {
     const inCell = schema.node("table", { grid: [100, 100] }, [
       schema.node("tableRow", null, [
         schema.node("tableCell", null, [para("Cell", image({ wrapMode: "square" }))]),
@@ -403,7 +404,7 @@ describe("float beside a table — the table moves below the float", () => {
     const l = layout(docOf(para("Before"), inCell));
     const row = must(rowsOf(l, "Cell")[0], "row");
     const f = floatOf(l);
-    expect(f.cellPos).toBeDefined();
+    expect(f.regionPos).toBeDefined();
     expect(row.y + row.height).toBeGreaterThanOrEqual(f.y + f.height);
   });
 

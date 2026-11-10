@@ -2,7 +2,7 @@
  * Stage 3 of the layout pipeline: anchored-object placement.
  *
  * Places every anchored float from its anchor flow, carves its wrap zone,
- * reflows the text and tables around it, and settles the two until no anchor
+ * reflows the text and composites around it, and settles the two until no anchor
  * moves.
  */
 import type { Node } from "prosemirror-model";
@@ -196,7 +196,7 @@ export function resolveAnchoredObjects(
     restampGlobalYFrom(flows, index, pageConfig, geometry, floatSet.startOf);
 
   // A wrap zone reflows every block it overlaps, including blocks *above*
-  // its own anchor, and can move a table above it. Either moves every anchor
+  // its own anchor, and can move a composite above it. Either moves every anchor
   // after that point, so a placement recorded before the reflow describes a
   // position its anchor no longer has.
   //
@@ -460,8 +460,8 @@ function samePlacement(a: AnchoredObjectPlacement, b: AnchoredObjectPlacement): 
  * Re-lays every text flow on the page that lies in `band` (where a float's
  * zone arrived or left), and every one whose wrap no longer matches where it
  * sits: it touches an exclusion and was not laid out at this y, or it was
- * wrapped on this page before at another y. A table that meets a float moves
- * below it. Growing a block or moving a table restamps what follows, so the
+ * wrapped on this page before at another y. A composite that meets a float moves
+ * below it. Growing a block or moving a composite restamps what follows, so the
  * scan runs to the page bottom.
  *
  * This deliberately does not start at the anchor flow index. `yOffset` makes
@@ -504,12 +504,12 @@ function reflowFlowsAgainstExclusions(
     if (flowY >= pageBottom) break;
     // Leaf flows (image, rule, page break) cannot be re-broken around a wrap zone.
     if (flow.kind === "leaf" || flowY + flow.height <= pageTop) continue;
-    // A table cannot be re-broken either, so it moves below the float instead.
-    if (flow.kind === "tableRow") {
+    // A composite cannot be re-broken either, so it moves below the float instead.
+    if (flow.kind === "composite") {
       if (pageConfig.pageless) continue;
-      const table = moveTableClearOfFloats(flows, idx, zone, floats, pageConfig, geometry);
-      noteMoved(table.moved);
-      idx = table.lastRowIndex;
+      const composite = moveCompositeClearOfFloats(flows, idx, zone, floats, pageConfig, geometry);
+      noteMoved(composite.moved);
+      idx = composite.lastUnitIndex;
       continue;
     }
 
@@ -591,17 +591,17 @@ function reflowFlowsAgainstExclusions(
   return moved;
 }
 
-/** A row whose table goes on after it, so the next flow is that table's next row. */
-function continuesTable(row: FlowBlock | undefined): row is FlowBlock {
-  return row?.kind === "tableRow" && !row.isLastRow;
+/** A unit whose composite goes on after it, so the next flow is that composite's next unit. */
+function continuesComposite(unit: FlowBlock | undefined): unit is FlowBlock {
+  return unit?.kind === "composite" && !unit.lastUnit;
 }
 
 function bandsOverlap(a: Band, b: Band): boolean {
   return a.top < b.bottom && a.bottom > b.top;
 }
 
-/** The band from the first row's top to the last row's bottom. */
-function tableExtent(flows: readonly FlowBlock[], start: number, end: number): Band {
+/** The band from the first unit's top to the last unit's bottom. */
+function compositeExtent(flows: readonly FlowBlock[], start: number, end: number): Band {
   const first = flows[start];
   const last = flows[end];
   return {
@@ -611,42 +611,42 @@ function tableExtent(flows: readonly FlowBlock[], start: number, end: number): B
 }
 
 /**
- * Place the table holding `rowIndex` below every float on the page it cannot
- * sit beside, measured from where the table would sit on its own. Word wraps
- * a table as one unit and never narrows it, so its rows on this page move
- * together; rows on other pages stay. The floats are taken where they sit
+ * Place the composite holding `unitIndex` below every float on the page it cannot
+ * sit beside, measured from where the composite would sit on its own. Word
+ * moves a table past a float whole and never narrows it, and a composite does
+ * the same: its units on this page move together; units on other pages stay. The floats are taken where they sit
  * with the flows as they are now, never from rects a restamp left behind.
  */
-function moveTableClearOfFloats(
+function moveCompositeClearOfFloats(
   flows: FlowBlock[],
-  rowIndex: number,
+  unitIndex: number,
   zone: { pageNumber: number; contentX: number; contentWidth: number },
   floats: FloatSet,
   pageConfig: PageConfig,
   geometry: PageGeometry,
-): { moved: { from: number; to: number }; lastRowIndex: number } {
+): { moved: { from: number; to: number }; lastUnitIndex: number } {
   const page = zone.pageNumber;
   const onPage = (flow: FlowBlock | undefined): boolean =>
     flow !== undefined && geometry.pageAt(flow.globalY ?? 0) === page;
 
-  let start = rowIndex;
-  while (continuesTable(flows[start - 1]) && onPage(flows[start - 1])) start--;
-  let end = rowIndex;
-  while (continuesTable(flows[end]) && onPage(flows[end + 1])) end++;
+  let start = unitIndex;
+  while (continuesComposite(flows[start - 1]) && onPage(flows[start - 1])) start--;
+  let end = unitIndex;
+  while (continuesComposite(flows[end]) && onPage(flows[end + 1])) end++;
   const first = flows[start];
-  const none = { moved: { from: start, to: start }, lastRowIndex: end };
+  const none = { moved: { from: start, to: start }, lastUnitIndex: end };
   if (!first) return none;
 
   const natural = naturalStartOf(flows, start, pageConfig, geometry);
-  const tableHeight = tableExtent(flows, start, end).bottom - (first.globalY ?? 0);
-  // Floats anchored before the table stay put while it moves. One anchored
-  // after it moves with it, so it blocks the table only where it reaches back
-  // over the table's own band — and a locked one never does: it is a float
-  // anchored after the table, and those overlap it.
-  // The table is cleared on the page its natural position is on, which is
+  const compositeHeight = compositeExtent(flows, start, end).bottom - (first.globalY ?? 0);
+  // Floats anchored before the composite stay put while it moves. One anchored
+  // after it moves with it, so it blocks the composite only where it reaches back
+  // over the composite's own band — and a locked one never does: it is a float
+  // anchored after the composite, and those overlap it.
+  // The composite is cleared on the page its natural position is on, which is
   // not the page being scanned when an earlier move carried it over.
   const clearPage = geometry.pageAt(natural);
-  const naturalBand = { top: natural, bottom: natural + tableHeight };
+  const naturalBand = { top: natural, bottom: natural + compositeHeight };
   const stayingPut = new ExclusionManager();
   const blocking = new ExclusionManager();
   for (const float of floats.placed) {
@@ -661,7 +661,7 @@ function moveTableClearOfFloats(
     }
   }
   const clearOf = (exclusions: ExclusionManager): number => {
-    const clearY = exclusions.getNextFreeY(clearPage, natural, tableHeight, zone.contentX, zone.contentWidth);
+    const clearY = exclusions.getNextFreeY(clearPage, natural, compositeHeight, zone.contentX, zone.contentWidth);
     return clearY === natural ? natural : advanceFlowGlobalY(first, clearY, pageConfig, geometry).startGlobalY;
   };
   const startingAt = (target: number): { flows: FlowBlock[]; to: number } => {
@@ -694,13 +694,13 @@ function moveTableClearOfFloats(
     const flow = result.flows[i];
     if (flow) flows[i] = flow;
   }
-  return { moved: { from: start, to: result.to }, lastRowIndex: end };
+  return { moved: { from: start, to: result.to }, lastUnitIndex: end };
 }
 
 /**
- * Moving a table drags every float anchored after it. The move holds only if
- * each one that reaches back over the table keeps its anchor on its page and,
- * when `reachBackMustClear`, clears the moved table; and each one that does
+ * Moving a composite drags every float anchored after it. The move holds only if
+ * each one that reaches back over the composite keeps its anchor on its page and,
+ * when `reachBackMustClear`, clears the moved composite; and each one that does
  * not reach back still clears it once carried. A float that does not reach
  * back may be carried onto the next page.
  */
@@ -712,8 +712,8 @@ function draggedFloatsHold(
   end: number,
   reachBackMustClear: boolean,
 ): boolean {
-  const tableBefore = tableExtent(before, start, end);
-  const tableAfter = tableExtent(after, start, end);
+  const tableBefore = compositeExtent(before, start, end);
+  const tableAfter = compositeExtent(after, start, end);
   return floats.placed.every((float) => {
     if (!float.wraps || float.anchorFlowIndex <= end || float.locked) return true;
     const now = floats.placementIn(float, before);

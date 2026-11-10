@@ -9,7 +9,8 @@ import { ServerEditor } from "../ServerEditor";
 import { StarterKit } from "../extensions/StarterKit";
 import { createMeasurer } from "../test-utils";
 import { defaultEditorTheme } from "../model/theme";
-import { TableRowStrategy } from "./TableRowStrategy";
+import { paintBlock } from "../renderer/paintBlock";
+import { CELL_INSET } from "./layout";
 
 function rowNode(): { row: Node; image: Node } {
   const editor = new ServerEditor({
@@ -83,14 +84,14 @@ function childBlock(line: LayoutLine, paragraph: Node): LayoutBlock {
   };
 }
 
-describe("TableRowStrategy", () => {
+describe("a table row painted", () => {
   it("dispatches inline object rendering for child blocks inside cells", () => {
     const { row, image } = rowNode();
     const line = objectLine(image);
     const paragraph = image.type.schema.nodes["paragraph"]!.create();
     const child = childBlock(line, paragraph);
     const block: LayoutBlock = {
-      kind: "tableRow",
+      kind: "composite",
       node: row,
       nodePos: 1,
       x: 10,
@@ -98,7 +99,7 @@ describe("TableRowStrategy", () => {
       width: 120,
       height: 40,
       lines: [],
-      cells: [{ cellPos: 2, x: 10, y: 0, width: 120, height: 40, vMerge: "none", background: null, blocks: [child] }],
+      regions: [{ pos: 2, x: 10, y: 0, width: 120, height: 40, inset: CELL_INSET, blocks: [child], data: { vMerge: "none", background: null } }],
       spaceBefore: 0,
       spaceAfter: 0,
       blockType: "tableRow",
@@ -115,7 +116,7 @@ describe("TableRowStrategy", () => {
     });
     const map = new CharacterMap();
 
-    TableRowStrategy.render(
+    paintBlock(
       block,
       {
         ctx: document.createElement("canvas").getContext("2d")!,

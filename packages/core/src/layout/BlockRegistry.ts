@@ -219,11 +219,63 @@ export interface WrapperLayout {
  * - `break` — the node has no box: a block that breaks the page starts the
  *   next block on a new page, an inline node that breaks the line ends its
  *   line. Only a leaf can break; a node that holds content ignores it.
+ * - `composite` — the node is laid out as units, each of side-by-side
+ *   regions (see `CompositeLayout`): a table, its rows, their cells.
  */
 export type NodeLayout =
   | { kind: "block" }
   | { kind: "transparent"; wrap?: WrapperLayout }
-  | { kind: "break"; breaks: BreakKind };
+  | { kind: "break"; breaks: BreakKind }
+  | { kind: "composite"; composite: CompositeLayout };
+
+/** One unit of a composite node, the piece pagination places whole: a table's row. */
+export interface CompositeUnit {
+  node: Node;
+  /** Document position of the unit's node. */
+  pos: number;
+  /** The extension's own, for its regions and painter: a table's column grid. */
+  data: unknown;
+}
+
+/** Space kept clear inside a region's edges: a cell's padding. */
+export interface RegionInset {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+}
+
+/** Where one region of a unit sits; the engine lays out what its node holds there. */
+export interface RegionPlacement {
+  /** The region's node: its child blocks are laid out in it. */
+  node: Node;
+  pos: number;
+  /** Left edge, relative to the unit's left. */
+  x: number;
+  width: number;
+  inset: RegionInset;
+  /** The extension's own, for its painter: a cell's background or merge. */
+  data?: unknown;
+}
+
+/**
+ * How a composite node is laid out: as units placed one at a time, each made
+ * of side-by-side regions. The extension says where regions sit; the engine
+ * lays out what each holds with the walk the page body uses, sizes the unit
+ * to its tallest region and stretches every region to that height.
+ */
+export interface CompositeLayout {
+  /** The units, in order, for a composite node at `pos`. */
+  units(node: Node, pos: number): CompositeUnit[];
+  /** The regions of a unit laid out `width` wide. */
+  regions(unit: CompositeUnit, width: number): RegionPlacement[];
+}
+
+function isCompositeLayout(value: unknown): value is CompositeLayout {
+  return typeof value === "object" && value !== null
+    && "units" in value && typeof value.units === "function"
+    && "regions" in value && typeof value.regions === "function";
+}
 
 /** What a `break` node ends: the page its block is on, or the line it sits in. */
 export type BreakKind = "page" | "line";
@@ -243,14 +295,21 @@ function isWrapperLayout(value: unknown): value is WrapperLayout {
     && "place" in value && typeof value.place === "function";
 }
 
+/** What each kind of declaration needs beside its `kind` to be whole. */
+const NODE_LAYOUT_CHECKS: Record<NodeLayout["kind"], (value: object) => boolean> = {
+  block: () => true,
+  transparent: (value) => !("wrap" in value) || value.wrap === undefined || isWrapperLayout(value.wrap),
+  break: (value) => "breaks" in value && (value.breaks === "page" || value.breaks === "line"),
+  composite: (value) => "composite" in value && isCompositeLayout(value.composite),
+};
+
+function isNodeLayoutKind(kind: unknown): kind is NodeLayout["kind"] {
+  return typeof kind === "string" && Object.hasOwn(NODE_LAYOUT_CHECKS, kind);
+}
+
 function isNodeLayout(value: unknown): value is NodeLayout {
-  if (typeof value !== "object" || value === null || !("kind" in value)) {
-    return false;
-  }
-  if (value.kind === "block") return true;
-  if (value.kind === "break") return "breaks" in value && (value.breaks === "page" || value.breaks === "line");
-  if (value.kind !== "transparent") return false;
-  return !("wrap" in value) || value.wrap === undefined || isWrapperLayout(value.wrap);
+  return typeof value === "object" && value !== null && "kind" in value
+    && isNodeLayoutKind(value.kind) && NODE_LAYOUT_CHECKS[value.kind](value);
 }
 
 /**
