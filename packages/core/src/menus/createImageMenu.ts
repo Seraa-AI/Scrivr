@@ -32,6 +32,7 @@ import type { IEditor } from "../extensions/types";
 import { subscribeViewUpdates } from "./subscribeViewUpdates";
 import { subscribeEditorFocusOutside } from "./subscribeEditorFocusOutside";
 import { isAnchorInsideContainer } from "./anchorVisibility";
+import { trackShownPosition } from "./shownPosition";
 import type { HoverTarget } from "../hover/types";
 import {
   subscribeHoverTarget,
@@ -71,12 +72,14 @@ export function createImageMenu(editor: IEditor, options: ImageMenuOptions): () 
   const { onShow, onHide, onMove } = options;
 
   let visible = false;
-  let lastDocPos = -1;
   let rafId: number | null = null;
   let hovered: HoverTarget | null = null;
+  /** The shown image's position, mapped through edits. */
+  const shown = trackShownPosition(editor);
 
   function hide() {
-    if (visible) { visible = false; lastDocPos = -1; onHide(); }
+    shown.set(null);
+    if (visible) { visible = false; onHide(); }
   }
 
   /** The selected image — the full presentation. */
@@ -115,11 +118,12 @@ export function createImageMenu(editor: IEditor, options: ImageMenuOptions): () 
 
     const info: ImageMenuInfo = { node, docPos, presentation: full ? "full" : "peek" };
 
-    if (visible && lastDocPos === docPos) {
+    const same = visible && shown.get() === docPos;
+    shown.set(docPos);
+    if (same) {
       onMove(rect, info);
     } else {
       visible = true;
-      lastDocPos = docPos;
       onShow(rect, info);
     }
   }
@@ -148,6 +152,7 @@ export function createImageMenu(editor: IEditor, options: ImageMenuOptions): () 
 
   return () => {
     unsubscribe();
+    shown.dispose();
     offHover();
     offFocusOutside();
     if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }

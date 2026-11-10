@@ -77,7 +77,18 @@ export interface ObjectRectEntry {
   page: number;
 }
 
-/** Key for the per-line painted-run index. */
+/** One line's part of a range: what `Range.getClientRects()` gives a DOM editor. */
+export interface RangeRect {
+  page: number;
+  x: number;
+  /** Top of the line. */
+  y: number;
+  width: number;
+  /** The line's height. */
+  height: number;
+}
+
+/** Key for the per-line indexes. */
 function extentKey(page: number, lineIndex: number): string {
   return `${page}:${lineIndex}`;
 }
@@ -101,6 +112,8 @@ export class CharacterMap {
    * cost the hover path cannot carry.
    */
   private lineExtents = new Map<string, { left: number; right: number }>();
+  /** Glyphs per line, keyed `page:lineIndex`: a point or a range reads one line, not the map. */
+  private lineGlyphs = new Map<string, GlyphEntry[]>();
   private populationGeneration = UNOWNED_GENERATION;
 
   /**
@@ -126,6 +139,7 @@ export class CharacterMap {
     this.lines = [];
     this.objectRects.clear();
     this.lineExtents.clear();
+    this.lineGlyphs.clear();
     // The contents left, so the claim on them goes too — until the next
     // layout stamps its own version, this map speaks for no generation.
     this.populationGeneration = UNOWNED_GENERATION;
@@ -141,16 +155,22 @@ export class CharacterMap {
     for (const key of this.lineExtents.keys()) {
       if (key.startsWith(`${pageNumber}:`)) this.lineExtents.delete(key);
     }
+    for (const key of this.lineGlyphs.keys()) {
+      if (key.startsWith(`${pageNumber}:`)) this.lineGlyphs.delete(key);
+    }
   }
 
   registerGlyph(entry: GlyphEntry): void {
     this.glyphs.push(entry);
+    const key = extentKey(entry.page, entry.lineIndex);
+    const onLine = this.lineGlyphs.get(key);
+    if (onLine) onLine.push(entry);
+    else this.lineGlyphs.set(key, [entry]);
 
     // Zero-width glyphs are structural, not visible — the caret sentinel on a
     // block's last line is one. They occupy no space a reader can see, so they
     // do not extend the painted run.
     if (entry.width <= 0) return;
-    const key = extentKey(entry.page, entry.lineIndex);
     const extent = this.lineExtents.get(key);
     if (!extent) {
       this.lineExtents.set(key, { left: entry.x, right: entry.x + entry.width });
@@ -491,11 +511,30 @@ export class CharacterMap {
     if (!this.hasTextAt(x, y, page)) return null;
     const line = this.lineAtPoint(x, y, page);
     if (!line) return null;
-    for (const g of this.glyphs) {
-      if (g.page !== page || g.lineIndex !== line.lineIndex || g.width <= 0) continue;
-      if (x >= g.x && x < g.x + g.width) return g;
+    for (const g of this.lineGlyphs.get(extentKey(page, line.lineIndex)) ?? []) {
+      if (g.width > 0 && x >= g.x && x < g.x + g.width) return g;
     }
     return null;
+  }
+
+  /**
+   * One rect per line the range `[from, to)` paints on, in page and line
+   * order, each spanning that line's glyphs in the range. A link wrapped onto
+   * two lines, or across a page, has a rect on each.
+   */
+  rangeRects(from: number, to: number): RangeRect[] {
+    const rects: RangeRect[] = [];
+    for (const line of this.linesInRange(from, to)) {
+      let left = Infinity;
+      let right = -Infinity;
+      for (const g of this.lineGlyphs.get(extentKey(line.page, line.lineIndex)) ?? []) {
+        if (g.docPos < from || g.docPos >= to || g.width <= 0) continue;
+        left = Math.min(left, g.x);
+        right = Math.max(right, g.x + g.width);
+      }
+      if (right > left) rects.push({ page: line.page, x: left, y: line.y, width: right - left, height: line.height });
+    }
+    return rects.sort((a, b) => a.page - b.page || a.y - b.y);
   }
 
   /**

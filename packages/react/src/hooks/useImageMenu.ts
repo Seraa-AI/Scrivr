@@ -63,9 +63,9 @@ export function useImageMenu(editor: Editor | null, options: UseImageMenuOptions
       },
       onMove: (r, i) => {
         setRect(r);
-        // Peek → full: the inputs were never shown, so seed them now.
-        const prev = infoRef.current;
-        if (prev?.presentation !== i.presentation || prev.docPos !== i.docPos) {
+        // The same image, moved or re-presented; a different one arrives as
+        // onShow. Peek → full: the inputs were never shown, so seed them now.
+        if (infoRef.current?.presentation !== i.presentation) {
           setWidth(dimension(i.node.attrs["width"]));
           setHeight(dimension(i.node.attrs["height"]));
         }

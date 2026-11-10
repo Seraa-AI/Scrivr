@@ -257,6 +257,10 @@ class ExportPdfEditorDouble extends ServerEditor implements IEditor {
     return [];
   }
 
+  getRangeViewportRects(): DOMRect[] {
+    return [];
+  }
+
   getHoverTargets(): readonly HoverTarget[] {
     return [];
   }

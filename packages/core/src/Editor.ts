@@ -54,7 +54,8 @@ import type { HoverEvent, HoverResolver, HoverTarget } from "./hover/types";
 import { sameHoverTargets } from "./hover/types";
 import { resolveHoverTargets } from "./hover/resolveHoverTargets";
 import type { PagePoint } from "./layout/pagePoint";
-import { resolvePointOwner } from "./layout/pointOwnership";
+import { resolvePointOwner, type PointOwner } from "./layout/pointOwnership";
+import { regionAtCoords } from "./layout/regionHitTest";
 import { nodeFragmentRects } from "./layout/nodeRects";
 import { TextMeasurer, type TextMeasurerLike } from "./layout/TextMeasurer";
 import { defaultPageConfig } from "./layout/PageLayout";
@@ -1188,11 +1189,27 @@ export class Editor extends BaseEditor implements IEditor {
 	 * for an image, one per page for a paragraph or table split across pages,
 	 * the cell's own rect for a table cell. `getNodeRect` stays the
 	 * image-only lookup.
+	 *
+	 * Fragments are read from the body's layout, so they place body positions
+	 * only. While a header or footer is edited, a position is that surface's,
+	 * and the body node sharing its number is not it.
 	 */
 	private getNodeRects(docPos: number): ObjectRectEntry[] {
 		const object = this.getNodeRect(docPos);
 		if (object) return [object];
+		if (this.surfaces?.activeSurface) return [];
 		return nodeFragmentRects(this.layout.pages, this.getState().doc, docPos);
+	}
+
+	getRangeViewportRects(from: number, to: number): DOMRect[] {
+		this.lc.ensureLayout();
+		const out: DOMRect[] = [];
+		for (const rect of this.lc.charMap.rangeRects(from, to)) {
+			const page = this.ib.lookupPageScreenRect(rect.page);
+			if (!page) continue;
+			out.push(new DOMRect(page.screenLeft + rect.x, page.screenTop + rect.y, rect.width, rect.height));
+		}
+		return out;
 	}
 
 	getNodeViewportRects(docPos: number): DOMRect[] {
@@ -1571,11 +1588,7 @@ export class Editor extends BaseEditor implements IEditor {
 			point,
 			state,
 			surfaceId: "body",
-			owner: resolvePointOwner(point.x, point.y, point.page, {
-				anchoredObjects: this.layout.anchoredObjects ?? [],
-				hasTextAt: (x, y, p) => this.charMap.hasTextAt(x, y, p),
-				objectRectAt: (x, y, p) => this.charMap.objectRectAtPoint(x, y, p),
-			}),
+			owner: this.pointOwnerAt(point.x, point.y, point.page),
 			glyphAt: (x, y, p) => this.charMap.glyphAtPoint(x, y, p),
 			hitTarget: () => this.resolveHitTarget(point.x, point.y, point.page),
 			resolvers: this.hoverResolvers,
@@ -1586,6 +1599,22 @@ export class Editor extends BaseEditor implements IEditor {
 					return state.doc.nodeAt(pos)?.type.name ?? "node";
 				}
 			},
+		});
+	}
+
+	/**
+	 * Who owns a point on a body page — the one answer click routing, hover,
+	 * the hover cursor and drags read, so they cannot disagree. See
+	 * `resolvePointOwner`.
+	 *
+	 * @internal — the pointer controller's and hover's.
+	 */
+	pointOwnerAt(x: number, y: number, page: number): PointOwner {
+		return resolvePointOwner(x, y, page, {
+			anchoredObjects: this.layout.anchoredObjects ?? [],
+			hasTextAt: (px, py, p) => this.charMap.hasTextAt(px, py, p),
+			regionAt: (px, py, p) => regionAtCoords(this.layout.pages, px, py, p) !== null,
+			objectRectAt: (px, py, p) => this.charMap.objectRectAtPoint(px, py, p),
 		});
 	}
 
@@ -1601,10 +1630,11 @@ export class Editor extends BaseEditor implements IEditor {
 	 * `"hover"` event instead.
 	 */
 	reportHover(event: HoverEvent): void {
-		if (sameHoverTargets(this.hoverTargets, event.targets)) return;
+		const changed = !sameHoverTargets(this.hoverTargets, event.targets);
+		// Kept even when unchanged: where in each target the pointer now rests.
 		this.hoverTargets = event.targets;
 		this.hoverPoint = event.point;
-		this.emit("hover", event);
+		if (changed) this.emit("hover", event);
 	}
 
 	/**
@@ -1612,13 +1642,15 @@ export class Editor extends BaseEditor implements IEditor {
 	 * collaborator typing above a link does not leave its peek on the old
 	 * range. A target whose range the edit deleted drops out.
 	 */
-	private mapHover(tr: Transaction): void {
-		if (!tr.docChanged || this.hoverTargets.length === 0) return;
+	protected override mapThroughEdit(tr: Transaction): void {
+		super.mapThroughEdit(tr);
+		if (this.hoverTargets.length === 0) return;
 		const targets: HoverTarget[] = [];
 		for (const target of this.hoverTargets) {
 			const pos = tr.mapping.map(target.pos, 1);
 			const end = tr.mapping.map(target.end, -1);
-			if (end > pos) targets.push({ ...target, pos, end });
+			const at = Math.min(Math.max(tr.mapping.map(target.at, 1), pos), end - 1);
+			if (end > pos) targets.push({ ...target, pos, end, at });
 		}
 		this.reportHover({ targets, point: this.hoverPoint, fromEdit: true });
 	}
@@ -1799,7 +1831,6 @@ export class Editor extends BaseEditor implements IEditor {
 		this.lc.invalidate();
 		// applyState is in BaseEditor: applies tr, emits "update", notifyListeners
 		this.applyState(tr);
-		this.mapHover(tr);
 		// resetSilent: reset blink state WITHOUT calling onTick (which fires notifyListeners).
 		// Calling reset() here was the root cause of O(N²) repaints during Y.js initial sync.
 		this.cursorManager.resetSilent();

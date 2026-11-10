@@ -2,6 +2,22 @@ import type { Node } from "prosemirror-model";
 import type { PagePoint } from "../layout/pagePoint";
 
 /**
+ * Marks a popover's root. Focus moving into one does not blur the editor away
+ * from it, and the pointer crossing onto one keeps the hover stack it serves.
+ * `getPopoverElement` is the primary check; this attribute is for vanilla and
+ * third-party popovers without their own root accessor.
+ *
+ * Convention: set it to the popover's name (`bubble-menu`, `link-popover`).
+ * Presence is checked, not value; the value only documents the DOM.
+ */
+export const POPOVER_MARKER = "data-scrivr-popover";
+
+/** Whether `element` is inside a popover. */
+export function inPopover(element: Element | null): boolean {
+  return element?.closest(`[${POPOVER_MARKER}]`) != null;
+}
+
+/**
  * One layer of what is under the pointer.
  *
  * The editor maps `pos` and `end` through each transaction while the pointer
@@ -21,6 +37,12 @@ export interface HoverTarget {
   pos: number;
   /** Mark range end, or pos + node.nodeSize. */
   end: number;
+  /**
+   * The position under the pointer, inside `[pos, end)`: the character for a
+   * mark, the object or the point's position for a node. A popover anchors to
+   * the part of a target the pointer is on — the hovered line of a wrapped link.
+   */
+  at: number;
 }
 
 export interface HoverEvent {
@@ -38,6 +60,11 @@ export interface HoverEvent {
    * so a popover showing it should close without a grace period.
    */
   fromEdit?: boolean;
+  /**
+   * True when the reader ended hover by keyboard — typing or Escape. The peek
+   * closes at once, even under the pointer.
+   */
+  dismissed?: boolean;
 }
 
 /** Mark-level hover: links today, comments / tracked changes later. */
@@ -69,7 +96,11 @@ export function isMarkHoverResolver(r: HoverResolver): r is MarkHoverResolver {
   return "mark" in r;
 }
 
-/** Same stack, layer for layer — the only change that is worth an event. */
+/**
+ * Same stack, layer for layer — the only change that is worth an event. Where
+ * in a target the pointer rests (`at`) is not a change: moving along a link
+ * is still hovering it.
+ */
 export function sameHoverTargets(
   a: readonly HoverTarget[],
   b: readonly HoverTarget[],

@@ -325,6 +325,13 @@ export interface IEditor extends IBaseEditor {
    * one. Empty when the node is not laid out.
    */
   getNodeViewportRects(docPos: number): DOMRect[];
+  /**
+   * Viewport rects for each line the range `[from, to)` paints on, in page and
+   * line order — `Range.getClientRects()` for the canvas. A link wrapped onto
+   * two lines, or across a page, has one per line. Empty when nothing in the
+   * range is painted on a mounted page.
+   */
+  getRangeViewportRects(from: number, to: number): DOMRect[];
   /** What the pointer is over, innermost first. Empty when over nothing. */
   getHoverTargets(): readonly HoverTarget[];
   /**

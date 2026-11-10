@@ -55,6 +55,7 @@ describe("createLinkPopover", () => {
   function linkUnderCaret(editor: Editor, caret: number): LinkPopoverInfo {
     vi.spyOn(editor, "getScrollContainerRect").mockReturnValue(rect(0, 0, 1000, 1000));
     vi.spyOn(editor, "getViewportRect").mockReturnValue(rect(100, 100, 80, 20));
+    vi.spyOn(editor, "getRangeViewportRects").mockReturnValue([rect(100, 100, 80, 20)]);
     const flushRaf = stubRaf();
     const onShow = vi.fn<(r: DOMRect, i: LinkPopoverInfo) => void>();
     cleanup = createLinkPopover(editor, { onShow, onHide: () => {}, onMove: () => {} });

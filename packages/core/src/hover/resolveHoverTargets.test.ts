@@ -96,7 +96,7 @@ describe("Editor.resolveHoverTargets", () => {
     const from = posOf(editor, "the docs");
     const targets = editor.resolveHoverTargets(pointOver(editor, from + 2));
     expect(targets).toEqual([
-      { kind: "link", surfaceId: "body", pos: from, end: from + "the docs".length },
+      { kind: "link", surfaceId: "body", pos: from, end: from + "the docs".length, at: from + 2 },
     ]);
   });
 
@@ -104,7 +104,7 @@ describe("Editor.resolveHoverTargets", () => {
     const editor = makeEditor();
     const from = posOf(editor, "other");
     expect(editor.resolveHoverTargets(pointOver(editor, from + 1))).toEqual([
-      { kind: "link", surfaceId: "body", pos: from, end: from + "other".length },
+      { kind: "link", surfaceId: "body", pos: from, end: from + "other".length, at: from + 1 },
     ]);
   });
 
@@ -166,7 +166,7 @@ describe("Editor hover through transactions", () => {
 
     const from = posOf(editor, "the docs");
     expect(editor.getHoverTargets()).toEqual([
-      { kind: "link", surfaceId: "body", pos: from, end: from + "the docs".length },
+      { kind: "link", surfaceId: "body", pos: from, end: from + "the docs".length, at: from + 2 },
     ]);
     expect(events).toHaveLength(1);
   });
@@ -275,5 +275,38 @@ describe("PointerController hover events", () => {
       new Ctor("pointerdown", { clientX: over.x, clientY: over.y, pointerId: 1, bubbles: true, cancelable: true, detail: 1 }),
     );
     expect(events.at(-1)!.targets).toEqual([]);
+  });
+});
+
+describe("a linked inline image", () => {
+  it("is hovered as the image and as the link it carries", () => {
+    const linkMark = { type: "link", attrs: { href: HREF } };
+    const editor = createTestEditor({
+      pageConfig: defaultPageConfig,
+      extensions: [
+        StarterKit,
+        DefaultContent.configure({
+          json: {
+            type: "doc",
+            content: [{
+              type: "paragraph",
+              content: [
+                { type: "text", text: "see " },
+                { type: "image", attrs: { src: "x.png", width: 80, height: 60 }, marks: [linkMark] },
+              ],
+            }],
+          },
+        }),
+      ],
+    });
+    editor.ensurePagePopulated(1);
+    const rect = editor.getNodeRect(5);
+    if (!rect) throw new Error("image not laid out");
+    const point: PagePoint = { page: rect.page, x: rect.x + rect.width / 2, y: rect.y + rect.height / 2, region: "content" };
+
+    expect(editor.resolveHoverTargets(point)).toEqual([
+      { kind: "image", surfaceId: "body", pos: 5, end: 6, at: 5 },
+      { kind: "link", surfaceId: "body", pos: 5, end: 6, at: 5 },
+    ]);
   });
 });

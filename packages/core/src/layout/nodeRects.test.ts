@@ -135,3 +135,24 @@ describe("CharacterMap.glyphAtPoint", () => {
     expect(editor.charMap.glyphAtPoint(cell.x + 1, cell.y + 1, 1)).toBeNull();
   });
 });
+
+describe("CharacterMap.rangeRects", () => {
+  // "one" ⏎ "two", all linked; the break makes two lines on every machine.
+  const linked = (text: string) => ({ type: "text", text, marks: [{ type: "link", attrs: { href: "https://x.test" } }] });
+  const twoLines = [{ type: "paragraph", content: [linked("one"), { type: "hardBreak", marks: [{ type: "link", attrs: { href: "https://x.test" } }] }, linked("two")] }];
+
+  it("returns one rect per line a range covers, each spanning only its glyphs", () => {
+    const editor = makeEditor(twoLines);
+    const [first, second] = editor.charMap.rangeRects(1, 8);
+    const o = editor.charMap.coordsAtPos(1)!;
+    const t = editor.charMap.coordsAtPos(5)!;
+    expect(first).toMatchObject({ page: 1, x: o.x });
+    expect(second).toMatchObject({ page: 1, x: t.x });
+    expect(second!.y).toBeGreaterThan(first!.y);
+    expect(first!.width).toBeGreaterThan(0);
+  });
+
+  it("returns nothing for a range with no painted glyph", () => {
+    expect(makeEditor(twoLines).charMap.rangeRects(500, 600)).toEqual([]);
+  });
+});

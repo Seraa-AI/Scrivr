@@ -52,7 +52,30 @@ own menu.
 `getNodeViewportRect(docPos)` is its first entry, so it now answers for tables
 and paragraphs as well as images.
 
-`IEditor` gains `getNodeViewportRects` and `getHoverTargets`. A hand-written
-`IEditor` test double needs both; returning `[]` from each is enough.
+A wrapped link peeks under the line the pointer rests on, and shows full under
+the line the caret is on. `editor.getRangeViewportRects(from, to)` is new: one
+rect per line a range paints on, `Range.getClientRects()` for the canvas. Each
+`HoverTarget` carries `at`, where in it the pointer rests; a target built by
+hand must set it.
+
+A popover keeps showing the same link, image or table through a
+collaborator's edit (`onMove`), and shows a different one anew (`onShow`), so
+an edit elsewhere no longer cancels a link edit or overwrites an image size
+being typed. The `"update"` event now carries the transaction's `mapping`;
+code that emits `"update"` itself must pass one (`StepMap.empty` will do).
+Hover positions are mapped before `"update"` is emitted.
+
+Escape or typing closes a peek at once, even under the pointer, with
+`dismissed: true` on the hover event; a lone modifier, `Fn` and `Super`
+included, does not. Moving onto another link while a peek is open swaps after
+the grace period, so crossing it on the way into the peek keeps the peek.
+
+`resolvePointOwner` takes a required `regionAt`: a `behind` image under a
+table no longer owns points in the table's cells, for hover as for click. A
+linked inline image is hovered as a link too.
+
+`IEditor` gains `getNodeViewportRects`, `getRangeViewportRects` and
+`getHoverTargets`. A hand-written `IEditor` test double needs all three;
+returning `[]` from each is enough.
 `ResolvedExtension` gains a required `hoverResolvers` array; code that builds
 one by hand passes `[]`.

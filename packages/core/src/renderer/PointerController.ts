@@ -9,9 +9,9 @@ import {
 import type { Node as PmNode } from "prosemirror-model";
 import { anchoredOf, placementAttrs, type AnchoredObjectPlacement, type PlacementPatch } from "../layout/AnchoredObjects";
 import type { LaidRegion, LayoutBlock } from "../layout/BlockLayout";
-import { resolvePointOwner, type PointOwner } from "../layout/pointOwnership";
+import type { PointOwner } from "../layout/pointOwnership";
 import { resolvePagePoint, type PagePoint } from "../layout/pagePoint";
-import { POPOVER_MARKER } from "../menus/subscribeEditorFocusOutside";
+import { inPopover } from "../hover/types";
 import {
   type PageFlowMetrics,
 } from "../layout/PageMetrics";
@@ -29,8 +29,11 @@ const DRAG_THRESHOLD_PX = 3;
 const AXIS_STILL_THRESHOLD_PX = 3;
 const RE_ANCHOR_THRESHOLD_PX = 24;
 
-/** `KeyboardEvent.key` for a modifier pressed on its own. */
-const MODIFIER_KEYS = new Set(["Shift", "Control", "Alt", "Meta", "AltGraph", "CapsLock"]);
+/** `KeyboardEvent.key` for a modifier pressed on its own: the UI Events modifier keys, and Firefox's older "OS". */
+const MODIFIER_KEYS = new Set([
+  "Alt", "AltGraph", "CapsLock", "Control", "Fn", "FnLock", "Hyper", "Meta", "NumLock",
+  "ScrollLock", "Shift", "Super", "Symbol", "SymbolLock", "OS",
+]);
 
 /**
  * The image's painted offset from its anchor. That is the user's `yOffset`
@@ -68,7 +71,7 @@ export interface PointerControllerDeps {
    * returns true, the click is consumed (e.g. chrome band activation or
    * cursor positioning within an active surface).
    */
-  onPageClick?: (page: number, docX: number, docY: number, clickCount: number) => boolean;
+  onPageClick?: (point: PagePoint, clickCount: number) => boolean;
 }
 
 /**
@@ -189,7 +192,7 @@ export class PointerController {
   /** Attach pointer event listeners. */
   attach(): void {
     this.deps.tilesContainer.addEventListener("pointerdown", this.handlePointerDown);
-    this.deps.tilesContainer.addEventListener("pointerleave", this.clearHover);
+    this.deps.tilesContainer.addEventListener("pointerleave", this.handlePointerLeave);
     document.addEventListener("keydown", this.handleKeyDown);
     document.addEventListener("pointermove", this.handlePointerMove);
     document.addEventListener("pointerup", this.handlePointerUp);
@@ -215,7 +218,7 @@ export class PointerController {
     }
     this.clearHover();
     this.deps.tilesContainer.removeEventListener("pointerdown", this.handlePointerDown);
-    this.deps.tilesContainer.removeEventListener("pointerleave", this.clearHover);
+    this.deps.tilesContainer.removeEventListener("pointerleave", this.handlePointerLeave);
     document.removeEventListener("keydown", this.handleKeyDown);
     document.removeEventListener("pointermove", this.handlePointerMove);
     document.removeEventListener("pointerup", this.handlePointerUp);
@@ -360,12 +363,7 @@ export class PointerController {
    * read, so they cannot disagree about it. See `resolvePointOwner`.
    */
   private ownerAt(docX: number, docY: number, page: number): PointOwner {
-    const { editor } = this.deps;
-    return resolvePointOwner(docX, docY, page, {
-      anchoredObjects: editor.layout.anchoredObjects ?? [],
-      hasTextAt: (x, y, p) => editor.charMap.hasTextAt(x, y, p),
-      objectRectAt: (x, y, p) => editor.charMap.objectRectAtPoint(x, y, p),
-    });
+    return this.deps.editor.pointOwnerAt(docX, docY, page);
   }
 
   /**
@@ -379,12 +377,7 @@ export class PointerController {
     const resizeHit = this.hitHandleAt(hit.x, hit.y, hit.page);
     if (resizeHit) return resizeHit.cursor;
 
-    const owner = this.ownerAt(hit.x, hit.y, hit.page);
-    if (owner.kind === "text") return "text";
-    // A behind image under a table leaves the point to the cell, as a press does.
-    const underTable = owner.kind === "anchored" && owner.object.wrapMode === "behind" &&
-      this.deps.editor.resolveHitTarget(hit.x, hit.y, hit.page) !== null;
-    return underTable ? "text" : "move";
+    return this.ownerAt(hit.x, hit.y, hit.page).kind === "text" ? "text" : "move";
   }
 
 
@@ -412,22 +405,28 @@ export class PointerController {
    * Nothing is hovered: the pointer left the editor, a drag began, a key was
    * pressed (typing hides peeks until the next real move), or teardown.
    */
-  private clearHover = (): void => {
+  private clearHover = (dismissed = false): void => {
     if (this.hoverRaf !== null) {
       cancelAnimationFrame(this.hoverRaf);
       this.hoverRaf = null;
     }
     this.pendingHoverPoint = null;
-    this.deps.editor.reportHover({ targets: [], point: null });
+    this.deps.editor.reportHover({ targets: [], point: null, ...(dismissed ? { dismissed } : {}) });
+  };
+
+  /** Leaving the page onto a popover keeps what the popover serves hovered. */
+  private handlePointerLeave = (e: PointerEvent): void => {
+    if (inPopover(e.relatedTarget instanceof Element ? e.relatedTarget : null)) return;
+    this.clearHover();
   };
 
   /**
-   * Typing hides peeks. A modifier alone is not typing — it is how a
-   * shortcut, or a Cmd/Ctrl-click on the hovered link, begins.
+   * Typing or Escape dismisses peeks. A modifier alone is not typing — it is
+   * how a shortcut, or a Cmd/Ctrl-click on the hovered link, begins.
    */
   private handleKeyDown = (e: KeyboardEvent): void => {
     if (MODIFIER_KEYS.has(e.key)) return;
-    this.clearHover();
+    this.clearHover(true);
   };
 
   // ── Pointer events ──────────────────────────────────────────────────────────
@@ -479,12 +478,12 @@ export class PointerController {
 
     // Chrome bands are separate editing surfaces, so their activation routing
     // precedes body hit testing.
-    if (!editor.readOnly && this.deps.onPageClick?.(page, docX, docY, this.clickCount)) return;
+    if (!editor.readOnly && this.deps.onPageClick?.(hit, this.clickCount)) return;
 
     // An image painted over the point owns it, as the hover cursor promised;
     // resize handles are chrome over the selected node. Either outranks the
-    // block underneath, a table cell included. A behind image paints under
-    // the table, so the cell keeps the click.
+    // block underneath, a table cell included. Ownership already gives a
+    // table's cells the points over a behind image.
     const owner = this.ownerAt(docX, docY, page);
     const resizeHit = this.hitHandleAt(docX, docY, page);
     const paintedOver = owner.kind === "anchored" && owner.object.wrapMode !== "behind";
@@ -707,7 +706,7 @@ export class PointerController {
     // Over a popover, the stack stays as it was so the peek the pointer is
     // crossing into stays open; anywhere else off the page area hovers nothing.
     const target = e.target instanceof Element ? e.target : null;
-    if (!target?.closest(`[${POPOVER_MARKER}]`)) {
+    if (!inPopover(target)) {
       const hovers =
         !this.isDragging &&
         this.activePointerId === null &&
@@ -919,11 +918,11 @@ export class PointerController {
       return;
     }
 
-    if (finalHit && this.commitContainerChange(finalHit)) return;
+    if (this.commitContainerChange(finalHit)) return;
 
     const { docPos, startYOffset } = this.anchoredDrag;
     const sourcePage = this.anchoredDrag.rect.page;
-    const samePage = !finalHit || finalHit.page === sourcePage;
+    const samePage = finalHit.page === sourcePage;
 
     // Resolve horizontal target X. For modes whose horizontal placement is
     // user-controlled (square / top-bottom / behind / front) this updates

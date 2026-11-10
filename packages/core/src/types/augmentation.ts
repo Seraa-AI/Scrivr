@@ -1,3 +1,4 @@
+import type { Mappable } from "prosemirror-transform";
 import type { HoverEvent } from "../hover/types";
 /**
  * augmentation.ts
@@ -106,14 +107,19 @@ export interface MarkAttributes {} // augmented by extensions
  *   interface EditorEvents {
  *     focus: void;
  *     blur: void;
- *     update: { docChanged: boolean };
+ *     update: { docChanged: boolean; mapping: Mappable };
  *   }
  * }
  */
 export interface EditorEvents {
   focus: void;
   blur: void;
-  update: { docChanged: boolean };
+  /**
+   * The state changed. `mapping` carries a position held from before the
+   * transaction onto the new document — how a popover keeps showing the same
+   * link after a collaborator types above it.
+   */
+  update: { docChanged: boolean; mapping: Mappable };
   destroy: void;
   /**
    * Fired when the viewport changes without a state update — i.e. the user

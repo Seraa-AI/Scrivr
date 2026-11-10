@@ -29,7 +29,7 @@ describe("the hover API a consumer builds popovers with", () => {
 
   it("types a custom resolver, a hover event and a table peek", () => {
     const resolver = { node: "paragraph", kind: "paragraph" } satisfies HoverResolver;
-    const target = { kind: "paragraph", surfaceId: "body", pos: 0, end: 2 } satisfies HoverTarget;
+    const target = { kind: "paragraph", surfaceId: "body", pos: 0, end: 2, at: 0 } satisfies HoverTarget;
     const point: PagePoint | null = null;
     const event = { targets: [target], point } satisfies HoverEvent;
     const presentation: PopoverPresentation = "peek";

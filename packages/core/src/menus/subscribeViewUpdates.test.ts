@@ -10,6 +10,7 @@
  * no fake editor shape, no `as unknown as IEditor`.
  */
 import { describe, it, expect, vi, afterEach } from "vitest";
+import { StepMap } from "prosemirror-transform";
 import { subscribeViewUpdates } from "./subscribeViewUpdates";
 import { createTestEditor } from "../test-utils";
 import type { Editor } from "../Editor";
@@ -27,7 +28,7 @@ describe("subscribeViewUpdates", () => {
     const cb = vi.fn();
     subscribeViewUpdates(editor, cb);
 
-    editor.emit("update", { docChanged: false });
+    editor.emit("update", { docChanged: false, mapping: StepMap.empty });
     expect(cb).toHaveBeenCalledTimes(1);
 
     editor.emit("viewport", undefined);
@@ -40,7 +41,7 @@ describe("subscribeViewUpdates", () => {
     const off = subscribeViewUpdates(editor, cb);
 
     off();
-    editor.emit("update", { docChanged: false });
+    editor.emit("update", { docChanged: false, mapping: StepMap.empty });
     editor.emit("viewport", undefined);
     expect(cb).not.toHaveBeenCalled();
   });

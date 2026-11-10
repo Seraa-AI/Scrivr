@@ -1,7 +1,7 @@
 import type { Editor } from "../Editor";
 import type { EditorState } from "prosemirror-state";
 import type { DocumentLayout, LayoutFragment } from "../layout/PageLayout";
-import { pageRegionAt } from "../layout/pagePoint";
+import type { PagePoint } from "../layout/pagePoint";
 import { setupCanvas, clearCanvas, watchDpr } from "./canvas";
 import { renderPage } from "./PageRenderer";
 import { paintBlock } from "./paintBlock";
@@ -124,17 +124,12 @@ export function fragmentsInTile(
  * Module-scope so unit tests can drive the routing decision against a real
  * `Editor` without exposing a test-only method on `TileManager`.
  */
-export function routePageClick(
-  editor: Editor,
-  page: number,
-  docX: number,
-  docY: number,
-  clickCount: number,
-): boolean {
-  // Band bounds, including the margin-strip fallback before any header/footer
-  // policy exists, live in `pageRegionAt` so click and hover agree on them.
-  const region = pageRegionAt(editor.layout, page, docX, docY);
-  if (region === null) return false;
+export function routePageClick(editor: Editor, point: PagePoint, clickCount: number): boolean {
+  // The region is the point's own (`resolvePagePoint`), so click and hover
+  // agree on it: band bounds, the margin-strip fallback before any
+  // header/footer policy exists, and the gap between pages, which is no band.
+  const { page, x, y, region } = point;
+  if (region === "outside") return false;
 
   if (region !== "header" && region !== "footer") {
     // Click in the body while a surface is active — deactivate first.
@@ -150,7 +145,7 @@ export function routePageClick(
   if (editor.surfaces?.activeSurface !== null) return false;
 
   // No surface active — emit chromeClick for activation (double-click).
-  editor.emit("chromeClick", { page, x: docX, y: docY, band: region, clickCount });
+  editor.emit("chromeClick", { page, x, y, band: region, clickCount });
   return true;
 }
 
@@ -225,8 +220,7 @@ export class TileManager {
       tileHeight: () => this.tileHeight,
       isPageless: () => this.editor.isPageless,
       scheduleUpdate: () => this.scheduleUpdate(),
-      onPageClick: (page, docX, docY, clickCount) =>
-        routePageClick(this.editor, page, docX, docY, clickCount),
+      onPageClick: (point, clickCount) => routePageClick(this.editor, point, clickCount),
     });
     this.pointer.attach();
 

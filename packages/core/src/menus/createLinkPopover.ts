@@ -5,8 +5,9 @@
  *   - "full" while the caret (the selection's head) is in a link — the
  *     consumer renders "Open / Edit / Remove".
  *   - "peek" when the pointer rests on a link — compact and read-only.
- * Selection wins: while the caret is in a link, hover is ignored. Peek → full
- * keeps the popover (onMove, not onShow), so it grows in place.
+ * Selection wins: while the caret is in a link, hover is ignored. The same
+ * link — peek → full, or moved by an edit — keeps the popover (onMove), so it
+ * grows or follows in place; a different link is shown anew (onShow).
  *
  * @example — vanilla JS
  *   const place = (rect, { href }) => {
@@ -25,6 +26,7 @@ import { linkAt, type LinkRange } from "../extensions/built-in/Link";
 import { subscribeViewUpdates } from "./subscribeViewUpdates";
 import { subscribeEditorFocusOutside } from "./subscribeEditorFocusOutside";
 import { isAnchorInsideContainer } from "./anchorVisibility";
+import { trackShownPosition } from "./shownPosition";
 import {
   subscribeHoverTarget,
   type HoverOption,
@@ -65,8 +67,11 @@ export function createLinkPopover(editor: IEditor, options: LinkPopoverOptions):
   let visible = false;
   let rafId: number | null = null;
   let hovered: HoverTarget | null = null;
+  /** Where the shown link starts, mapped through edits. */
+  const shown = trackShownPosition(editor);
 
   function hide() {
+    shown.set(null);
     if (visible) { visible = false; onHide(); }
   }
 
@@ -87,14 +92,36 @@ export function createLinkPopover(editor: IEditor, options: LinkPopoverOptions):
     return linkAt(state.doc, hovered.pos + 1, linkType);
   }
 
+  /** Where in the link the pointer rests; its start when the target is gone. */
+  function hoveredAt(link: LinkRange): number {
+    const at = hovered?.at ?? link.from;
+    return at >= link.from && at < link.to ? at : link.from;
+  }
+
+  /**
+   * The part of the link to anchor to: the line `at` is on, as a wrapped link
+   * peeks under the line the pointer rests on. When that line is scrolled
+   * away, the first part still on screen; none on screen, nothing.
+   */
+  function anchorRect(link: LinkRange, at: number): DOMRect | null {
+    const container = editor.getScrollContainerRect();
+    const parts = editor
+      .getRangeViewportRects(link.from, link.to)
+      .filter((part) => isAnchorInsideContainer(part, container));
+    const caret = editor.getViewportRect(at, at);
+    const middle = caret ? caret.top + caret.height / 2 : null;
+    const onLine = middle === null ? undefined : parts.find((part) => middle >= part.top && middle < part.bottom);
+    return onLine ?? parts[0] ?? null;
+  }
+
   function update() {
     const selected = selectedLink();
     // Selection wins: a link with the caret in it shows full and hover is ignored.
     const link = selected ?? hoveredLink();
     if (!link) { hide(); return; }
 
-    const rect = editor.getViewportRect(link.from, link.to);
-    if (!rect || !isAnchorInsideContainer(rect, editor.getScrollContainerRect())) {
+    const rect = anchorRect(link, selected ? editor.getState().selection.head : hoveredAt(link));
+    if (!rect) {
       hide();
       return;
     }
@@ -106,7 +133,9 @@ export function createLinkPopover(editor: IEditor, options: LinkPopoverOptions):
       presentation: selected ? "full" : "peek",
     };
 
-    if (visible) {
+    const same = visible && shown.get() === link.from;
+    shown.set(link.from);
+    if (same) {
       onMove(rect, info);
     } else {
       visible = true;
@@ -140,6 +169,7 @@ export function createLinkPopover(editor: IEditor, options: LinkPopoverOptions):
 
   return () => {
     unsubscribe();
+    shown.dispose();
     offHover();
     offFocusOutside();
     if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }

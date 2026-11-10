@@ -29,6 +29,7 @@ import { describeTable, type TableShape } from "../table/describeTable";
 import { subscribeViewUpdates } from "./subscribeViewUpdates";
 import { subscribeEditorFocusOutside } from "./subscribeEditorFocusOutside";
 import { isAnchorInsideContainer } from "./anchorVisibility";
+import { trackShownPosition } from "./shownPosition";
 import {
   subscribeHoverTarget,
   type HoverOption,
@@ -59,12 +60,14 @@ export function createTableMenu(editor: IEditor, options: TableMenuOptions): () 
   const { onShow, onHide, onMove } = options;
 
   let visible = false;
-  let lastDocPos = -1;
   let rafId: number | null = null;
   let hovered: HoverTarget | null = null;
+  /** The shown table's position, mapped through edits. */
+  const shown = trackShownPosition(editor);
 
   function hide() {
-    if (visible) { visible = false; lastDocPos = -1; onHide(); }
+    shown.set(null);
+    if (visible) { visible = false; onHide(); }
   }
 
   /** The table holding a cell selection, and whether its cells can be edited. */
@@ -102,11 +105,12 @@ export function createTableMenu(editor: IEditor, options: TableMenuOptions): () 
       presentation: selected?.editable ? "full" : "peek",
     };
 
-    if (visible && lastDocPos === docPos) {
+    const same = visible && shown.get() === docPos;
+    shown.set(docPos);
+    if (same) {
       onMove(rect, info);
     } else {
       visible = true;
-      lastDocPos = docPos;
       onShow(rect, info);
     }
   }
@@ -135,6 +139,7 @@ export function createTableMenu(editor: IEditor, options: TableMenuOptions): () 
 
   return () => {
     unsubscribe();
+    shown.dispose();
     offHover();
     offFocusOutside();
     if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }

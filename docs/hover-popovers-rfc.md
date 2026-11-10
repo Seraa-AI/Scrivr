@@ -504,24 +504,40 @@ pointer controller has. `PagePoint` and `PageRegion` stay public because
 
 **Deviation: `glyphAtPoint` scans, it does not binary-search**, and
 `hasTextAt` is unchanged — `glyphAtPoint` calls it first, not the other way
-round. The scan is one line's glyphs after `lineAtPoint` has found the line.
+round. The scan is one line's glyphs after `lineAtPoint` has found the line,
+read from a per-line glyph index the map keeps as glyphs register.
 
 **Deviation: node geometry.** `getNodeRects` takes no `surfaceId` and is
 private; `getNodeViewportRects(docPos)` is the public form, and
 `getNodeViewportRect(docPos)` is its first entry, so the two agree for every
 node. The table menu anchors to the table's first fragment on screen, for
 hover and selection alike, not the fragment nearest the pointer; the image
-menu anchors to `getNodeViewportRect`, and the link popover to the link's
-text. Fragments are found inside table cells too, so a table nested in
+menu anchors to `getNodeViewportRect`. The link popover anchors to the line of
+the link the pointer rests on (a peek) or the caret is on (full), from
+`getRangeViewportRects(from, to)` — one rect per line, `Range.getClientRects()`
+for the canvas — and to the first line still on screen when that one has
+scrolled away. Body geometry places body positions only: while a header or
+footer is edited, a node lookup that is not an image answers nothing rather
+than the body node that shares the number. Fragments are found inside table cells too, so a table nested in
 another table's cell gets its own menu.
 
 **Deviation: hover positions are mapped.** §1 says positions go stale on the
 next transaction. The editor maps the stack through each body transaction
 while the pointer rests, dropping a target whose range was deleted, so a
-collaborator's edit does not leave a peek on the old range. Those events
-carry `fromEdit: true`, and a peek whose target an edit deleted closes at
-once rather than after the grace period — waiting would leave it holding
-positions that now belong to whatever shifted into them.
+collaborator's edit does not leave a peek on the old range. It maps them with
+`deferEdit`'s anchors, before `"update"` is emitted, so whatever wakes on the
+update reads the new positions; `"update"` carries the transaction's
+`mapping` for popovers that hold one of their own. Hover events from an edit
+carry `fromEdit: true`. A target an edit moved is the same target — its wait
+goes on, and a shown peek follows it through `onMove`. One the edit deleted
+closes at once rather than after the grace period — waiting would leave it
+holding positions that now belong to whatever shifted into them.
+
+The pointer crossing from the page onto a popover keeps the stack, so the
+editor goes on mapping what that popover shows; leaving for anywhere else
+clears it. A target carries `at`, where in it the pointer rests, kept up to
+date without an event, so a wrapped link peeks under the line the pointer is
+on when the peek opens.
 
 **Deviation: hover is off by default for images and tables.** §5 has
 `hover` default true everywhere. Word, Docs and Pages show no card on hovering
@@ -534,10 +550,11 @@ the caret is the problem this RFC set out to solve.
 image menu's do; the link popover's needed `presentation: "full"` added to
 their expected info, since the field is required.
 
-**Deviation: no Escape.** §5's "Escape hides a peek" was not built. Any key
-other than a lone modifier clears hover, which hides a peek after its grace
-period; a modifier alone does not, so a shortcut or a modifier-click can begin
-over a peek.
+**Escape and typing dismiss.** Any key other than a lone modifier (the UI
+Events modifier keys, and Firefox's older `"OS"`) clears hover with
+`dismissed: true`, which closes a peek at once, even under the pointer. A
+modifier alone does not, so a shortcut or a modifier-click can begin over a
+peek.
 
 **Table actions are node actions.** The full table menu renders
 `editor.getNodeActions()`, which the `Table` extension contributes for the
@@ -547,3 +564,27 @@ non-React consumer gets them the same way.
 **Open question answered: read-only.** Node actions that edit are hidden in a
 read-only editor, so a cell selection there has nothing to offer: the table
 menu shows its peek instead of an empty full menu.
+
+**One answer for who owns a point.** A table's cells are painted content, so
+a `behind` image under a table owns no point inside a cell, glyph or not:
+`resolvePointOwner` asks for painted regions as well as text, and the
+editor's `pointOwnerAt` builds that question once for click, hover, the hover
+cursor and drags. A linked inline image is hovered as the image and as the
+link; mark resolvers ask about the character under the point, an object
+included.
+
+**Crossing to the peek.** While a peek is open, another target of its kind
+swaps in after the hide grace period, not at once, and not at all if the
+pointer reaches the peek first: on the way down to a link's peek the pointer
+can cross the link below.
+
+**Click reads the point's region.** `routePageClick` takes the `PagePoint`
+the pointer controller resolved, so click and hover agree on the region; a
+double-click in the gap between pages is no header or footer click.
+
+**Popovers know their target across edits.** Each controller holds the
+position that identifies what it shows — a link's start, an image's or
+table's position — mapped through edits. The same target moved reports
+`onMove`; a different one reports `onShow`. The React hooks read that rather
+than comparing positions, so a collaborator's edit no longer cancels a link
+edit or overwrites an image size being typed.
