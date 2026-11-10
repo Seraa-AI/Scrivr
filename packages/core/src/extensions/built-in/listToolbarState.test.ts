@@ -39,10 +39,10 @@ function pressedAt(content: Json[], at: string): string[] {
   });
   if (caret < 0) throw new Error(`no text "${at}"`);
   editor.selection.setSelection(caret, caret);
-  const { activeMarks, activeMarkAttrs, blockType, blockAttrs, ancestors } = editor.getSelectionSnapshot();
+  const state = editor.getSelectionSnapshot();
   return editor.toolbarItems
     .filter((spec) => spec.group === "list" || spec.group === "heading" || spec.group === "align")
-    .filter((spec) => spec.isActive(activeMarks, blockType, blockAttrs, activeMarkAttrs, ancestors))
+    .filter((spec) => spec.isActive(state))
     .map((spec) => spec.command);
 }
 

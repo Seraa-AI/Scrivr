@@ -42,7 +42,7 @@ import {
   describeSuggestionRefusal,
 } from "@scrivr/react";
 import type { SuggestionRefusalText } from "@scrivr/react";
-import type { BlockAncestor, Editor } from "@scrivr/core";
+import type { Editor, ToolbarState } from "@scrivr/core";
 import { Selection } from "@scrivr/core/pm";
 import { ChatPanel } from "./ChatPanel";
 import { DemoContent, demoDoc, startingDemo, type DemoKind } from "./demoContent";
@@ -177,15 +177,7 @@ const EXTENSIONS =
         DemoContent,
       ];
 
-interface ToolbarSlice {
-  activeMarks: string[];
-  activeMarkAttrs: Record<string, Record<string, unknown>>;
-  blockType: string;
-  blockAttrs: Record<string, unknown>;
-  ancestors: BlockAncestor[];
-}
-
-function selectToolbar(ctx: EditorStateContext): ToolbarSlice {
+function selectToolbar(ctx: EditorStateContext): ToolbarState {
   return {
     activeMarks: ctx.editor.getActiveMarks(),
     activeMarkAttrs: ctx.editor.getActiveMarkAttrs(),
@@ -193,7 +185,7 @@ function selectToolbar(ctx: EditorStateContext): ToolbarSlice {
   };
 }
 
-const EMPTY_TOOLBAR: ToolbarSlice = {
+const EMPTY_TOOLBAR: ToolbarState = {
   activeMarks: [],
   activeMarkAttrs: {},
   blockType: "paragraph",
@@ -391,11 +383,7 @@ export function Playground() {
         <div className="min-w-0 flex-1 overflow-x-auto">
           <Toolbar
             items={editor?.toolbarItems ?? []}
-            activeMarks={toolbar.activeMarks}
-            activeMarkAttrs={toolbar.activeMarkAttrs}
-            blockType={toolbar.blockType}
-            blockAttrs={toolbar.blockAttrs}
-            ancestors={toolbar.ancestors}
+            state={toolbar}
             editor={editor}
           />
         </div>

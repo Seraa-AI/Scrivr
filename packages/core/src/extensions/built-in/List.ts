@@ -270,7 +270,7 @@ const joinOntoListAbove: Command = (state, dispatch) => {
 };
 
 /** The list nearest the caret's paragraph, as Word's ribbon shows it; null outside any list. */
-function nearestList(ancestors: readonly BlockAncestor[] = []): string | null {
+function nearestList(ancestors: readonly BlockAncestor[]): string | null {
   return ancestors.find(({ type }) => type === "bulletList" || type === "orderedList")?.type ?? null;
 }
 
@@ -406,14 +406,14 @@ export const List = Extension.create({
         label: "•",
         title: "Bullet list (⌘⇧8)",
         group: "list",
-        isActive: (_marks, _type, _attrs, _markAttrs, ancestors) => nearestList(ancestors) === "bulletList",
+        isActive: ({ ancestors }) => nearestList(ancestors) === "bulletList",
       },
       {
         command: "toggleOrderedList",
         label: "1.",
         title: "Ordered list (⌘⇧9)",
         group: "list",
-        isActive: (_marks, _type, _attrs, _markAttrs, ancestors) => nearestList(ancestors) === "orderedList",
+        isActive: ({ ancestors }) => nearestList(ancestors) === "orderedList",
       },
     ];
   },

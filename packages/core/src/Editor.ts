@@ -11,10 +11,10 @@ import {
 import { SelectionController } from "./SelectionController";
 import { anchoredOf, placementAttrs } from "./layout/AnchoredObjects";
 import type {
-	BlockAncestor,
 	FontModifier,
 	MarkDecorator,
 	ToolbarItemSpec,
+	ToolbarState,
 	OverlayRenderHandler,
 	IEditor,
 } from "./extensions/types";
@@ -86,7 +86,7 @@ export type EditorChangeHandler = (state: EditorState) => void;
  * can draw both the cursor and selection highlights without importing
  * ProseMirror types.
  */
-export interface SelectionSnapshot {
+export interface SelectionSnapshot extends ToolbarState {
 	/** The fixed end of the selection (doesn't move when you Shift+arrow) */
 	anchor: number;
 	/** The moving end — where the cursor is drawn */
@@ -97,22 +97,6 @@ export interface SelectionSnapshot {
 	to: number;
 	/** True when anchor === head (cursor only, no highlight) */
 	empty: boolean;
-	/**
-	 * Names of marks active at the cursor (or present anywhere in the selection).
-	 * Use this to show toolbar button active states without importing ProseMirror.
-	 */
-	activeMarks: string[];
-	/**
-	 * Attributes of each active mark, keyed by mark name.
-	 * e.g. { color: { color: "#dc2626" }, fontSize: { size: 18 } }
-	 */
-	activeMarkAttrs: Record<string, Record<string, unknown>>;
-	/** The ProseMirror node type name of the textblock containing the cursor: "paragraph", "heading", etc. */
-	blockType: string;
-	/** Attributes of that textblock — e.g. { level: 1, align: "left" } for a heading */
-	blockAttrs: Record<string, unknown>;
-	/** The nodes around that textblock, innermost first: a list item, its list, a table cell… */
-	ancestors: BlockAncestor[];
 }
 
 function moveDeleteRange(
@@ -346,9 +330,9 @@ function withAvailableFamilies(
 		// No `labelStyle`: owned bytes are installed under a private name, so
 		// styling a label `font-family: Inter` asks the browser for a family it
 		// does not have and previews every entry in the same fallback.
-		isActive: (activeMarks, blockType, blockAttrs, activeMarkAttrs) =>
+		isActive: ({ blockAttrs, activeMarkAttrs }) =>
 			blockAttrs["fontFamily"] === family ||
-			activeMarkAttrs?.["fontFamily"]?.["family"] === family,
+			activeMarkAttrs["fontFamily"]?.["family"] === family,
 	}));
 
 	const firstAt = items.indexOf(template);

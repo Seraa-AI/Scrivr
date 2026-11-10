@@ -186,7 +186,7 @@ export const Highlight = Extension.create<HighlightOptions>({
       label: "H",
       title: "Highlight (⌘⇧H)",
       group: "highlight",
-      isActive: (marks: string[]) => marks.includes("highlight"),
+      isActive: ({ activeMarks }) => activeMarks.includes("highlight"),
     }];
   },
 });

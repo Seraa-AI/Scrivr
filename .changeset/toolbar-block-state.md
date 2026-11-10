@@ -14,8 +14,12 @@ paragraph in a list shows as centred.
   inside a list and the table inside a cell.
 - They gain `ancestors`: the nodes around the textblock, `{ type, attrs }`,
   innermost first.
-- `ToolbarItemSpec.isActive` receives `ancestors` as a fifth argument. Pass
-  it through when you render toolbar items yourself.
+- `ToolbarItemSpec.isActive` takes one `ToolbarState` object instead of
+  positional arguments. It holds `activeMarks`, `activeMarkAttrs`,
+  `blockType`, `blockAttrs` and `ancestors`; destructure what you need, e.g.
+  `isActive: ({ activeMarks }) => activeMarks.includes("bold")`. A
+  `SelectionSnapshot` is a `ToolbarState`, so a toolbar you render yourself
+  can pass `item.isActive(editor.getSelectionSnapshot())`.
 - Inside a list, `blockType` is now `"paragraph"` (or `"heading"`), not
   `"bulletList"`. Use `editor.isActive("bulletList")` to ask whether the
   caret is in a list, at any depth.

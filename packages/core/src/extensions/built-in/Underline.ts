@@ -59,7 +59,7 @@ export const Underline = Extension.create({
       label: "U",
       title: "Underline (⌘U)",
       group: "format",
-      isActive: (marks: string[]) => marks.includes("underline"),
+      isActive: ({ activeMarks }) => activeMarks.includes("underline"),
     }];
   },
 

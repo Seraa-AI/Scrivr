@@ -77,6 +77,7 @@ export type {
   ToolbarItemSpec,
   BlockAncestor,
   BlockInfo,
+  ToolbarState,
   SlashCommandSpec,
   SlashCommandContribution,
   SlashCommandResolver,

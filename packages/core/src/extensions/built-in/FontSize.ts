@@ -128,8 +128,7 @@ export const FontSize = Extension.create<FontSizeOptions>({
       label: String(size),
       title: `Font size ${size}px`,
       group: "size",
-      isActive: (_activeMarks, _blockType, _blockAttrs, activeMarkAttrs) =>
-        activeMarkAttrs?.["fontSize"]?.["size"] === size,
+      isActive: ({ activeMarkAttrs }) => activeMarkAttrs["fontSize"]?.["size"] === size,
     }));
     return items;
   },

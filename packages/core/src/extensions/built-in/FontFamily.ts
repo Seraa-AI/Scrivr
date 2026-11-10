@@ -177,9 +177,9 @@ export const FontFamily = Extension.create<FontFamilyOptions>({
       group: "family",
       // Active when the block attr is set, OR when every character in the
       // selection carries the fontFamily mark for this family.
-      isActive: (_activeMarks, _blockType, blockAttrs, activeMarkAttrs) =>
+      isActive: ({ blockAttrs, activeMarkAttrs }) =>
         blockAttrs["fontFamily"] === family ||
-        activeMarkAttrs?.["fontFamily"]?.["family"] === family,
+        activeMarkAttrs["fontFamily"]?.["family"] === family,
     }));
     return items;
   },

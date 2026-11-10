@@ -531,18 +531,8 @@ export interface ToolbarItemSpec {
    * should share a group name (e.g. "format", "heading", "size", "family").
    */
   group?: string;
-  /**
-   * Returns true when this item should appear active/pressed. `blockType` and
-   * `blockAttrs` are the caret's own textblock; `ancestors` are the nodes
-   * around it, innermost first (a list item, its list, a table cell…).
-   */
-  isActive: (
-    activeMarks: string[],
-    blockType: string,
-    blockAttrs: Record<string, unknown>,
-    activeMarkAttrs?: Record<string, Record<string, unknown>>,
-    ancestors?: readonly BlockAncestor[]
-  ) => boolean;
+  /** Returns true when this item should appear active/pressed. */
+  isActive: (state: ToolbarState) => boolean;
 }
 
 /** A node around the caret's textblock: its type name and attrs. */
@@ -556,6 +546,18 @@ export interface BlockInfo {
   blockType: string;
   blockAttrs: Record<string, unknown>;
   ancestors: BlockAncestor[];
+}
+
+/**
+ * What a toolbar item reads to show itself pressed: the marks at the caret
+ * (on every character of a range) and its block. `blockType`/`blockAttrs` are
+ * the caret's own textblock; `ancestors` the nodes around it, innermost first
+ * (a list item, its list, a table cell…).
+ */
+export interface ToolbarState extends BlockInfo {
+  activeMarks: string[];
+  /** Attrs of each active mark, by mark name, e.g. `{ color: { color: "#dc2626" } }`. */
+  activeMarkAttrs: Record<string, Record<string, unknown>>;
 }
 
 // ── Slash commands ─────────────────────────────────────────────────────────────
