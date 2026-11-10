@@ -196,6 +196,11 @@ export interface IBaseEditor {
   /** Block styles from all extensions, by style key, before the document's family is applied. */
   getBlockStyles(): FontConfig;
   /**
+   * Rewrites of copied markup from all extensions, in registration order:
+   * pass them to `serializeSelectionToHtml` to serialize what a copy would.
+   */
+  getCopyHtmlTransforms(): CopyHtmlTransform[];
+  /**
    * Names of doc-level attributes declared by extensions via `addDocAttrs()`.
    *
    * Used by collab bindings as a whitelist of syncable attrs — attrs not in
@@ -479,6 +484,15 @@ export type PasteTransform = (slice: Slice) => Slice;
  * via `addPasteHtmlTransforms`; leave the tree untouched to decline.
  */
 export type PasteHtmlTransform = (root: HTMLElement) => void;
+
+/**
+ * Rewrites copied HTML in place, before it reaches the clipboard. Contributed
+ * via `addCopyHtmlTransforms`; leave the tree untouched to decline. `root`
+ * wraps the copied markup: edit what it holds, since a selection that writes
+ * its own form (a cell selection's table) is copied without the wrapper.
+ * Must not throw — copy has already claimed the clipboard when it runs.
+ */
+export type CopyHtmlTransform = (root: HTMLElement) => void;
 
 /**
  * How pasted files of one kind become a node, declared by the extension that
@@ -1136,6 +1150,19 @@ export interface ExtensionConfig<Options = object> {
   addPasteHtmlTransforms?(this: Phase1Context<Options>): PasteHtmlTransform[];
 
   /**
+   * Rewrite copied HTML before it reaches the clipboard.
+   *
+   * The counterpart to `addPasteHtmlTransforms`: what the schema states one
+   * way and other editors read another (a merge as a cell per row versus one
+   * `rowspan` cell) is restated here, or state that must stay in the editor is
+   * stripped. Runs on every copy and cut, including a selection's own form
+   * (a cell selection's table).
+   *
+   * Transforms run in registration order, each seeing the previous one's edits.
+   */
+  addCopyHtmlTransforms?(this: Phase1Context<Options>): CopyHtmlTransform[];
+
+  /**
    * Pasted files this extension's nodes take, keyed by node type name: which
    * files, and the attrs of the placeholder and of the resolved node.
    */
@@ -1279,6 +1306,7 @@ export interface ResolvedExtension {
   inputHandlers: Record<string, InputHandler>;
   pasteTransforms: PasteTransform[];
   pasteHtmlTransforms: PasteHtmlTransform[];
+  copyHtmlTransforms: CopyHtmlTransform[];
   pasteFiles: Record<string, PasteFileSpec>;
   inputRules: InputRule[];
   markdownParserTokens: Record<string, MarkdownParserTokenSpec>;

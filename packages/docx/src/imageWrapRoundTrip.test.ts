@@ -103,7 +103,7 @@ function copyAll(editor: ServerEditor): Record<string, string> {
   editor.applyTransaction(state.tr.setSelection(new AllSelection(state.doc)));
 
   const data: Record<string, string> = {};
-  const html = serializeSelectionToHtml(editor.getState(), editor.schema);
+  const html = serializeSelectionToHtml(editor.getState(), editor.schema, editor.getCopyHtmlTransforms());
   const text = serializeSelectionToText(editor.getState());
   if (html !== null) data["text/html"] = html;
   if (text !== null) data["text/plain"] = text;

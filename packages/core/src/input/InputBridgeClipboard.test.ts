@@ -55,6 +55,7 @@ function mountEditor(initialText = "Hello world"): Harness {
       lastDispatched = tr;
     },
     getSchema: () => schema,
+    copyHtmlTransforms: manager.buildCopyHtmlTransforms(),
     getViewportRect: () => null,
     getCharMap: () => new CharacterMap(),
     keymap: manager.buildKeymap(),

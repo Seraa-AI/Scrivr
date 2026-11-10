@@ -1,7 +1,7 @@
 import { DOMSerializer } from "prosemirror-model";
 import type { Schema } from "prosemirror-model";
 import type { EditorState, Selection } from "prosemirror-state";
-import { collapseRowSpans } from "../table/clipboardHtml";
+import type { CopyHtmlTransform } from "../extensions/types";
 
 /**
  * Records how deeply the copied slice was open at each end, so a paste back into
@@ -26,28 +26,33 @@ export const SLICE_DATA_ATTR = "data-pm-slice";
  * `DOMSerializer` (each node/mark's `toDOM`), so marks, headings, alignment,
  * etc. round-trip into Word / Google Docs / Notion automatically.
  *
- * Returns null when the selection is collapsed (nothing to copy).
+ * The markup then passes through the extensions' copy transforms
+ * (`editor.getCopyHtmlTransforms()`). Returns null when the selection is collapsed
+ * (nothing to copy).
  */
 export function serializeSelectionToHtml(
   state: EditorState,
   schema: Schema,
+  copyHtmlTransforms: readonly CopyHtmlTransform[],
 ): string | null {
   const sel = state.selection;
   if (sel.empty) return null;
 
   const serializer = DOMSerializer.fromSchema(schema);
-  const ownHtml = ownClipboardForms(sel)?.html(serializer);
-  if (ownHtml !== undefined && ownHtml !== null) return ownHtml;
-  const slice = sel.content();
   const container = document.createElement("div");
+  const ownHtml = ownClipboardForms(sel)?.html(serializer);
+  if (ownHtml !== undefined && ownHtml !== null) {
+    container.innerHTML = ownHtml;
+    for (const transform of copyHtmlTransforms) transform(container);
+    return container.innerHTML;
+  }
+  const slice = sel.content();
   container.setAttribute(
     SLICE_DATA_ATTR,
     `${slice.openStart} ${slice.openEnd} []`,
   );
   container.appendChild(serializer.serializeFragment(slice.content));
-  // Any table in the slice states its merges as attrs; the clipboard states
-  // them as `rowspan`, which is what another editor will read.
-  collapseRowSpans(container);
+  for (const transform of copyHtmlTransforms) transform(container);
   return container.outerHTML;
 }
 

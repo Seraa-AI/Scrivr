@@ -2,7 +2,7 @@ import type { EditorState, Transaction, Command } from "prosemirror-state";
 import { TextSelection } from "prosemirror-state";
 import type { Schema } from "prosemirror-model";
 import type { CharacterMap } from "../layout/CharacterMap";
-import type { InputHandler, EditorNavigator } from "../extensions/types";
+import type { CopyHtmlTransform, InputHandler, EditorNavigator } from "../extensions/types";
 import type { PasteTransformer, PendingImagePaste } from "./PasteTransformer";
 import { insertText, deleteSelection } from "../model/commands";
 import { serializeSelectionToHtml, serializeSelectionToText } from "./ClipboardSerializer";
@@ -51,6 +51,8 @@ export interface InputBridgeOptions {
   dispatch: (tr: Transaction | null) => void;
   /** Schema — used by ClipboardSerializer for copy/cut. */
   getSchema: () => Schema;
+  /** Extensions' rewrites of copied markup, run on copy and cut. */
+  copyHtmlTransforms: readonly CopyHtmlTransform[];
   /** Viewport rect for a doc-position range — used to position the textarea. */
   getViewportRect: (from: number, to: number) => DOMRect | null;
   /** CharacterMap — used by scrollCursorIntoView for cursor coordinates. */
@@ -439,7 +441,7 @@ export class InputBridge {
     if (text === null) return;
     e.preventDefault();
     e.clipboardData.setData("text/plain", text);
-    const html = serializeSelectionToHtml(state, this.opts.getSchema());
+    const html = serializeSelectionToHtml(state, this.opts.getSchema(), this.opts.copyHtmlTransforms);
     if (html) e.clipboardData.setData("text/html", html);
   };
 
@@ -450,7 +452,7 @@ export class InputBridge {
     if (text === null) return;
     e.preventDefault();
     e.clipboardData.setData("text/plain", text);
-    const html = serializeSelectionToHtml(state, this.opts.getSchema());
+    const html = serializeSelectionToHtml(state, this.opts.getSchema(), this.opts.copyHtmlTransforms);
     if (html) e.clipboardData.setData("text/html", html);
     // In read-only mode, honour copy but skip the delete.
     if (this.readOnly) return;

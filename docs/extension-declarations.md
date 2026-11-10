@@ -38,13 +38,16 @@ Two things hold the rule in place:
 | A mark that changes the font | `addFontModifiers()` | layout, font preflight, the editor's font readouts | heavy / huge / typewriter — `core/src/extensions/customFontMark.test.ts` |
 | Markdown it reads | `addMarkdownParserTokens()` | markdown paste, `parseMarkdown` | strikethrough `~~` — `core/src/input/PasteMarkdown.test.ts` |
 | Pasted files it takes | `addPasteFiles()` | paste, load-time placeholder sweep | photo node — `core/src/extensions/customPasteFiles.test.ts` |
+| How its markup leaves on copy | `addCopyHtmlTransforms()` (the reverse of `addPasteHtmlTransforms()`) | copy and cut, a selection's own form included | redaction note stripped — `core/src/extensions/customCopyTransforms.test.ts` |
 | An embedded file in a PDF | `addExports().pdf.embeds` | PDF image fetching | photo block — `export-pdf/src/__tests__/customEmbeds.test.ts` |
 
 Contracts worth knowing:
 
 - A declaration's callbacks (`outlineLevel`, `anchored.read/write`,
-  `regions`, font modifiers) run for every block they apply to: they must be
-  pure and must not throw.
+  `regions`, font modifiers, paste and copy transforms) run for every block
+  or clipboard event they apply to: they must be pure and must not throw.
+- A copy transform edits what its `root` holds; a selection that writes its
+  own form (a cell selection's table) is copied without the wrapper.
 - A break and a section boundary are honoured only on a leaf; a node that
   holds content and declares one lays out as what it is.
 - A composite's `units()` should return at least one unit, and a region node
@@ -86,7 +89,7 @@ Update this list as each item lands.
 
 | Where | What it knows by name | Next step |
 |---|---|---|
-| `input/ClipboardSerializer.ts` | every copied slice runs the Table's `collapseRowSpans` | a copy-time HTML transform hook beside the paste transforms; Table declares it (**next PR**) |
+| `input/InputBridge.ts` cut | `instanceof CellSelection` → the Table's `clearSelectedCellsTr` | the selection's own `replace()`, so `deleteSelection` clears cells (**next PR**) |
 | `model/sanitizeDocUrls.ts` | per-node URL gates (`image` → `safeImageUrl`, `link` → `safeUrl`) | a URL-attr declaration on the spec |
 | `export-semantic` walker | editable part types (`paragraph`, `heading`, `codeBlock`) and list/table container labels | part declarations, after tables |
 | `layout/FontConfig.ts` `getBlockStyle` | falls back to the `paragraph` style for a node with none | the schema's default textblock |

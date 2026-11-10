@@ -65,6 +65,7 @@ export type {
   ScrivrNodeSpec,
   PasteTransform,
   PasteHtmlTransform,
+  CopyHtmlTransform,
   PasteFileHandler,
   PasteFileSpec,
   InitialDocContext,

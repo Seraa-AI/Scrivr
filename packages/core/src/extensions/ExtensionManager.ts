@@ -15,6 +15,7 @@ import type {
   InputHandler,
   PasteTransform,
   PasteHtmlTransform,
+  CopyHtmlTransform,
   PasteFileHandler,
   PasteFileSpec,
   MarkdownParserTokenSpec,
@@ -707,6 +708,14 @@ export class ExtensionManager {
    */
   buildPasteHtmlTransforms(): PasteHtmlTransform[] {
     return this.resolved.flatMap((ext) => ext.pasteHtmlTransforms);
+  }
+
+  /**
+   * All copy HTML transforms from all extensions, in registration order.
+   * Run by the clipboard serializer on copied markup.
+   */
+  buildCopyHtmlTransforms(): CopyHtmlTransform[] {
+    return this.resolved.flatMap((ext) => ext.copyHtmlTransforms);
   }
 
   /**

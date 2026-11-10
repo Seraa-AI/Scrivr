@@ -24,7 +24,7 @@ import { renderTableRowPdf } from "../../table/pdfExport";
 import { tableDocxExportHandlers } from "../../table/docxExport";
 import { tableDocxImportHandlers } from "../../table/docxImport";
 import { tableSemanticHandler } from "../../table/semanticExport";
-import { expandRowSpans } from "../../table/clipboardHtml";
+import { collapseRowSpans, expandRowSpans } from "../../table/clipboardHtml";
 import {
   readGridSpan,
   readCellHAlign,
@@ -355,6 +355,12 @@ export const Table = Extension.create({
   // point where the covered rows can still be identified.
   addPasteHtmlTransforms() {
     return [expandRowSpans];
+  },
+
+  // The reverse on the way out: a merge leaves as one `rowspan` cell, the
+  // markup other editors read.
+  addCopyHtmlTransforms() {
+    return [collapseRowSpans];
   },
 
   onViewReady(editor: IEditor) {

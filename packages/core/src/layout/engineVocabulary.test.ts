@@ -54,6 +54,11 @@ describe("the engine's vocabulary", () => {
     expect(linesMatching(dir, TABLE_WORDS)).toEqual([]);
   });
 
+  it("the copy serializer runs what extensions declare, not a node's own rewrite", () => {
+    const serializer = readFileSync(join(__dirname, "..", "input", "ClipboardSerializer.ts"), "utf8");
+    expect(serializer.split("\n").filter((line) => /from ["'`]\.\.\/table\//.test(line))).toEqual([]);
+  });
+
   it("the sections model finds a section boundary by its declaration, not its name", () => {
     const named = readFileSync(join(__dirname, "..", "model", "sections.ts"), "utf8").split("\n").filter((line) => /["'`]sectionBreak["'`]/.test(line));
     expect(named).toEqual([]);
