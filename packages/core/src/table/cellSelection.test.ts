@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { Selection, TextSelection } from "prosemirror-state";
 import type { Node } from "prosemirror-model";
 import { ServerEditor } from "../ServerEditor";
+import { createTestEditor } from "../test-utils";
 import { StarterKit } from "../extensions/StarterKit";
 import { selectedCells, CellSelection, CELL_SELECTION_JSON_ID } from "./cellSelection";
 import { cellsCoveredBySelection } from "./cellSelectionSeam";
@@ -325,6 +326,59 @@ describe("typing over a CellSelection", () => {
     // All four cells were touched: three cleared, exactly one holds the typed text.
     expect(texts).toHaveLength(4);
     expect(texts.filter((t) => t.length > 0)).toEqual(["X"]);
+  });
+});
+
+describe("deleting a CellSelection — cut, Delete, deleteSelection", () => {
+  function selectAll2x2() {
+    const editor = makeEditor(rect2x2());
+    const s0 = editor.getState();
+    const sel = CellSelection.between(s0.doc, cellNodePos(s0.doc, 0, 0), cellNodePos(s0.doc, 1, 1))!;
+    editor.applyTransaction(s0.tr.setSelection(sel));
+    return editor;
+  }
+
+  it("empties every cell to a paragraph and keeps the grid, as Word does", () => {
+    const editor = selectAll2x2();
+    editor.applyTransaction(editor.getState().tr.deleteSelection());
+
+    const cells: string[] = [];
+    editor.getState().doc.descendants((n) => {
+      if (n.type.name !== "tableCell") return true;
+      cells.push(`${n.childCount}:${n.firstChild?.type.name}:${n.textContent}`);
+      return false;
+    });
+    expect(cells).toEqual(["1:paragraph:", "1:paragraph:", "1:paragraph:", "1:paragraph:"]);
+  });
+
+  it("is what a cut does: the cells copied, then emptied in place", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const editor = createTestEditor({ extensions: [StarterKit.configure({ table: true })], content: rect2x2() });
+    editor.mount(container);
+    const s0 = editor.getState();
+    editor.applyTransaction(s0.tr.setSelection(CellSelection.between(s0.doc, cellNodePos(s0.doc, 0, 0), cellNodePos(s0.doc, 1, 1))!));
+
+    const clipboardData = new DataTransfer();
+    container.querySelector("textarea")?.dispatchEvent(new ClipboardEvent("cut", { bubbles: true, cancelable: true, clipboardData }));
+    const texts: string[] = [];
+    editor.getState().doc.descendants((n) => {
+      if (n.type.name === "tableCell") texts.push(n.textContent);
+      return n.type.name !== "tableCell";
+    });
+    editor.destroy();
+    container.remove();
+
+    expect(clipboardData.getData("text/plain")).toBe("A\tB\nC\tD");
+    expect(texts).toEqual(["", "", "", ""]);
+  });
+
+  it("leaves the caret in the top-left cell", () => {
+    const editor = selectAll2x2();
+    editor.applyTransaction(editor.getState().tr.deleteSelection());
+    const { selection, doc } = editor.getState();
+    expect(selection.empty).toBe(true);
+    expect(selection.from).toBe(cellNodePos(doc, 0, 0) + 2);
   });
 });
 

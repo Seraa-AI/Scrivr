@@ -6,8 +6,6 @@ import type { CopyHtmlTransform, InputHandler, EditorNavigator } from "../extens
 import type { PasteTransformer, PendingImagePaste } from "./PasteTransformer";
 import { insertText, deleteSelection } from "../model/commands";
 import { serializeSelectionToHtml, serializeSelectionToText } from "./ClipboardSerializer";
-import { clearSelectedCellsTr } from "../table/editingGuards";
-import { CellSelection } from "../table/cellSelection";
 
 /**
  * Convert a DOM KeyboardEvent into a ProseMirror key string.
@@ -456,12 +454,9 @@ export class InputBridge {
     if (html) e.clipboardData.setData("text/html", html);
     // In read-only mode, honour copy but skip the delete.
     if (this.readOnly) return;
-    // A cell selection clears each cell's contents (keeping the grid); any other
-    // selection deletes its range.
-    const clear =
-      state.selection instanceof CellSelection
-        ? clearSelectedCellsTr(state)
-        : deleteSelection(state);
+    // The selection deletes itself: a cell selection empties its cells and
+    // keeps the grid (`CellSelection.replace`), a range deletes its text.
+    const clear = deleteSelection(state);
     // Marked so a plugin can tell a cut from a deletion, as it can a paste.
     if (clear) this.opts.dispatch(clear.setMeta("uiEvent", "cut"));
   };

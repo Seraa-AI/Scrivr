@@ -1,8 +1,8 @@
 import { Selection } from "prosemirror-state";
 import type { Command, EditorState, Transaction } from "prosemirror-state";
-import type { Node, ResolvedPos, Schema } from "prosemirror-model";
+import type { ResolvedPos } from "prosemirror-model";
 import { tableStructureCommands } from "./commands";
-import { selectedCells, enclosingCell, type ResolvedCellRange } from "./cellSelection";
+import { clearCells, selectedCells, enclosingCell, type ResolvedCellRange } from "./cellSelection";
 
 /**
  * Table editing-UX commands (Phase 5) — the layer that sits on top of the
@@ -25,10 +25,6 @@ import { selectedCells, enclosingCell, type ResolvedCellRange } from "./cellSele
  */
 
 const structure = tableStructureCommands();
-
-function emptyParagraph(schema: Schema): Node | null {
-  return schema.nodes["paragraph"]?.create() ?? null;
-}
 
 // ── Cell navigation (Tab / Shift-Tab) ────────────────────────────────────────
 
@@ -68,47 +64,14 @@ export const tabToPreviousCell: Command = (state, dispatch) =>
 // ── Backspace / Delete guards ────────────────────────────────────────────────
 
 /**
- * Replace every cell in `range` with an empty paragraph, collapsing the
- * selection into the top-left cell. Cells are cleared from the original doc's
- * positions in descending order, so each edit leaves the lower positions valid.
+ * Empty every cell in `range` — a cell selection's, or a text selection's that
+ * runs across cells — as `CellSelection.replace` does. Null when every cell
+ * was already empty.
  */
 function clearCellsTr(state: EditorState, range: ResolvedCellRange): Transaction | null {
-  const para = emptyParagraph(state.schema);
-  if (!para) return null;
-
-  let tr = state.tr;
-  const descending = [...range.cellPositions].sort((a, b) => b - a);
-  for (const cellPos of descending) {
-    const cellNode = state.doc.nodeAt(cellPos);
-    if (!cellNode) continue;
-    const from = cellPos + 1;
-    const to = cellPos + cellNode.nodeSize - 1;
-    // Skip cells that are already a single empty paragraph — nothing to clear.
-    if (cellNode.childCount === 1 && cellNode.firstChild?.content.size === 0) continue;
-    tr = tr.replaceWith(from, to, para);
-  }
-  if (!tr.docChanged) return null;
-
-  // The top-left cell has the smallest position and nothing before it was
-  // edited, so its start is stable — land the caret at its content start
-  // directly rather than mapping a position through its own replacement.
-  const firstCell = Math.min(...range.cellPositions);
-  return landInCell(tr, firstCell);
-}
-
-/**
- * Clear every cell of the active drag/text cell-range selection, or null when
- * there is no range. Shared by the Backspace/Delete guards and clipboard cut.
- */
-export function clearSelectedCellsTr(state: EditorState): Transaction | null {
-  const range = selectedCells(state);
-  return range ? clearCellsTr(state, range) : null;
-}
-
-/** Collapse the selection to the start of the cell at `cellPos` in `tr.doc`. */
-function landInCell(tr: Transaction, cellPos: number): Transaction {
-  const target = Math.min(cellPos + 2, tr.doc.content.size);
-  return tr.setSelection(Selection.near(tr.doc.resolve(target), 1)).scrollIntoView();
+  const tr = state.tr;
+  clearCells(tr, range.cellPositions);
+  return tr.docChanged ? tr.scrollIntoView() : null;
 }
 
 /**
