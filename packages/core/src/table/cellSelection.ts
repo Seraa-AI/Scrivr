@@ -2,7 +2,6 @@ import { Selection, SelectionRange, TextSelection } from "prosemirror-state";
 import type { EditorState } from "prosemirror-state";
 import { Fragment, Slice } from "prosemirror-model";
 import type { DOMSerializer, Node, ResolvedPos } from "prosemirror-model";
-import { collapseRowSpans } from "./clipboardHtml";
 import type { Mappable } from "prosemirror-transform";
 import { getTableMap, type Rect, type TableMap } from "./TableMap";
 import { cellGridSpan } from "./attrs";
@@ -195,16 +194,15 @@ export class CellSelection extends Selection {
   readonly rect: Rect;
 
   /**
-   * This selection as clipboard HTML: a standalone table of its cells. The
-   * cells carry their merge role as an attr, which `collapseRowSpans` turns
-   * into the `rowspan` other editors read.
+   * This selection as clipboard HTML: a standalone table of its cells. Their
+   * merge role is an attr until the Table's copy transform states it as
+   * `rowspan`, as for any copied table.
    */
   clipboardHtml(serializer: DOMSerializer): string {
     const tableNode = this.content().content.firstChild;
     if (!tableNode) return "";
     const container = document.createElement("div");
     container.appendChild(serializer.serializeNode(tableNode));
-    collapseRowSpans(container);
     return container.innerHTML;
   }
 

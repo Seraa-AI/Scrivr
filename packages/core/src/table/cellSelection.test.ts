@@ -3,6 +3,7 @@ import { Selection, TextSelection } from "prosemirror-state";
 import type { Node } from "prosemirror-model";
 import { ServerEditor } from "../ServerEditor";
 import { StarterKit } from "../extensions/StarterKit";
+import { ExtensionManager } from "../extensions/ExtensionManager";
 import { selectedCells, CellSelection, CELL_SELECTION_JSON_ID } from "./cellSelection";
 import { cellsCoveredBySelection } from "./cellSelectionSeam";
 import { serializeSelectionToHtml, serializeSelectionToText } from "../input/ClipboardSerializer";
@@ -57,6 +58,9 @@ function tableDoc(grid: number[], rows: CellSpec[][]) {
 function makeEditor(doc: Record<string, unknown>): ServerEditor {
   return new ServerEditor({ extensions: [StarterKit.configure({ table: true })], content: doc });
 }
+
+/** The copy rewrites the same extensions declare, as the copy path runs them. */
+const copyTransforms = new ExtensionManager([StarterKit.configure({ table: true })]).buildCopyHtmlTransforms();
 
 /** Content position inside the (first) cell whose text equals `text`. */
 function posInCell(doc: Node, text: string): number {
@@ -336,7 +340,7 @@ describe("clipboard serialization of a CellSelection", () => {
     editor.applyTransaction(s0.tr.setSelection(sel));
     const state = editor.getState();
     expect(serializeSelectionToText(state)).toBe("A\tB\nC\tD");
-    const html = serializeSelectionToHtml(state, state.schema);
+    const html = serializeSelectionToHtml(state, state.schema, copyTransforms);
     expect(html).toContain("<table");
     expect(html).toContain("<td");
     expect(html).toContain("A");
@@ -362,7 +366,7 @@ describe("clipboard serialization of a CellSelection", () => {
     )!;
     editor.applyTransaction(state.tr.setSelection(sel));
 
-    const html = serializeSelectionToHtml(editor.getState(), editor.getState().schema);
+    const html = serializeSelectionToHtml(editor.getState(), editor.getState().schema, copyTransforms);
     expect(html).toContain('colspan="2"');
     expect(html).toContain('rowspan="2"');
   });

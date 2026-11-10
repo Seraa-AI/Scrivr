@@ -688,6 +688,7 @@ export class Editor extends BaseEditor implements IEditor {
 			getState: getRoutedState,
 			dispatch: routedDispatch,
 			getSchema: () => this.manager.schema,
+			copyHtmlTransforms: this.manager.buildCopyHtmlTransforms(),
 			getViewportRect: (from, to) => this.getViewportRect(from, to),
 			// TODO(pr7): getViewportRect still resolves positions against the flow
 			// layout. When a surface is active, `from`/`to` are surface-doc positions

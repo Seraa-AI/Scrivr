@@ -481,6 +481,12 @@ export type PasteTransform = (slice: Slice) => Slice;
 export type PasteHtmlTransform = (root: HTMLElement) => void;
 
 /**
+ * Rewrites copied HTML in place, before it reaches the clipboard. Contributed
+ * via `addCopyHtmlTransforms`; leave the tree untouched to decline.
+ */
+export type CopyHtmlTransform = (root: HTMLElement) => void;
+
+/**
  * How pasted files of one kind become a node, declared by the extension that
  * owns the node (`addPasteFiles`, keyed by node type name). Core reads or
  * uploads each file to a `src`, gates it as an image URL and measures it; a
@@ -1136,6 +1142,19 @@ export interface ExtensionConfig<Options = object> {
   addPasteHtmlTransforms?(this: Phase1Context<Options>): PasteHtmlTransform[];
 
   /**
+   * Rewrite copied HTML before it reaches the clipboard.
+   *
+   * The counterpart to `addPasteHtmlTransforms`: what the schema states one
+   * way and other editors read another (a merge as a cell per row versus one
+   * `rowspan` cell) is restated here, or state that must stay in the editor is
+   * stripped. Runs on every copy and cut, including a selection's own form
+   * (a cell selection's table).
+   *
+   * Transforms run in registration order, each seeing the previous one's edits.
+   */
+  addCopyHtmlTransforms?(this: Phase1Context<Options>): CopyHtmlTransform[];
+
+  /**
    * Pasted files this extension's nodes take, keyed by node type name: which
    * files, and the attrs of the placeholder and of the resolved node.
    */
@@ -1279,6 +1298,7 @@ export interface ResolvedExtension {
   inputHandlers: Record<string, InputHandler>;
   pasteTransforms: PasteTransform[];
   pasteHtmlTransforms: PasteHtmlTransform[];
+  copyHtmlTransforms: CopyHtmlTransform[];
   pasteFiles: Record<string, PasteFileSpec>;
   inputRules: InputRule[];
   markdownParserTokens: Record<string, MarkdownParserTokenSpec>;
