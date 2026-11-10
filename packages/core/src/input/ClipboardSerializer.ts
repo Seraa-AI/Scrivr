@@ -36,8 +36,8 @@ export function serializeSelectionToHtml(
   if (sel.empty) return null;
 
   const serializer = DOMSerializer.fromSchema(schema);
-  const own = ownClipboardForms(sel);
-  if (own) return own.html(serializer);
+  const ownHtml = ownClipboardForms(sel)?.html(serializer);
+  if (ownHtml !== undefined && ownHtml !== null) return ownHtml;
   const slice = sel.content();
   const container = document.createElement("div");
   container.setAttribute(
@@ -51,14 +51,19 @@ export function serializeSelectionToHtml(
   return container.outerHTML;
 }
 
-/** A selection's own clipboard forms, when it writes them: a cell selection writes a table. */
-function ownClipboardForms(sel: Selection): { html(serializer: DOMSerializer): string; text(): string } | null {
+/**
+ * A selection's own clipboard forms, when it writes them: a cell selection
+ * writes a table. A form that is not text is null, and the document's own
+ * form is used instead.
+ */
+function ownClipboardForms(sel: Selection): { html(serializer: DOMSerializer): string | null; text(): string | null } | null {
   if (!("clipboardHtml" in sel) || typeof sel.clipboardHtml !== "function") return null;
   if (!("clipboardText" in sel) || typeof sel.clipboardText !== "function") return null;
   const { clipboardHtml, clipboardText } = sel;
+  const textOrNull = (value: unknown): string | null => (typeof value === "string" ? value : null);
   return {
-    html: (serializer) => String(clipboardHtml.call(sel, serializer)),
-    text: () => String(clipboardText.call(sel)),
+    html: (serializer) => textOrNull(clipboardHtml.call(sel, serializer)),
+    text: () => textOrNull(clipboardText.call(sel)),
   };
 }
 
@@ -70,7 +75,7 @@ function ownClipboardForms(sel: Selection): { html(serializer: DOMSerializer): s
 export function serializeSelectionToText(state: EditorState): string | null {
   const sel = state.selection;
   if (sel.empty) return null;
-  const own = ownClipboardForms(sel);
-  if (own) return own.text();
+  const ownText = ownClipboardForms(sel)?.text();
+  if (ownText !== undefined && ownText !== null) return ownText;
   return state.doc.textBetween(sel.from, sel.to, "\n");
 }

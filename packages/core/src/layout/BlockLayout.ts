@@ -950,9 +950,7 @@ export function registeredLineCount(block: LayoutBlock): number {
   if (block.kind === "composite") {
     let n = 0;
     for (const region of block.regions ?? []) {
-      for (const child of region.blocks) {
-        n += child.kind === "leaf" ? 1 : child.lines.length;
-      }
+      for (const child of region.blocks) n += registeredLineCount(child);
     }
     return n;
   }
@@ -1003,7 +1001,7 @@ export function populateCharMap(
       for (const child of region.blocks) {
         const absolute: LayoutBlock = { ...child, y: block.y + child.y };
         populateCharMap(absolute, map, page, offset, measurer);
-        offset += child.kind === "leaf" ? 1 : child.lines.length;
+        offset += registeredLineCount(child);
       }
     }
     return;

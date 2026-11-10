@@ -43,7 +43,8 @@ export function layoutRegions(
   placements: readonly RegionPlacement[],
   ctx: RegionLayoutContext,
 ): { regions: LaidRegion[]; height: number } {
-  const regions: LaidRegion[] = placements.map((placement) => {
+  const regions: LaidRegion[] = placements.map((declared) => {
+    const placement = sizedPlacement(declared);
     const { inset } = placement;
     const x = ctx.x + placement.x;
     const box: RegionBox = {
@@ -72,6 +73,20 @@ export function layoutRegions(
   for (const region of regions) region.height = height;
 
   return { regions, height };
+}
+
+/** A size an extension declared, or none: a region is never sized NaN or negative. */
+const sizeOf = (value: number): number => (Number.isFinite(value) && value > 0 ? value : 0);
+
+/** A placement whose position, width and inset are numbers layout can use. */
+function sizedPlacement(placement: RegionPlacement): RegionPlacement {
+  const { inset } = placement;
+  return {
+    ...placement,
+    x: Number.isFinite(placement.x) ? placement.x : 0,
+    width: sizeOf(placement.width),
+    inset: { top: sizeOf(inset.top), right: sizeOf(inset.right), bottom: sizeOf(inset.bottom), left: sizeOf(inset.left) },
+  };
 }
 
 interface RegionBox {

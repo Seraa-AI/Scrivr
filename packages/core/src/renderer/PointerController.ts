@@ -1066,14 +1066,9 @@ export class PointerController {
     return pageX - this.deps.editor.layout.pageConfig.margins.left;
   }
 
-  /** The composite unit and region under a page-local point, if any. */
+  /** The innermost composite unit and region under a page-local point, if any. */
   private regionAt(pageNumber: number, x: number, y: number): { unit: LayoutBlock; region: LaidRegion } | null {
-    for (const unit of this.deps.editor.layout.pages?.[pageNumber - 1]?.blocks ?? []) {
-      if (y < unit.y || y >= unit.y + unit.height) continue;
-      const region = unit.regions?.find((r) => x >= r.x && x < r.x + r.width);
-      if (region) return { unit, region };
-    }
-    return null;
+    return innermostRegion(this.deps.editor.layout.pages?.[pageNumber - 1]?.blocks ?? [], x, y, 0);
   }
 
   private resolveSamePageReanchor(
@@ -1400,6 +1395,26 @@ export class PointerController {
     }
   }
 
+}
+
+/**
+ * The innermost region at a page-local point among `blocks` (their `y`
+ * relative to `originY`), with its unit placed at its page-local top: a cell
+ * of a table nested in a cell wins over its outer cell.
+ */
+function innermostRegion(
+  blocks: readonly LayoutBlock[],
+  x: number,
+  y: number,
+  originY: number,
+): { unit: LayoutBlock; region: LaidRegion } | null {
+  for (const block of blocks) {
+    const unit = { ...block, y: originY + block.y };
+    if (y < unit.y || y >= unit.y + unit.height) continue;
+    const region = unit.regions?.find((r) => x >= r.x && x < r.x + r.width);
+    if (region) return innermostRegion(region.blocks, x, y, unit.y) ?? { unit, region };
+  }
+  return null;
 }
 
 /** The paragraph in a region whose top is nearest a page-local y; an image anchors only in a textblock. */

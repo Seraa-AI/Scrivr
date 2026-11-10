@@ -11,6 +11,7 @@ import type {
   SelectionGestureProvider,
 } from "../selection/types";
 import { regionAtCoords } from "../layout/regionHitTest";
+import type { LayoutBlock } from "../layout/BlockLayout";
 import { CellSelection, enclosingCellPos, isCellType, resolveCellRange, selectedCells } from "./cellSelection";
 import { getTableMap } from "./TableMap";
 
@@ -335,11 +336,17 @@ export function tableCellWashHandler(editor: IEditor): OverlayRenderHandler {
     if (!page) return;
     ctx.save();
     ctx.fillStyle = theme.selectionFill;
-    for (const block of page.blocks) {
-      for (const region of block.regions ?? []) {
-        if (covered.has(region.pos)) ctx.fillRect(region.x, block.y + region.y, region.width, region.height);
+    // A table nested in a cell washes its own cells, relative to its own top.
+    const wash = (blocks: readonly LayoutBlock[], originY: number): void => {
+      for (const block of blocks) {
+        const top = originY + block.y;
+        for (const region of block.regions ?? []) {
+          if (covered.has(region.pos)) ctx.fillRect(region.x, top + region.y, region.width, region.height);
+          wash(region.blocks, top);
+        }
       }
-    }
+    };
+    wash(page.blocks, 0);
     ctx.restore();
   };
 }

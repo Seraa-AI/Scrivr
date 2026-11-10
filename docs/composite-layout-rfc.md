@@ -173,5 +173,21 @@ details:
 - **Still table-aware in `input/`**: the copy path runs the Table's
   `collapseRowSpans` on every copied slice; a copy-transform hook, beside the
   paste transforms, is where it moves.
+- **Nested composites** (a table in a cell) are handled at every depth: line
+  counting and the CharacterMap (`registeredLineCount` recursive), images in
+  a nested region, hit-testing (`regionAtCoords` gives the innermost region),
+  drops into a nested cell and the cell selection's wash. Older than this PR;
+  fixed here because composites made a region holding a composite part of
+  the design.
+- **Table cells always fill the row's width**: a grid with fewer columns than
+  the row has cells, or a width that is no width, is read with default
+  columns, and the scale covers every column. A region's position, width and
+  inset are clamped to finite, non-negative numbers.
+- **A selection's own clipboard form that is not text** is ignored, and the
+  document's own form is used.
+- **Contract for a custom composite**: `units()` should return at least one
+  unit (a composite with none takes no place in the flow), and a region node
+  should hold at least one block to take a caret (an empty region is only its
+  inset). Tables meet both through their schema (`tableRow+`, `block+`).
 - The vocabulary guard keeps table names and the old row vocabulary out of
   `layout/`, `renderer/` and `input/`.

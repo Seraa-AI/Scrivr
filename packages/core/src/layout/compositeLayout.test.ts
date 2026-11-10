@@ -219,3 +219,16 @@ describe("composite layout of a table row — layout participation", () => {
     expect(cells[0]!.blocks.map((block) => block.node.type.name)).toEqual(["paragraph", "paragraph"]);
   });
 });
+
+describe("composite layout of a region an extension sizes with no size", () => {
+  it("lays it out at no width rather than at NaN", () => {
+    const { row, rowNodePos } = rowFixture([100], [{ text: "A" }]);
+    const cellNode = row.child(0);
+    const bad = Number.NaN;
+    const { regions } = layoutRegions(
+      [{ node: cellNode, pos: rowNodePos + 1, x: bad, width: bad, inset: { top: bad, right: bad, bottom: bad, left: bad } }],
+      { x: 0, page: 1, measurer: createMeasurer() },
+    );
+    expect(regions.map((r) => [r.x, r.width, Number.isFinite(r.height)])).toEqual([[0, 0, true]]);
+  });
+});

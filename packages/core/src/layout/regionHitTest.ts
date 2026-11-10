@@ -1,9 +1,11 @@
+import type { LayoutBlock } from "./BlockLayout";
 import type { LayoutPage } from "./PageLayout";
 
 /**
- * The composite region whose laid-out rect contains (x, y) on `page`, returned
- * as the absolute document position of its node — or null when the point hits
- * no region.
+ * The innermost composite region whose laid-out rect contains (x, y) on
+ * `page` — a cell of a table nested in a cell wins over its outer cell —
+ * returned as the absolute document position of its node, or null when the
+ * point hits no region.
  *
  * A region's `x` is absolute; its `y` is relative to its unit's top, so its
  * absolute top is `unit.y + region.y`. Ranges are half-open on the right and
@@ -16,13 +18,18 @@ export function regionAtCoords(
   page: number,
 ): number | null {
   const layoutPage = pages.find((p) => p.pageNumber === page);
-  if (!layoutPage) return null;
+  return layoutPage ? regionIn(layoutPage.blocks, x, y, 0) : null;
+}
 
-  for (const block of layoutPage.blocks) {
+/** The innermost region at (x, y) among `blocks`, whose `y` is relative to `originY`. */
+function regionIn(blocks: readonly LayoutBlock[], x: number, y: number, originY: number): number | null {
+  for (const block of blocks) {
+    const unitTop = originY + block.y;
     for (const region of block.regions ?? []) {
-      const top = block.y + region.y;
+      const top = unitTop + region.y;
       if (x >= region.x && x < region.x + region.width && y >= top && y < top + region.height) {
-        return region.pos;
+        // A composite nested in the region (a table in a cell) owns its own regions.
+        return regionIn(region.blocks, x, y, unitTop) ?? region.pos;
       }
     }
   }

@@ -430,30 +430,37 @@ function regionFloatPlacements(
   for (const page of pages) {
     const toGlobal = (localY: number) =>
       geometry.startOf(page.pageNumber) + localY - geometry.metricsFor(page.pageNumber).contentTop;
-    for (const block of page.blocks) {
-      for (const region of block.regions ?? []) {
-        for (const f of region.floats ?? []) {
-          const y = block.y + f.y;
-          placements.push({
-            docPos: f.docPos,
-            page: page.pageNumber,
-            x: f.x,
-            y,
-            width: f.width,
-            height: f.height,
-            wrapMode: f.wrapMode,
-            zIndex: f.zIndex,
-            node: f.node,
-            anchorGlobalY: toGlobal(block.y + f.anchorY),
-            anchorPage: page.pageNumber,
-            globalY: toGlobal(y),
-            regionPos: region.pos,
-            ...(f.clamped ? { clamped: true } : {}),
-            ...(f.stackOffset ? { stackOffset: f.stackOffset } : {}),
-          });
+    // A composite nested in a region (a table in a cell) carries its own
+    // regions' images, relative to its own top.
+    const visit = (blocks: readonly LayoutBlock[], originY: number): void => {
+      for (const block of blocks) {
+        const unitTop = originY + block.y;
+        for (const region of block.regions ?? []) {
+          visit(region.blocks, unitTop);
+          for (const f of region.floats ?? []) {
+            const y = unitTop + f.y;
+            placements.push({
+              docPos: f.docPos,
+              page: page.pageNumber,
+              x: f.x,
+              y,
+              width: f.width,
+              height: f.height,
+              wrapMode: f.wrapMode,
+              zIndex: f.zIndex,
+              node: f.node,
+              anchorGlobalY: toGlobal(unitTop + f.anchorY),
+              anchorPage: page.pageNumber,
+              globalY: toGlobal(y),
+              regionPos: region.pos,
+              ...(f.clamped ? { clamped: true } : {}),
+              ...(f.stackOffset ? { stackOffset: f.stackOffset } : {}),
+            });
+          }
         }
       }
-    }
+    };
+    visit(page.blocks, 0);
   }
   return placements;
 }

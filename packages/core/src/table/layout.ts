@@ -6,7 +6,7 @@
  */
 import type { Node } from "prosemirror-model";
 import type { CompositeLayout, CompositeUnit, RegionInset, RegionPlacement } from "../layout/BlockRegistry";
-import type { LaidRegion, LayoutBlock } from "../layout/BlockLayout";
+import type { LaidRegion } from "../layout/BlockLayout";
 import { cellBackground, cellGridSpan, cellVMerge, type CellVMerge } from "./attrs";
 
 /** Space a cell keeps clear inside its edges, in CSS px. */
@@ -42,18 +42,15 @@ export function cellDataOf(region: LaidRegion): CellData {
   return { vMerge: "none", background: null };
 }
 
-/** A table's laid-out row: a unit of the table composite. */
-export function isTableRowBlock(block: LayoutBlock): boolean {
-  return block.kind === "composite" && block.node.type.name === "tableRow";
-}
-
-/** The table's column widths, from its `grid` attr; empty when it has none. */
+/** The table's column widths, from its `grid` attr; a width that is no width is a default column. */
 function gridOf(table: Node): number[] {
   const grid = table.attrs["grid"];
-  return Array.isArray(grid) ? grid.filter((w): w is number => typeof w === "number" && Number.isFinite(w)) : [];
+  return Array.isArray(grid)
+    ? grid.map((w) => (typeof w === "number" && Number.isFinite(w) && w > 0 ? w : DEFAULT_COLUMN_WIDTH))
+    : [];
 }
 
-/** Sum of `gridSpan` across a row's cells — its column count. */
+/** Sum of `gridSpan` across a row's cells: its column count. */
 function rowColumnCount(row: Node): number {
   let n = 0;
   row.forEach((cell) => { n += cellGridSpan(cell); });
@@ -81,9 +78,10 @@ export const tableLayout: CompositeLayout = {
 
     // Scale the grid to fill the width (Word and Docs fit a table to the
     // page, never letting a wide grid overflow the margin), keeping its
-    // proportions.
+    // proportions — over every column the row has, the grid's or not.
+    const count = Math.max(columns.length, rowColumnCount(row));
     let total = 0;
-    for (let c = 0; c < columns.length; c++) total += widthAt(c);
+    for (let c = 0; c < count; c++) total += widthAt(c);
     const scale = width > 0 && total > 0 ? width / total : 1;
     const columnWidth = (c: number) => widthAt(c) * scale;
 
