@@ -10,6 +10,7 @@ import { ExtensionManager } from "./extensions/ExtensionManager";
 import { StarterKit } from "./extensions/StarterKit";
 import type { Extension } from "./extensions/Extension";
 import type {
+  BlockInfo,
   FontModifier,
   IBaseEditor,
   MarkdownParserTokenSpec,
@@ -644,26 +645,21 @@ export class BaseEditor implements IBaseEditor {
     return result;
   }
 
-  getBlockInfo(): { blockType: string; blockAttrs: Record<string, unknown> } {
+  /** The textblock holding the selection's start, and the nodes around it up to the doc. */
+  getBlockInfo(): BlockInfo {
     const { $from } = this.getActiveState().selection;
-    for (let d = 1; d <= $from.depth; d++) {
+    const ancestors: BlockInfo["ancestors"] = [];
+    for (let d = $from.depth - 1; d >= 1; d--) {
       const node = $from.node(d);
-      if (node.isBlock && d === 1) {
-        return {
-          blockType: node.type.name,
-          blockAttrs: node.attrs as Record<string, unknown>,
-        };
-      }
+      ancestors.push({ type: node.type.name, attrs: node.attrs });
     }
-    return {
-      blockType: $from.parent.type.name,
-      blockAttrs: $from.parent.attrs as Record<string, unknown>,
-    };
+    return { blockType: $from.parent.type.name, blockAttrs: $from.parent.attrs, ancestors };
   }
 
   /**
-   * Returns true when the named mark or block type is active at the cursor.
-   * Mirrors TipTap's `editor.isActive()` signature.
+   * Returns true when the named mark is active at the cursor, or the named
+   * node is the cursor's textblock or around it (the nearest one's attrs are
+   * matched). Mirrors TipTap's `editor.isActive()` signature.
    */
   isActive(name: string, attrs?: Record<string, unknown>): boolean {
     if (this.schema.marks[name]) {
@@ -673,10 +669,11 @@ export class BaseEditor implements IBaseEditor {
       if (!ma) return false;
       return Object.entries(attrs).every(([k, v]) => ma[k] === v);
     }
-    const { blockType, blockAttrs } = this.getBlockInfo();
-    if (blockType !== name) return false;
+    const { blockType, blockAttrs, ancestors } = this.getBlockInfo();
+    const nodeAttrs = blockType === name ? blockAttrs : ancestors.find((node) => node.type === name)?.attrs;
+    if (!nodeAttrs) return false;
     if (!attrs) return true;
-    return Object.entries(attrs).every(([k, v]) => blockAttrs[k] === v);
+    return Object.entries(attrs).every(([k, v]) => nodeAttrs[k] === v);
   }
 
   // ── Lifecycle ────────────────────────────────────────────────────────────────

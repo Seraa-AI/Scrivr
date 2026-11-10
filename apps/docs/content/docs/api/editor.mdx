@@ -200,9 +200,9 @@ attrs.fontSize?.size; // 18
 
 ### `getBlockInfo()`
 ```ts
-getBlockInfo(): { blockType: string; blockAttrs: Record<string, unknown> }
+getBlockInfo(): BlockInfo // { blockType, blockAttrs, ancestors }
 ```
-Type name and attributes of the block node containing the cursor.
+Type name and attributes of the textblock containing the cursor, and the nodes around it (`{ type, attrs }`), innermost first.
 
 ### `getMarkdown()`
 ```ts

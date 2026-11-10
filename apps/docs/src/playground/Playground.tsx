@@ -42,7 +42,7 @@ import {
   describeSuggestionRefusal,
 } from "@scrivr/react";
 import type { SuggestionRefusalText } from "@scrivr/react";
-import type { Editor } from "@scrivr/core";
+import type { BlockAncestor, Editor } from "@scrivr/core";
 import { Selection } from "@scrivr/core/pm";
 import { ChatPanel } from "./ChatPanel";
 import { DemoContent, demoDoc, startingDemo, type DemoKind } from "./demoContent";
@@ -182,15 +182,14 @@ interface ToolbarSlice {
   activeMarkAttrs: Record<string, Record<string, unknown>>;
   blockType: string;
   blockAttrs: Record<string, unknown>;
+  ancestors: BlockAncestor[];
 }
 
 function selectToolbar(ctx: EditorStateContext): ToolbarSlice {
-  const { blockType, blockAttrs } = ctx.editor.getBlockInfo();
   return {
     activeMarks: ctx.editor.getActiveMarks(),
     activeMarkAttrs: ctx.editor.getActiveMarkAttrs(),
-    blockType,
-    blockAttrs: blockAttrs as Record<string, unknown>,
+    ...ctx.editor.getBlockInfo(),
   };
 }
 
@@ -199,6 +198,7 @@ const EMPTY_TOOLBAR: ToolbarSlice = {
   activeMarkAttrs: {},
   blockType: "paragraph",
   blockAttrs: {},
+  ancestors: [],
 };
 
 type SidebarTab = "ai" | "changes";
@@ -395,6 +395,7 @@ export function Playground() {
             activeMarkAttrs={toolbar.activeMarkAttrs}
             blockType={toolbar.blockType}
             blockAttrs={toolbar.blockAttrs}
+            ancestors={toolbar.ancestors}
             editor={editor}
           />
         </div>

@@ -11,6 +11,7 @@ import {
 import { SelectionController } from "./SelectionController";
 import { anchoredOf, placementAttrs } from "./layout/AnchoredObjects";
 import type {
+	BlockAncestor,
 	FontModifier,
 	MarkDecorator,
 	ToolbarItemSpec,
@@ -106,10 +107,12 @@ export interface SelectionSnapshot {
 	 * e.g. { color: { color: "#dc2626" }, fontSize: { size: 18 } }
 	 */
 	activeMarkAttrs: Record<string, Record<string, unknown>>;
-	/** The ProseMirror node type name of the block containing the cursor: "paragraph", "heading", etc. */
+	/** The ProseMirror node type name of the textblock containing the cursor: "paragraph", "heading", etc. */
 	blockType: string;
-	/** Attributes of that block node — e.g. { level: 1, align: "left" } for a heading */
+	/** Attributes of that textblock — e.g. { level: 1, align: "left" } for a heading */
 	blockAttrs: Record<string, unknown>;
+	/** The nodes around that textblock, innermost first: a list item, its list, a table cell… */
+	ancestors: BlockAncestor[];
 }
 
 function moveDeleteRange(
@@ -1292,6 +1295,7 @@ export class Editor extends BaseEditor implements IEditor {
 			activeMarkAttrs: this.getActiveMarkAttrs(),
 			blockType: blockInfo.blockType,
 			blockAttrs: blockInfo.blockAttrs,
+			ancestors: blockInfo.ancestors,
 		};
 	}
 

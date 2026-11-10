@@ -532,15 +532,30 @@ export interface ToolbarItemSpec {
    */
   group?: string;
   /**
-   * Returns true when this item should appear active/pressed.
-   * The 4th param (activeMarkAttrs) is optional — existing 3-param functions still work.
+   * Returns true when this item should appear active/pressed. `blockType` and
+   * `blockAttrs` are the caret's own textblock; `ancestors` are the nodes
+   * around it, innermost first (a list item, its list, a table cell…).
    */
   isActive: (
     activeMarks: string[],
     blockType: string,
     blockAttrs: Record<string, unknown>,
-    activeMarkAttrs?: Record<string, Record<string, unknown>>
+    activeMarkAttrs?: Record<string, Record<string, unknown>>,
+    ancestors?: readonly BlockAncestor[]
   ) => boolean;
+}
+
+/** A node around the caret's textblock: its type name and attrs. */
+export interface BlockAncestor {
+  type: string;
+  attrs: Record<string, unknown>;
+}
+
+/** The caret's textblock and the nodes around it, innermost first. */
+export interface BlockInfo {
+  blockType: string;
+  blockAttrs: Record<string, unknown>;
+  ancestors: BlockAncestor[];
 }
 
 // ── Slash commands ─────────────────────────────────────────────────────────────

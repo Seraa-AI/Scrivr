@@ -1043,7 +1043,7 @@ describe("Editor — list commands", () => {
     const { editor, type, cleanup } = makeEditor();
     type("Hello");
     editor.commands["toggleBulletList"]?.();
-    expect(editor.getBlockInfo().blockType).toBe("bulletList");
+    expect(editor.isActive("bulletList")).toBe(true);
     expect(editor.getState().doc.textContent).toBe("Hello");
     cleanup();
   });
@@ -1062,7 +1062,7 @@ describe("Editor — list commands", () => {
     const { editor, type, cleanup } = makeEditor();
     type("Hello");
     editor.commands["toggleOrderedList"]?.();
-    expect(editor.getBlockInfo().blockType).toBe("orderedList");
+    expect(editor.isActive("orderedList")).toBe(true);
     cleanup();
   });
 
@@ -1079,9 +1079,9 @@ describe("Editor — list commands", () => {
     const { editor, type, cleanup } = makeEditor();
     type("Hello");
     editor.commands["toggleBulletList"]?.();
-    expect(editor.getBlockInfo().blockType).toBe("bulletList");
+    expect(editor.isActive("bulletList")).toBe(true);
     editor.commands["toggleOrderedList"]?.();
-    expect(editor.getBlockInfo().blockType).toBe("orderedList");
+    expect(editor.isActive("orderedList")).toBe(true);
     expect(editor.getState().doc.textContent).toBe("Hello");
     cleanup();
   });
@@ -1091,15 +1091,15 @@ describe("Editor — list commands", () => {
     type("Hello");
     editor.commands["toggleOrderedList"]?.();
     editor.commands["toggleBulletList"]?.();
-    expect(editor.getBlockInfo().blockType).toBe("bulletList");
+    expect(editor.isActive("bulletList")).toBe(true);
     cleanup();
   });
 
-  it("getBlockInfo returns bulletList when cursor is inside a bullet list", () => {
+  it("isActive(\"bulletList\") when the cursor is inside a bullet list", () => {
     const { editor, type, cleanup } = makeEditor();
     type("Hello");
     editor.commands["toggleBulletList"]?.();
-    expect(editor.getBlockInfo().blockType).toBe("bulletList");
+    expect(editor.isActive("bulletList")).toBe(true);
     cleanup();
   });
 

@@ -114,10 +114,12 @@ interface SelectionSnapshot {
   activeMarks: string[];
   /** Attrs of each active mark, keyed by mark name */
   activeMarkAttrs: Record<string, Record<string, unknown>>;
-  /** Node type name of the block containing the cursor */
+  /** Node type name of the textblock containing the cursor */
   blockType: string;
-  /** Attrs of the block node */
+  /** Attrs of that textblock */
   blockAttrs: Record<string, unknown>;
+  /** The nodes around it, innermost first: a list item, its list, a table cell… */
+  ancestors: { type: string; attrs: Record<string, unknown> }[];
 }
 ```
 
@@ -128,8 +130,9 @@ const snap = editor.getSelectionSnapshot();
 
 snap.empty;                           // true = cursor only
 snap.activeMarks.includes('bold');    // is bold active?
-snap.blockType;                       // 'paragraph' | 'heading' | 'bulletList' | ...
+snap.blockType;                       // 'paragraph' | 'heading' | 'codeBlock' | ...
 snap.blockAttrs;                      // { level: 1 } for a heading
+snap.ancestors[1]?.type;              // 'orderedList' in a numbered list item
 snap.activeMarkAttrs.color?.color;    // '#dc2626'
 ```
 

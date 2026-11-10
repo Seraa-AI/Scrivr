@@ -1,4 +1,4 @@
-import type { ToolbarItemSpec } from "@scrivr/core";
+import type { BlockAncestor, ToolbarItemSpec } from "@scrivr/core";
 
 /** The command half of a spec — the only names a toolbar button can dispatch. */
 type ToolbarCommand = ToolbarItemSpec["command"];
@@ -36,6 +36,7 @@ interface ToolbarProps {
   activeMarkAttrs: Record<string, Record<string, unknown>>;
   blockType: string;
   blockAttrs: Record<string, unknown>;
+  ancestors: BlockAncestor[];
   /** Document-level default font family — shown when no explicit family is set on the selection. */
   defaultFontFamily?: string;
   /** Document-level default font size in px — shown when no fontSize mark is active. */
@@ -84,6 +85,7 @@ export function Toolbar({
   activeMarkAttrs,
   blockType,
   blockAttrs,
+  ancestors,
   defaultFontFamily = DEFAULT_FONT_FAMILY,
   defaultFontSize = 14,
 }: ToolbarProps) {
@@ -133,6 +135,7 @@ export function Toolbar({
                 blockType,
                 blockAttrs,
                 activeMarkAttrs,
+                ancestors,
               );
               return (
                 <ToolbarButton

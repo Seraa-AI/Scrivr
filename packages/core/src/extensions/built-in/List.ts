@@ -17,7 +17,7 @@ import {
   nestedListLevel,
 } from "./listLevels";
 import { LIST_MARKER_PAINTER, listItemWrap, listMarkerPainter, listWrap } from "./listLayout";
-import type { SlashCommandContribution, ToolbarItemSpec } from "../types";
+import type { BlockAncestor, SlashCommandContribution, ToolbarItemSpec } from "../types";
 import { KeymapPriority } from "../types";
 import {
   pxToTwips,
@@ -269,6 +269,11 @@ const joinOntoListAbove: Command = (state, dispatch) => {
   return true;
 };
 
+/** The list nearest the caret's paragraph, as Word's ribbon shows it; null outside any list. */
+function nearestList(ancestors: readonly BlockAncestor[] = []): string | null {
+  return ancestors.find(({ type }) => type === "bulletList" || type === "orderedList")?.type ?? null;
+}
+
 const listPdf: PdfNodeHandler = (block, ctx) => ctx.draw.lines(block, ctx);
 
 /**
@@ -401,14 +406,14 @@ export const List = Extension.create({
         label: "•",
         title: "Bullet list (⌘⇧8)",
         group: "list",
-        isActive: (_marks, blockType) => blockType === "bulletList",
+        isActive: (_marks, _type, _attrs, _markAttrs, ancestors) => nearestList(ancestors) === "bulletList",
       },
       {
         command: "toggleOrderedList",
         label: "1.",
         title: "Ordered list (⌘⇧9)",
         group: "list",
-        isActive: (_marks, blockType) => blockType === "orderedList",
+        isActive: (_marks, _type, _attrs, _markAttrs, ancestors) => nearestList(ancestors) === "orderedList",
       },
     ];
   },

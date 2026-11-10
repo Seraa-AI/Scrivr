@@ -75,6 +75,8 @@ export type {
   SpanRect,
   FontModifier,
   ToolbarItemSpec,
+  BlockAncestor,
+  BlockInfo,
   SlashCommandSpec,
   SlashCommandContribution,
   SlashCommandResolver,
