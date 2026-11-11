@@ -6,6 +6,13 @@ export { KeymapPriority, DEFAULT_SLASH_ORDER } from "./types";
 // Built-in extensions — individually importable
 export { Document } from "./built-in/Document";
 export { HardBreak } from "./built-in/HardBreak";
+export { ContentControl, listSignerFields } from "./built-in/ContentControl";
+export type {
+  ContentControlFill,
+  ContentControlKind,
+  InsertContentControlOptions,
+  SignerFieldDescriptor,
+} from "./built-in/ContentControl";
 export { Paragraph } from "./built-in/Paragraph";
 export { Heading } from "./built-in/Heading";
 export { Bold } from "./built-in/Bold";

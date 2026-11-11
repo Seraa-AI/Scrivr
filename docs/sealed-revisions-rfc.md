@@ -528,3 +528,16 @@ this section says so rather than the proposal being quietly rewritten to match.
 - Closing the viewer ends the reading record: `pageLeft` for every page
   still in view.
 - Not yet: phases 3–5; keyboard traversal between fields.
+
+**Phase 3a — inline content control.** Shipped on PR #256.
+
+- `ContentControl` in core, outside StarterKit. Field listing is the pure
+  `listSignerFields(doc)`, not a `BaseEditor` method: the editor would otherwise
+  name a node only an opt-in extension defines.
+- A field's id is its `nodeId`. `UniqueId` now stamps inline atoms that declare
+  `nodeId` as it does blocks, so a pasted field gets a fresh id. Images get ids
+  too, as a consequence.
+- The insert command refuses a signer field without a role, and an author
+  control other than a checkbox. Author text comes in 3b.
+- PDF draws the same box as the canvas; the signer outline is solid in the PDF
+  because the draw surface has no dash.
