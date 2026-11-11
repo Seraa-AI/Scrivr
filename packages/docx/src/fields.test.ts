@@ -150,17 +150,19 @@ describe("kinds of field in DOCX", () => {
   });
 
   it("writes a dropdown as Word's dropdown, and reads its choices back", async () => {
-    const editor = new ServerEditor({ extensions, content: doc({ kind: "dropdown", options: ["Net 30", "Net 60"] }) });
+    const editor = new ServerEditor({ extensions, content: doc({ kind: "dropdown", options: [{ id: "net-30", label: "Net 30" }, { id: "net-60", label: "Net 60" }] }) });
     const bytes = await exportDocxBytes(editor);
     const document = strFromU8(unzipSync(bytes)["word/document.xml"]!);
 
-    expect(document).toMatch(/<w:dropDownList>.*?w:value="Net 30".*?w:value="Net 60".*?<\/w:dropDownList>/);
+    expect(document).toMatch(
+      /<w:dropDownList>.*?w:displayText="Net 30" w:value="net-30".*?w:displayText="Net 60" w:value="net-60".*?<\/w:dropDownList>/,
+    );
     const { doc: back } = await importDocx(new ServerEditor({ extensions }), bytes);
     let options: unknown = null;
     back.descendants((node) => {
       if (node.type.name === "field") options = node.attrs["options"];
     });
-    expect(options).toEqual(["Net 30", "Net 60"]);
+    expect(options).toEqual([{ id: "net-30", label: "Net 30" }, { id: "net-60", label: "Net 60" }]);
   });
 
   it("keeps a host's own kind, sent to Word as a text control", async () => {

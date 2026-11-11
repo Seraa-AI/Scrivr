@@ -10,6 +10,11 @@ export interface UseCanvasEditorOptions {
   /** When true, the editor blocks all mutations. Default: false. */
   readOnly?: boolean;
   /**
+   * Start sealed: the content loads, then the document refuses every change,
+   * from this client and collaborators alike. Default: false.
+   */
+  sealed?: boolean;
+  /**
    * Which typefaces this editor may measure and paint in.
    *
    * Without one the editor asks the browser for whatever a family name means
@@ -81,6 +86,7 @@ export function useScrivrEditor(
       extensions: opts.extensions ?? [StarterKit],
       ...(opts.pageConfig ? { pageConfig: opts.pageConfig } : {}),
       readOnly: opts.readOnly ?? false,
+      sealed: opts.sealed ?? false,
       ...(opts.fonts ? { fonts: opts.fonts } : {}),
       ...(opts.theme ? { theme: opts.theme } : {}),
       ...(opts.themeRoot ? { themeRoot: opts.themeRoot } : {}),

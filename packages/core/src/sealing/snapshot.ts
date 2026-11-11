@@ -18,7 +18,9 @@ export type SealRefusal =
   /** A role was assigned that no field carries — its field was removed after the invitation. */
   | { reason: "unknown-roles"; unknown: string[] }
   /** Suggestions are still open; a signer would agree to wording not yet decided. */
-  | { reason: "pending-tracked-changes"; count: number };
+  | { reason: "pending-tracked-changes"; count: number }
+  /** Text the author fills still shows its prompt; a signer would agree to a blank. */
+  | { reason: "unfilled-fields"; prompts: string[] };
 
 export type SnapshotResult = { ok: true; snapshot: SealedSnapshot } | { ok: false; refusal: SealRefusal };
 
@@ -73,6 +75,19 @@ function pendingChanges(doc: PmNode): number {
   return ids.size;
 }
 
+/** The prompts of author text fields still showing them, one per field. */
+function unfilledPrompts(doc: PmNode): string[] {
+  const prompts = new Map<string, string>();
+  doc.descendants((node) => {
+    for (const mark of node.marks) {
+      const { nodeId, prompt, placeholder } = mark.attrs;
+      if (mark.type.name === "fieldRange" && placeholder === true) prompts.set(String(nodeId), String(prompt));
+    }
+    return true;
+  });
+  return [...prompts.values()];
+}
+
 function roleRefusal(fields: readonly SignerFieldDescriptor[], assigned: readonly string[]): SealRefusal | null {
   const roles = new Set(fields.map((f) => f.role));
   const missing = [...new Set(fields.filter((f) => f.required && !assigned.includes(f.role)).map((f) => f.role))];
@@ -90,6 +105,8 @@ function roleRefusal(fields: readonly SignerFieldDescriptor[], assigned: readonl
 export async function createSnapshot(doc: PmNode, { assignedRoles }: CreateSnapshotOptions): Promise<SnapshotResult> {
   const count = pendingChanges(doc);
   if (count > 0) return { ok: false, refusal: { reason: "pending-tracked-changes", count } };
+  const prompts = unfilledPrompts(doc);
+  if (prompts.length > 0) return { ok: false, refusal: { reason: "unfilled-fields", prompts } };
   const fields = listSignerFields(doc);
   const refusal = roleRefusal(fields, assignedRoles);
   if (refusal) return { ok: false, refusal };

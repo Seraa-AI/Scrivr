@@ -32,6 +32,7 @@ import type {
   DocxMark,
   DocxParagraphAttrs,
   DocxSectionRef,
+  DocxSdtListItem,
   DocxTableCell,
   DocxTableRow,
 } from "@scrivr/core";
@@ -452,16 +453,18 @@ function parseInlineSdt(el: OoxmlElement, diag: ParserDiagnostics): DocxInline {
   };
 }
 
-function sdtListItems(sdtPr: OoxmlElement): string[] {
+function sdtListItems(sdtPr: OoxmlElement): DocxSdtListItem[] {
   const list = findChild(sdtPr, "w:dropDownList") ?? findChild(sdtPr, "w:comboBox");
   if (!list) return [];
-  const values: string[] = [];
+  const items: DocxSdtListItem[] = [];
   for (const item of list.children) {
     if (typeof item === "string" || item.name !== "w:listItem") continue;
+    // Word writes both; either alone stands for the other.
     const value = attr(item, "w:value") ?? attr(item, "w:displayText");
-    if (value !== undefined) values.push(value);
+    const displayText = attr(item, "w:displayText") ?? value;
+    if (value !== undefined && displayText !== undefined) items.push({ value, displayText });
   }
-  return values;
+  return items;
 }
 
 function buildHyperlinkMark(hyperlink: OoxmlElement): DocxMark {

@@ -1,5 +1,5 @@
 import type { Node as PmNode } from "prosemirror-model";
-import { fieldCaption, type FieldControl, type FieldKinds } from "./fieldKinds";
+import { fieldCaption, fieldChoices, type FieldChoice, type FieldControl, type FieldKinds } from "./fieldKinds";
 import {
   DOCX_TAG_MAX_LENGTH,
   xml,
@@ -118,15 +118,12 @@ function checkbox(checked: boolean): XmlNode {
 const dateControl = (): XmlNode =>
   xml("w:date", undefined, [xml("w:dateFormat", { "w:val": "yyyy-MM-dd" }), xml("w:lid", { "w:val": "en-US" })]);
 
-const dropdown = (choices: readonly string[]): XmlNode =>
+const dropdown = (choices: readonly FieldChoice[]): XmlNode =>
   xml(
     "w:dropDownList",
     undefined,
-    choices.map((choice) => xml("w:listItem", { "w:displayText": choice, "w:value": choice })),
+    choices.map((choice) => xml("w:listItem", { "w:displayText": choice.label, "w:value": choice.id })),
   );
-
-const choicesOf = (node: PmNode): string[] =>
-  Array.isArray(node.attrs["options"]) ? node.attrs["options"].filter((o): o is string => typeof o === "string") : [];
 
 /** Each field as the control its kind declares; a kind Word has no control for is a text control. */
 export const fieldDocx = (kinds: FieldKinds): DocxNodeHandler => (node, _children, ctx) => {
@@ -151,7 +148,7 @@ export const fieldDocx = (kinds: FieldKinds): DocxNodeHandler => (node, _childre
     signatureLine: () => ({ props: [], content: signatureLine(node, id) }),
     checkbox: () => ({ props: [checkbox(checked)], content: glyphRun(checked ? "☒" : "☐") }),
     date: () => ({ props: [xml("w:showingPlcHdr"), dateControl()], content: plainRun(caption) }),
-    dropdown: () => ({ props: [xml("w:showingPlcHdr"), dropdown(choicesOf(node))], content: plainRun(caption) }),
+    dropdown: () => ({ props: [xml("w:showingPlcHdr"), dropdown(fieldChoices(node.attrs["options"]))], content: plainRun(caption) }),
     text: () => ({ props: [xml("w:showingPlcHdr"), xml("w:text")], content: plainRun(caption) }),
   };
   const { props, content } = shapes[kinds[kind]?.control ?? "text"]();
@@ -207,7 +204,7 @@ export const fieldImport: DocxInlineTransform = (inline, _marks, ctx) => {
     role: fill === "signer" ? params.get("role") : null,
     required: params.get("required") === "1",
     checked: fill === "author" && checked,
-    options: inline.listItems,
+    options: inline.listItems.map((item) => ({ id: item.value, label: item.displayText })),
     ...(Number(params.get("width")) > 0 ? { width: Number(params.get("width")) } : {}),
     ...(Number(params.get("height")) > 0 ? { height: Number(params.get("height")) } : {}),
   });

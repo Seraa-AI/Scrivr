@@ -10,6 +10,8 @@ import {
   BUILT_IN_FIELD_KINDS,
   controlOf,
   fieldCaption,
+  fieldChoices,
+  type FieldChoice,
   type FieldKind,
   type FieldKinds,
   type FieldOptions,
@@ -34,6 +36,19 @@ import {
   type InsertFieldRangeOptions,
 } from "./fieldRange";
 
+const distinctChoices = (choices: readonly FieldChoice[]): boolean =>
+  choices.length > 0 && new Set(choices.map((c) => c.id)).size === choices.length;
+
+/** A dropdown's choices from pasted HTML, where they travel as JSON. */
+function choicesFromHtml(json: string | null): FieldChoice[] {
+  if (!json) return [];
+  try {
+    return fieldChoices(JSON.parse(json));
+  } catch {
+    return [];
+  }
+}
+
 /** Who fills a control: the author while drafting, or a signer after the seal. */
 export type FieldFill = "author" | "signer";
 
@@ -45,8 +60,8 @@ export interface InsertFieldOptions {
   required?: boolean;
   width?: number;
   height?: number;
-  /** The choices a dropdown offers. Required for one. */
-  options?: string[];
+  /** The choices a dropdown offers, each with an id of its own. Required for one. */
+  options?: FieldChoice[];
 }
 
 /** A field a signer completes, as the host needs it to assign people to roles. */
@@ -55,6 +70,8 @@ export interface SignerFieldDescriptor {
   role: string;
   kind: FieldKind;
   required: boolean;
+  /** A dropdown's choices; empty for every other kind. */
+  options: FieldChoice[];
 }
 
 /**
@@ -66,9 +83,9 @@ export function listSignerFields(doc: PmNode): SignerFieldDescriptor[] {
   const fields: SignerFieldDescriptor[] = [];
   doc.descendants((node) => {
     if (node.type.name !== "field" || node.attrs["fill"] !== "signer") return true;
-    const { nodeId, role, kind, required } = node.attrs;
+    const { nodeId, role, kind, required, options } = node.attrs;
     if (typeof nodeId === "string" && typeof role === "string" && typeof kind === "string") {
-      fields.push({ id: nodeId, role, kind, required: required === true });
+      fields.push({ id: nodeId, role, kind, required: required === true, options: fieldChoices(options) });
     }
     return false;
   });
@@ -84,10 +101,11 @@ function insertField(options: InsertFieldOptions, kinds: FieldKinds): Command {
     const control = spec.control ?? "text";
     // A signer field nobody is named for could never be completed; an author
     // fills anything but a checkbox as ordinary text; a dropdown with nothing
-    // to choose offers no choice.
+    // to choose offers no choice, and one whose choices share an id cannot
+    // record which was chosen.
     if (fill === "signer" && !role) return false;
     if (fill === "author" && control !== "checkbox") return false;
-    if (control === "dropdown" && choices.length === 0) return false;
+    if (control === "dropdown" && !distinctChoices(choices)) return false;
     const node = type.create({
       kind,
       fill,
@@ -141,6 +159,9 @@ const resolveKinds = (options: FieldOptions): FieldKinds => ({ ...BUILT_IN_FIELD
 
 const fieldStrategy = (kinds: FieldKinds): InlineStrategy => ({
   verticalAlign: "baseline",
+  // The box is the size it was authored at. Measuring it anyway sets the field
+  // in the face of the text around it, which an export prints its value in.
+  measure: (node) => ({ width: Number(node.attrs["width"]), height: Number(node.attrs["height"]) }),
   render(ctx, x, y, width, height, node, theme: ResolvedTheme) {
     ctx.save();
     ctx.strokeStyle = theme.imagePlaceholderBorder;
@@ -277,7 +298,7 @@ export const Field = Extension.create<FieldOptions>({
                 role: fill === "signer" ? role : null,
                 required: fill === "signer" && dom.hasAttribute("data-required"),
                 checked: fill === "author" && dom.hasAttribute("data-checked"),
-                options: (dom.getAttribute("data-options") ?? "").split("\n").filter(Boolean),
+                options: choicesFromHtml(dom.getAttribute("data-options")),
                 width: Number(dom.getAttribute("data-width")) || spec.size.width,
                 height: Number(dom.getAttribute("data-height")) || spec.size.height,
               };
@@ -294,7 +315,7 @@ export const Field = Extension.create<FieldOptions>({
               ...(typeof role === "string" ? { "data-role": role } : {}),
               ...(required === true ? { "data-required": "" } : {}),
               ...(checked === true ? { "data-checked": "" } : {}),
-              ...(Array.isArray(options) && options.length > 0 ? { "data-options": options.join("\n") } : {}),
+              ...(Array.isArray(options) && options.length > 0 ? { "data-options": JSON.stringify(options) } : {}),
               "data-width": String(width),
               "data-height": String(height),
             },

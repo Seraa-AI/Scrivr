@@ -1,4 +1,5 @@
 import type { Node as PmNode } from "prosemirror-model";
+import { z } from "zod";
 
 /** The control a field is: how it draws, whether it toggles, and what Word gets. */
 export type FieldControl = "signatureLine" | "checkbox" | "date" | "dropdown" | "text";
@@ -37,6 +38,19 @@ export type FieldValue =
   | { kind: "text"; text: string }
   | { kind: "image"; src: string }
   | { kind: "checkbox"; checked: boolean };
+
+/** One choice a dropdown offers: `id` is what is stored and exported, `label` what a person reads. */
+export const FieldChoiceSchema = z.object({ id: z.string(), label: z.string() });
+export type FieldChoice = z.infer<typeof FieldChoiceSchema>;
+
+/** The choices a field's `options` attr holds, leaving out anything that is not one. */
+export const fieldChoices = (options: unknown): FieldChoice[] =>
+  Array.isArray(options)
+    ? options.flatMap((option) => {
+        const parsed = FieldChoiceSchema.safeParse(option);
+        return parsed.success ? [parsed.data] : [];
+      })
+    : [];
 
 export interface FieldOptions {
   /** Kinds added to — or replacing — the built-ins, by name. */

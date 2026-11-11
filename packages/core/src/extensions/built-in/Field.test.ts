@@ -5,11 +5,12 @@
  */
 import { describe, expect, it } from "vitest";
 import { NodeSelection, TextSelection } from "prosemirror-state";
-import type { Node as PmNode } from "prosemirror-model";
+import { DOMParser, DOMSerializer, type Node as PmNode } from "prosemirror-model";
 import { ServerEditor } from "../../ServerEditor";
 import { StarterKit } from "../StarterKit";
 import { Field, listSignerFields } from "./Field";
 import { createTestEditor } from "../../test-utils";
+import { DefaultFontProvider } from "../../fonts/DefaultFontProvider";
 
 const terms = {
   type: "doc",
@@ -39,7 +40,17 @@ describe("a signer field", () => {
       editor.commands.insertField({ kind: "signature", fill: "signer", role: "client", required: true }),
     ).toBe(true);
 
-    expect(listSignerFields(editor.getState().doc)).toEqual([{ id: expect.any(String), role: "client", kind: "signature", required: true }]);
+    expect(listSignerFields(editor.getState().doc)).toEqual([{ id: expect.any(String), role: "client", kind: "signature", required: true, options: [] }]);
+  });
+
+  it("is listed with a dropdown's choices, which a host needs to ask for one", () => {
+    const editor = drafter();
+
+    editor.commands.insertField({ kind: "dropdown", fill: "signer", role: "client", options: [{ id: "net-30", label: "Net 30" }, { id: "net-60", label: "Net 60" }] });
+
+    expect(listSignerFields(editor.getState().doc)).toEqual([
+      { id: expect.any(String), role: "client", kind: "dropdown", required: false, options: [{ id: "net-30", label: "Net 30" }, { id: "net-60", label: "Net 60" }] },
+    ]);
   });
 
   it("cannot be inserted without a role, since nobody could be asked to complete it", () => {
@@ -328,9 +339,32 @@ describe("kinds of field", () => {
 
     expect(editor.commands.insertField({ kind: "dropdown", fill: "signer", role: "client" })).toBe(false);
     expect(
-      editor.commands.insertField({ kind: "dropdown", fill: "signer", role: "client", options: ["Net 30", "Net 60"] }),
+      editor.commands.insertField({ kind: "dropdown", fill: "signer", role: "client", options: [{ id: "net-30", label: "Net 30" }, { id: "net-60", label: "Net 60" }] }),
     ).toBe(true);
-    expect(only(editor)["options"]).toEqual(["Net 30", "Net 60"]);
+    expect(only(editor)["options"]).toEqual([{ id: "net-30", label: "Net 30" }, { id: "net-60", label: "Net 60" }]);
+  });
+
+  it("keep a dropdown's choices when copied as HTML and pasted back", () => {
+    const editor = editorWith();
+    const options = [{ id: "net-30", label: "Net 30" }, { id: "net-60", label: "Net 60" }];
+    editor.commands.insertField({ kind: "dropdown", fill: "signer", role: "client", options });
+    const { doc, schema } = editor.getState();
+
+    const html = DOMSerializer.fromSchema(schema).serializeFragment(doc.content);
+    const pasted = DOMParser.fromSchema(schema).parse(html);
+
+    let back: unknown = null;
+    pasted.descendants((node) => {
+      if (node.type.name === "field") back = node.attrs["options"];
+    });
+    expect(back).toEqual(options);
+  });
+
+  it("refuse a dropdown whose choices share an id, since a value could not say which was chosen", () => {
+    const editor = editorWith();
+    const options = [{ id: "net", label: "Net 30" }, { id: "net", label: "Net 60" }];
+
+    expect(editor.commands.insertField({ kind: "dropdown", fill: "signer", role: "client", options })).toBe(false);
   });
 
   it("can be added by the host, with its own label and size", () => {
@@ -360,5 +394,42 @@ describe("kinds of field", () => {
 
     expect(editor.commands.toggleFieldChecked()).toBe(true);
     expect(only(editor)["checked"]).toBe(true);
+  });
+});
+
+describe("a field's box on the page", () => {
+  it("keeps its fixed size, set in the face of the text around it", () => {
+    // A field draws text — its caption, and in the executed PDF its value —
+    // so it needs the run's face the way a page number does, or an export
+    // has nothing to print the value in.
+    const fonts = new DefaultFontProvider({
+      default: { id: "app-sans", family: "App Sans", weight: 400, style: "normal", bytes: () => Promise.resolve(new ArrayBuffer(8)) },
+    });
+    const editor = createTestEditor({
+      extensions: [StarterKit, Field],
+      fonts,
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              { type: "text", text: "Signed: " },
+              { type: "field", attrs: { nodeId: "f1", kind: "signature", fill: "signer", role: "client", width: 180, height: 44 } },
+            ],
+          },
+        ],
+      },
+    });
+    editor.ensureFullLayout();
+
+    const span = editor.layout.pages
+      .flatMap((page) => page.blocks)
+      .flatMap((block) => block.lines)
+      .flatMap((line) => line.spans)
+      .find((s) => s.kind === "object");
+
+    expect(span).toMatchObject({ kind: "object", width: 180, height: 44 });
+    expect(span?.kind === "object" && span.font).toContain("App Sans");
   });
 });

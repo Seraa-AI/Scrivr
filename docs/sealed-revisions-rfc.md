@@ -754,3 +754,25 @@ sealed revision → snapshot hash → signer values → executed PDF hash.
   image's size, so the fit is computed there.
 - `FieldValue` moved to core, shared by `FieldCompletion` and `Field`;
   `@scrivr/plugins` re-exports it.
+
+**Dogfooded end to end in the playground.** The content switch gained a
+*Signing* demo: an agreement holding every shape of field and one pending
+suggestion. An author reviews and fills it, seals it, then signs as each party
+in a sealed viewer with `FieldCompletion` and `ReadingProgress`, and downloads
+the executed PDF with its hash. Driving it found:
+
+- **Values missing from the executed PDF.** An inline atom is set in the run's
+  face only when its strategy measures it; a field did not, so with a font
+  provider `fieldPdf` had no face and printed no text. The field strategy now
+  measures — returning its authored size — and the box is unchanged. The PDF
+  tests had passed because their fixture hand-built a span with a font the
+  real layout never gave one; the regression test now lays out a document.
+- **A seal over a blank.** An author's text field still showing its prompt
+  sealed; a signer would agree to "Client name". `createSnapshot` now refuses
+  with `unfilled-fields`.
+- **A dropdown a host could not ask for.** `SignerFieldDescriptor` lacked the
+  choices. Choices are now `{ id, label }` (`FieldChoice`, a zod schema), on
+  the descriptor, and map to `w:value` / `w:displayText` in Word.
+- **No sealed mount in React.** `useScrivrEditor` gained `sealed`.
+- Paint: values in the theme's text colour (they vanished on a dark page), a
+  ticked checkbox keeps its box, no outline left at a completed field's edge.

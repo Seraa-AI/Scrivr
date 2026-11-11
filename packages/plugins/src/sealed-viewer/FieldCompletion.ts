@@ -135,15 +135,19 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
         if (!value && !mayComplete.has(field.id)) continue;
         const { x, y, width, height } = box;
         ctx.save();
-        // Whatever is drawn stays in the box the field reserved.
+        // Whatever is drawn stays in the box the field reserved, and its
+        // outline, which is stroked across the box's edge.
         ctx.beginPath();
-        ctx.rect(x, y, width, height);
+        ctx.rect(x - 1, y - 1, width + 2, height + 2);
         ctx.clip();
         if (value) {
-          // The empty field's caption is underneath; the value replaces it.
-          ctx.fillStyle = theme.pageBg;
-          ctx.fillRect(x, y, width, height);
-          paintValue(ctx, { x, y, width, height }, value, imageFor);
+          // A checkbox keeps its box and gains a tick; any other value
+          // replaces the empty field's caption and outline.
+          if (value.kind !== "checkbox") {
+            ctx.fillStyle = theme.pageBg;
+            ctx.fillRect(x - 1, y - 1, width + 2, height + 2);
+          }
+          paintValue(ctx, { x, y, width, height }, value, theme.defaultText, imageFor);
         } else if (!pending.has(field.id)) {
           ctx.strokeStyle = accentColor;
           ctx.lineWidth = 2;
@@ -165,10 +169,11 @@ function paintValue(
   ctx: CanvasRenderingContext2D,
   box: { x: number; y: number; width: number; height: number },
   value: FieldValue,
+  ink: string,
   imageFor: (src: string) => HTMLImageElement | null,
 ): void {
   const { x, y, width, height } = box;
-  ctx.fillStyle = "#111827";
+  ctx.fillStyle = ink;
   ctx.textBaseline = "middle";
   if (value.kind === "text") {
     ctx.font = `${Math.min(18, height * 0.6)}px sans-serif`;
@@ -181,7 +186,13 @@ function paintValue(
     const h = img.naturalHeight * scale;
     ctx.drawImage(img, x + (width - w) / 2, y + (height - h) / 2, w, h);
   } else if (value.checked) {
-    ctx.font = `${height * 0.8}px sans-serif`;
-    ctx.fillText("✓", x + width / 2 - height * 0.3, y + height / 2);
+    // The tick an author's checked checkbox has on canvas and in the PDF.
+    ctx.strokeStyle = ink;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(x + width * 0.2, y + height * 0.55);
+    ctx.lineTo(x + width * 0.42, y + height * 0.78);
+    ctx.lineTo(x + width * 0.8, y + height * 0.25);
+    ctx.stroke();
   }
 }

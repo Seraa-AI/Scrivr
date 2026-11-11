@@ -468,14 +468,20 @@ export interface DocxFieldInline {
  * handler may claim it whole; otherwise its content is imported with an `sdt`
  * mark (`attrs: { tag, placeholder }`) a `marks.sdt` handler can claim.
  */
+/** One `w:listItem`: what is stored (`w:value`) and what is shown (`w:displayText`). */
+export interface DocxSdtListItem {
+  value: string;
+  displayText: string;
+}
+
 export interface DocxSdtInline {
   type: "sdt";
   /** `w:tag/@w:val` — who the control belongs to. */
   tag: string | null;
   /** `w:showingPlcHdr` — the content is placeholder text, not a value. */
   placeholder: boolean;
-  /** A dropdown or combo box's choices (`w:listItem/@w:value`), in order. */
-  listItems: string[];
+  /** A dropdown or combo box's choices, in order. */
+  listItems: DocxSdtListItem[];
   content: DocxInline[];
   marks: DocxMark[];
 }

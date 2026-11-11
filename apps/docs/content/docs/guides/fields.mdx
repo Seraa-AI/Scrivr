@@ -77,14 +77,17 @@ editor.commands.unwrapFieldBlock();
 | `number` | Number | text |
 | `dropdown` | Choose | dropdown |
 
-The **control** is what a field *is*: how its box is drawn, whether it can be ticked, and what Word receives when the document is exported. A dropdown needs its choices:
+The **control** is what a field *is*: how its box is drawn, whether it can be ticked, and what Word receives when the document is exported. A dropdown needs its choices, each with an id of its own — the id is what Word stores, the label what a person reads:
 
 ```ts
 editor.commands.insertField({
   kind: "dropdown",
   fill: "signer",
   role: "client",
-  options: ["Net 30", "Net 60"],
+  options: [
+    { id: "net-30", label: "Net 30" },
+    { id: "net-60", label: "Net 60" },
+  ],
 });
 ```
 
@@ -130,7 +133,7 @@ A copied or pasted field gets a fresh id, so one signature can never fill two bo
 
 ## Completing fields on a sealed revision
 
-Sealing freezes a document into a snapshot and its hash. It refuses while suggestions are still pending, or while the roles you assign do not match the fields:
+Sealing freezes a document into a snapshot and its hash. It refuses while suggestions are still pending, while text the author fills still shows its prompt, or while the roles you assign do not match the fields:
 
 ```ts
 import { createSnapshot } from "@scrivr/core";
@@ -172,7 +175,7 @@ When another participant completes a field, show it with `setFieldValue(editor, 
 
 ## The executed document
 
-When everyone has signed, render the sealed snapshot with the values printed in their fields. Give `Field` the values on the editor that exports — a drawn signature keeps its proportions in its box, a typed one prints as text, a field nobody completed prints empty:
+When everyone has signed, render the sealed snapshot with the values printed in their fields. Give `Field` the values on the editor that exports — a drawn signature keeps its proportions in its box, a typed one prints as text, a field nobody completed prints as the empty field, so the record shows it was left blank:
 
 ```ts
 import { exportToPdf } from "@scrivr/export-pdf";

@@ -65,8 +65,8 @@ describe("createSnapshot", () => {
 
   it("returns the signer fields with the hash, so the two cannot disagree", async () => {
     expect((await sealed()).fields).toEqual([
-      { id: "field-client", role: "client", kind: "signature", required: true },
-      { id: "field-witness", role: "witness", kind: "signature", required: false },
+      { id: "field-client", role: "client", kind: "signature", required: true, options: [] },
+      { id: "field-witness", role: "witness", kind: "signature", required: false, options: [] },
     ]);
   });
 
@@ -98,6 +98,19 @@ describe("createSnapshot", () => {
       ok: false,
       refusal: { reason: "pending-tracked-changes", count: 1 },
     });
+  });
+
+  it("refuses while text the author fills still shows its prompt", async () => {
+    const range = (id: string, text: string, placeholder: boolean) =>
+      para(text, [{ type: "fieldRange", attrs: { nodeId: id, kind: "text", prompt: "Client name", placeholder } }]);
+    const unfilled = docOf([range("client-name", "Client name", true), contract.child(1).toJSON()]);
+    const filled = docOf([range("client-name", "Ada Lovelace", false), contract.child(1).toJSON()]);
+
+    expect(await createSnapshot(unfilled, { assignedRoles: ["client"] })).toEqual({
+      ok: false,
+      refusal: { reason: "unfilled-fields", prompts: ["Client name"] },
+    });
+    expect((await createSnapshot(filled, { assignedRoles: ["client"] })).ok).toBe(true);
   });
 });
 

@@ -9,8 +9,8 @@ import { Field, StarterKit, type PagePoint, type SignerFieldDescriptor } from "@
 import { ViewEditorDouble } from "../__tests__/viewEditorDouble";
 import { FieldCompletion, setFieldValue, type FieldValue } from "../index";
 
-const signHere: SignerFieldDescriptor = { id: "f-client", role: "client-authorized-signatory", kind: "signature", required: true };
-const witness: SignerFieldDescriptor = { id: "f-witness", role: "witness", kind: "signature", required: true };
+const signHere: SignerFieldDescriptor = { id: "f-client", role: "client-authorized-signatory", kind: "signature", required: true, options: [] };
+const witness: SignerFieldDescriptor = { id: "f-witness", role: "witness", kind: "signature", required: true, options: [] };
 
 const fieldNode = (field: SignerFieldDescriptor) => ({
   type: "field",
