@@ -1,5 +1,6 @@
 import type { Mappable } from "prosemirror-transform";
 import type { HoverEvent } from "../hover/types";
+import type { MutationDenied } from "../mutationGate";
 /**
  * augmentation.ts
  *
@@ -137,6 +138,11 @@ export interface EditorEvents {
    * never in editor state, never sent to collaborators. Mouse and pen only.
    */
   hover: HoverEvent;
+  /**
+   * The editor refused a change: read-only to an edit made on this client, or
+   * sealed. The document is exactly as it was before the attempt.
+   */
+  mutationDenied: MutationDenied;
 }
 
 /**

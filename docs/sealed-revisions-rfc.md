@@ -138,7 +138,10 @@ if any changed the document, the whole result is discarded. Nothing partial land
 
 **A refusal is reported, never silent.**
 
-- `applyTransaction(tr)` returns `boolean` (was `void` — widening, not breaking).
+- `applyTransaction(tr)` and `EditorSurface.dispatch(tr)` return `boolean`
+  (were `void`). Not purely additive: a caller whose arrow function passed the
+  old `undefined` along (`(e) => e.applyTransaction(tr)` feeding a `?? fallback`)
+  now passes a boolean.
 - Commands keep returning `false`.
 - `deferEdit` keeps abandoning with `"read-only"`; a sealed editor abandons with
   `"sealed"`.
@@ -438,4 +441,16 @@ returns the original result.
 Updated as each phase lands. Where the code and the proposal above disagree,
 this section says so rather than the proposal being quietly rewritten to match.
 
-*Nothing yet — draft.*
+**Phase 1 — mutation gate.** Shipped with this RFC (PR #202).
+
+- `mutationDenial(root, applied, locks)` in `packages/core/src/mutationGate.ts`
+  is the one rule. `BaseEditor.applyState` and `EditorSurface.dispatch` both
+  apply through it; `SurfaceRegistry` installs the editor's gate on each surface
+  at `register()`.
+- `editor.seal()` / `editor.sealed`; `readOnly` reads true when sealed, and
+  `setReadOnly(false)` does not unseal.
+- Origin is `COLLAB_SYNC_META`. `YBinding` now tags its doc-attr sync with it —
+  it did not, so a read-only viewer would have refused a collaborator's
+  header/footer change.
+- `deferEdit` abandons with `"sealed"`; commands return `false` when sealed.
+- Not yet: phases 2–5.

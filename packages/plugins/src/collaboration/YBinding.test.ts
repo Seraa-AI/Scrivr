@@ -447,6 +447,26 @@ describe("YBinding — two-peer sync", () => {
     b.binding.destroy();
   });
 
+  it("a read-only viewer still receives the author's text and policy", () => {
+    const a = makePeer({ extensions: [StarterKit, HeaderFooter] });
+    const b = makePeer({ extensions: [StarterKit, HeaderFooter] });
+    const unpair = pairDocs(a.ydoc, b.ydoc);
+    a.binding.markSynced();
+    b.binding.markSynced();
+    b.editor.setReadOnly(true);
+
+    const policy = { enabled: true, headerHeight: 36 };
+    a.editor.applyTransaction(a.editor.getState().tr.insertText("typed ", 1));
+    a.editor.applyTransaction(a.editor.getState().tr.setDocAttribute("headerFooter", policy));
+
+    expect(b.editor.getState().doc.textContent).toBe(a.editor.getState().doc.textContent);
+    expect(b.editor.getState().doc.attrs.headerFooter).toEqual(policy);
+
+    unpair();
+    a.binding.destroy();
+    b.binding.destroy();
+  });
+
   it("concurrent writes converge — both peers end up with the same value (Yjs LWW)", () => {
     const a = makePeer({ extensions: [StarterKit, HeaderFooter] });
     const b = makePeer({ extensions: [StarterKit, HeaderFooter] });

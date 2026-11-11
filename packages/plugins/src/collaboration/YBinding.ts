@@ -237,7 +237,8 @@ export class YBinding {
       this.lastWrittenValue[key] = envelope.value;
     }
 
-    if (touched) this.editor.applyTransaction(tr);
+    // A collaborator's change, so a read-only viewer still receives it.
+    if (touched) this.editor.applyTransaction(tr.setMeta(COLLAB_SYNC_META, true));
   }
 
   // ── PM → Y.js ───────────────────────────────────────────────────────────────

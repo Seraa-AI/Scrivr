@@ -151,10 +151,14 @@ export interface IBaseEditor {
   on<K extends keyof EditorEvents>(event: K, handler: (payload: EditorEvents[K]) => void): () => void;
   /** Current ProseMirror state. */
   getState(): EditorState;
-  /** True when the editor is in read-only / view mode. */
+  /** True when this viewer may not author — set by the host, or by a seal. */
   get readOnly(): boolean;
   /** Enable or disable read-only / view mode. Notifies subscribers. */
   setReadOnly(value: boolean): void;
+  /** True once the document is sealed and refuses every change. */
+  get sealed(): boolean;
+  /** Seal the document. One-way: there is no unseal. */
+  seal(): void;
   /**
    * Update the attrs of the node at docPos, merging with its current attrs.
    * No-op if there is no node at that position.
@@ -167,9 +171,10 @@ export interface IBaseEditor {
    * remote sync or AI suggestions). Routes through the same path as
    * command-dispatched transactions: plugin appendTransaction hooks run,
    * layout is invalidated, subscribers are notified, and (in `Editor`) a
-   * render flush is scheduled.
+   * render flush is scheduled. Returns `false` when the editor refused the
+   * change (read-only to a local edit, or sealed).
    */
-  applyTransaction(tr: Transaction): void;
+  applyTransaction(tr: Transaction): boolean;
   /** The merged ProseMirror Schema built from all extensions. */
   readonly schema: Schema;
   /** Typed old→new identity map produced during document cloning. */

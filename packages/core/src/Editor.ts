@@ -609,7 +609,7 @@ export class Editor extends BaseEditor implements IEditor {
 		});
 
 		// ── Surface registry — plugins register their own surfaces lazily.
-		this.surfaces = new SurfaceRegistry();
+		this.surfaces = new SurfaceRegistry((root, applied) => this.admits(root, applied));
 		const owners = this.manager.getSurfaceOwners();
 		this.surfaces.setOwnerMediator({
 			commit: s => {
@@ -779,8 +779,8 @@ export class Editor extends BaseEditor implements IEditor {
 	 * the viewport where the caller put it — e.g. `revealCitation` sets the
 	 * highlight here, then scrolls the cited range into view itself.
 	 */
-	override applyTransaction(tr: Transaction): void {
-		this.viewDispatch(tr, tr.scrolledIntoView);
+	override applyTransaction(tr: Transaction): boolean {
+		return this.viewDispatch(tr, tr.scrolledIntoView);
 	}
 
 	/**
@@ -805,14 +805,15 @@ export class Editor extends BaseEditor implements IEditor {
 	 * setting the flag and notifying subscribers.
 	 */
 	override setReadOnly(value: boolean): void {
-		if (this.readOnly === value) return;
+		const wasReadOnly = this.readOnly;
 		super.setReadOnly(value);
-		this.ib.setReadOnly(value);
-		if (value) {
-			this.cursorManager.stop();
-		} else if (this.ib.isFocused) {
-			this.cursorManager.start();
-		}
+		if (this.readOnly !== wasReadOnly) this.syncInputToWritability();
+	}
+
+	override seal(): void {
+		const wasReadOnly = this.readOnly;
+		super.seal();
+		if (this.readOnly !== wasReadOnly) this.syncInputToWritability();
 	}
 
 	/** Override to route through active surface when one is set. */
@@ -1831,7 +1832,7 @@ export class Editor extends BaseEditor implements IEditor {
 	 *
 	 * All transaction paths in Editor (commands, input, external) converge here.
 	 */
-	private viewDispatch(tr: Transaction, scrollToCursor = true): void {
+	private viewDispatch(tr: Transaction, scrollToCursor = true): boolean {
 		// Stale first, publish second. applyState emits "update" and notifies
 		// listeners synchronously, so anything it wakes reads the new document —
 		// and would read the old layout with it, because a coordinator that still
@@ -1841,13 +1842,24 @@ export class Editor extends BaseEditor implements IEditor {
 		// while describing text that has already moved.
 		this.lc.invalidate();
 		// applyState is in BaseEditor: applies tr, emits "update", notifyListeners
-		this.applyState(tr);
+		if (!this.applyState(tr)) return false;
 		// resetSilent: reset blink state WITHOUT calling onTick (which fires notifyListeners).
 		// Calling reset() here was the root cause of O(N²) repaints during Y.js initial sync.
 		this.cursorManager.resetSilent();
 		this.onChangeHandler?.(this.editorState);
 		if (scrollToCursor) this.pendingScrollToCursor = true;
 		this.scheduleFlush();
+		return true;
+	}
+
+	/** Input and caret follow `readOnly`, which a seal also makes true. */
+	private syncInputToWritability(): void {
+		this.ib.setReadOnly(this.readOnly);
+		if (this.readOnly) {
+			this.cursorManager.stop();
+		} else if (this.ib.isFocused) {
+			this.cursorManager.start();
+		}
 	}
 
 	/**
