@@ -147,6 +147,18 @@ function transformInlines(
           nodeType: "image",
         });
       }
+    } else if (item.type === "sdt") {
+      const marks = transformMarks(layer(inherited, item.marks), ctx, handlers);
+      const claimed = handlers.inlines["sdt"]?.(item, marks, ctx);
+      if (claimed) {
+        out.push(claimed);
+        continue;
+      }
+      // Unclaimed: its content stays, under a mark an owner may claim.
+      const control: DocxMark[] = handlers.marks["sdt"]
+        ? [{ kind: "sdt", attrs: { tag: item.tag, placeholder: item.placeholder } }]
+        : [];
+      out.push(...transformInlines(item.content, ctx, handlers, layer(inherited, [...item.marks, ...control])));
     } else if (item.type === "field") {
       const marks = transformMarks(layer(inherited, item.marks), ctx, handlers);
       const handler = handlers.inlines["field"];

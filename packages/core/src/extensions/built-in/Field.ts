@@ -7,6 +7,15 @@ import type { PdfNodeHandler } from "../../exports/pdf";
 import { compositeColor, parseCssColor, type Rgb } from "../../model/cssColor";
 import type { ResolvedTheme } from "../../model/theme";
 import {
+  fieldBlockDocx,
+  fieldBlockImport,
+  fieldDocx,
+  fieldImport,
+  fieldRangeImport,
+  fieldRangeRunProps,
+  fieldRangeWrapper,
+} from "./fieldDocx";
+import {
   exitFieldRange,
   fieldRangeDecorator,
   fieldRangePdf,
@@ -374,7 +383,49 @@ export const Field = Extension.create({
   },
 
   addExports() {
-    return { pdf: { nodes: { field: fieldPdf }, marks: { fieldRange: fieldRangePdf } } };
+    return {
+      pdf: { nodes: { field: fieldPdf }, marks: { fieldRange: fieldRangePdf } },
+      semantic: { nodes: { fieldBlock: () => ({ type: "fieldBlock" }) } },
+      docx: {
+        nodes: { field: fieldDocx, fieldBlock: fieldBlockDocx },
+        marks: { fieldRange: fieldRangeRunProps },
+        markWrappers: { fieldRange: fieldRangeWrapper },
+      },
+    };
+  },
+
+  addMarkdownSerializerRules() {
+    // Markdown has no fields: a field reads as its caption, a text field as
+    // its text, a block field as what it holds.
+    return {
+      nodes: {
+        field(state, node) {
+          if (node.attrs["kind"] === "checkbox") {
+            state.text(node.attrs["checked"] === true ? "☒" : "☐");
+            return;
+          }
+          state.text("[", false);
+          state.text(caption(node));
+          state.text("]", false);
+        },
+        fieldBlock(state, node) {
+          state.renderContent(node);
+        },
+      },
+      marks: {
+        fieldRange: { open: "", close: "", mixable: true },
+      },
+    };
+  },
+
+  addImports() {
+    return {
+      docx: {
+        inlines: { sdt: fieldImport },
+        marks: { sdt: fieldRangeImport },
+        blocks: { sdt: fieldBlockImport },
+      },
+    };
   },
 });
 

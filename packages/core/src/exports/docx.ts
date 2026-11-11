@@ -462,11 +462,31 @@ export interface DocxFieldInline {
   marks: DocxMark[];
 }
 
+/**
+ * An inline content control (`<w:sdt>` inside a paragraph). Several owners
+ * store things in one, each recognising its own by `tag`. An `inlines.sdt`
+ * handler may claim it whole; otherwise its content is imported with an `sdt`
+ * mark (`attrs: { tag, placeholder }`) a `marks.sdt` handler can claim.
+ */
+export interface DocxSdtInline {
+  type: "sdt";
+  /** `w:tag/@w:val` — who the control belongs to. */
+  tag: string | null;
+  /** `w:showingPlcHdr` — the content is placeholder text, not a value. */
+  placeholder: boolean;
+  content: DocxInline[];
+  marks: DocxMark[];
+}
+
 export type DocxInline =
   | { type: "text"; text: string; marks: DocxMark[] }
   | { type: "hardBreak"; marks: DocxMark[] }
   | DocxImageInline
-  | DocxFieldInline;
+  | DocxFieldInline
+  | DocxSdtInline;
+
+/** ECMA-376 caps `w:tag/@w:val` (ST_String) at 255 characters. */
+export const DOCX_TAG_MAX_LENGTH = 255;
 
 export interface DocxParagraphAttrs {
   /** Paragraph style ID (`Heading1`, `Normal`, …) — resolved from `styles.xml`. */

@@ -277,3 +277,28 @@ describe("a block field", () => {
     wrapped.destroy();
   });
 });
+
+describe("fields as Markdown", () => {
+  it("writes a field as its caption, a text field as its text, and a block field as its paragraphs", () => {
+    const editor = new ServerEditor({
+      extensions: [StarterKit, Field],
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              { type: "text", text: "Client: " },
+              { type: "text", text: "Acme", marks: [{ type: "fieldRange", attrs: { nodeId: "r1", prompt: "Name" } }] },
+              { type: "text", text: " " },
+              { type: "field", attrs: { kind: "signature", fill: "signer", role: "client" } },
+            ],
+          },
+          { type: "fieldBlock", content: [{ type: "paragraph", content: [{ type: "text", text: "Net 30." }] }] },
+        ],
+      },
+    });
+
+    expect(editor.getMarkdown()).toBe("Client: Acme [Signature · client]\n\nNet 30.");
+  });
+});

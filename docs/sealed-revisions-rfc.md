@@ -604,3 +604,27 @@ this section says so rather than the proposal being quietly rewritten to match.
 - `insertFieldBlock` wraps the selected blocks; `unwrapFieldBlock` lifts them
   out. A block field is always content: wrapping needs blocks to wrap, so it
   has no placeholder state — `prompt` is kept for the DOCX placeholder.
+
+**Phase 3d — DOCX, markdown, semantic.** Shipped on PR #256.
+
+- Export as mapped above. Every control gets a `w:id` unique within the
+  export; the signature line carries `issignatureline="t"`, a braced GUID from
+  the field id, and the role as `o:suggestedsigner2`. VML and `w14`
+  namespaces are declared on the elements, as `Image` does for DrawingML.
+- Two seams fixed first, each a defect on its own (`209041ef`): the walker
+  wrapped every run separately — a link over mixed formatting became several
+  `<w:hyperlink>`, a text field several `<w:sdt>` sharing an id — and now wraps
+  a mark's consecutive runs once; import kept one handler per key, so a second
+  extension claiming `<w:sdt>` hid `SourcedBlock`'s, and now a declining later
+  handler falls through to the earlier one.
+- The parser read inline `<w:sdt>` not at all — its text was lost. It now
+  yields an `sdt` inline: an `inlines.sdt` handler claims it whole (a field), or
+  its content comes in under an `sdt` mark a `marks.sdt` handler claims (a
+  text field). A control no one claims keeps its text.
+- `getMarkdown()` threw on any document with a field; a field now writes as its
+  caption, a text field as its text, a block field as its paragraphs.
+- A block field is a `fieldBlock` semantic unit.
+- Still to verify in real Word: *Sign* on a signature line inside a content
+  control, whether Word needs `v:imagedata` for the line's preview, and Word
+  2007's handling of `w14` without `mc:Ignorable`. A content control from a
+  document Scrivr did not write keeps its text but is not a field.
