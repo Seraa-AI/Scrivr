@@ -1,4 +1,5 @@
 import { NodeSelection, type Command } from "prosemirror-state";
+import { lift, wrapIn } from "prosemirror-commands";
 import type { Node as PmNode } from "prosemirror-model";
 import { Extension } from "../Extension";
 import type { InlineStrategy } from "../../layout/BlockRegistry";
@@ -110,6 +111,23 @@ const toggleFieldChecked: Command = (state, dispatch) => {
     dispatch(state.tr.setNodeMarkup(from, undefined, { ...node.attrs, checked: node.attrs["checked"] !== true }));
   }
   return true;
+};
+
+/** Wrap the selected blocks in a block field — Word's block-level content control. */
+function insertFieldBlock({ kind, prompt }: InsertFieldRangeOptions): Command {
+  return (state, dispatch) => {
+    const type = state.schema.nodes["fieldBlock"];
+    return type ? wrapIn(type, { kind, prompt })(state, dispatch) : false;
+  };
+}
+
+/** Take the block field around the selection away, keeping its content. */
+const unwrapFieldBlock: Command = (state, dispatch) => {
+  const { $from } = state.selection;
+  for (let depth = $from.depth; depth > 0; depth--) {
+    if ($from.node(depth).type.name === "fieldBlock") return lift(state, dispatch);
+  }
+  return false;
 };
 
 const isSigner = (node: PmNode) => node.attrs["fill"] === "signer";
@@ -252,6 +270,37 @@ export const Field = Extension.create({
           ];
         },
       },
+      fieldBlock: {
+        content: "block+",
+        group: "block",
+        defining: true,
+        // No box of its own, as Word shows a block control only on focus.
+        layout: { kind: "transparent" },
+        attrs: {
+          nodeId: { default: null },
+          kind: { default: "text" },
+          prompt: { default: "" },
+        },
+        parseDOM: [
+          {
+            tag: "div[data-field-block]",
+            getAttrs(dom) {
+              if (!(dom instanceof Element)) return false;
+              return {
+                kind: dom.getAttribute("data-field-block") === "date" ? "date" : "text",
+                prompt: dom.getAttribute("data-prompt") ?? "",
+              };
+            },
+          },
+        ],
+        toDOM(node) {
+          return [
+            "div",
+            { "data-field-block": String(node.attrs["kind"]), "data-prompt": String(node.attrs["prompt"]) },
+            0,
+          ];
+        },
+      },
     };
   },
 
@@ -315,6 +364,8 @@ export const Field = Extension.create({
       toggleFieldChecked: () => toggleFieldChecked,
       insertFieldRange: (options: InsertFieldRangeOptions) => insertFieldRange(options),
       exitFieldRange: () => exitFieldRange,
+      insertFieldBlock: (options: InsertFieldRangeOptions) => insertFieldBlock(options),
+      unwrapFieldBlock: () => unwrapFieldBlock,
     };
   },
 
@@ -338,6 +389,10 @@ declare module "@scrivr/core" {
       insertFieldRange: (options: InsertFieldRangeOptions) => ReturnType;
       /** Step out of a text field at its end, so what follows is plain text. */
       exitFieldRange: () => ReturnType;
+      /** Wrap the selected blocks in a block field. */
+      insertFieldBlock: (options: InsertFieldRangeOptions) => ReturnType;
+      /** Take the block field around the selection away, keeping its content. */
+      unwrapFieldBlock: () => ReturnType;
     };
   }
 }

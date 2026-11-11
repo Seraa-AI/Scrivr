@@ -5,9 +5,11 @@
  */
 import { describe, expect, it } from "vitest";
 import { NodeSelection, TextSelection } from "prosemirror-state";
+import type { Node as PmNode } from "prosemirror-model";
 import { ServerEditor } from "../../ServerEditor";
 import { StarterKit } from "../StarterKit";
 import { Field, listSignerFields } from "./Field";
+import { createTestEditor } from "../../test-utils";
 
 const terms = {
   type: "doc",
@@ -222,5 +224,56 @@ describe("an author's text field", () => {
     expect(ids).toHaveLength(2);
     expect(new Set(ids).size).toBe(2);
     expect(ids).toContain(original!.id);
+  });
+});
+
+describe("a block field", () => {
+  const twoClauses = {
+    type: "doc",
+    content: [
+      { type: "paragraph", content: [{ type: "text", text: "Clause one" }] },
+      { type: "paragraph", content: [{ type: "text", text: "Clause two" }] },
+    ],
+  };
+  const blocks = (doc: PmNode) => {
+    const out: Array<{ type: string; children: number; id: unknown }> = [];
+    doc.content.forEach((n) => out.push({ type: n.type.name, children: n.childCount, id: n.attrs["nodeId"] }));
+    return out;
+  };
+
+  it("wraps the selected paragraphs, with an id of its own", () => {
+    const editor = new ServerEditor({ extensions: [StarterKit, Field], content: twoClauses });
+    const state = editor.getState();
+    editor.applyTransaction(state.tr.setSelection(TextSelection.create(state.doc, 2, 15)));
+
+    expect(editor.commands.insertFieldBlock({ kind: "text", prompt: "Special terms" })).toBe(true);
+
+    expect(blocks(editor.getState().doc)[0]).toEqual({ type: "fieldBlock", children: 2, id: expect.any(String) });
+    expect(editor.getState().doc.textContent).toBe("Clause oneClause two");
+  });
+
+  it("can be taken away again, leaving its paragraphs", () => {
+    const editor = new ServerEditor({ extensions: [StarterKit, Field], content: twoClauses });
+    const state = editor.getState();
+    editor.applyTransaction(state.tr.setSelection(TextSelection.create(state.doc, 2, 15)));
+    editor.commands.insertFieldBlock({ kind: "text", prompt: "Special terms" });
+
+    expect(editor.commands.unwrapFieldBlock()).toBe(true);
+
+    expect(blocks(editor.getState().doc).some((b) => b.type === "fieldBlock")).toBe(false);
+    expect(editor.getState().doc.textContent).toBe("Clause oneClause two");
+  });
+
+  it("lays its paragraphs out in the page's flow, with no box of its own", () => {
+    const plain = createTestEditor({ extensions: [StarterKit, Field], content: twoClauses });
+    const wrapped = createTestEditor({
+      extensions: [StarterKit, Field],
+      content: { type: "doc", content: [{ type: "fieldBlock", attrs: { kind: "text" }, content: twoClauses.content }] },
+    });
+
+    const ys = (editor: typeof plain) => editor.layout.pages[0]!.blocks.map((b) => [b.node.type.name, b.y]);
+    expect(ys(wrapped)).toEqual(ys(plain));
+    plain.destroy();
+    wrapped.destroy();
   });
 });

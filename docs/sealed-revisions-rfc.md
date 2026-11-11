@@ -595,3 +595,12 @@ this section says so rather than the proposal being quietly rewritten to match.
   transactions and any transaction that touches no field text.
 - Placeholder text paints and prints in the placeholder colour, as a default
   fill an author's colour overrides.
+
+**Phase 3c — block field.** Shipped on PR #256.
+
+- `fieldBlock` (`block+`, `layout: { kind: "transparent" }`): its children lay
+  out in the page's flow and it draws nothing itself, so canvas and PDF need no
+  handler of their own. As a block it gets its id from `UniqueId` unchanged.
+- `insertFieldBlock` wraps the selected blocks; `unwrapFieldBlock` lifts them
+  out. A block field is always content: wrapping needs blocks to wrap, so it
+  has no placeholder state — `prompt` is kept for the DOCX placeholder.
