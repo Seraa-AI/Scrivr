@@ -5,6 +5,14 @@ import type { InlineStrategy } from "../../layout/BlockRegistry";
 import type { PdfNodeHandler } from "../../exports/pdf";
 import { compositeColor, parseCssColor, type Rgb } from "../../model/cssColor";
 import type { ResolvedTheme } from "../../model/theme";
+import {
+  exitFieldRange,
+  fieldRangeDecorator,
+  fieldRangePdf,
+  fieldRangePlugin,
+  insertFieldRange,
+  type InsertFieldRangeOptions,
+} from "./fieldRange";
 
 export type FieldKind = "signature" | "initials" | "date" | "text" | "checkbox";
 
@@ -247,10 +255,66 @@ export const Field = Extension.create({
     };
   },
 
+  addMarks() {
+    return {
+      fieldRange: {
+        attrs: {
+          nodeId: { default: null },
+          kind: { default: "text" },
+          prompt: { default: "" },
+          placeholder: { default: false },
+        },
+        // Typing at the end stays inside, as in Word; ArrowRight steps out.
+        inclusive: true,
+        parseDOM: [
+          {
+            tag: "span[data-field-range]",
+            getAttrs(dom) {
+              if (!(dom instanceof Element)) return false;
+              const kind = dom.getAttribute("data-field-range") === "date" ? "date" : "text";
+              return {
+                kind,
+                prompt: dom.getAttribute("data-prompt") ?? "",
+                placeholder: dom.hasAttribute("data-placeholder"),
+              };
+            },
+          },
+        ],
+        toDOM(mark) {
+          const { kind, prompt, placeholder } = mark.attrs;
+          return [
+            "span",
+            {
+              "data-field-range": String(kind),
+              "data-prompt": String(prompt),
+              ...(placeholder === true ? { "data-placeholder": "" } : {}),
+            },
+            0,
+          ];
+        },
+      },
+    };
+  },
+
+  addProseMirrorPlugins() {
+    const type = this.schema?.marks["fieldRange"];
+    return type ? [fieldRangePlugin(type)] : [];
+  },
+
+  addKeymap() {
+    return { ArrowRight: exitFieldRange };
+  },
+
+  addMarkDecorators() {
+    return { fieldRange: fieldRangeDecorator };
+  },
+
   addCommands() {
     return {
       insertField: (options: InsertFieldOptions) => insertField(options),
       toggleFieldChecked: () => toggleFieldChecked,
+      insertFieldRange: (options: InsertFieldRangeOptions) => insertFieldRange(options),
+      exitFieldRange: () => exitFieldRange,
     };
   },
 
@@ -259,7 +323,7 @@ export const Field = Extension.create({
   },
 
   addExports() {
-    return { pdf: { nodes: { field: fieldPdf } } };
+    return { pdf: { nodes: { field: fieldPdf }, marks: { fieldRange: fieldRangePdf } } };
   },
 });
 
@@ -270,6 +334,10 @@ declare module "@scrivr/core" {
       insertField: (options: InsertFieldOptions) => ReturnType;
       /** Check or uncheck the selected author checkbox. */
       toggleFieldChecked: () => ReturnType;
+      /** Insert a text field's placeholder at the caret, or make the selection a filled field. */
+      insertFieldRange: (options: InsertFieldRangeOptions) => ReturnType;
+      /** Step out of a text field at its end, so what follows is plain text. */
+      exitFieldRange: () => ReturnType;
     };
   }
 }

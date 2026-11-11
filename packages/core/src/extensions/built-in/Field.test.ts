@@ -96,3 +96,131 @@ describe("an author's checkbox", () => {
     expect(editor.commands.insertField({ kind: "signature", fill: "author" })).toBe(false);
   });
 });
+
+describe("an author's text field", () => {
+  const ranges = (editor: ServerEditor) => {
+    const found: Array<{ text: string; id: unknown; placeholder: unknown }> = [];
+    editor.getState().doc.descendants((node) => {
+      const mark = node.marks.find((m) => m.type.name === "fieldRange");
+      if (!node.isText || !mark) return true;
+      const last = found.at(-1);
+      if (last && last.id === mark.attrs["nodeId"]) last.text += node.text;
+      else found.push({ text: node.text ?? "", id: mark.attrs["nodeId"], placeholder: mark.attrs["placeholder"] });
+      return true;
+    });
+    return found;
+  };
+  const caret = (editor: ServerEditor, pos: number) => {
+    const state = editor.getState();
+    editor.applyTransaction(state.tr.setSelection(TextSelection.create(state.doc, pos)));
+  };
+  const select = (editor: ServerEditor, from: number, to: number) => {
+    const state = editor.getState();
+    editor.applyTransaction(state.tr.setSelection(TextSelection.create(state.doc, from, to)));
+  };
+  const type = (editor: ServerEditor, text: string) => {
+    editor.applyTransaction(editor.getState().tr.insertText(text));
+  };
+  // "Signed: " is 8 characters; the field starts at 9.
+  const withPlaceholder = () => {
+    const editor = drafter();
+    editor.commands.insertFieldRange({ kind: "text", prompt: "Client name" });
+    return editor;
+  };
+
+  it("starts as Word's placeholder: the prompt, marked as one", () => {
+    const editor = withPlaceholder();
+
+    expect(ranges(editor)).toEqual([{ text: "Client name", id: expect.any(String), placeholder: true }]);
+    expect(listSignerFields(editor.getState().doc)).toEqual([]);
+  });
+
+  it("selects the whole placeholder when the caret lands inside it", () => {
+    const editor = withPlaceholder();
+    caret(editor, 12);
+
+    const { from, to } = editor.getState().selection;
+    expect([from, to]).toEqual([9, 20]);
+  });
+
+  it("is filled by typing over the placeholder, keeping its id", () => {
+    const editor = withPlaceholder();
+    const [placeholder] = ranges(editor);
+    caret(editor, 12);
+
+    type(editor, "Acme Ltd");
+
+    expect(ranges(editor)).toEqual([{ text: "Acme Ltd", id: placeholder!.id, placeholder: false }]);
+  });
+
+  it("wraps selected text as an already-filled field", () => {
+    const editor = drafter();
+    type(editor, "Acme Ltd");
+    select(editor, 9, 17);
+
+    editor.commands.insertFieldRange({ kind: "text", prompt: "Client name" });
+
+    expect(ranges(editor)).toEqual([{ text: "Acme Ltd", id: expect.any(String), placeholder: false }]);
+  });
+
+  it("keeps text typed at its end, as Word does with the caret inside a control", () => {
+    const editor = drafter();
+    type(editor, "Acme");
+    select(editor, 9, 13);
+    editor.commands.insertFieldRange({ kind: "text", prompt: "Client name" });
+    caret(editor, 13);
+
+    type(editor, " Ltd");
+
+    expect(ranges(editor).map((r) => r.text)).toEqual(["Acme Ltd"]);
+  });
+
+  it("lets the author step out at its end, so what follows is plain text", () => {
+    const editor = drafter();
+    type(editor, "Acme");
+    select(editor, 9, 13);
+    editor.commands.insertFieldRange({ kind: "text", prompt: "Client name" });
+    caret(editor, 13);
+
+    expect(editor.commands.exitFieldRange()).toBe(true);
+    type(editor, ", signed");
+
+    expect(ranges(editor).map((r) => r.text)).toEqual(["Acme"]);
+    expect(editor.getState().doc.textContent).toBe("Signed: Acme, signed");
+  });
+
+  it("brings the placeholder back when its text is deleted", () => {
+    const editor = withPlaceholder();
+    const [placeholder] = ranges(editor);
+    caret(editor, 12);
+    type(editor, "Acme");
+    select(editor, 9, 13);
+
+    editor.applyTransaction(editor.getState().tr.deleteSelection());
+
+    expect(ranges(editor)).toEqual([{ text: "Client name", id: placeholder!.id, placeholder: true }]);
+  });
+
+  it("goes away when deleted together with the text around it", () => {
+    const editor = withPlaceholder();
+    select(editor, 5, 20);
+
+    editor.applyTransaction(editor.getState().tr.deleteSelection());
+
+    expect(ranges(editor)).toEqual([]);
+  });
+
+  it("gets a fresh id when copied", () => {
+    const editor = withPlaceholder();
+    const [original] = ranges(editor);
+    const state = editor.getState();
+    const copy = state.doc.slice(9, 20);
+
+    editor.applyTransaction(state.tr.replace(1, 1, copy));
+
+    const ids = ranges(editor).map((r) => r.id);
+    expect(ids).toHaveLength(2);
+    expect(new Set(ids).size).toBe(2);
+    expect(ids).toContain(original!.id);
+  });
+});

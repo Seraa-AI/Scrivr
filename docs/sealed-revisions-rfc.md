@@ -579,3 +579,19 @@ this section says so rather than the proposal being quietly rewritten to match.
   field other than a checkbox. Author text comes in 3b.
 - PDF draws the same box as the canvas; the signer outline is solid in the PDF
   because the draw surface has no dash.
+
+**Phase 3b — author text field.** Shipped on PR #256.
+
+- `fieldRange` mark (`nodeId`, `kind: text | date`, `prompt`, `placeholder`),
+  in the same `Field` extension. Its id is `nodeId`, the attr document cloning
+  already re-keys on marks.
+- Behaves as Word's content control: inclusive, so typing at the end stays
+  inside; `exitFieldRange` (ArrowRight at the end) steps out; a caret landing
+  inside a placeholder selects all of it; typing over it fills the field with
+  the same id; deleting just its text brings the placeholder back, while
+  deleting it along with surrounding text removes it.
+- A copy — paste, or a split — is re-keyed; the run holding the original's
+  first character keeps the id. One plugin does this, skipping collaborators'
+  transactions and any transaction that touches no field text.
+- Placeholder text paints and prints in the placeholder colour, as a default
+  fill an author's colour overrides.

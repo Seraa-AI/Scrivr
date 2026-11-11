@@ -51,3 +51,22 @@ describe("fields in the PDF", () => {
     expect(ops.filter((op) => op.op === "rect").length).toBeGreaterThan(0);
   });
 });
+
+describe("an author's text field in the PDF", () => {
+  async function colourOf(placeholder: boolean): Promise<unknown> {
+    const line = textLine("Client name", {
+      font: "16px Helvetica",
+      marks: [{ name: "fieldRange", attrs: { nodeId: "f1", kind: "text", prompt: "Client name", placeholder } }],
+    });
+    const ops = await recordDrawOps(() => buildPdf(onePage([block("paragraph", [line], { y: 100 })]), editor));
+    return ops.find((op) => op.op === "text" && op["value"] === "Client name")?.["color"];
+  }
+
+  it("prints placeholder text in the placeholder colour, and filled text as text", async () => {
+    const placeholder = await colourOf(true);
+    const filled = await colourOf(false);
+
+    expect(placeholder).toBeDefined();
+    expect(placeholder).not.toEqual(filled);
+  });
+});

@@ -13,6 +13,7 @@ export type {
   InsertFieldOptions,
   SignerFieldDescriptor,
 } from "./built-in/Field";
+export type { FieldRangeKind, InsertFieldRangeOptions } from "./built-in/fieldRange";
 export { Paragraph } from "./built-in/Paragraph";
 export { Heading } from "./built-in/Heading";
 export { Bold } from "./built-in/Bold";
