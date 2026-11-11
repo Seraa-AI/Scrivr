@@ -22,7 +22,6 @@
  */
 
 import { Extension } from "@scrivr/core";
-import type { IBaseEditor } from "@scrivr/core";
 import { exportDocx as runExportDocx } from "./export";
 import type { DocxExportOptions } from "./export";
 
@@ -42,11 +41,6 @@ interface ExportDocxCallOptions {
   fidelity?: DocxExportOptions["fidelity"];
 }
 
-interface InstanceState {
-  editor: IBaseEditor | null;
-}
-const instanceState = new WeakMap<object, InstanceState>();
-
 const DOCX_MIME =
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
@@ -57,19 +51,11 @@ export const DocxExport = Extension.create<DocxExportExtensionOptions>({
     filename: "document",
   },
 
-  // Seed the WeakMap early so addCommands has it via closure.
-  addProseMirrorPlugins() {
-    instanceState.set(this.options, { editor: null });
-    return [];
-  },
-
   addCommands() {
     return {
       exportDocx:
         (callOptions?: ExportDocxCallOptions) =>
         (_state, dispatch) => {
-          const inst = instanceState.get(this.options);
-          if (!inst?.editor) return false;
           if (typeof document === "undefined") {
             // Toolbar command is browser-only. Server callers should use the
             // bare `exportDocx(editor, opts)` function.
@@ -82,7 +68,7 @@ export const DocxExport = Extension.create<DocxExportExtensionOptions>({
             return false;
           }
           if (dispatch) {
-            const editor = inst.editor;
+            const editor = this.editor();
             const filename =
               callOptions?.filename ?? this.options.filename ?? "document";
             const opts = resolveOptions(callOptions, this.options);
@@ -115,18 +101,6 @@ export const DocxExport = Extension.create<DocxExportExtensionOptions>({
         isActive: () => false,
       },
     ];
-  },
-
-  // DOCX export is layout-free — onEditorReady fires in both browser Editor
-  // and ServerEditor. Registering here keeps the command available headlessly
-  // even though the toolbar command path itself requires a DOM.
-  onEditorReady(editor: IBaseEditor) {
-    const inst = instanceState.get(this.options);
-    if (inst) inst.editor = editor;
-    return () => {
-      const i = instanceState.get(this.options);
-      if (i) i.editor = null;
-    };
   },
 });
 

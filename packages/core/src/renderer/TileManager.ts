@@ -1,9 +1,10 @@
 import type { Editor } from "../Editor";
 import type { EditorState } from "prosemirror-state";
 import type { DocumentLayout, LayoutFragment } from "../layout/PageLayout";
+import type { PagePoint } from "../layout/pagePoint";
 import { setupCanvas, clearCanvas, watchDpr } from "./canvas";
 import { renderPage } from "./PageRenderer";
-import { drawBlock } from "./PageRenderer";
+import { paintBlock } from "./paintBlock";
 import {
   clearOverlay,
   paintSelectionPrimitives,
@@ -69,6 +70,12 @@ export interface TileEntry {
    * with the cursor during mousemove without waiting for mouseup.
    */
   lastPendingAnchoredDragKey: string;
+  /**
+   * The content paint the overlay was last drawn over. Repainting content
+   * resizes the overlay canvas, which clears it, so a newer content paint means
+   * the overlay has to be drawn again even when nothing it shows has changed.
+   */
+  lastOverlayContentKey: string;
 }
 
 /** Helpers */
@@ -117,33 +124,14 @@ export function fragmentsInTile(
  * Module-scope so unit tests can drive the routing decision against a real
  * `Editor` without exposing a test-only method on `TileManager`.
  */
-export function routePageClick(
-  editor: Editor,
-  page: number,
-  docX: number,
-  docY: number,
-  clickCount: number,
-): boolean {
-  const layout = editor.layout;
-  const metrics = layout.metrics?.[page - 1];
-  if (!metrics) return false;
-  // Fall back to the page's layout margins when no header/footer policy
-  // exists yet (band heights collapse to 0). Word/Docs treat the margin
-  // strip as the hit target for "double-click to create a header"; this
-  // keeps that affordance live before a policy is written. When bands
-  // are rendered, the resolved band bounds take precedence.
-  const { pageConfig } = layout;
-  const headerLowerBound =
-    metrics.headerHeight > 0 ? metrics.contentTop : pageConfig.margins.top;
-  const footerUpperBound =
-    metrics.footerHeight > 0
-      ? metrics.footerTop
-      : pageConfig.pageHeight - pageConfig.margins.bottom;
-  const inHeader = docY >= 0 && docY < headerLowerBound;
-  const inFooter = docY > footerUpperBound && docY <= pageConfig.pageHeight;
+export function routePageClick(editor: Editor, point: PagePoint, clickCount: number): boolean {
+  // The region is the point's own (`resolvePagePoint`), so click and hover
+  // agree on it: band bounds, the margin-strip fallback before any
+  // header/footer policy exists, and the gap between pages, which is no band.
+  const { page, x, y, region } = point;
 
-  if (!inHeader && !inFooter) {
-    // Click in the body while a surface is active — deactivate first.
+  if (region !== "header" && region !== "footer") {
+    // Click anywhere but a band while a surface is active — deactivate first.
     if (editor.surfaces?.activeSurface) {
       editor.surfaces.activate(null);
     }
@@ -156,8 +144,7 @@ export function routePageClick(
   if (editor.surfaces?.activeSurface !== null) return false;
 
   // No surface active — emit chromeClick for activation (double-click).
-  const band = inHeader ? "header" : "footer";
-  editor.emit("chromeClick", { page, x: docX, y: docY, band, clickCount });
+  editor.emit("chromeClick", { page, x, y, band: region, clickCount });
   return true;
 }
 
@@ -172,9 +159,11 @@ export function routePageClick(
  * Paged mode:   tileHeight = pageHeight. One tile = one full page. O(1) lookup.
  * Pageless mode: tileHeight = 307px. Small recycled tiles. O(log N) lookup.
  *
- * The two modes differ in exactly two places:
- *   - `visualYToDocY` / `docYToVisualY` — coordinate mapping
- *   - `paintContent` — paged calls renderPage(); pageless calls drawBlock() with translate
+ * Within this class the two modes differ in:
+ *   - `docYToVisualY` — page-local y to scroll-space y
+ *   - `paintContent` — paged calls renderPage(); pageless calls paintBlock() with translate
+ * The inverse mapping, and where a pageless page ends, are `resolvePagePoint`
+ * and `pageRegionAt` in layout/pagePoint.ts.
  */
 export class TileManager {
   private readonly tilesContainer: HTMLDivElement;
@@ -229,10 +218,8 @@ export class TileManager {
       slotHeight: () => this.slotHeight,
       tileHeight: () => this.tileHeight,
       isPageless: () => this.editor.isPageless,
-      visualYToDocY: (y) => this.visualYToDocY(y),
       scheduleUpdate: () => this.scheduleUpdate(),
-      onPageClick: (page, docX, docY, clickCount) =>
-        routePageClick(this.editor, page, docX, docY, clickCount),
+      onPageClick: (point, clickCount) => routePageClick(this.editor, point, clickCount),
     });
     this.pointer.attach();
 
@@ -301,18 +288,9 @@ export class TileManager {
   }
 
   /**
-   * Convert visual Y (scroll-space) to document-space {page, docY}.
-   * Pageless: identity — visualY === docY, always page 1.
-   * Paged: tile boundaries align with page boundaries.
+   * Convert document-space page + docY to visual Y in the scroll container.
+   * The inverse lives in `resolvePagePoint`, which pointer handling reads.
    */
-  private visualYToDocY(visualY: number): { page: number; docY: number } {
-    if (this.editor.isPageless) return { page: 1, docY: visualY };
-    const tileIndex = Math.floor(visualY / this.slotHeight);
-    const docY = visualY - tileIndex * this.slotHeight;
-    return { page: tileIndex + 1, docY };
-  }
-
-  /** Convert document-space page + docY to visual Y in the scroll container. */
   private docYToVisualY(page: number, docY: number): number {
     if (this.editor.isPageless) return docY;
     return (page - 1) * this.slotHeight + docY;
@@ -422,6 +400,7 @@ export class TileManager {
         tile.lastPmState = null;
         tile.lastPendingResizeKey = "";
         tile.lastPendingAnchoredDragKey = "";
+        tile.lastOverlayContentKey = "";
         tile.wrapper.style.top = `${idx * sh}px`;
         tile.wrapper.style.height = `${this.tileHeight}px`;
         tile.wrapper.style.display = "block";
@@ -541,6 +520,7 @@ export class TileManager {
       measurer: this.editor.measurer,
       map: this.editor.charMap,
       markDecorators: this.editor.markDecorators,
+      fontModifiers: this.editor.fontModifiers,
       showMarginGuides: this.showMarginGuides,
       ...(layout.fontResolutions ? { fontResolutions: layout.fontResolutions } : {}),
       ...(this.editor.fontResolver ? { fontResolver: this.editor.fontResolver } : {}),
@@ -608,44 +588,28 @@ export class TileManager {
 
     let lineIndexOffset = 0;
     for (const frag of fragments) {
-      const strategy = this.editor.blockRegistry?.get(frag.block.blockType);
-      if (strategy) {
-        lineIndexOffset = strategy.render(
-          frag.block,
-          {
-            ctx,
-            pageNumber: 1,
-            lineIndexOffset,
-            dpr,
-            measurer: this.editor.measurer,
-            theme,
-            ...(this.editor.blockRegistry
-              ? { blockRegistry: this.editor.blockRegistry }
-              : {}),
-            ...(this.editor.markDecorators
-              ? { markDecorators: this.editor.markDecorators }
-              : {}),
-            ...(this.editor.inlineRegistry
-              ? { inlineRegistry: this.editor.inlineRegistry }
-              : {}),
-            ...(layout.fontResolutions ? { fontResolutions: layout.fontResolutions } : {}),
-          },
-          this.editor.charMap,
-        );
-      } else {
-        lineIndexOffset = drawBlock(
+      lineIndexOffset = paintBlock(
+        frag.block,
+        {
           ctx,
-          frag.block,
-          this.editor.measurer,
-          this.editor.charMap,
-          1,
+          pageNumber: 1,
           lineIndexOffset,
+          dpr,
+          measurer: this.editor.measurer,
           theme,
-          this.editor.markDecorators,
-          this.editor.inlineRegistry,
-          layout.fontResolutions,
-        );
-      }
+          ...(this.editor.blockRegistry
+            ? { blockRegistry: this.editor.blockRegistry }
+            : {}),
+          ...(this.editor.markDecorators
+            ? { markDecorators: this.editor.markDecorators }
+            : {}),
+          ...(this.editor.inlineRegistry
+            ? { inlineRegistry: this.editor.inlineRegistry }
+            : {}),
+          ...(layout.fontResolutions ? { fontResolutions: layout.fontResolutions } : {}),
+        },
+        this.editor.charMap,
+      );
     }
 
     ctx.restore();
@@ -723,7 +687,10 @@ export class TileManager {
     // blinks correctly and selection updates are visible. The header cursor
     // is drawn by an overlay handler that needs blink-tick repaints.
     const surfaceStateDirty = surfaceActive;
+    const contentKey = `${tile.lastPaintedVersion}:${tile.lastRenderGeneration}`;
+    const contentDirty = tile.lastOverlayContentKey !== contentKey;
     if (
+      !contentDirty &&
       !blinkDirty &&
       !moveDirty &&
       !pluginStateDirty &&
@@ -739,6 +706,7 @@ export class TileManager {
     tile.lastPmState = pmState;
     tile.lastPendingResizeKey = pendingKey;
     tile.lastPendingAnchoredDragKey = pendingAnchoredKey;
+    tile.lastOverlayContentKey = contentKey;
 
     const dpr = tile.dpr || (window.devicePixelRatio ?? 1);
     const w = pageConfig.pageWidth;
@@ -918,6 +886,7 @@ export class TileManager {
       lastPmState: null,
       lastPendingResizeKey: "",
       lastPendingAnchoredDragKey: "",
+      lastOverlayContentKey: "",
     };
   }
 

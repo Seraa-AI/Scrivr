@@ -1,4 +1,7 @@
-import type { ToolbarItemSpec } from "@scrivr/core";
+import type { ToolbarItemSpec, ToolbarState } from "@scrivr/core";
+
+/** The command half of a spec — the only names a toolbar button can dispatch. */
+type ToolbarCommand = ToolbarItemSpec["command"];
 import type { Editor, FontFamilyOption } from "@scrivr/react";
 import { DEFAULT_FONT_FAMILY } from "@scrivr/react";
 import {
@@ -29,20 +32,12 @@ import {
 interface ToolbarProps {
   editor: Editor | null;
   items: ToolbarItemSpec[];
-  activeMarks: string[];
-  activeMarkAttrs: Record<string, Record<string, unknown>>;
-  blockType: string;
-  blockAttrs: Record<string, unknown>;
+  /** The marks and block at the caret, as each item's `isActive` reads them. */
+  state: ToolbarState;
   /** Document-level default font family — shown when no explicit family is set on the selection. */
   defaultFontFamily?: string;
   /** Document-level default font size in px — shown when no fontSize mark is active. */
   defaultFontSize?: number;
-}
-
-/** Single cast point: ToolbarItemSpec uses string commands (core extension API). */
-function runCommand(editor: Editor, cmd: string, args?: unknown[]) {
-  const fn = (editor.commands as Record<string, ((...a: unknown[]) => void) | undefined>)[cmd];
-  fn?.(...(args ?? []));
 }
 
 // Map from command name → Lucide icon
@@ -83,15 +78,12 @@ const ICON_MAP: Record<string, LucideIcon> = {
 export function Toolbar({
   editor,
   items,
-  activeMarks,
-  activeMarkAttrs,
-  blockType,
-  blockAttrs,
+  state,
   defaultFontFamily = DEFAULT_FONT_FAMILY,
   defaultFontSize = 14,
 }: ToolbarProps) {
-  const onCommand = (cmd: string, args?: unknown[]) => {
-    if (editor) runCommand(editor, cmd, args);
+  const onCommand = (cmd: ToolbarCommand, args?: unknown[]) => {
+    editor?.runCommand(cmd, args);
   };
   const groupOrder: string[] = [];
   const groupMap = new Map<string, ToolbarItemSpec[]>();
@@ -118,7 +110,7 @@ export function Toolbar({
           {group === "size" ? (
             <SizeSelect
               items={groupMap.get(group)!}
-              activeMarkAttrs={activeMarkAttrs}
+              editor={editor}
               defaultFontSize={defaultFontSize}
               onCommand={onCommand}
             />
@@ -131,12 +123,7 @@ export function Toolbar({
             />
           ) : (
             groupMap.get(group)!.map((item) => {
-              const active = item.isActive(
-                activeMarks,
-                blockType,
-                blockAttrs,
-                activeMarkAttrs,
-              );
+              const active = item.isActive(state);
               return (
                 <ToolbarButton
                   key={`${item.command}:${JSON.stringify(item.args)}`}
@@ -162,7 +149,7 @@ function ToolbarButton({
 }: {
   item: ToolbarItemSpec;
   active: boolean;
-  onCommand: (cmd: string, args?: unknown[]) => void;
+  onCommand: (cmd: ToolbarCommand, args?: unknown[]) => void;
 }) {
   return (
     <button
@@ -233,21 +220,24 @@ function ButtonLabel({ item }: { item: ToolbarItemSpec }) {
 
 function SizeSelect({
   items,
-  activeMarkAttrs,
+  editor,
   defaultFontSize,
   onCommand,
 }: {
   items: ToolbarItemSpec[];
-  activeMarkAttrs: Record<string, Record<string, unknown>>;
+  editor: Editor | null;
   defaultFontSize: number;
-  onCommand: (cmd: string, args?: unknown[]) => void;
+  onCommand: (cmd: ToolbarCommand, args?: unknown[]) => void;
 }) {
-  const markSize = activeMarkAttrs["fontSize"]?.["size"];
-  // Fall back to document default size when no explicit mark is set.
-  const activeSize = typeof markSize === "number" ? markSize : defaultFontSize;
-  const value = String(activeSize);
+  // The editor resolves this — mark, then block style — so the control shows the
+  // size the text is actually drawn at rather than a default for every unmarked
+  // run. `null` means the selection spans more than one size: the box goes blank
+  // rather than naming one of them, which is what Word and Docs do and what
+  // stops a reader confirming a value that would resize the rest.
+  const activeSize = editor ? editor.getActiveFontSize() : defaultFontSize;
+  const value = activeSize === null ? "" : String(activeSize);
   const presetValues = new Set(items.map((i) => String(i.args?.[0])));
-  const hasCustomSize = !presetValues.has(value);
+  const hasCustomSize = value !== "" && !presetValues.has(value);
 
   return (
     <select
@@ -265,6 +255,7 @@ function SizeSelect({
       onMouseDown={(e) => e.stopPropagation()}
       title="Font size"
     >
+      {activeSize === null && <option value="" />}
       {hasCustomSize && <option value={value}>{value}</option>}
       {items.map((item) => (
         <option key={String(item.args?.[0])} value={String(item.args?.[0])}>
@@ -320,14 +311,17 @@ function FamilySelect({
   editor: Editor | null;
   items: ToolbarItemSpec[];
   defaultFontFamily: string;
-  onCommand: (cmd: string, args?: unknown[]) => void;
+  onCommand: (cmd: ToolbarCommand, args?: unknown[]) => void;
 }) {
   // The editor owns the inline-mark → block-attr → document-default precedence
   // and knows what each resolves to, so the control reads it rather than
   // reconstructing it and drifting from the page it describes.
   const active = editor?.getActiveFontFamily();
-  const value = active?.requested ?? defaultFontFamily.split(",")[0]!.trim();
-  const offered = items.some((i) => i.args?.[0] === value);
+  // A selection drawn in more than one family has no single answer, so the box
+  // shows none — the same reason the size box blanks. Naming one of them would
+  // invite the reader to confirm it and restyle the rest.
+  const value = active?.mixed ? "" : active?.requested ?? defaultFontFamily.split(",")[0]!.trim();
+  const offered = value !== "" && items.some((i) => i.args?.[0] === value);
 
   return (
     <select
@@ -352,7 +346,8 @@ function FamilySelect({
       {/* The document's own family, when this editor does not hold it. The
           arrow is this app's choice of how to show it; the engine only says
           that the two differ and what the second one is. */}
-      {!offered && (
+      {value === "" && <option value="" />}
+      {value !== "" && !offered && (
         <option value={value}>
           {active?.substituted ? `${value} → ${active.resolved}` : value}
         </option>

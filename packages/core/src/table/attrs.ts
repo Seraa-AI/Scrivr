@@ -100,3 +100,19 @@ export function isVMerge(value: string): value is CellVMerge {
   const candidates: readonly string[] = VALID_VMERGE;
   return candidates.includes(value);
 }
+
+/** Physical width, including merged cells, before any integrity repair runs. */
+export function maxPhysicalColumns(table: Node): number {
+  let width = 0;
+  table.forEach((row) => {
+    let columns = 0;
+    row.forEach((cell) => { columns += cellGridSpan(cell); });
+    width = Math.max(width, columns);
+  });
+  return width;
+}
+
+/** Grid width for structural edits, including columns missing from either representation. */
+export function tableColumnCount(table: Node): number {
+  return Math.max(tableGrid(table).length, maxPhysicalColumns(table));
+}

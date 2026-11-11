@@ -18,7 +18,8 @@
  * debug = "what does my placement look like, and why?"
  */
 import type { Editor } from "../Editor";
-import { ANCHORED_OBJECT_MARGIN, normalizeImageAttrs } from "../layout/AnchoredObjects";
+import { ANCHORED_OBJECT_MARGIN, anchoredOf } from "../layout/AnchoredObjects";
+import type { Node } from "prosemirror-model";
 
 const WRAP_ZONE_FILL    = "rgba(59, 130, 246, 0.10)";  // blue-500 wash
 const WRAP_ZONE_STROKE  = "rgba(59, 130, 246, 0.45)";  // blue-500
@@ -118,17 +119,7 @@ export function installAnchoredObjectDebugOverlay(editor: Editor): () => void {
   });
 }
 
-/**
- * Read the configured margin from a placement's node, falling back to the
- * default. Mirrors how `resolveAnchoredObjects` reads it. We accept any
- * node-shaped value because some test fixtures construct minimal placeholder
- * nodes that don't go through PM's full attr resolution.
- */
-function readMargin(node: unknown): number {
-  if (node === null || typeof node !== "object" || !("attrs" in node)) {
-    return ANCHORED_OBJECT_MARGIN;
-  }
-  // normalizeImageAttrs is the canonical reader; safe even with sparse attrs.
-  const attrs = normalizeImageAttrs(node as Parameters<typeof normalizeImageAttrs>[0]);
-  return attrs.margin;
+/** The margin a placement's node declares, or the default. */
+function readMargin(node: Node): number {
+  return anchoredOf(node)?.margin ?? ANCHORED_OBJECT_MARGIN;
 }

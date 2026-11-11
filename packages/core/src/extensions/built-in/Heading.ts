@@ -1,8 +1,13 @@
 import { setBlockType } from "prosemirror-commands";
+import type { Node } from "prosemirror-model";
 import type { PdfNodeHandler } from "../../exports/pdf";
 import { textblockTypeInputRule } from "prosemirror-inputrules";
 import { Extension } from "../Extension";
-import type { ToolbarItemSpec } from "../types";
+import type {
+  SlashCommandContribution,
+  SlashCommandSpec,
+  ToolbarItemSpec,
+} from "../types";
 import type { BlockStyle } from "../../layout/FontConfig";
 import { TextBlockStrategy } from "../../layout/TextBlockStrategy";
 import {
@@ -49,6 +54,16 @@ export const HEADING_LEVEL_SPEC: Record<number, HeadingLevelSpec> = {
   6: { size: 12, spaceBefore: 10, spaceAfter: 2 },
 };
 
+/**
+ * A heading's own level, so one deeper than the configured `levels` still
+ * nests in order; a level stored as text reads as the number it spells.
+ */
+function headingOutlineLevel(node: Node): number {
+  const raw = node.attrs["level"];
+  const level = typeof raw === "string" && raw.trim() !== "" ? Number(raw) : raw;
+  return typeof level === "number" && Number.isFinite(level) ? level : 1;
+}
+
 const headingPdf: PdfNodeHandler = (block, ctx) => ctx.draw.lines(block, ctx);
 
 export const Heading = Extension.create<HeadingOptions>({
@@ -73,6 +88,7 @@ export const Heading = Extension.create<HeadingOptions>({
           dataTracked: { default: [] },
         },
         defining: true,
+        outlineLevel: headingOutlineLevel,
         parseDOM: this.options.levels.map((level) => ({
           tag: `h${level}`,
           getAttrs(dom) {
@@ -236,14 +252,6 @@ export const Heading = Extension.create<HeadingOptions>({
     };
   },
 
-  addMarkdownRules() {
-    // These back up the built-in heading handler in PasteTransformer.
-    // They're intentionally not registered since PasteTransformer already handles "# "
-    // natively — returning [] here avoids double-processing.
-    // Custom extensions that want heading-like behaviour can use this hook instead.
-    return [];
-  },
-
   addInputRules() {
     const heading = this.schema.nodes["heading"];
     const paragraph = this.schema.nodes["paragraph"];
@@ -275,23 +283,50 @@ export const Heading = Extension.create<HeadingOptions>({
         label: `H${level}`,
         title: `Heading ${level} (⌘⌥${level})`,
         group: "heading",
-        isActive: (
-          _marks: string[],
-          blockType: string,
-          blockAttrs: Record<string, unknown>,
-        ) => blockType === "heading" && blockAttrs["level"] === level,
+        isActive: ({ blockType, blockAttrs }) => blockType === "heading" && blockAttrs["level"] === level,
       }));
     items.push({
       command: "setParagraph",
       label: "¶",
       title: "Paragraph (⌘⌥0)",
       group: "heading",
-      isActive: (_marks: string[], blockType: string) =>
-        blockType === "paragraph",
+      isActive: ({ blockType }) => blockType === "paragraph",
     });
     return items;
   },
+
+  addSlashCommands(): SlashCommandContribution[] {
+    return [{
+      items: [
+        {
+          id: "heading.paragraph",
+          label: "Text",
+          description: "Plain paragraph",
+          group: "blocks",
+          order: 10,
+          command: "setParagraph",
+        },
+        // Driven by the configured levels, like the toolbar items: a kit built
+        // with fewer headings should not offer entries it cannot honour.
+        ...this.options.levels.slice(0, 3).map((level, i): SlashCommandSpec => ({
+          id: `heading.${level}`,
+          label: `Heading ${level}`,
+          description: HEADING_DESCRIPTIONS[level] ?? `Level ${level} heading`,
+          group: "blocks",
+          order: 20 + i * 10,
+          command: `setHeading${level}`,
+        })),
+      ],
+    }];
+  },
 });
+
+/** Relative size, which is what a reader picking a heading is choosing between. */
+const HEADING_DESCRIPTIONS: Record<number, string> = {
+  1: "Large section title",
+  2: "Medium section title",
+  3: "Small section title",
+};
 
 declare module "@scrivr/core" {
   interface Commands<ReturnType> {

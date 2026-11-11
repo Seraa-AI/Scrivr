@@ -11,12 +11,12 @@ export { resolveTheme, resolveThemeColor, disposeProbe } from "./resolveTheme";
 export { safeUrl, safeImageUrl } from "./safeUrl";
 export { parseCssColor, compositeColor, toHex6 } from "./cssColor";
 export type { Rgb, Rgba } from "./cssColor";
-export { spansToFragment, sameMark, resolveInlineMark } from "./spansToFragment";
+export { spansToFragment, sameMark, resolveInlineMark, resolveInlineMarks, describeInlineMark, isTrackedMark } from "./spansToFragment";
 export type { SpansToFragmentOptions } from "./spansToFragment";
 export { sanitizeDocUrls } from "./sanitizeDocUrls";
 export { dropPendingPlaceholders } from "./dropPendingPlaceholders";
-export { assignBlockIds, planBlockIdAssignments, recloneDocumentIds } from "./assignBlockIds";
-export { fnv1aHex, stableStringify } from "./hash";
+export { assignBlockIds, blockIdOf, planBlockIdAssignments, planDuplicateIdAssignments, recloneDocumentIds } from "./assignBlockIds";
+export { fnv1aHex, sha256Hex, stableStringify } from "./hash";
 export type {
   AssignBlockIdsOptions,
   BlockIdAssignment,
@@ -53,6 +53,9 @@ export {
   previousSection,
   sectionAt,
 } from "./sections";
+// Track changes and the semantic exporter ask what a list is. How one looks
+// belongs to `List`.
+export { isListType } from "./lists";
 export type {
   Section,
   SectionBreakType,
@@ -60,3 +63,4 @@ export type {
   SectionSettings,
   SectionSettingsPatch,
 } from "./sections";
+export { outlineLevelOf, outlineTitleOf } from "./outline";

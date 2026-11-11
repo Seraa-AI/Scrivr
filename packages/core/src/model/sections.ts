@@ -5,7 +5,7 @@
  * Sections are NOT stored as `{ from, to }` ranges: document positions move on
  * every local, remote, paste, and normalization transaction, so persisted
  * ranges would need mapping through all of them. The persisted form mirrors
- * OOXML instead — an intermediate `sectionBreak` terminates the section before
+ * OOXML instead — an intermediate section boundary terminates the section before
  * it and carries that section's settings, while `doc.attrs.finalSection`
  * carries the settings of the final section, which has no trailing break.
  *
@@ -68,7 +68,7 @@ export interface Section {
   from: number;
   /** Exclusive end — past the terminating break, or the end of the doc. */
   to: number;
-  /** Position of the terminating `sectionBreak`, or null for the final section. */
+  /** Position of the terminating section boundary, or null for the final section. */
   breakPos: number | null;
   settings: SectionSettings;
 }
@@ -170,9 +170,14 @@ export function applySectionSettingsPatch(
   });
 }
 
-/** Whether a node is a section boundary. Safe on schemas without the node. */
+/**
+ * Whether a node is a section boundary: a leaf whose spec declares
+ * `sectionBoundary` and a `settings` attr, which holds the settings of the
+ * section it ends. Without that attr its settings could never be set.
+ */
 export function isSectionBreak(node: Node): boolean {
-  return node.type.name === "sectionBreak";
+  const { spec } = node.type;
+  return spec["sectionBoundary"] === true && node.isLeaf && spec.attrs !== undefined && "settings" in spec.attrs;
 }
 
 /**

@@ -23,6 +23,11 @@ import {
   type PageConfig,
 } from "../layout/PageLayout";
 
+import { pageRegionAt, type PagePoint } from "../layout/pagePoint";
+import type { Editor } from "../Editor";
+import { Extension } from "../extensions/Extension";
+import type { FontModifier } from "../extensions/types";
+
 function frag(y: number, height: number): LayoutFragment {
   return { y, height } as LayoutFragment;
 }
@@ -508,6 +513,33 @@ describe("TileManager — overlay generation guard", () => {
   });
 });
 
+describe("TileManager — overlay follows the content it sits on", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  // Repainting a page resizes its overlay canvas, which clears it; whatever the
+  // overlay showed has to be drawn again over the new pixels.
+  it("redraws the overlay whenever the page under it is repainted", () => {
+    const setup = makeRendererTestSetup({ scrollParent: true });
+    const tm = new TileManager(setup.editor, setup.container);
+    tm.update();
+
+    const spy = vi.spyOn(setup.editor, "runOverlayHandlers");
+    setup.editor.redraw();
+    tm.update();
+
+    expect(spy).toHaveBeenCalled();
+
+    tm.destroy();
+    setup.cleanup();
+  });
+});
+
 describe("TileManager — body click deactivates surface", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -531,11 +563,22 @@ describe("TileManager — body click deactivates surface", () => {
     tm.update();
 
     // y=500 is well below contentTop (~132) — body area, not chrome.
-    const consumed = routePageClick(setup.editor, 1, 400, 500, 1);
+    const consumed = routePageClick(setup.editor, pointAt(setup.editor, 500), 1);
     expect(consumed).toBe(false);
     expect(activateSpy).toHaveBeenCalledWith(null);
 
     tm.destroy();
+    setup.cleanup();
+  });
+
+  it("clicking outside the pages deactivates an active surface, as a body click does", () => {
+    const setup = makeRendererTestSetup({ scrollParent: true });
+    registerActiveSurface(setup.editor);
+    const activateSpy = vi.spyOn(setup.editor.surfaces, "activate");
+
+    expect(routePageClick(setup.editor, { page: 1, x: 400, y: 5000, region: "outside" }, 1)).toBe(false);
+    expect(activateSpy).toHaveBeenCalledWith(null);
+
     setup.cleanup();
   });
 
@@ -554,15 +597,20 @@ describe("TileManager — body click deactivates surface", () => {
     // y=90 is inside the header band (margins.top=72 + headerHeight=60 → contentTop=132).
     // All click counts in the chrome band with an active surface fall through —
     // they don't deactivate.
-    expect(routePageClick(setup.editor, 1, 400, 90, 1)).toBe(false);
-    expect(routePageClick(setup.editor, 1, 400, 90, 2)).toBe(false);
-    expect(routePageClick(setup.editor, 1, 400, 90, 3)).toBe(false);
+    expect(routePageClick(setup.editor, pointAt(setup.editor, 90), 1)).toBe(false);
+    expect(routePageClick(setup.editor, pointAt(setup.editor, 90), 2)).toBe(false);
+    expect(routePageClick(setup.editor, pointAt(setup.editor, 90), 3)).toBe(false);
     expect(activateSpy).not.toHaveBeenCalledWith(null);
 
     tm.destroy();
     setup.cleanup();
   });
 });
+
+/** A page-1 point at `y`, classified as the pointer controller classifies it. */
+function pointAt(editor: Editor, y: number): PagePoint {
+  return { page: 1, x: 400, y, region: pageRegionAt(editor.layout, 1, 400, y) ?? "outside" };
+}
 
 describe("TileManager — margin click activation (no policy)", () => {
   beforeEach(() => {
@@ -581,7 +629,7 @@ describe("TileManager — margin click activation (no policy)", () => {
     // y=40 is inside margins.top (72) — the potential header strip. With no
     // headerFooter policy, headerHeight=0, but the widened hit-test still
     // treats the margin strip as the header band.
-    const consumed = routePageClick(setup.editor, 1, 400, 40, 2);
+    const consumed = routePageClick(setup.editor, pointAt(setup.editor, 40), 2);
     expect(consumed).toBe(true);
     expect(emitSpy).toHaveBeenCalledWith(
       "chromeClick",
@@ -597,7 +645,7 @@ describe("TileManager — margin click activation (no policy)", () => {
     const pageConfig = setup.editor.layout.pageConfig;
 
     const footerY = pageConfig.pageHeight - pageConfig.margins.bottom + 20;
-    const consumed = routePageClick(setup.editor, 1, 400, footerY, 2);
+    const consumed = routePageClick(setup.editor, pointAt(setup.editor, footerY), 2);
     expect(consumed).toBe(true);
     expect(emitSpy).toHaveBeenCalledWith(
       "chromeClick",
@@ -607,12 +655,25 @@ describe("TileManager — margin click activation (no policy)", () => {
     setup.cleanup();
   });
 
+  it("does not emit chromeClick on a double-click in the gap between pages", () => {
+    const setup = makeRendererTestSetup({ scrollParent: true });
+    const emitSpy = vi.spyOn(setup.editor, "emit");
+    const { pageHeight } = setup.editor.layout.pageConfig;
+
+    // The pointer controller clamps a gap point to the page bottom; its region still says gap.
+    const consumed = routePageClick(setup.editor, { page: 1, x: 400, y: pageHeight, region: "gap" }, 2);
+    expect(consumed).toBe(false);
+    expect(emitSpy).not.toHaveBeenCalledWith("chromeClick", expect.anything());
+
+    setup.cleanup();
+  });
+
   it("does not emit chromeClick on body double-click (between margins)", () => {
     const setup = makeRendererTestSetup({ scrollParent: true });
     const emitSpy = vi.spyOn(setup.editor, "emit");
 
     // y=400 is well inside the body (between margins.top=72 and footer strip).
-    const consumed = routePageClick(setup.editor, 1, 400, 400, 2);
+    const consumed = routePageClick(setup.editor, pointAt(setup.editor, 400), 2);
     expect(consumed).toBe(false);
     expect(emitSpy).not.toHaveBeenCalledWith("chromeClick", expect.anything());
 
@@ -633,7 +694,7 @@ describe("TileManager — margin click activation (no policy)", () => {
 
     // y=100 sits between margins.top (72) and the band-resolved contentTop (132).
     // With bands present, that's still inside the header — must emit chromeClick.
-    expect(routePageClick(setup.editor, 1, 400, 100, 2)).toBe(true);
+    expect(routePageClick(setup.editor, pointAt(setup.editor, 100), 2)).toBe(true);
     expect(emitSpy).toHaveBeenCalledWith(
       "chromeClick",
       expect.objectContaining({ band: "header" }),
@@ -796,5 +857,44 @@ describe("painting before the editor is ready", () => {
 
     // Scrolled while unready: the tiles moved, so painting really happened.
     expect(tops()).not.toEqual(before);
+  });
+});
+
+describe("what chrome painting is given", () => {
+  it("gives chrome painting the editor's measurement font modifiers", () => {
+  const measured: Array<Map<string, FontModifier> | undefined> = [];
+  const painted: Array<Map<string, FontModifier> | undefined> = [];
+  const modifier: FontModifier = (font) => { font.size = "40px"; };
+  const extension = Extension.create({
+    name: "chromeTypography",
+    addFontModifiers: () => new Map([["bold", modifier]]),
+    addPageChrome: () => ({
+      name: "chromeTypography",
+      measure: (input) => {
+        measured.push(input.fontModifiers);
+        return {
+          topForPage: () => 60, bottomForPage: () => 0,
+          stable: true, payload: {},
+        };
+      },
+      render: (ctx) => { painted.push(ctx.fontModifiers); },
+    }),
+  });
+  const setup = makeRendererTestSetup({
+    pageCount: 1, scrollParent: true, extraExtensions: [extension],
+  });
+  const tiles = new TileManager(setup.editor, setup.container);
+  try {
+    tiles.update();
+    expect(measured.length).toBeGreaterThan(0);
+    expect(painted.length).toBeGreaterThan(0);
+    expect(setup.editor.fontModifiers.get("bold")).toBe(modifier);
+    for (const modifiers of [...measured, ...painted]) {
+      expect(modifiers).toBe(setup.editor.fontModifiers);
+    }
+  } finally {
+      tiles.destroy();
+      setup.cleanup();
+    }
   });
 });

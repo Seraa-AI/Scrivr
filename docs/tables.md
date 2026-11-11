@@ -187,6 +187,12 @@ Separate plugin. Replaces what upstream `tableEditing()` did beyond pure validit
 
 ## Layout
 
+> Since the composite layout RFC (`docs/composite-layout-rfc.md`), a table is
+> laid out as a composite: each row a unit, each cell a region. The engine
+> knows no table names; `table/layout.ts` places the cells and `table/rowPainter.ts`
+> paints the grid. `TableLayoutEngine`, `CellSubBlock` and `kind: "tableRow"`
+> below are the names this section was written with.
+
 `TableLayoutEngine` responsibilities:
 
 1. Read `table.grid` and scale/fit it into `availableWidth`.

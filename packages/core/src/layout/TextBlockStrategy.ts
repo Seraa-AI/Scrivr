@@ -2,7 +2,7 @@ import type { CharacterMap } from "./CharacterMap";
 import { fontSizeOf, paintText } from "../fonts/synthesis";
 import { isHiddenAnchorLine, type LayoutBlock } from "./BlockLayout";
 import { computeAlignmentOffset, computeJustifySpaceBonus, countSpaces } from "./BlockLayout";
-import { computeObjectRenderY } from "./LineBreaker";
+import { atomStyle, computeObjectRenderY, paintInSpanStyle } from "./LineBreaker";
 import { resolveSpanFill } from "./resolveSpanFill";
 import type { BlockStrategy, BlockRenderContext } from "./BlockRegistry";
 
@@ -10,7 +10,7 @@ import type { BlockStrategy, BlockRenderContext } from "./BlockRegistry";
  * TextBlockStrategy — the default render strategy for text-based block nodes.
  *
  * Handles any block whose layout is expressed as LayoutLines of LayoutSpans
- * (paragraph, heading, list item, etc.). Draws each span with mark decorators
+ * (paragraph, heading, etc.). Draws each span with mark decorators
  * and registers glyph positions into the CharacterMap for cursor hit-testing.
  *
  * Text spans are drawn directly. Object spans (inline images, widgets) are
@@ -58,7 +58,9 @@ export const TextBlockStrategy: BlockStrategy = {
           const objY = computeObjectRenderY(lineY, line, span);
           const strategy = inlineRegistry?.get(span.node.type.name);
           if (strategy) {
-            strategy.render(ctx, spanX, objY, span.width, span.height, span.node, theme);
+            paintInSpanStyle(ctx, atomStyle(span, spanX, objY, markDecorators, theme, ctx), () => {
+              strategy.render(ctx, spanX, objY, span.width, span.height, span.node, theme);
+            });
           }
           // Store the full visual rect so the overlay can draw resize handles.
           map.registerObjectRect({ docPos: span.docPos, x: spanX, y: objY, width: span.width, height: span.height, page: pageNumber });
@@ -208,7 +210,7 @@ export const TextBlockStrategy: BlockStrategy = {
         spacesBeforeSpan += countSpaces(span.text);
       }
 
-      // Register a zero-width glyph at the hardBreak's doc position so
+      // Register a zero-width glyph at the line break's doc position so
       // coordsAtPos(breakDocPos) returns the correct cursor location at line-end.
       if (line.terminalBreakDocPos !== undefined && !map.hasGlyph(line.terminalBreakDocPos)) {
         map.registerGlyph({
@@ -232,12 +234,12 @@ export const TextBlockStrategy: BlockStrategy = {
           height: line.lineHeight,
           x,
           contentWidth: availableWidth,
-          startDocPos: line.spans[0]?.docPos ?? 0,
+          startDocPos: line.spans[0]?.docPos ?? block.nodePos + 1,
           endDocPos: line.terminalBreakDocPos !== undefined
             ? line.terminalBreakDocPos + 1
             : (lastSpan
               ? (lastSpan.kind === "text" ? lastSpan.docPos + lastSpan.text.length : lastSpan.docPos + 1)
-              : 0),
+              : block.nodePos + 1),
         });
       }
     }

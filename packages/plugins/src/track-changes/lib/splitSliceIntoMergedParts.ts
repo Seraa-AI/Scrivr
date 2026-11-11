@@ -1,6 +1,4 @@
-import { Fragment, Node as PMNode } from "@scrivr/core/pm";
-
-import { ExposedFragment, ExposedSlice } from "../types";
+import { Fragment, Node as PMNode, Slice } from "@scrivr/core/pm";
 
 function getMergedNode(
   node: PMNode,
@@ -8,14 +6,14 @@ function getMergedNode(
   depth: number,
   first: boolean,
 ): {
-  mergedNodeContent: ExposedFragment;
-  unmergedContent: ExposedFragment | undefined;
+  mergedNodeContent: Fragment;
+  unmergedContent: Fragment | undefined;
 } {
   if (currentDepth === depth) {
-    return { mergedNodeContent: node.content as ExposedFragment, unmergedContent: undefined };
+    return { mergedNodeContent: node.content, unmergedContent: undefined };
   }
   const result: PMNode[] = [];
-  let merged = Fragment.empty as ExposedFragment;
+  let merged = Fragment.empty;
   node.content.forEach((n, _, i) => {
     if ((first && i === 0) || (!first && i === node.childCount - 1)) {
       const { mergedNodeContent, unmergedContent } = getMergedNode(n, currentDepth + 1, depth, first);
@@ -27,14 +25,14 @@ function getMergedNode(
   });
   return {
     mergedNodeContent: merged,
-    unmergedContent: result.length > 0 ? (Fragment.fromArray(result) as ExposedFragment) : undefined,
+    unmergedContent: result.length > 0 ? Fragment.fromArray(result) : undefined,
   };
 }
 
 /**
  * Filters merged nodes from an open insertSlice to manually merge them and prevent unwanted deletions.
  */
-export function splitSliceIntoMergedParts(insertSlice: ExposedSlice, mergeEqualSides = false) {
+export function splitSliceIntoMergedParts(insertSlice: Slice, mergeEqualSides = false) {
   const {
     openStart,
     openEnd,

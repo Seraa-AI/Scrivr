@@ -23,6 +23,7 @@ export * from "./layout";
 export * from "./renderer";
 export * from "./input";
 export * from "./extensions";
+export type { DeferredEditOptions, DeferredEditAbandonment } from "./BaseEditor";
 export * from "./menus";
 export * from "./surfaces";
 export * from "./exports/docx";
@@ -48,3 +49,6 @@ export {
 export * from "./exports/semantic";
 /** ProseMirror's built-in DocAttrStep — prefer `tr.setDocAttribute(name, value)`. */
 export { DocAttrStep } from "prosemirror-transform";
+
+export { tableColumnCount } from "./table/attrs";
+export { resolveActiveFontSize, DEFAULT_FONT_SIZE_PX } from "./fonts/activeFontSize";

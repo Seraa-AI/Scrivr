@@ -9,7 +9,7 @@
 
 import { describe, it, expect } from "vitest";
 import type { Node } from "prosemirror-model";
-import { TextSelection } from "prosemirror-state";
+import { AllSelection, TextSelection } from "prosemirror-state";
 import { createInstallingMeasurer, createTestEditor } from "../test-utils";
 import { getSchema } from "../extensions/ExtensionManager";
 import { StarterKit } from "../extensions/StarterKit";
@@ -215,7 +215,16 @@ describe("what the editor reports about substitution", () => {
       requested: "Aptos",
       resolved: "Inter",
       substituted: true,
+      mixed: false,
     });
+  });
+
+  it("reports the block's family when the selection holds no text", () => {
+    const editor = withProvider(schema.node("doc", null, [schema.node("paragraph", { fontFamily: "Georgia" })]));
+    const state = editor.getState();
+    editor.applyTransaction(state.tr.setSelection(new AllSelection(state.doc)));
+
+    expect(editor.getActiveFontFamily().requested).toBe("Georgia");
   });
 
   it("strips the fallback list from the document default", () => {
@@ -263,6 +272,7 @@ describe("what the editor reports about substitution", () => {
       requested: "Aptos",
       resolved: "Aptos",
       substituted: false,
+      mixed: false,
     });
   });
 });

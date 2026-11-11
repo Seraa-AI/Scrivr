@@ -1,4 +1,7 @@
 import type { LayoutFontResolver } from "./fonts/layoutResolver";
+import { parseFontSizePx, resolveActiveFontSize } from "./fonts/activeFontSize";
+import { applyPageFont, blockFontOf, blockStyleOf } from "./layout/FontConfig";
+import { parseFont, resolveFont, type ParsedFont } from "./layout/StyleResolver";
 import {
 	EditorState,
 	Transaction,
@@ -6,16 +9,18 @@ import {
 	type Selection,
 } from "prosemirror-state";
 import { SelectionController } from "./SelectionController";
+import { anchoredOf, placementAttrs } from "./layout/AnchoredObjects";
 import type {
 	FontModifier,
 	MarkDecorator,
 	ToolbarItemSpec,
+	ToolbarState,
 	OverlayRenderHandler,
 	IEditor,
 } from "./extensions/types";
-import type { Node as PmNode, Schema } from "prosemirror-model";
+import type { Mark, Node as PmNode, Schema } from "prosemirror-model";
 import { StarterKit } from "./extensions/StarterKit";
-import { BlockRegistry, InlineRegistry } from "./layout/BlockRegistry";
+import { BlockRegistry } from "./layout/BlockRegistry";
 import type { Extension } from "./extensions/Extension";
 import type {
 	ActiveFontFamily,
@@ -29,7 +34,7 @@ import {
 	usedResolutions,
 	type FontShortfall,
 } from "./fonts/collectFontRequests";
-import { primaryFamily } from "./fonts/layoutResolver";
+import { faceOf, primaryFamily } from "./fonts/layoutResolver";
 import { DEFAULT_FONT_FAMILY } from "./layout/FontConfig";
 import { CursorManager } from "./renderer/CursorManager";
 import { SelectionRegistry } from "./selection/SelectionRegistry";
@@ -45,13 +50,20 @@ import type {
 	SelectionGesture,
 	SelectionGestureProvider,
 } from "./selection/types";
+import type { HoverEvent, HoverResolver, HoverTarget } from "./hover/types";
+import { mapHoverTarget, sameHoverTargets } from "./hover/types";
+import { resolveHoverTargets } from "./hover/resolveHoverTargets";
+import type { PagePoint } from "./layout/pagePoint";
+import { resolvePointOwner, type PointOwner } from "./layout/pointOwnership";
+import { regionAtCoords } from "./layout/regionHitTest";
+import { nodeFragmentRects } from "./layout/nodeRects";
 import { TextMeasurer, type TextMeasurerLike } from "./layout/TextMeasurer";
 import { defaultPageConfig } from "./layout/PageLayout";
 import type { RecloneOptions } from "./model/assignBlockIds";
 import type { PageConfig, DocumentLayout } from "./layout/PageLayout";
 import type { FontConfig } from "./layout/FontConfig";
 import { LayoutCoordinator } from "./layout/LayoutCoordinator";
-import type { CharacterMap, ObjectRectEntry } from "./layout/CharacterMap";
+import type { CharacterMap, ObjectRectEntry, RangeRect } from "./layout/CharacterMap";
 import { InputBridge } from "./input/InputBridge";
 import { PasteTransformer } from "./input/PasteTransformer";
 import { BaseEditor } from "./BaseEditor";
@@ -81,7 +93,7 @@ export type EditorChangeHandler = (state: EditorState) => void;
  * can draw both the cursor and selection highlights without importing
  * ProseMirror types.
  */
-export interface SelectionSnapshot {
+export interface SelectionSnapshot extends ToolbarState {
 	/** The fixed end of the selection (doesn't move when you Shift+arrow) */
 	anchor: number;
 	/** The moving end — where the cursor is drawn */
@@ -92,20 +104,6 @@ export interface SelectionSnapshot {
 	to: number;
 	/** True when anchor === head (cursor only, no highlight) */
 	empty: boolean;
-	/**
-	 * Names of marks active at the cursor (or present anywhere in the selection).
-	 * Use this to show toolbar button active states without importing ProseMirror.
-	 */
-	activeMarks: string[];
-	/**
-	 * Attributes of each active mark, keyed by mark name.
-	 * e.g. { color: { color: "#dc2626" }, fontSize: { size: 18 } }
-	 */
-	activeMarkAttrs: Record<string, Record<string, unknown>>;
-	/** The ProseMirror node type name of the block containing the cursor: "paragraph", "heading", etc. */
-	blockType: string;
-	/** Attributes of that block node — e.g. { level: 1, align: "left" } for a heading */
-	blockAttrs: Record<string, unknown>;
 }
 
 function moveDeleteRange(
@@ -339,9 +337,9 @@ function withAvailableFamilies(
 		// No `labelStyle`: owned bytes are installed under a private name, so
 		// styling a label `font-family: Inter` asks the browser for a family it
 		// does not have and previews every entry in the same fallback.
-		isActive: (activeMarks, blockType, blockAttrs, activeMarkAttrs) =>
+		isActive: ({ blockAttrs, activeMarkAttrs }) =>
 			blockAttrs["fontFamily"] === family ||
-			activeMarkAttrs?.["fontFamily"]?.["family"] === family,
+			activeMarkAttrs["fontFamily"]?.["family"] === family,
 	}));
 
 	const firstAt = items.indexOf(template);
@@ -495,6 +493,10 @@ export class Editor extends BaseEditor implements IEditor {
 
 	/** Extension-registered semantic hit testers (highest priority first). */
 	private readonly hitTesters: HitTester[];
+	private readonly hoverResolvers: HoverResolver[];
+	/** What the pointer is over — transient, never editor state. */
+	private hoverTargets: readonly HoverTarget[] = [];
+	private hoverPoint: PagePoint | null = null;
 	/** Extension-registered pointer-gesture providers. */
 	private readonly selectionGestures: SelectionGestureProvider[];
 
@@ -503,12 +505,6 @@ export class Editor extends BaseEditor implements IEditor {
 	 * Pass to renderPage — maps node type names to BlockStrategy instances.
 	 */
 	readonly blockRegistry: BlockRegistry;
-
-	/**
-	 * Inline object registry built from all extensions.
-	 * Pass to renderPage — maps node type names to InlineStrategy instances.
-	 */
-	readonly inlineRegistry: InlineRegistry;
 
 	/**
 	 * Page chrome contributions from all extensions (headers, footers, etc.).
@@ -601,9 +597,9 @@ export class Editor extends BaseEditor implements IEditor {
 			defaultSelectionBehavior,
 		);
 		this.hitTesters = this.manager.buildHitTesters();
+		this.hoverResolvers = this.manager.buildHoverResolvers();
 		this.selectionGestures = this.manager.buildSelectionGestures();
 		this.blockRegistry = this.manager.buildBlockRegistry();
-		this.inlineRegistry = this.manager.buildInlineRegistry();
 		this.pageChromeContributions =
 			this.manager.getPageChromeContributions();
 
@@ -691,11 +687,11 @@ export class Editor extends BaseEditor implements IEditor {
 
 		const pasteTransformer = new PasteTransformer(
 			this.manager.schema,
-			this.manager.buildMarkdownRules(),
 			this.manager.buildMarkdownParserTokens(),
 			{
 				pasteTransforms: this.manager.buildPasteTransforms(),
 				pasteHtmlTransforms: this.manager.buildPasteHtmlTransforms(),
+				pasteFiles: this.manager.buildPasteFiles(),
 				...(uploadPastedImage ? { uploadImage: uploadPastedImage } : {}),
 			},
 		);
@@ -704,6 +700,7 @@ export class Editor extends BaseEditor implements IEditor {
 			getState: getRoutedState,
 			dispatch: routedDispatch,
 			getSchema: () => this.manager.schema,
+			copyHtmlTransforms: this.getCopyHtmlTransforms(),
 			getViewportRect: (from, to) => this.getViewportRect(from, to),
 			// TODO(pr7): getViewportRect still resolves positions against the flow
 			// layout. When a surface is active, `from`/`to` are surface-doc positions
@@ -914,24 +911,19 @@ export class Editor extends BaseEditor implements IEditor {
 	}
 
 	/**
-	 * Convert a floating image back to inline content at its current painted
-	 * location. Floating modes treat docPos as ownership and attrs as geometry;
-	 * inline mode is the opposite, so this is the one place where visual X/Y is
-	 * resolved back to a document insertion point.
+	 * Put a floating object back into its text, at its current painted
+	 * location, its placement written through its own declaration. Floating
+	 * modes treat docPos as ownership and attrs as geometry; inline mode is the
+	 * opposite, so this is the one place where visual X/Y is resolved back to a
+	 * document position.
 	 */
-	convertImageToInlineAtVisualPosition(docPos: number): boolean {
+	placeInlineAtVisualPosition(docPos: number): boolean {
 		const state = this.getActiveState();
 		const node = state.doc.nodeAt(docPos);
-		if (!node || node.type.name !== "image") return false;
-
-		const inlineAttrs: Record<string, unknown> = {
-			wrapMode: "inline",
-			wrappingMode: "inline",
-			xAlign: "left",
-			x: null,
-			yOffset: 0,
-			floatOffset: { x: 0, y: 0 },
-		};
+		const inlineAttrs = node && anchoredOf(node)
+			? placementAttrs(node, { wrapMode: "inline", xAlign: "left", x: null, yOffset: 0 })
+			: null;
+		if (!node || !inlineAttrs) return false;
 
 		const rect = this.getNodeRect(docPos);
 		if (!rect) {
@@ -959,7 +951,7 @@ export class Editor extends BaseEditor implements IEditor {
 			if (this.debug?.drag) {
 				// eslint-disable-next-line no-console
 				console.warn(
-					"[convertImageToInlineAtVisualPosition] moveAndUpdateNode rejected — falling back to attrs-only update",
+					"[placeInlineAtVisualPosition] moveAndUpdateNode rejected — falling back to attrs-only update",
 					{ from, to, targetPos },
 				);
 			}
@@ -1058,30 +1050,55 @@ export class Editor extends BaseEditor implements IEditor {
 	}
 
 	/**
+	 * The font a run is drawn in: its block's font with the run's marks applied
+	 * through the font modifiers, as layout resolves it. A font control that
+	 * re-derived it would drift from the thing it describes.
+	 */
+	private runFont(marks: readonly Mark[], block: PmNode, config: FontConfig): ParsedFont {
+		return parseFont(resolveFont(blockFontOf(block, config), marks, this.fontModifiers));
+	}
+
+	/**
+	 * The font of every run the selection covers, in order; for a collapsed
+	 * selection, or one that covers no text, the one the next typed character
+	 * takes.
+	 */
+	private selectedRunFonts(): Array<{ font: ParsedFont; block: PmNode }> {
+		const state = this.getActiveState();
+		const { from, to, empty, $from } = state.selection;
+		const config = applyPageFont(this.fontConfig, this.pageConfig.fontFamily ?? DEFAULT_FONT_FAMILY);
+		const runs: Array<{ font: ParsedFont; block: PmNode }> = [];
+		let firstTextblock: PmNode | null = null;
+		if (!empty) {
+			state.doc.nodesBetween(from, to, (node, _pos, parent) => {
+				if (node.isTextblock) firstTextblock ??= node;
+				if (node.isText && parent) runs.push({ font: this.runFont(node.marks, parent, config), block: parent });
+			});
+		}
+		if (runs.length > 0) return runs;
+		// No text: an empty block, an image, or a whole document of empty blocks.
+		const block = $from.parent.isTextblock ? $from.parent : (firstTextblock ?? $from.parent);
+		return [{ font: this.runFont(state.storedMarks ?? $from.marks(), block, config), block }];
+	}
+
+	/**
 	 * The family in effect at the selection, and the face it is drawn in.
 	 *
-	 * The precedence — inline mark, then block attr, then the document default —
-	 * is the editor's own rule, so a font control that re-derived it would drift
-	 * from the thing it describes.
+	 * Asked of every run rather than the first: a range drawn in two families
+	 * is `mixed`, so one family is not named confidently for it.
 	 */
 	getActiveFontFamily(): ActiveFontFamily {
-		const inline = this.getActiveMarkAttrs()["fontFamily"]?.["family"];
-		const block = this.getBlockInfo().blockAttrs["fontFamily"];
-		const requested = primaryFamily(
-			typeof inline === "string" && inline.length > 0
-				? inline
-				: typeof block === "string" && block.length > 0
-					? block
-					: (this.pageConfig.fontFamily ?? DEFAULT_FONT_FAMILY),
-		);
+		const runs = this.selectedRunFonts();
+		const families = runs.map((run) => primaryFamily(run.font.family));
+		const first = runs[0]?.font;
+		const requested = families[0] ?? primaryFamily(this.pageConfig.fontFamily ?? DEFAULT_FONT_FAMILY);
+		const mixed = families.some((family) => family !== requested);
 
-		if (!this.fonts) return { requested, resolved: requested, substituted: false };
+		if (!this.fonts || !first) return { requested, resolved: requested, substituted: false, mixed };
 
-		const marks = this.getActiveMarks();
 		const { resolved } = this.fonts.resolve({
 			family: requested,
-			weight: marks.includes("bold") ? 700 : 400,
-			style: marks.includes("italic") ? "italic" : "normal",
+			...faceOf(first),
 			// Size never changes which face answers; the provider's own is the
 			// one value guaranteed to be meaningful to it.
 			size: this.fonts.defaultRequest().size,
@@ -1090,7 +1107,26 @@ export class Editor extends BaseEditor implements IEditor {
 			requested,
 			resolved: resolved.family,
 			substituted: resolved.family !== requested,
+			mixed,
 		};
+	}
+
+	/**
+	 * The size in effect at the selection, in px — the counterpart to
+	 * `getActiveFontFamily`: the size each run is drawn at, or null when the
+	 * runs differ. A selection covering a 24px run and an unmarked one has no
+	 * single size, and naming either invites the reader to confirm it and
+	 * resize the other.
+	 */
+	getActiveFontSize(): number | null {
+		// The textblock itself, not a depth-1 ancestor: layout styles the leaf,
+		// so a heading inside a table cell is styled as a heading while its
+		// ancestor is the table, which has no style of its own.
+		const sizes = this.selectedRunFonts().map(({ font, block }) =>
+			resolveActiveFontSize(parseFontSizePx(font.size) ?? undefined, blockStyleOf(block, this.fontConfig)));
+		const [first] = sizes;
+		if (first === undefined) return null;
+		return sizes.every((size) => size === first) ? first : null;
 	}
 
 	/** True when the editor is in pageless (infinite-scroll) mode. */
@@ -1145,16 +1181,55 @@ export class Editor extends BaseEditor implements IEditor {
 	}
 
 	getNodeViewportRect(docPos: number): DOMRect | null {
-		const rect = this.getNodeRect(docPos);
-		if (!rect) return null;
-		const pageScreenRect = this.ib.lookupPageScreenRect(rect.page);
-		if (!pageScreenRect) return null;
-		return new DOMRect(
-			pageScreenRect.screenLeft + rect.x,
-			pageScreenRect.screenTop + rect.y,
-			rect.width,
-			rect.height,
-		);
+		return this.getNodeViewportRects(docPos)[0] ?? null;
+	}
+
+	/**
+	 * Every painted fragment of the node at `docPos`, in page order: one rect
+	 * for an image, one per page for a paragraph or table split across pages,
+	 * the cell's own rect for a table cell. `getNodeRect` stays the
+	 * image-only lookup.
+	 *
+	 * Read from the body's layout, so they place body positions only; see
+	 * `getNodeRect`.
+	 */
+	private getNodeRects(docPos: number): ObjectRectEntry[] {
+		if (this.surfaces?.activeSurface) return [];
+		const object = this.getNodeRect(docPos);
+		if (object) return [object];
+		return nodeFragmentRects(this.layout.pages, this.getState().doc, docPos);
+	}
+
+	getRangeViewportRects(from: number, to: number): DOMRect[] {
+		// Body geometry places body positions only, as `getNodeRect` says.
+		if (this.surfaces?.activeSurface) return [];
+		this.lc.ensureLayout();
+		const rects: RangeRect[] = this.lc.charMap.rangeRects(from, to);
+		// A floating image is painted off its line: its box is its placement,
+		// as a DOM range gives a replaced element's.
+		for (const object of this.lc.current.anchoredObjects ?? []) {
+			if (object.docPos >= from && object.docPos < to) rects.push(object);
+		}
+		rects.sort((a, b) => a.page - b.page || a.y - b.y);
+		const out: DOMRect[] = [];
+		for (const rect of rects) {
+			const page = this.ib.lookupPageScreenRect(rect.page);
+			if (!page) continue;
+			out.push(new DOMRect(page.screenLeft + rect.x, page.screenTop + rect.y, rect.width, rect.height));
+		}
+		return out;
+	}
+
+	getNodeViewportRects(docPos: number): DOMRect[] {
+		const out: DOMRect[] = [];
+		for (const rect of this.getNodeRects(docPos)) {
+			const page = this.ib.lookupPageScreenRect(rect.page);
+			if (!page) continue;
+			out.push(
+				new DOMRect(page.screenLeft + rect.x, page.screenTop + rect.y, rect.width, rect.height),
+			);
+		}
+		return out;
 	}
 
 	/**
@@ -1171,6 +1246,10 @@ export class Editor extends BaseEditor implements IEditor {
 	 * resize drag pivots on the wrong corner.
 	 */
 	getNodeRect(docPos: number): ObjectRectEntry | undefined {
+		// Body layout places body positions only. While a header or footer is
+		// edited a position is that surface's, and the body image sharing its
+		// number is not it — its handles, drag and menu must not land there.
+		if (this.surfaces?.activeSurface) return undefined;
 		this.lc.ensureLayout();
 		const anchored = this.lc.current.anchoredObjects?.find(
 			o => o.docPos === docPos,
@@ -1256,6 +1335,7 @@ export class Editor extends BaseEditor implements IEditor {
 			activeMarkAttrs: this.getActiveMarkAttrs(),
 			blockType: blockInfo.blockType,
 			blockAttrs: blockInfo.blockAttrs,
+			ancestors: blockInfo.ancestors,
 		};
 	}
 
@@ -1502,6 +1582,88 @@ export class Editor extends BaseEditor implements IEditor {
 			if (hit) return hit;
 		}
 		return null;
+	}
+
+	/**
+	 * What is under `point`, innermost first — `[link, table-cell, table]` for a
+	 * link in a cell. Click routing keeps `resolveHitTarget`'s first-wins chain;
+	 * hover wants every layer. Empty while a header/footer surface is being
+	 * edited: hover resolves against the body only, which is dimmed then.
+	 *
+	 * @internal — the pointer controller's; read `getHoverTargets` or the
+	 * `"hover"` event instead.
+	 */
+	resolveHoverTargets(point: PagePoint): HoverTarget[] {
+		if (this.surfaces?.activeSurface) return [];
+		const state = this.getState();
+		return resolveHoverTargets({
+			point,
+			state,
+			surfaceId: "body",
+			owner: this.pointOwnerAt(point.x, point.y, point.page),
+			glyphAt: (x, y, p) => this.charMap.glyphAtPoint(x, y, p),
+			hitTarget: () => this.resolveHitTarget(point.x, point.y, point.page),
+			resolvers: this.hoverResolvers,
+			nodeKind: (pos) => {
+				try {
+					return this.describeSelection(NodeSelection.create(state.doc, pos)).kind;
+				} catch {
+					return state.doc.nodeAt(pos)?.type.name ?? "node";
+				}
+			},
+		});
+	}
+
+	/**
+	 * Who owns a point on a body page — the one answer click routing, hover,
+	 * the hover cursor and drags read, so they cannot disagree. See
+	 * `resolvePointOwner`.
+	 *
+	 * @internal — the pointer controller's and hover's.
+	 */
+	pointOwnerAt(x: number, y: number, page: number): PointOwner {
+		return resolvePointOwner(x, y, page, {
+			anchoredObjects: this.layout.anchoredObjects ?? [],
+			hasTextAt: (px, py, p) => this.charMap.hasTextAt(px, py, p),
+			regionAt: (px, py, p) => regionAtCoords(this.layout.pages, px, py, p) !== null,
+			objectRectAt: (px, py, p) => this.charMap.objectRectAtPoint(px, py, p),
+		});
+	}
+
+	/** The current hover stack, innermost first. Empty when over nothing. */
+	getHoverTargets(): readonly HoverTarget[] {
+		return this.hoverTargets;
+	}
+
+	/**
+	 * Record what the pointer is over and emit `"hover"` when the stack changed.
+	 *
+	 * @internal — the pointer controller's; read `getHoverTargets` or the
+	 * `"hover"` event instead.
+	 */
+	reportHover(event: HoverEvent): void {
+		const changed = !sameHoverTargets(this.hoverTargets, event.targets);
+		// Kept even when unchanged: where in each target the pointer now rests.
+		this.hoverTargets = event.targets;
+		this.hoverPoint = event.point;
+		// A dismissal is news even when nothing was hovered: a peek may be open.
+		if (changed || event.dismissed) this.emit("hover", event);
+	}
+
+	/**
+	 * Carry the hover stack through an edit made while the pointer rests, so a
+	 * collaborator typing above a link does not leave its peek on the old
+	 * range. A target whose range the edit deleted drops out.
+	 */
+	protected override mapThroughEdit(tr: Transaction): void {
+		super.mapThroughEdit(tr);
+		if (this.hoverTargets.length === 0) return;
+		const targets: HoverTarget[] = [];
+		for (const target of this.hoverTargets) {
+			const mapped = mapHoverTarget(target, tr.mapping);
+			if (mapped) targets.push(mapped);
+		}
+		this.reportHover({ targets, point: this.hoverPoint, fromEdit: true });
 	}
 
 	/**

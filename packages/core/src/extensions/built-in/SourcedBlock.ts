@@ -1,18 +1,25 @@
 import { Extension } from "../Extension";
 import { fnv1aHex, stableStringify } from "../../model/hash";
 import { Slice, Fragment, Node } from "prosemirror-model";
+import { insertPoint } from "prosemirror-transform";
 import {
 	Plugin,
 	PluginKey,
 	type EditorState,
 	type Transaction,
 } from "prosemirror-state";
-import type { CloneHandler, IBaseEditor, IEditor } from "../types";
+import type {
+	CloneHandler,
+	IBaseEditor,
+	IEditor,
+	SlashCommandContribution,
+} from "../types";
 import type {
 	NodeActionContext,
 	NodeActionContribution,
 } from "../../selection/types";
 import type { SemanticNodeHandler } from "../../exports/semantic";
+import type { LayoutBlock } from "../../layout/BlockLayout";
 import { xml, type DocxNodeHandler, type DocxBlockTransform } from "../../exports/docx";
 
 export type SourceCapability =
@@ -49,6 +56,7 @@ export interface SourcedBlockEvent {
  *
  * The two facts have different owners. `modified` is the document's: the editor
  * hashes the block's content and compares it to the base it was inserted with.
+ * A block with no recorded base is never modified.
  * `outdated` is the library's — whether the source moved on past `versionId` is
  * not knowable from this document, so the host sets it (from a server check, or
  * from a collaborator who ran one) via `setSourcedBlockOutdated`, and the
@@ -79,6 +87,28 @@ export const NORMALIZER_VERSION = 1;
 
 /** ECMA-376 caps `w:tag/@w:val` (ST_String) at 255 characters. */
 const DOCX_TAG_MAX_LENGTH = 255;
+
+/** The diverged bar sits this far into the left margin, like Word's change bar. */
+const DIVERGED_GUTTER_INSET = 12;
+const DIVERGED_GUTTER_WIDTH = 3;
+
+interface BlockExtent {
+	nodePos: number;
+	top: number;
+	bottom: number;
+}
+
+/**
+ * The vertical extent of every block on a page, in page coordinates. A table
+ * cell's blocks are measured from their row's top, so they are lifted out here.
+ */
+function blockExtents(blocks: readonly LayoutBlock[], rowTop = 0): BlockExtent[] {
+	return blocks.flatMap(block => {
+		const top = rowTop + block.y;
+		const regionBlocks = (block.regions ?? []).flatMap(region => blockExtents(region.blocks, top));
+		return [{ nodePos: block.nodePos, top, bottom: top + block.height }, ...regionBlocks];
+	});
+}
 
 export function normalizeSourcedBlock(fragment: Fragment): unknown[] {
 	const walkNode = (node: Node): unknown => {
@@ -160,9 +190,16 @@ export function isEmptyShell(node: Node): boolean {
 	return empty;
 }
 
-/** Hash the block's current content and compare it against its recorded base. */
+/** The hash the block was inserted with. `""` is no base: earlier DOCX imports wrote it. */
+function recordedBaseHash(node: Node): string | null {
+	const baseHash: unknown = node.attrs["baseHash"];
+	return typeof baseHash === "string" && baseHash !== "" ? baseHash : null;
+}
+
+/** A block with no recorded base has nothing to diverge from. */
 function isDiverged(node: Node): boolean {
-	return computeBlockHash(node.content) !== node.attrs["baseHash"];
+	const baseHash = recordedBaseHash(node);
+	return baseHash !== null && computeBlockHash(node.content) !== baseHash;
 }
 
 function instanceIdOf(node: Node): string | null {
@@ -286,12 +323,40 @@ export interface SourcedBlockOptions {
 	providers?: SourceProvider[];
 }
 
+
 declare module "@scrivr/core" {
 	interface Commands<ReturnType> {
 		sourcedBlock: {
 			insertSourcedBlock: (options: {
 				kind: string;
 				content: SourceContent;
+				/**
+				 * Where to put it. Defaults to replacing the selection, which
+				 * is what a direct insertion means. Content that arrived
+				 * asynchronously passes the position it was asked for, because
+				 * by then the selection is somewhere else.
+				 */
+				at?: number;
+			}) => ReturnType;
+			/**
+			 * Insert by identity rather than content, resolving through
+			 * `provider.fetch` — the method whose own comment already promises
+			 * "full content for insertion".
+			 *
+			 * The sibling that takes full content cannot be named by a menu
+			 * entry, because somebody has to fetch before dispatching; that is
+			 * what turns a contribution back into a callback. This one lets
+			 * `{ kind, resourceId, versionId }` be the whole entry.
+			 *
+			 * Returns true once the request is under way, not once the block
+			 * is in the document. The insert is abandoned, with a reason, if
+			 * the text it was anchored to is gone, the editor has stopped
+			 * accepting writes, or the editor is destroyed.
+			 */
+			insertSourcedBlockFromSource: (options: {
+				kind: string;
+				resourceId: string;
+				versionId: string;
 			}) => ReturnType;
 			/**
 			 * Record which instances hold a version their source has moved past
@@ -419,7 +484,7 @@ export function collectSourcedBlocks(doc: Node): SourcedBlockRecord[] {
 				kind: parseStringOrNull(attrs["kind"]),
 				resourceId: parseStringOrNull(attrs["resourceId"]),
 				versionId: parseStringOrNull(attrs["versionId"]),
-				baseHash: parseStringOrNull(attrs["baseHash"]),
+				baseHash: recordedBaseHash(node),
 				baseNormalizer: parseNumberOrNull(attrs["baseNormalizer"]),
 				outdated: attrs["outdated"] === true,
 			});
@@ -539,9 +604,9 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 				},
 
 			insertSourcedBlock:
-				(options: { kind: string; content: SourceContent }) =>
+				(options: { kind: string; content: SourceContent; at?: number }) =>
 				(state, dispatch) => {
-					const { kind, content } = options;
+					const { kind, content, at } = options;
 					const schema = state.schema;
 
 					try {
@@ -572,7 +637,16 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 								fragment,
 							);
 
-							tr.replaceSelectionWith(blockNode);
+							if (at === undefined) {
+								tr.replaceSelectionWith(blockNode);
+							} else {
+								// Where a block can legally go near `at` — a
+								// raw insert at a text offset would split the
+								// paragraph the position happened to land in.
+								const point = insertPoint(tr.doc, at, blockType);
+								if (point === null) return false;
+								tr.insert(point, blockNode);
+							}
 							dispatch(tr);
 
 							const providers = this.options.providers ?? [];
@@ -606,7 +680,77 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 						return false;
 					}
 				},
+
+			insertSourcedBlockFromSource:
+				(options: {
+					kind: string;
+					resourceId: string;
+					versionId: string;
+				}) =>
+				() => {
+					const { kind, resourceId, versionId } = options;
+					const provider = (this.options.providers ?? []).find(
+						p => p.kind === kind,
+					);
+					if (!provider) {
+						console.error(
+							`[SourcedBlock] No provider registered for kind "${kind}"`,
+						);
+						return false;
+					}
+					// `deferEdit` owns the three things that go wrong between
+					// asking for content and holding it: the position moves,
+					// the editor may stop accepting writes, and it may be gone.
+					// The insert itself still runs through the content-taking
+					// sibling, so there is one insertion path.
+					const editor = this.editor();
+					editor.deferEdit({
+						work: () => provider.fetch(resourceId, versionId),
+						edit: (content, at) => {
+							editor.runCommand("insertSourcedBlock", [
+								{ kind, content, at },
+							]);
+						},
+						onAbandoned: (reason, error) => {
+							console.error(
+								`[SourcedBlock] Did not insert ${kind} ${resourceId} — ${reason}`,
+								error ?? "",
+							);
+						},
+					});
+
+					return true;
+				},
 		};
+	},
+
+	/**
+	 * One resolver per provider, so a query reaches each source's own `search`.
+	 *
+	 * Entries carry identity and a label, never a body: `SourceSearchResult` is
+	 * already `{ resourceId, versionId, label }`, and that only pays off once
+	 * something fetches on select instead of pulling full text for twenty rows
+	 * to render twenty labels.
+	 */
+	addSlashCommands(): SlashCommandContribution[] {
+		return (this.options.providers ?? []).map(provider => ({
+			async resolve(query: string, signal: AbortSignal) {
+				const hits = await provider.search(query, signal);
+				return hits.map(hit => ({
+					id: `${provider.kind}.insert.${hit.resourceId}`,
+					label: hit.label,
+					group: provider.kind.toUpperCase(),
+					command: "insertSourcedBlockFromSource" as const,
+					args: [
+						{
+							kind: provider.kind,
+							resourceId: hit.resourceId,
+							versionId: hit.versionId,
+						},
+					],
+				}));
+			},
+		}));
 	},
 
 	/**
@@ -677,7 +821,7 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 
 	onViewReady(editor: IEditor) {
 		const unregister = editor.addOverlayRenderHandler(
-			(ctx, pageIndex, pageConfig, charMap, theme) => {
+			(ctx, pageNumber, pageConfig, _charMap, theme) => {
 				const state = editor.getState();
 				const divergenceState =
 					sourcedBlockDivergenceKey.getState(state);
@@ -685,38 +829,31 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 				if (!divergenceState || divergenceState.diverged.size === 0)
 					return;
 
+				const page = editor.layout.pages[pageNumber - 1];
+				if (!page) return;
+
 				state.doc.descendants((node, pos) => {
 					if (node.type.name !== "sourcedBlock") return true;
 
 					const id = instanceIdOf(node);
 					if (!id || !divergenceState.diverged.has(id)) return false;
 
-					// coordsAtPos returns { x, y, height, page }
-					const startCoords = charMap.coordsAtPos(pos + 1);
-					const endCoords = charMap.coordsAtPos(
-						pos + node.nodeSize - 2,
-					); // end of inner block
+					// Layout blocks, not charMap lines: the caret positions of a rule or
+					// image next to the block fall inside its range, so its lines would
+					// stretch the bar over them.
+					const extents = blockExtents(page.blocks).filter(
+						extent => extent.nodePos > pos && extent.nodePos < pos + node.nodeSize,
+					);
+					if (extents.length === 0) return false;
 
-					// Ensure both coordinates exist and are on the current page being rendered
-					if (
-						startCoords &&
-						endCoords &&
-						(startCoords.page === pageIndex ||
-							endCoords.page === pageIndex)
-					) {
-						ctx.save();
-						// Use divergedGutter from theme if available, otherwise amber fallback
-						ctx.fillStyle = theme.divergedGutter ?? "#FFC107";
+					const top = Math.min(...extents.map(extent => extent.top));
+					const bottom = Math.max(...extents.map(extent => extent.bottom));
+					const gutterX = pageConfig.margins.left - DIVERGED_GUTTER_INSET;
 
-						const gutterWidth = 3;
-						const gutterX = startCoords.x - 12;
-						const top = startCoords.y;
-						const bottom = endCoords.y + endCoords.height;
-						const height = bottom - top;
-
-						ctx.fillRect(gutterX, top, gutterWidth, height);
-						ctx.restore();
-					}
+					ctx.save();
+					ctx.fillStyle = theme.divergedGutter;
+					ctx.fillRect(gutterX, top, DIVERGED_GUTTER_WIDTH, bottom - top);
+					ctx.restore();
 					return false;
 				});
 			},
@@ -1033,7 +1170,8 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 				kind: params.get("kind") ?? "",
 				resourceId: params.get("resourceId") ?? "",
 				versionId: params.get("versionId") ?? "",
-				baseHash: params.get("baseHash") ?? "",
+				// Absent stays null: no recorded base, not an empty one.
+				baseHash: params.get("baseHash"),
 				baseNormalizer: Number(params.get("baseNormalizer")) || 1,
 			};
 

@@ -116,9 +116,8 @@ Returns the flat array of UI specifications utilized to build React floating men
 
 ## Markdown & Paste Builders
 
-#### `buildMarkdownRules() / buildMarkdownParserTokens()`
+#### `buildMarkdownParserTokens()`
 ```ts
-buildMarkdownRules(): MarkdownBlockRule[]
 buildMarkdownParserTokens(): Record<string, MarkdownParserTokenSpec>
 ```
 Passes all custom syntax mapping down to the `PasteTransformer` for accurate CommonMark ingestion.

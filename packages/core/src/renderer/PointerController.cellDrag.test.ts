@@ -63,7 +63,6 @@ function setup(cols: number) {
     slotHeight: () => 1224,
     tileHeight: () => 1200,
     isPageless: () => false,
-    visualYToDocY: (y) => ({ page: Math.floor(y / 1224) + 1, docY: y - Math.floor(y / 1224) * 1224 }),
     scheduleUpdate: () => {},
   };
   const controller = new PointerController(deps);
@@ -71,7 +70,7 @@ function setup(cols: number) {
   editor.ensurePagePopulated(1);
 
   const rowBlock = (): LayoutBlock => {
-    for (const p of editor.layout.pages) for (const b of p.blocks) if (b.kind === "tableRow") return b;
+    for (const p of editor.layout.pages) for (const b of p.blocks) if (b.kind === "composite") return b;
     throw new Error("no row block");
   };
   return {
@@ -87,7 +86,7 @@ function setup(cols: number) {
 }
 
 function center(row: LayoutBlock, i: number): { x: number; y: number } {
-  const c = row.cells![i]!;
+  const c = row.regions![i]!;
   return { x: c.x + c.width / 2, y: row.y + c.y + c.height / 2 };
 }
 

@@ -1,21 +1,70 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createSlashMenu } from "@scrivr/core";
-import type { Editor } from "@scrivr/core";
+import type { Editor, SlashCommandSpec } from "@scrivr/core";
 import { useFloatingPosition } from "./useFloatingPosition";
 
 export interface SlashMenuItem {
   /** Short icon label shown in the menu (e.g. "H1", "•"). */
   label: string;
-  /** Display name (also used as the React key — must be unique in the list). */
+  /** Display name. */
   title: string;
   /** One-line description shown below the title. */
   description: string;
+  /**
+   * Stable identity, used as the React key. An extension's entry carries the
+   * one it declared; a title cannot stand in, because two search hits can
+   * legitimately share a label and the rows would then reconcile onto each
+   * other — the highlight on one and Enter running another.
+   */
+  id?: string;
+  /** Logical grouping. Renderers draw a divider between groups. */
+  group?: string;
   /** Called when the item is selected. Delete-slash logic runs before this. */
   action: () => void;
 }
 
 export interface UseSlashMenuOptions {
+  /**
+   * Replace the entries entirely — the extensions' own are not offered, and
+   * no resolver is asked.
+   */
   items?: SlashMenuItem[] | undefined;
+  /**
+   * How long to wait after a keystroke before asking the resolvers, in ms.
+   * A search is I/O: typing "indemnity" should not be ten requests.
+   */
+  resolveDebounceMs?: number | undefined;
+}
+
+/**
+ * Short glyph for an entry, by the command it runs.
+ *
+ * A spec carries no icon: Scrivr contributes no renderer, so what an entry
+ * looks like is the host's business — the same split the playground toolbar
+ * makes, keying its Lucide icons off `item.command`. An entry whose command is
+ * not listed here renders with no glyph rather than a wrong one.
+ */
+const GLYPHS: Partial<Record<SlashCommandSpec["command"], string>> = {
+  setParagraph: "¶",
+  setHeading1: "H1",
+  setHeading2: "H2",
+  setHeading3: "H3",
+  toggleBulletList: "•",
+  toggleOrderedList: "1.",
+  toggleCodeBlock: "<>",
+  insertHorizontalRule: "—",
+};
+
+/** Turn an extension's declared entry into something this menu can render. */
+function toItem(editor: Editor, spec: SlashCommandSpec): SlashMenuItem {
+  return {
+    label: GLYPHS[spec.command] ?? "",
+    title: spec.label,
+    description: spec.description ?? "",
+    id: spec.id,
+    ...(spec.group !== undefined ? { group: spec.group } : {}),
+    action: () => editor.runCommand(spec.command, spec.args),
+  };
 }
 
 export function useSlashMenu(
@@ -23,59 +72,12 @@ export function useSlashMenu(
   options: UseSlashMenuOptions = {},
 ) {
   const itemsProp = options.items;
+  const debounceMs = options.resolveDebounceMs ?? 150;
   const defaultItems = useMemo((): SlashMenuItem[] => {
+    // Declared by whoever owns the node each entry inserts, so an application
+    // extension's entries appear here without this hook knowing about it.
     if (!editor) return [];
-    const c = editor.commands;
-    return [
-      {
-        label: "¶",
-        title: "Text",
-        description: "Plain paragraph",
-        action: () => c.setParagraph(),
-      },
-      {
-        label: "H1",
-        title: "Heading 1",
-        description: "Large section title",
-        action: () => c.setHeading1(),
-      },
-      {
-        label: "H2",
-        title: "Heading 2",
-        description: "Medium section title",
-        action: () => c.setHeading2(),
-      },
-      {
-        label: "H3",
-        title: "Heading 3",
-        description: "Small section title",
-        action: () => c.setHeading3(),
-      },
-      {
-        label: "•",
-        title: "Bullet list",
-        description: "Unordered list",
-        action: () => c.toggleBulletList(),
-      },
-      {
-        label: "1.",
-        title: "Ordered list",
-        description: "Numbered list",
-        action: () => c.toggleOrderedList(),
-      },
-      {
-        label: "<>",
-        title: "Code block",
-        description: "Monospace code block",
-        action: () => c.toggleCodeBlock(),
-      },
-      {
-        label: "—",
-        title: "Divider",
-        description: "Horizontal rule",
-        action: () => c.insertHorizontalRule(),
-      },
-    ];
+    return editor.getSlashCommands().map((spec) => toItem(editor, spec));
   }, [editor]);
 
   const items = itemsProp ?? defaultItems;
@@ -85,13 +87,18 @@ export function useSlashMenu(
   const [activeIndex, setActiveIndex] = useState(0);
   const [rect, setRect] = useState<DOMRect | null>(null);
   const controllerRef = useRef<ReturnType<typeof createSlashMenu> | null>(null);
-  const filteredItems = query
+  const [resolvedItems, setResolvedItems] = useState<SlashMenuItem[]>([]);
+  const listedItems = query
     ? items.filter(
         (it) =>
           it.title.toLowerCase().includes(query.toLowerCase()) ||
           it.description.toLowerCase().includes(query.toLowerCase()),
       )
     : items;
+  const filteredItems = useMemo(
+    () => [...listedItems, ...resolvedItems],
+    [listedItems, resolvedItems],
+  );
   const { ref, position } = useFloatingPosition<HTMLDivElement>(
     rect,
     [filteredItems.length],
@@ -101,6 +108,35 @@ export function useSlashMenu(
   useEffect(() => {
     setActiveIndex((i) => Math.min(i, Math.max(0, filteredItems.length - 1)));
   }, [filteredItems.length]);
+
+  useEffect(() => {
+    // A host that supplied its own items owns the whole list, so no resolver
+    // is asked — otherwise "override" would mean "append to".
+    if (!editor || !visible || itemsProp) {
+      setResolvedItems([]);
+      return;
+    }
+    // Cleared up front, not on the answer: holding the previous query's
+    // entries on screen leaves them selectable, and Enter would insert
+    // something matching a query the reader has already typed past.
+    setResolvedItems([]);
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      editor
+        .resolveSlashCommands(query, controller.signal)
+        .then((specs) => setResolvedItems(specs.map((spec) => toItem(editor, spec))))
+        .catch(() => {
+          // Abandoned, or every resolver failed. The listed entries stand on
+          // their own — a search that cannot answer shows nothing.
+        });
+    }, debounceMs);
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [editor, visible, query, itemsProp, debounceMs]);
 
   useEffect(() => {
     if (!editor) return;

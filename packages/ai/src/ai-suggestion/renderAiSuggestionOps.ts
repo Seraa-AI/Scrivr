@@ -34,7 +34,18 @@ export interface DeleteRenderInstruction {
   page:  number;
 }
 
-export type RenderInstruction = InsertRenderInstruction | DeleteRenderInstruction;
+/** A run whose formatting the proposal changes; the words are untouched. */
+export interface FormatRenderInstruction {
+  type:  "format";
+  from:  number;
+  to:    number;
+  page:  number;
+}
+
+export type RenderInstruction =
+  | InsertRenderInstruction
+  | DeleteRenderInstruction
+  | FormatRenderInstruction;
 
 // ── Delete highlight ──────────────────────────────────────────────────────────
 
@@ -109,6 +120,49 @@ export function renderInsertMarker(
   ctx.restore();
 }
 
+// ── Format highlight ──────────────────────────────────────────────────────────
+
+/**
+ * A formatting proposal changes no words, so there is nothing for a delete
+ * strike or an insert caret to point at — without a mark of its own it renders
+ * as nothing at all, and the card offers the reader a change they cannot see.
+ *
+ * Drawn as an underline beneath the run, distinct from the dashed red of a
+ * deletion: this text is staying, only its appearance is in question.
+ */
+export function renderFormatHighlight(
+  ctx: CanvasRenderingContext2D,
+  glyphs: GlyphEntry[],
+  isActive: boolean,
+): void {
+  if (glyphs.length === 0) return;
+
+  ctx.save();
+  ctx.strokeStyle = isActive ? "rgba(99, 102, 241, 0.7)" : "rgba(99, 102, 241, 0.3)";
+  ctx.lineWidth = isActive ? 2 : 1;
+
+  // One stroke per line, so a wrapped run does not rule across the gap between
+  // its lines. Grouped by `lineY`, not `y`: glyphs on one line differ in `y`
+  // whenever their sizes differ, so a run holding a smaller word would break
+  // into disjoint stubs at different heights. The rule sits under the tallest
+  // glyph on the line so it stays straight across mixed sizes.
+  let start = 0;
+  for (let i = 1; i <= glyphs.length; i++) {
+    const prev = glyphs[i - 1]!;
+    const next = glyphs[i];
+    if (next && next.lineY === prev.lineY) continue;
+    const run = glyphs.slice(start, i);
+    const baseline = Math.max(...run.map((g) => g.y + g.height)) - 0.5;
+    ctx.beginPath();
+    ctx.moveTo(run[0]!.x, baseline);
+    ctx.lineTo(prev.x + prev.width, baseline);
+    ctx.stroke();
+    start = i;
+  }
+
+  ctx.restore();
+}
+
 // ── Instruction builder ───────────────────────────────────────────────────────
 
 export function buildOpRenderInstructions(
@@ -127,6 +181,20 @@ export function buildOpRenderInstructions(
     const tokenLen = op.text.length;
 
     if (op.type === "keep") {
+      // A keep carries marks only where the formatting changes, so this is the
+      // whole of a formatting-only proposal's visible footprint.
+      if (op.marks) {
+        const startEntry = map[acceptedOffset];
+        const endEntry = map[Math.min(acceptedOffset + tokenLen - 1, map.length - 1)];
+        if (startEntry && endEntry) {
+          instructions.push({
+            type:  "format",
+            from:  startEntry.docPos,
+            to:    endEntry.docPos + 1,
+            page:  pageNumber,
+          });
+        }
+      }
       acceptedOffset += tokenLen;
       continue;
     }
@@ -178,10 +246,11 @@ export function renderInstructions(
   isActive: boolean,
 ): void {
   for (const inst of instructions) {
-    if (inst.type === "delete") {
+    if (inst.type === "delete" || inst.type === "format") {
       const glyphs = charMap.glyphsInRange(inst.from, inst.to)
         .filter((g) => g.page === inst.page);
-      renderDeleteHighlight(ctx, glyphs, isActive);
+      if (inst.type === "delete") renderDeleteHighlight(ctx, glyphs, isActive);
+      else renderFormatHighlight(ctx, glyphs, isActive);
     }
     // insert markers intentionally not rendered — card panel conveys inserts
   }

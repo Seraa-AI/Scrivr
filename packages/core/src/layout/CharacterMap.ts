@@ -77,7 +77,18 @@ export interface ObjectRectEntry {
   page: number;
 }
 
-/** Key for the per-line painted-run index. */
+/** One line's part of a range: what `Range.getClientRects()` gives a DOM editor. */
+export interface RangeRect {
+  page: number;
+  x: number;
+  /** Top of the line. */
+  y: number;
+  width: number;
+  /** The line's height. */
+  height: number;
+}
+
+/** Key for the per-line indexes. */
 function extentKey(page: number, lineIndex: number): string {
   return `${page}:${lineIndex}`;
 }
@@ -101,6 +112,8 @@ export class CharacterMap {
    * cost the hover path cannot carry.
    */
   private lineExtents = new Map<string, { left: number; right: number }>();
+  /** Glyphs per line, keyed `page:lineIndex`: a point or a range reads one line, not the map. */
+  private lineGlyphs = new Map<string, GlyphEntry[]>();
   private populationGeneration = UNOWNED_GENERATION;
 
   /**
@@ -126,6 +139,7 @@ export class CharacterMap {
     this.lines = [];
     this.objectRects.clear();
     this.lineExtents.clear();
+    this.lineGlyphs.clear();
     // The contents left, so the claim on them goes too — until the next
     // layout stamps its own version, this map speaks for no generation.
     this.populationGeneration = UNOWNED_GENERATION;
@@ -141,16 +155,22 @@ export class CharacterMap {
     for (const key of this.lineExtents.keys()) {
       if (key.startsWith(`${pageNumber}:`)) this.lineExtents.delete(key);
     }
+    for (const key of this.lineGlyphs.keys()) {
+      if (key.startsWith(`${pageNumber}:`)) this.lineGlyphs.delete(key);
+    }
   }
 
   registerGlyph(entry: GlyphEntry): void {
     this.glyphs.push(entry);
+    const key = extentKey(entry.page, entry.lineIndex);
+    const onLine = this.lineGlyphs.get(key);
+    if (onLine) onLine.push(entry);
+    else this.lineGlyphs.set(key, [entry]);
 
     // Zero-width glyphs are structural, not visible — the caret sentinel on a
     // block's last line is one. They occupy no space a reader can see, so they
     // do not extend the painted run.
     if (entry.width <= 0) return;
-    const key = extentKey(entry.page, entry.lineIndex);
     const extent = this.lineExtents.get(key);
     if (!extent) {
       this.lineExtents.set(key, { left: entry.x, right: entry.x + entry.width });
@@ -327,7 +347,7 @@ export class CharacterMap {
 
     // Find the highest line on this page that is strictly above currentLine.y
     const above = this.lines
-      .filter((l) => l.page === currentLine.page && l.y < currentLine.y)
+      .filter((l) => l.page === currentLine.page && l.y < currentLine.y && !isEmptyLine(l))
       .reduce<
         LineEntry | undefined
       >((best, l) => (best === undefined || l.y > best.y ? l : best), undefined);
@@ -337,7 +357,7 @@ export class CharacterMap {
 
     // First visual row on this page — jump to the last line of the previous page
     const prevPageLines = this.lines.filter(
-      (l) => l.page === currentLine.page - 1,
+      (l) => l.page === currentLine.page - 1 && !isEmptyLine(l),
     );
     if (!prevPageLines.length) return null;
     const lastOnPrev = prevPageLines.reduce((max, l) =>
@@ -370,7 +390,7 @@ export class CharacterMap {
     // Find the lowest line on this page that starts strictly below currentLine's bottom
     const currentBottom = currentLine.y + currentLine.height;
     const below = this.lines
-      .filter((l) => l.page === currentLine.page && l.y >= currentBottom)
+      .filter((l) => l.page === currentLine.page && l.y >= currentBottom && !isEmptyLine(l))
       .reduce<
         LineEntry | undefined
       >((best, l) => (best === undefined || l.y < best.y ? l : best), undefined);
@@ -380,7 +400,7 @@ export class CharacterMap {
 
     // Last visual row on this page — jump to the first line of the next page
     const nextPageLines = this.lines.filter(
-      (l) => l.page === currentLine.page + 1,
+      (l) => l.page === currentLine.page + 1 && !isEmptyLine(l),
     );
     if (!nextPageLines.length) return null;
     const firstOnNext = nextPageLines.reduce((min, l) =>
@@ -429,16 +449,14 @@ export class CharacterMap {
 
   /**
    * Returns all lines that overlap the given ProseMirror position range.
-   * Includes empty lines (startDocPos === endDocPos) when the cursor position
-   * falls within [from, to). Used by the renderer to draw full-line selection
-   * highlights, including for empty paragraphs.
+   * Includes an empty line (one holding no position: a marker's line of
+   * its own, the gap past a float) only when the range runs across it, from
+   * before its position. Used by the renderer to draw full-line selection
+   * highlights.
    */
   linesInRange(from: number, to: number): LineEntry[] {
     return this.lines.filter((l) => {
-      if (l.startDocPos === l.endDocPos) {
-        // Empty line — include when the cursor position is within the selection
-        return l.startDocPos >= from && l.startDocPos < to;
-      }
+      if (isEmptyLine(l)) return l.startDocPos > from && l.startDocPos < to;
       // Non-empty line — include when any character is within the selection
       return l.startDocPos < to && l.endDocPos > from;
     });
@@ -457,7 +475,7 @@ export class CharacterMap {
   private lineForDocPos(docPos: number, page?: number): LineEntry | undefined {
     return this.lines.find((l) => {
       if (page !== undefined && l.page !== page) return false;
-      if (l.startDocPos === l.endDocPos) return docPos === l.startDocPos;
+      if (isEmptyLine(l)) return docPos === l.startDocPos;
       return docPos >= l.startDocPos && docPos <= l.endDocPos;
     });
   }
@@ -479,6 +497,45 @@ export class CharacterMap {
     const extent = this.lineExtents.get(extentKey(page, line.lineIndex));
     if (!extent) return false; // an empty line paints nothing
     return x >= extent.left && x < extent.right;
+  }
+
+  /**
+   * The glyph painted under (x, y), or null. Never snaps: trailing line space,
+   * paragraph spacing, cell padding, marker gutters and margins all return
+   * null. `docPos` is the character's own position, so its marks are
+   * `doc.resolve(docPos + 1).marks()` — no left/right ambiguity at a boundary.
+   *
+   * Hover asks this; caret placement asks `posAtCoords`, which snaps.
+   */
+  glyphAtPoint(x: number, y: number, page: number): GlyphEntry | null {
+    if (!this.hasTextAt(x, y, page)) return null;
+    const line = this.lineAtPoint(x, y, page);
+    if (!line) return null;
+    for (const g of this.lineGlyphs.get(extentKey(page, line.lineIndex)) ?? []) {
+      if (g.width > 0 && x >= g.x && x < g.x + g.width) return g;
+    }
+    return null;
+  }
+
+  /**
+   * One rect per line the range `[from, to)` paints on, in page and line
+   * order, each spanning that line's glyphs in the range. A link wrapped onto
+   * two lines, or across a page, has a rect on each. Text only: a floating
+   * image is painted off its line, and its box is its layout placement's.
+   */
+  rangeRects(from: number, to: number): RangeRect[] {
+    const rects: RangeRect[] = [];
+    for (const line of this.linesInRange(from, to)) {
+      let left = Infinity;
+      let right = -Infinity;
+      for (const g of this.lineGlyphs.get(extentKey(line.page, line.lineIndex)) ?? []) {
+        if (g.docPos < from || g.docPos >= to || g.width <= 0) continue;
+        left = Math.min(left, g.x);
+        right = Math.max(right, g.x + g.width);
+      }
+      if (right > left) rects.push({ page: line.page, x: left, y: line.y, width: right - left, height: line.height });
+    }
+    return rects.sort((a, b) => a.page - b.page || a.y - b.y);
   }
 
   /**
@@ -526,4 +583,9 @@ export class CharacterMap {
 
   // Internal — find the closest line when y is outside all line ranges.
   // Click above first line → first line. Click below last line → last line.
+}
+
+/** A line that holds no position: its start is its end, where the text after it starts. */
+function isEmptyLine(line: LineEntry): boolean {
+  return line.startDocPos === line.endDocPos;
 }

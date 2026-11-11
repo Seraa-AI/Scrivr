@@ -16,6 +16,21 @@ export type { SlashMenuOptions, SlashMenuCallbacks, SlashMenuController } from "
 export { createImageMenu } from "./createImageMenu";
 export type { ImageMenuOptions, ImageMenuCallbacks, ImageMenuInfo } from "./createImageMenu";
 
+export { createTableMenu } from "./createTableMenu";
+export type { TableMenuOptions, TableMenuCallbacks, TableMenuInfo } from "./createTableMenu";
+
+export {
+  subscribeHoverTarget,
+  DEFAULT_HOVER_SHOW_DELAY,
+  DEFAULT_HOVER_HIDE_DELAY,
+} from "./subscribeHoverTarget";
+export type {
+  PopoverPresentation,
+  HoverOption,
+  HoverDelays,
+  SubscribeHoverTargetOptions,
+} from "./subscribeHoverTarget";
+
 export { subscribeViewUpdates } from "./subscribeViewUpdates";
 export { subscribeEditorFocusOutside, POPOVER_MARKER } from "./subscribeEditorFocusOutside";
 export { isAnchorInsideContainer } from "./anchorVisibility";

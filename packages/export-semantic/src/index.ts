@@ -5,21 +5,33 @@
 // other extensions rely on. Extensions that WRITE semantic handlers opt in with
 //   import "@scrivr/export-semantic/augment";
 export { toSemanticUnits } from "./toSemanticUnits";
+export { resolveNodeId } from "./id";
+export type { BlockEntry } from "./id";
+export { toDocumentOutline } from "./outline";
+export type { DocumentOutlineOptions } from "./outline";
 export { SemanticExport } from "./SemanticExport";
 export {
   unitEmbeddingInput,
   unitContentHash,
   unitRichHash,
+  unitRichInput,
   semanticPartRichHash,
+  semanticPartRichInput,
+  unitAlignmentInput,
+  unitContentKey,
   diffSemanticUnits,
 } from "./changeDetection";
-export type { SemanticUnitDiff } from "./changeDetection";
+export type { SemanticUnitDiff, UnitRichInput, SemanticPartRichInput } from "./changeDetection";
 export type {
   SemanticUnit,
+  OutlineSection,
   SemanticUnitType,
   SemanticRole,
   SemanticTextView,
   SemanticChange,
+  SemanticNodeChange,
+  SemanticImage,
+  SemanticPart,
   InlineSpan,
   InlineMark,
   TableCells,

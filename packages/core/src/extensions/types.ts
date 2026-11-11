@@ -1,4 +1,5 @@
 import type { TextMeasurerLike } from "../layout/TextMeasurer";
+import type { InlineRegistry } from "../layout/BlockRegistry";
 import type { LayoutFontResolver } from "../fonts/layoutResolver";
 /**
  * Extension system types.
@@ -44,11 +45,14 @@ import type { NodeSpec, MarkSpec, AttributeSpec, Schema, Node, Mark, Slice } fro
 import type { MarkdownSerializer, MarkdownSerializerState } from "prosemirror-markdown";
 import type { Command, Plugin, Transaction, EditorState, Selection } from "prosemirror-state";
 import type { EditorEvents, SafeFlatCommands } from "../types/augmentation";
+import type { DeferredEditOptions } from "../BaseEditor";
 import type { InputRule } from "prosemirror-inputrules";
 import type { CharacterMap } from "../layout/CharacterMap";
 import type { PageConfig, DocumentLayout } from "../layout/PageLayout";
 import type { BlockStrategy, InlineStrategy, NodeLayout } from "../layout/BlockRegistry";
-import type { BlockStyle } from "../layout/FontConfig";
+import type { AnchoredSpec } from "../layout/AnchoredObjects";
+import type { MarkerPainter } from "../layout/markers";
+import type { BlockStyle, FontConfig } from "../layout/FontConfig";
 import type { ParsedFont } from "../layout/StyleResolver";
 import type { PageChromeContribution } from "../layout/PageMetrics";
 import type { SurfaceOwnerRegistration } from "../surfaces/types";
@@ -58,6 +62,7 @@ import type { SelectionController } from "../SelectionController";
 import type { CursorManager } from "../renderer/CursorManager";
 import type { ResolvedTheme } from "../model/theme";
 import type { CloneIdMap } from "../model/assignBlockIds";
+import type { HoverResolver, HoverTarget } from "../hover/types";
 import type {
   SelectionBehavior,
   HitTester,
@@ -73,11 +78,33 @@ import type {
  * A ProseMirror node spec plus the Scrivr-side declarations that go with it.
  *
  * `layout` says how the node participates in the visual flow — a dimension
- * independent of what it means in the document tree. Omit it and the node
- * behaves as `{ kind: "block" }`, which is what every built-in node relies on.
+ * independent of what it means in the document tree. Omit it and a node that
+ * holds inline content or nothing behaves as `{ kind: "block" }`, while a node
+ * whose content is blocks behaves as `{ kind: "transparent" }`; declare
+ * `{ kind: "block" }` to give such a node its own box and painter.
  */
 export type ScrivrNodeSpec = NodeSpec & {
   layout?: NodeLayout;
+  /**
+   * The node ends a section, when it is a leaf with a `settings` attr, which
+   * holds the settings of the section it ends (see `deriveSections`). Only one
+   * between the document's own blocks ends a section.
+   */
+  sectionBoundary?: boolean;
+  /**
+   * The node's level in the document outline, 1 at the top, or null when it
+   * heads no section: read by the PDF bookmarks and the semantic outline.
+   * Called for every block those visit, so it must be pure and must not throw.
+   */
+  outlineLevel?: (node: Node) => number | null;
+  /**
+   * How an inline node is placed as an anchored object, both ways: `read`
+   * gives its placement (floated beside or around the text, or `wrapMode:
+   * "inline"` to sit in its line), `write` the attrs that store a placement
+   * patch. Read through `anchoredOf` and written through `placementAttrs` by
+   * layout, hit-testing, drag, resize and the exporters.
+   */
+  anchored?: AnchoredSpec;
 };
 
 // ── Overlay render handler ─────────────────────────────────────────────────────
@@ -163,6 +190,17 @@ export interface IBaseEditor {
   getExportContributions(): ExportContributionMap[];
   /** Import contributions from all extensions, in registration order. */
   getImportContributions(): ImportContributionMap[];
+  /** Marker painters from all extensions, by key; a later extension's replaces an earlier one's. */
+  getMarkerPainters(): ReadonlyMap<string, MarkerPainter>;
+  /** Font modifiers from all extensions, by mark name: how each mark changes a run's face. */
+  getFontModifiers(): ReadonlyMap<string, FontModifier>;
+  /** Block styles from all extensions, by style key, before the document's family is applied. */
+  getBlockStyles(): FontConfig;
+  /**
+   * Rewrites of copied markup from all extensions, in registration order:
+   * pass them to `serializeSelectionToHtml` to serialize what a copy would.
+   */
+  getCopyHtmlTransforms(): CopyHtmlTransform[];
   /**
    * Names of doc-level attributes declared by extensions via `addDocAttrs()`.
    *
@@ -172,6 +210,13 @@ export interface IBaseEditor {
    */
   getDocAttrNames(): string[];
   /**
+   * Inline node strategies, by node type name. On the base contract because
+   * measuring an inline atom is layout, not paint — a headless caller that lays
+   * a document out must be able to reach a strategy, and it holds this interface
+   * rather than the class.
+   */
+  readonly inlineRegistry: InlineRegistry;
+  /**
    * Look up a registered extension by name. Returns `null` when the
    * extension is not present. Callers that need typed options should narrow
    * with a runtime guard — the return type widens to the un-parameterised
@@ -179,6 +224,46 @@ export interface IBaseEditor {
    * to option shape.
    */
   findExtension(name: string): Extension | null;
+  /**
+   * Run asynchronous work and write its result at a position that survives
+   * whatever happens meanwhile.
+   *
+   * The seam for an extension that must fetch before it can edit. Without it
+   * the position captured at dispatch is stale when the answer arrives — so
+   * the write lands on text the author has since selected, and replaces it —
+   * and a write into a read-only or destroyed editor vanishes or lands on a
+   * state nobody will save. `onAbandoned` says which of those happened.
+   */
+  deferEdit<T>(options: DeferredEditOptions<T>): void;
+  /**
+   * Run a command named by a declared spec — a `ToolbarItemSpec` or a
+   * `SlashCommandSpec` — with the arguments it carries.
+   *
+   * Those specs are data: they name a command rather than closing over one, so
+   * the surface that renders them dispatches by name. An unknown name returns
+   * false, like any command that did not run — a spec can name a command from
+   * an extension this editor was not built with.
+   */
+  runCommand(name: keyof SafeFlatCommands, args?: unknown[]): boolean;
+  /**
+   * The listable half of the menu, ordered by `group` then `order`.
+   *
+   * Entries that must be searched come from `resolveSlashCommands` instead.
+   */
+  getSlashCommands(): SlashCommandSpec[];
+  /**
+   * Ask every registered resolver what matches `query`.
+   *
+   * Throws `signal.reason` if the query was abandoned — before the resolvers
+   * run, and again once they answer, so a resolver that ignores its signal
+   * still cannot replace the entries for the query the reader is now on.
+   * A caller that holds the result is holding entries for a live query.
+   *
+   * A resolver that rejects is dropped from the round with a warning. One
+   * provider being down must not empty the menu — the formatting commands have
+   * to still be there when the network is not.
+   */
+  resolveSlashCommands(query: string, signal: AbortSignal): Promise<SlashCommandSpec[]>;
 }
 
 /**
@@ -228,13 +313,27 @@ export interface IEditor extends IBaseEditor {
    */
   getViewportRect(from: number, to: number): DOMRect | null;
   /**
-   * Returns the full visual viewport rect of the inline object at docPos
-   * (image, widget). Unlike getViewportRect, this uses the actual object
-   * render bounds — not the cursor-sized glyph — so the rect height matches
-   * the real image height and rect.bottom is the correct anchor for a popover.
-   * Returns null if the object has not been rendered yet.
+   * The first of `getNodeViewportRects(docPos)`, or null when the node has no
+   * fragment on a mounted page. For an image this is its full render bounds —
+   * not the cursor-sized glyph `getViewportRect` gives — so rect.bottom is the
+   * correct anchor for a popover.
    */
   getNodeViewportRect(docPos: number): DOMRect | null;
+  /**
+   * Viewport rects for every painted fragment of the node at `docPos`, in page
+   * order — a table split across pages has one per page. Image-like nodes have
+   * one. Empty when the node is not laid out.
+   */
+  getNodeViewportRects(docPos: number): DOMRect[];
+  /**
+   * Viewport rects for each line the range `[from, to)` paints on, in page and
+   * line order — `Range.getClientRects()` for the canvas. A link wrapped onto
+   * two lines, or across a page, has one per line. Empty when nothing in the
+   * range is painted on a mounted page.
+   */
+  getRangeViewportRects(from: number, to: number): DOMRect[];
+  /** What the pointer is over, innermost first. Empty when over nothing. */
+  getHoverTargets(): readonly HoverTarget[];
   /**
    * Current viewport DOMRect of the scrollable container, or null when no
    * scroll container is attached. Popover controllers use this to hide when
@@ -401,19 +500,36 @@ export type PasteTransform = (slice: Slice) => Slice;
  */
 export type PasteHtmlTransform = (root: HTMLElement) => void;
 
-export interface MarkdownBlockRule {
-  /** Tested against each trimmed line of pasted text. */
-  pattern: RegExp;
-  /**
-   * Called when pattern matches. Return a ProseMirror Node or null to fall through.
-   * parseInline is the paste transformer's inline parser — use it to support
-   * **bold** / *italic* inside custom block content.
-   */
-  createNode(
-    match: RegExpMatchArray,
-    schema: Schema,
-    parseInline: (text: string) => Node[],
-  ): Node | null;
+/**
+ * Rewrites copied HTML in place, before it reaches the clipboard. Contributed
+ * via `addCopyHtmlTransforms`; leave the tree untouched to decline. `root`
+ * wraps the copied markup: edit what it holds, since a selection that writes
+ * its own form (a cell selection's table) is copied without the wrapper.
+ * Must not throw — copy has already claimed the clipboard when it runs.
+ */
+export type CopyHtmlTransform = (root: HTMLElement) => void;
+
+/**
+ * How pasted files of one kind become a node, declared by the extension that
+ * owns the node (`addPasteFiles`, keyed by node type name). Core reads or
+ * uploads each file to a `src`, gates it as an image URL and measures it; a
+ * placeholder holds its place meanwhile.
+ */
+export interface PasteFileSpec {
+  /** Whether this node takes a pasted file. */
+  accepts(file: File): boolean;
+  /** The placeholder's attrs while the file resolves; `id` marks it. */
+  pending(id: string): Record<string, unknown>;
+  /** The placeholder's `id`, or null for any other node. */
+  pendingIdOf(node: Node): string | null;
+  /** The node's attrs once the file has a `src` and a size. */
+  resolved(file: { src: string; width: number; height: number }): Record<string, unknown>;
+}
+
+/** A node type and the pasted files it takes. */
+export interface PasteFileHandler {
+  node: string;
+  spec: PasteFileSpec;
 }
 
 /**
@@ -444,16 +560,100 @@ export interface ToolbarItemSpec {
    * should share a group name (e.g. "format", "heading", "size", "family").
    */
   group?: string;
+  /** Returns true when this item should appear active/pressed. */
+  isActive: (state: ToolbarState) => boolean;
+}
+
+/** A node around the caret's block: its type name and attrs. */
+export interface BlockAncestor {
+  type: string;
+  attrs: Record<string, unknown>;
+}
+
+/**
+ * The node holding the selection's start — its textblock for a text
+ * selection, the cell for a cell selection — and the nodes around it,
+ * innermost first.
+ */
+export interface BlockInfo {
+  blockType: string;
+  blockAttrs: Record<string, unknown>;
+  ancestors: BlockAncestor[];
+}
+
+/**
+ * What a toolbar item reads to show itself pressed: the marks at the caret
+ * (on every character of a range) and its block: `blockType`/`blockAttrs` the
+ * caret's own textblock, `ancestors` the nodes around it, innermost first (a
+ * list item, its list, a table cell…).
+ */
+export interface ToolbarState extends BlockInfo {
+  activeMarks: string[];
+  /** Attrs of each active mark, by mark name, e.g. `{ color: { color: "#dc2626" } }`. */
+  activeMarkAttrs: Record<string, Record<string, unknown>>;
+}
+
+// ── Slash commands ─────────────────────────────────────────────────────────────
+
+/**
+ * An entry in the "/" menu, declared by the extension that owns what it
+ * inserts. A command name and arguments, never a closure — the same refusal
+ * `ToolbarItemSpec` makes, and what lets a host sort, filter and render these
+ * without holding editor internals.
+ */
+export interface SlashCommandSpec {
+  /** Namespaced, stable, unique across extensions — e.g. "clause.insert". */
+  id: string;
+  /** The entry's name, as the reader reads it. */
+  label: string;
+  /** Longer text under the label. */
+  description?: string;
+  /** Logical grouping; renderers draw dividers between groups. */
+  group?: string;
+  /** Lower sorts first within a group. Defaults to `DEFAULT_SLASH_ORDER`. */
+  order?: number;
   /**
-   * Returns true when this item should appear active/pressed.
-   * The 4th param (activeMarkAttrs) is optional — existing 3-param functions still work.
+   * The command name to call on editor.commands, typed against the augmented
+   * `Commands<ReturnType>` interface the same way `ToolbarItemSpec.command` is.
    */
-  isActive: (
-    activeMarks: string[],
-    blockType: string,
-    blockAttrs: Record<string, unknown>,
-    activeMarkAttrs?: Record<string, Record<string, unknown>>
-  ) => boolean;
+  command: keyof SafeFlatCommands;
+  /** Extra arguments passed verbatim to the command when the entry is chosen. */
+  args?: unknown[];
+}
+
+/** Where a spec sorts within its group when it states no `order`. */
+export const DEFAULT_SLASH_ORDER = 100;
+
+/**
+ * Answers the entries that have to be searched rather than listed — a clause
+ * library, a document index, anything whose set is not known up front.
+ *
+ * `signal` is required rather than optional: an author typing `conf` issues
+ * four searches, and without cancellation the menu shows whichever response
+ * happens to arrive last.
+ */
+export type SlashCommandResolver = (
+  query: string,
+  signal: AbortSignal,
+) => Promise<SlashCommandSpec[]>;
+
+/**
+ * What one extension contributes to the slash menu.
+ *
+ * Two fields rather than one async function. `items` is known up front and
+ * paints on the first frame; `resolve` is I/O, and only that half needs a
+ * spinner. Folding them together would push the formatting commands through a
+ * promise for no reason, or weaken the synchronous guarantee the static path
+ * gives a renderer.
+ *
+ * An extension returns a list of these, so one fronting several sources gives
+ * each source its own resolver.
+ */
+export interface SlashCommandContribution {
+  /** Always offered; the host filters them against the query. */
+  items?: SlashCommandSpec[];
+  /** Query-driven. Called as the author types; may be cancelled. */
+  resolve?: SlashCommandResolver;
 }
 
 // ── Mark decorator ─────────────────────────────────────────────────────────────
@@ -572,6 +772,20 @@ export interface Phase1Context<Options = object> {
  */
 export interface ExtensionContext<Options = object> extends Phase1Context<Options> {
   readonly schema: Schema;
+  /**
+   * The editor these contributions belong to.
+   *
+   * A thunk, not a value: contexts are built while the editor is still being
+   * constructed, so this is valid inside a command body — which runs later —
+   * and not while `addCommands()` itself is executing.
+   *
+   * Reach for it only when a contribution genuinely needs the editor rather
+   * than the `state` it is handed; the case it exists for is work that
+   * finishes after an await, where the state a command received is stale.
+   * Throws when no editor owns the manager, which is only true in a test that
+   * built one directly.
+   */
+  readonly editor: () => IBaseEditor;
 }
 
 /**
@@ -579,7 +793,8 @@ export interface ExtensionContext<Options = object> extends Phase1Context<Option
  * fully resolved, so the merged markdown parser tokens are available — letting
  * extensions seed the document from markdown without an editor instance.
  */
-export interface InitialDocContext<Options = object> extends ExtensionContext<Options> {
+export interface InitialDocContext<Options = object> extends Phase1Context<Options> {
+  readonly schema: Schema;
   /**
    * Parse a markdown string into a ProseMirror document using the merged token
    * map from all registered extensions. Same algorithm as `editor.parseMarkdown()`.
@@ -678,7 +893,10 @@ export interface ExtensionConfig<Options = object> {
    * `{ kind: "block" }` (the default) and registers a painter through
    * `addLayoutHandlers`. A node that exists structurally but has no visual box
    * of its own is `{ kind: "transparent" }`: it stays in the tree, and its
-   * children are laid out into the enclosing flow as if it weren't there.
+   * children are laid out into the enclosing flow as if it weren't there. A
+   * node whose content is blocks must declare `{ kind: "block" }` explicitly to
+   * keep its own box and painter; left undeclared, its blocks are laid out in
+   * its place.
    */
   addNodes?(this: Phase1Context<Options>): Record<string, ScrivrNodeSpec>;
 
@@ -840,6 +1058,18 @@ export interface ExtensionConfig<Options = object> {
   addInlineHandlers?(this: Phase1Context<Options>): Record<string, InlineStrategy>;
 
   /**
+   * Painters for the markers this extension's wrappers hang (see
+   * `WrapperLayout`), by the key a `BlockMarker` names: canvas and PDF side by
+   * side, so a marker draws the same on screen and in the file.
+   *
+   * @example
+   * addMarkerPainters() {
+   *   return { checkbox: { canvas: (ctx, marker) => …, pdf: (marker, ctx) => … } };
+   * }
+   */
+  addMarkerPainters?(this: Phase1Context<Options>): Record<string, MarkerPainter>;
+
+  /**
    * Block styles contributed by this extension.
    * Merged into the FontConfig used by layoutDocument.
    * Keys are node type names or compound keys like "heading_1".
@@ -873,6 +1103,13 @@ export interface ExtensionConfig<Options = object> {
   addToolbarItems?(this: Phase1Context<Options>): ToolbarItemSpec[];
 
   /**
+   * Slash-menu entries this extension contributes — declared where the node is
+   * defined, so the menu that inserts a thing is owned by whoever owns it.
+   * Data only, like `addToolbarItems`.
+   */
+  addSlashCommands?(this: Phase1Context<Options>): SlashCommandContribution[];
+
+  /**
    * Node actions this extension contributes (contextual operations on its nodes).
    * Actions are registered against a selection kind, evaluated on selection
    * changes, and exposed via `editor.getNodeActions()`.
@@ -895,18 +1132,18 @@ export interface ExtensionConfig<Options = object> {
   addHitTester?(this: Phase1Context<Options>): HitTester[];
 
   /**
+   * Hover resolvers — claim a mark (link) or a node (table cell) under the
+   * pointer as a `HoverTarget`. Unlike hit testers, every claim is kept: the
+   * pointer over a link in a cell is over the link, the cell and the table.
+   */
+  addHoverResolvers?(this: Phase1Context<Options>): HoverResolver[];
+
+  /**
    * Pointer-gesture providers — begin a drag for a `HitTarget` this extension
    * owns (e.g. cell drag-select). Kept separate from `addSelectionBehavior` so
    * non-pointer selection kinds need not implement one.
    */
   addSelectionGesture?(this: Phase1Context<Options>): SelectionGestureProvider[];
-
-  /**
-   * Custom markdown block rules for PasteTransformer.
-   * Tried before built-in heading/bullet/ordered rules on each pasted line.
-   * Phase 1 — no schema needed at definition time; schema is passed to createNode at runtime.
-   */
-  addMarkdownRules?(this: Phase1Context<Options>): MarkdownBlockRule[];
 
   /**
    * Rewrite pasted content before it enters the document.
@@ -933,6 +1170,25 @@ export interface ExtensionConfig<Options = object> {
    * Transforms run in registration order, each seeing the previous one's edits.
    */
   addPasteHtmlTransforms?(this: Phase1Context<Options>): PasteHtmlTransform[];
+
+  /**
+   * Rewrite copied HTML before it reaches the clipboard.
+   *
+   * The counterpart to `addPasteHtmlTransforms`: what the schema states one
+   * way and other editors read another (a merge as a cell per row versus one
+   * `rowspan` cell) is restated here, or state that must stay in the editor is
+   * stripped. Runs on every copy and cut, including a selection's own form
+   * (a cell selection's table).
+   *
+   * Transforms run in registration order, each seeing the previous one's edits.
+   */
+  addCopyHtmlTransforms?(this: Phase1Context<Options>): CopyHtmlTransform[];
+
+  /**
+   * Pasted files this extension's nodes take, keyed by node type name: which
+   * files, and the attrs of the placeholder and of the resolved node.
+   */
+  addPasteFiles?(this: Phase1Context<Options>): Record<string, PasteFileSpec>;
 
   /**
    * ProseMirror input rules (auto-format while typing).
@@ -1057,19 +1313,24 @@ export interface ResolvedExtension {
   layoutHandlers: Record<string, BlockStrategy>;
   /** Map of node type name → InlineStrategy, contributed by this extension. */
   inlineHandlers: Record<string, InlineStrategy>;
+  /** Map of marker key → MarkerPainter, contributed by this extension. */
+  markerPainters: Record<string, MarkerPainter>;
   /** Block styles contributed by this extension (merged into FontConfig). */
   blockStyles: Record<string, BlockStyle>;
   markDecorators: Map<string, MarkDecorator>;
   fontModifiers: Map<string, FontModifier>;
   toolbarItems: ToolbarItemSpec[];
+  slashCommands: SlashCommandContribution[];
   nodeActions: NodeActionContribution[];
   selectionBehaviors: SelectionBehavior[];
   hitTesters: HitTester[];
+  hoverResolvers: HoverResolver[];
   selectionGestures: SelectionGestureProvider[];
   inputHandlers: Record<string, InputHandler>;
-  markdownRules: MarkdownBlockRule[];
   pasteTransforms: PasteTransform[];
   pasteHtmlTransforms: PasteHtmlTransform[];
+  copyHtmlTransforms: CopyHtmlTransform[];
+  pasteFiles: Record<string, PasteFileSpec>;
   inputRules: InputRule[];
   markdownParserTokens: Record<string, MarkdownParserTokenSpec>;
   markdownSerializerRules: MarkdownSerializerRules;

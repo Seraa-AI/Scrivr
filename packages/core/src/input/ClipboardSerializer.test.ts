@@ -6,6 +6,8 @@ import { serializeSelectionToHtml } from "./ClipboardSerializer";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
+const copyTransforms = new ExtensionManager([StarterKit]).buildCopyHtmlTransforms();
+
 function makeContext() {
   const manager = new ExtensionManager([StarterKit]);
   const schema = manager.schema;
@@ -35,13 +37,13 @@ describe("serializeSelectionToHtml", () => {
   it("returns null for a collapsed (empty) selection", () => {
     const { schema, state } = makeContext();
     const s = withText(state, "Hello");
-    expect(serializeSelectionToHtml(s, schema)).toBeNull();
+    expect(serializeSelectionToHtml(s, schema, copyTransforms)).toBeNull();
   });
 
   it("serializes plain text and contains the text content", () => {
     const { schema, state } = makeContext();
     const s = selectAll(withText(state, "Hello"));
-    const html = serializeSelectionToHtml(s, schema);
+    const html = serializeSelectionToHtml(s, schema, copyTransforms);
     expect(html).not.toBeNull();
     expect(html).toContain("Hello");
     // Note: when the selection is entirely within one block, DOMSerializer emits
@@ -57,7 +59,7 @@ describe("serializeSelectionToHtml", () => {
     const boldMark = schema.marks["bold"]!;
     s = s.apply(s.tr.addMark(1, 6, boldMark.create()));
     s = selectAll(s);
-    const html = serializeSelectionToHtml(s, schema);
+    const html = serializeSelectionToHtml(s, schema, copyTransforms);
     expect(html).not.toBeNull();
     expect(html).toContain("<strong>");
     expect(html).toContain("Hello");
@@ -71,7 +73,7 @@ describe("serializeSelectionToHtml", () => {
     const italicMark = schema.marks["italic"]!;
     s = s.apply(s.tr.addMark(1, 6, italicMark.create()));
     s = selectAll(s);
-    const html = serializeSelectionToHtml(s, schema);
+    const html = serializeSelectionToHtml(s, schema, copyTransforms);
     expect(html).not.toBeNull();
     expect(html).toContain("<em>");
     expect(html).toContain("World");
@@ -84,7 +86,7 @@ describe("serializeSelectionToHtml", () => {
     const headingType = schema.nodes["heading"]!;
     s = s.apply(s.tr.setBlockType(1, s.doc.content.size - 1, headingType, { level: 2 }));
     s = selectAll(s);
-    const html = serializeSelectionToHtml(s, schema);
+    const html = serializeSelectionToHtml(s, schema, copyTransforms);
     expect(html).not.toBeNull();
     expect(html).toContain("<h2");
     expect(html).toContain("My Title");
@@ -96,7 +98,7 @@ describe("serializeSelectionToHtml", () => {
     const headingType = schema.nodes["heading"]!;
     s = s.apply(s.tr.setBlockType(1, s.doc.content.size - 1, headingType, { level: 1 }));
     s = selectAll(s);
-    const html = serializeSelectionToHtml(s, schema);
+    const html = serializeSelectionToHtml(s, schema, copyTransforms);
     expect(html).toContain("<h1");
   });
 
@@ -106,7 +108,7 @@ describe("serializeSelectionToHtml", () => {
     const headingType = schema.nodes["heading"]!;
     s = s.apply(s.tr.setBlockType(1, s.doc.content.size - 1, headingType, { level: 3, fontFamily: "Verdana" }));
     s = selectAll(s);
-    const html = serializeSelectionToHtml(s, schema);
+    const html = serializeSelectionToHtml(s, schema, copyTransforms);
     expect(html).not.toBeNull();
     // happy-dom normalizes CSS properties to add a space after the colon
     expect(html).toMatch(/font-family:\s*Verdana/);
@@ -121,7 +123,7 @@ describe("serializeSelectionToHtml", () => {
     const headingType = schema.nodes["heading"]!;
     s = s.apply(s.tr.setBlockType(1, s.doc.content.size - 1, headingType, { level: 1, fontFamily: "Arial" }));
     s = selectAll(s);
-    const html = serializeSelectionToHtml(s, schema);
+    const html = serializeSelectionToHtml(s, schema, copyTransforms);
     expect(html).toContain("<h1");
     expect(html).toMatch(/font-family:\s*Arial/);
   });
@@ -131,7 +133,7 @@ describe("serializeSelectionToHtml", () => {
     // "Hello World" — select only "Hello" (positions 1–6)
     let s = withText(state, "Hello World");
     s = selectRange(s, 1, 6);
-    const html = serializeSelectionToHtml(s, schema);
+    const html = serializeSelectionToHtml(s, schema, copyTransforms);
     expect(html).not.toBeNull();
     expect(html).toContain("Hello");
     expect(html).not.toContain("World");

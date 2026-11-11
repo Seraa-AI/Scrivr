@@ -38,7 +38,7 @@ export function reconstructLists(
       const startNumId = b.attrs.numbering.numId;
       const endIdx = findListEnd(blocks, i, startNumId, startIlvl);
       const slice = blocks.slice(i, endIdx);
-      const list = buildList(slice, startIlvl, numbering);
+      const list = buildList(slice, 0, numbering);
       if (list) out.push(list);
       i = endIdx;
     } else {
@@ -97,12 +97,14 @@ function findListEnd(
 /**
  * Build a nested list from a slice of consecutive list paragraphs.
  *
- * `targetIlvl` is the ilvl at which to open items here; paragraphs deeper
- * than that get attached as nested lists inside the previous item.
+ * The list opens at its first paragraph's `ilvl`; `expectedIlvl` is the level
+ * its place puts it at, and items Word starts deeper sit that many levels
+ * further in (`levelOffset`), rather than under empty items. Paragraphs
+ * deeper than the list's level are nested inside the previous item.
  */
 function buildList(
   slice: DocxBlock[],
-  targetIlvl: number,
+  expectedIlvl: number,
   numbering: NumberingResolver,
 ): DocxBlock | null {
   // Identify the list at this level by its leading paragraph's numId.
@@ -110,6 +112,8 @@ function buildList(
   if (!first || !isListParagraph(first)) return null;
   const numId = first.attrs.numbering.numId;
   const listType = numbering.resolve(numId);
+  const targetIlvl = Math.max(first.attrs.numbering.ilvl, expectedIlvl);
+  const levelOffset = targetIlvl - expectedIlvl;
 
   const items: DocxListItem[] = [];
   let i = 0;
@@ -143,11 +147,17 @@ function buildList(
       continue;
     }
     // ilvl === targetIlvl — new item.
-    items.push({ content: [stripNumberingMarker(b)] });
+    items.push({ content: [stripNumberingMarker(b)], ...(levelOffset > 0 ? { levelOffset } : {}) });
     i++;
   }
 
-  return { type: "list", listType, items };
+  const start = listType === "ordered" ? numbering.start(numId, targetIlvl) : 1;
+  return {
+    type: "list",
+    listType,
+    items,
+    ...(start !== 1 ? { start } : {}),
+  };
 }
 
 /**

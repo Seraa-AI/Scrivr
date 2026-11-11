@@ -3,6 +3,7 @@ import "./augmentation";
 
 export { PdfExport } from "./PdfExport";
 export type { PdfHandlers, PdfNodeHandler, PdfChromeHandler } from "./augmentation";
+export type { PdfEmbedSource } from "@scrivr/core";
 // The handler contract lives in core so an extension can describe its node and
 // its mark without depending on this package; re-exported for consumers already
 // importing it from here.
@@ -20,6 +21,7 @@ export type {
   PdfTextOp,
   PdfLineOp,
   PdfRectOp,
+  PdfEllipseOp,
   PdfImageOp,
   PdfFontHandle,
   PdfImageHandle,
@@ -30,7 +32,9 @@ export type { PdfMetadata } from "./metadata";
 export type { ImageResolver, ImageBytes } from "./fetchImage";
 
 import { PDFDocument, type PDFPage, type PDFImage } from "pdf-lib";
+import type { Node as PmNode } from "@scrivr/core/pm";
 import type {
+  PdfEmbedSource,
   PdfMarkHandler,
   IEditor,
   IBaseEditor,
@@ -44,6 +48,7 @@ import {
   chromeBlocks,
   compareAnchoredObjectPaintOrder,
   defaultPdfTheme,
+  markerAnchorOf,
 } from "@scrivr/core";
 import { createDefaultImageResolver } from "./fetchImage";
 import type { ImageResolver } from "./fetchImage";
@@ -57,7 +62,7 @@ import {
 } from "./fonts";
 import { preparePdfLayout } from "./prepareLayout";
 import { applyMetadata, type PdfMetadata } from "./metadata";
-import { addHeadingOutline } from "./outline";
+import { addOutline } from "./outline";
 
 /** Public types */
 
@@ -88,7 +93,7 @@ export interface PdfExportOptions {
    */
   metadata?: PdfMetadata;
   /**
-   * Build bookmarks from the document's headings. On by default: a reader
+   * Build bookmarks from the blocks whose specs declare an outline level. On by default: a reader
    * opening a long agreement has no way through it but scrolling without them.
    */
   outline?: boolean;
@@ -178,7 +183,13 @@ async function writePdf(
     after: Array<(ctx: PdfContext) => void | Promise<void>>;
   } = { before: [], after: [] };
 
+  const markerPainters = editor.getMarkerPainters();
+  const removers: Array<(node: PmNode) => boolean> = [];
+  const embedSources = new Map<string, PdfEmbedSource>();
+
   for (const contrib of editor.getExportContributions()) {
+    const remover = proposedRemoverOf(contrib);
+    if (remover) removers.push(remover);
     const pdfContrib = contrib.pdf;
     if (!pdfContrib) continue;
     for (const [name, handler] of Object.entries(pdfContrib.nodes ?? {})) {
@@ -186,6 +197,9 @@ async function writePdf(
     }
     for (const [name, handler] of Object.entries(pdfContrib.marks ?? {})) {
       markHandlers.set(name, handler);
+    }
+    for (const [name, source] of Object.entries(pdfContrib.embeds ?? {})) {
+      embedSources.set(name, source);
     }
     for (const [name, handler] of Object.entries(pdfContrib.chrome ?? {})) {
       chromeHandlers.set(name, handler);
@@ -233,6 +247,7 @@ async function writePdf(
     pdfDoc,
     layout,
     options?.resolveImage ?? createDefaultImageResolver(options?.onImageRefused),
+    (node) => embedSources.get(node.type.name)?.(node) ?? null,
   );
 
   // Mutable page ref — updated per page in the loop. Draw helpers read lazily.
@@ -263,22 +278,40 @@ async function writePdf(
    * over the collected handlers, and hung on the context so nested content and
    * chrome reach the same one rather than each re-deriving it.
    */
+  const inBlockBox = (block: LayoutBlock, draw: () => void): void => {
+    const { x, y, width } = ctx;
+    ctx.x = block.x;
+    ctx.y = block.y;
+    ctx.width = block.width;
+    try {
+      draw();
+    } finally {
+      // Nested dispatch must return the caller's box, even if a child fails.
+      ctx.x = x;
+      ctx.y = y;
+      ctx.width = width;
+    }
+  };
   const renderBlocks = (blocks: readonly LayoutBlock[]): void => {
     for (const block of blocks) {
+      if (block.kind === "composite") {
+        // A composite unit's handler draws only its decoration (a table row's
+        // grid), and a unit without one draws none; what its regions hold is
+        // drawn here, as the canvas paints it.
+        const decorate = nodeHandlers.get(block.node.type.name);
+        if (decorate) inBlockBox(block, () => decorate(block, ctx));
+        renderBlocks((block.regions ?? []).flatMap((region) =>
+          region.blocks.map((child) => ({ ...child, y: block.y + child.y }))));
+        continue;
+      }
       const handler = resolveNodeHandler(block.node.type.name);
       if (!handler) continue;
-      const { x, y, width } = ctx;
-      ctx.x = block.x;
-      ctx.y = block.y;
-      ctx.width = block.width;
-      try {
+      inBlockBox(block, () => {
         handler(block, ctx);
-      } finally {
-        // Nested dispatch must return the caller's box, even if a child fails.
-        ctx.x = x;
-        ctx.y = y;
-        ctx.width = width;
-      }
+        // After the block, so its background cannot cover the marker.
+        const marker = markerAnchorOf(block);
+        if (marker) markerPainters.get(marker.painter)?.pdf(marker, ctx);
+      });
     }
   };
 
@@ -355,8 +388,22 @@ async function writePdf(
   // After the pages exist, because a bookmark's destination names the page
   // object it jumps to.
   applyMetadata(pdfDoc, options?.metadata);
-  if (options?.outline !== false) addHeadingOutline(pdfDoc, layout);
+  if (options?.outline !== false) addOutline(pdfDoc, layout, (node) => removers.some((removed) => removed(node)));
   return pdfDoc.save();
+}
+
+/**
+ * What the proposed view leaves out, as an extension declares it on the
+ * semantic lane (`isRemoved`): a bookmark is titled by its block's proposed
+ * text, as the semantic outline titles a section. Read by shape, since this package does
+ * not depend on the semantic one.
+ */
+function proposedRemoverOf(contrib: object): ((node: PmNode) => boolean) | null {
+  if (!("semantic" in contrib)) return null;
+  const semantic: unknown = contrib.semantic;
+  if (typeof semantic !== "object" || semantic === null || !("isRemoved" in semantic)) return null;
+  const isRemoved: unknown = semantic.isRemoved;
+  return typeof isRemoved === "function" ? (node) => isRemoved(node) === true : null;
 }
 
 // ── Anchored objects ────────────────────────────────────────────────────────
@@ -393,30 +440,25 @@ async function embedImages(
   pdfDoc: PDFDocument,
   layout: DocumentLayout,
   resolveImage: ImageResolver,
+  embedOf: (node: PmNode) => string | null,
 ): Promise<Map<string, PDFImage | null>> {
   const srcs = new Set<string>();
-
-  for (const object of layout.anchoredObjects ?? []) {
-    const src = object.node.attrs["src"] as string | undefined;
+  const add = (node: PmNode): void => {
+    const src = embedOf(node);
     if (src) srcs.add(src);
-  }
+  };
+
+  for (const object of layout.anchoredObjects ?? []) add(object.node);
 
   const collectFromBlock = (block: DocumentLayout["pages"][0]["blocks"][number]) => {
-    for (const cell of block.cells ?? []) {
-      for (const child of cell.blocks) collectFromBlock(child);
+    for (const region of block.regions ?? []) {
+      for (const child of region.blocks) collectFromBlock(child);
     }
 
-    if (block.node.type.name === "image") {
-      const src = block.node.attrs["src"] as string | undefined;
-      if (src) srcs.add(src);
-    }
-
+    add(block.node);
     for (const line of block.lines) {
       for (const span of line.spans) {
-        if (span.kind === "object" && span.node.type.name === "image") {
-          const src = span.node.attrs["src"] as string | undefined;
-          if (src) srcs.add(src);
-        }
+        if (span.kind === "object") add(span.node);
       }
     }
   };

@@ -1,5 +1,1021 @@
 # @scrivr/plugins
 
+## 1.0.23
+
+### Patch Changes
+
+- 31a013e: Agents can read the document as originally agreed, and structural edits know
+  when what they name has changed.
+
+  - **The original view.** `toSemanticUnits(editor, { view: "original" })` and
+    `ai.getRichBlocks({ view: "original" })` read the document as it was before
+    every pending proposal — what rejecting all of them would leave, computed by
+    TrackChanges' own Reject on a copy. Its units say `view: "original"` and carry
+    no `changes`. `SemanticTextView` is now `"proposed" | "original"`, and
+    `SemanticHandlers` gains `documentIn(doc, view)`.
+  - **Only the proposed view is editable.** `applyRichEdit` reports a unit read in
+    another view under the new `wrongView` list and writes nothing for it. A unit
+    hash covers its view when it is not the proposed one; proposed hashes are
+    unchanged.
+  - **Structural ops carry hashes.** `expectedContentHash` on an op's own block
+    and `anchorContentHash` on its anchor; a mismatch is reported in `stale` and
+    nothing is written. `applySemanticEdits` returns `SemanticEditResult`, which
+    adds `alreadyProposed` (a delete whose block another author already proposed
+    for deletion) and `anchorProposedForDeletion` (an anchor that disappears on
+    Accept). Both were refused before, inside `rejected`. Hashes are judged
+    against the units `getRichBlocks` hands out; an id the document does not hold
+    is `notFound`, not `stale`.
+  - `@scrivr/export-semantic` exports `resolveNodeId`, the id rule units are
+    keyed by; `@scrivr/plugins` exports `originalDocument(doc)`, the original
+    document with the mapping into it.
+
+- 4657757: Agents read pending tracked changes and can review them.
+
+  - `SemanticChange` gains `at`, `length`, `moveId`, `oldAttrs` and `image`.
+    Each change is placed by offset into the text it belongs to: `unit.text`,
+    `part.text` or `cell.text`. Its `id` is the act's id, the one to pass to
+    `reviewChanges`, shared by every piece of the act.
+  - `SemanticPart` gains `changes`. `UnitRichInput.changes` and
+    `SemanticPartRichInput.changes` carry them into the rich hashes.
+  - `SemanticUnit` and `SemanticPart` gain `proposedForDeletion: true` when the
+    block itself — not only its text — is proposed for deletion. Such a unit
+    cannot be edited (`applyRichEdit` rejects it) or placed after.
+  - `@scrivr/export-semantic` re-exports `SemanticImage` and `SemanticPart`.
+  - `SemanticHandlers` gains `nodeChanges`, which runs for every node, text
+    included: it reports records on a block's own attrs and on a text node's
+    formatting marks, returning `SemanticNodeChange[]` (exported from
+    `@scrivr/core` and `@scrivr/export-semantic`). It also gains
+    `isMarkRemoved`, so a formatting mark proposed for removal is left off the
+    proposed spans.
+  - `UnitCtx` gains `doc`, the document being read. **It is required:** code
+    that builds a `UnitCtx` itself, such as a mock in a handler test, must now
+    supply it.
+  - `semanticImage(node)` is exported from `@scrivr/core`; `moveShadowRanges(doc)`
+    from `@scrivr/plugins`.
+  - TrackChanges reports pending insertions, deletions (including line breaks),
+    block insertions and deletions, paragraph joins and splits, heading, list and
+    formatting changes, wrapped and structurally moved nodes, table rows and
+    moves. An act reads as one change per type: a replacement or a move is its
+    two halves under one id, a formatting change over text with different
+    prior marks is one change per run, and each image an act adds or removes is
+    a change of its own — all under the act's id. An insertion reads what
+    remains of it in the proposed text. Text whose deletion is already decided
+    stays in the proposed text, as `proposedForDeletion` reads it.
+  - A tracked record naming an operation the engine does not know — including
+    one like `"toString"` from a synced document — is read as an unknown
+    operation instead of breaking `findChanges`.
+  - `ai.reviewChanges(decisions)` accepts or rejects changes by the ids an agent
+    read, returning the `ReviewOutcome` type from `@scrivr/plugins`. It is a
+    pass-through to `reviewChanges`, so the host's `canAcceptReject` still
+    decides whether an agent may review.
+
+  **`SemanticChange.type` gains two members**, `suggestedInsert` and
+  `suggestedAttrs`. An exhaustive `switch` on it, or code that assumed every
+  change is a deletion, must handle both.
+
+  One-time changes to watch for:
+
+  - **Hashes change once for any unit with a pending change.** `unitRichHash` and
+    `semanticPartRichHash` now cover `changes` when there are any. A unit with
+    none hashes exactly as before. An `expectedContentHash` pinned before the
+    upgrade on a unit with any pending change reads `stale` once.
+  - **Change ids stored before the upgrade can change.** `SemanticChange.id` is
+    now the act's id: both halves of a replacement or a move, and every piece of
+    a block act, report one id.
+  - **A block proposed for deletion now appears in `getRichBlocks`,** reading
+    `text: ""` with its deletion in `changes`. Only the copy a pending move
+    leaves behind stays out.
+  - **A deleted hard break, and a formatting mark proposed for removal, leave the
+    proposed view,** where they used to read as present.
+  - **`markdown` is omitted on units with any pending change,** not only those
+    with pending deletions.
+  - **Block ids are now unique after a split.** `UniqueId` gives the block an
+    edit creates — a split's new half, a list Enter's new item, a pasted copy
+    (rules and page breaks included) — a fresh id when another block already
+    carries its id. The copy holding the block's first words keeps it: Enter at
+    the start of a paragraph or a list item makes the empty one before it the
+    new block. Only the
+    author's client assigns it; a change arriving through sync is never
+    re-keyed, and undo and redo never rename. A pending move's two copies still
+    share their id. A tracked cut pasted elsewhere is a move, as Word tracks it,
+    so a pasted block the cut took whole keeps its id (approved by the user,
+    2026-11-09). A pasted copy of a block that is still in place is not that
+    cut, even when it reads the same.
+    Documents saved with duplicates keep them; edits never repair them.
+  - **An id two live blocks carry is refused.**
+    `findLiveNodeById` returns `null` for an id two live blocks carry, so every
+    write that resolves an id through it — the agent's edits and structural ops,
+    ghost text, suggestions, image layout — refuses that id rather than acting
+    on the first copy. That can happen in a document saved with duplicates, or
+    after concurrent cut-and-paste of one block in collaboration.
+  - `blockIdOf(node)` is exported from `@scrivr/core` (approved by the user,
+    2026-11-09): the one answer to which nodes carry a block id. An empty
+    `nodeId` counts as none, so `UniqueId` now stamps it as it stamps `null`.
+  - `ReferenceAttrs` gains `originalNodeId`, the id the block had when a tracked
+    split was made. Rejecting the split gives the rejoined block that id back.
+  - **Track changes marks its own recording transaction `NORMALIZATION_META`,**
+    as bookkeeping nobody authored.
+  - **A tracked Enter in a list item is recorded as a split** of the item and
+    its paragraph, as Enter in a paragraph is, no longer as an inserted item.
+    Rejecting it joins both levels back under the ids they had (user decision,
+    2026-11-09). Which half of a split keeps its ids is core's rule in either
+    order of registering `UniqueId` and `TrackChanges`: `planDuplicateIdAssignments`
+    is exported from `@scrivr/core` for it (approved by the user, 2026-11-09).
+  - Deleting the moved copy of a pending move proposes its deletion and drops
+    its move record. Before, the move record was stripped from whatever block
+    then sat at the copy's old place: the block after it lost its id, level and
+    records, or, with nothing after it, the deletion threw.
+  - An agent's reply is diffed against the proposed view it read: another
+    author's pending formatting removal stays theirs, and a pending deleted line
+    break no longer turns a small edit into a rewrite of the block.
+  - An inserted, deleted or moved empty line — a new empty list item or
+    paragraph — is marked on the canvas again. The caret's zero-width glyph on
+    the line counted as text, so it was left unmarked.
+  - Review cards and the change popover name a block added or removed by what
+    it is — "List item added", "Paragraph added", "Image removed" — instead of
+    "Block added", and leave out the preview line of a block with no words.
+    `ChangePopoverInfo.nodeTypeName` (new) says which block a node change is on,
+    so a host can name it too (asked for by the user, 2026-11-09).
+  - An attribute change reads its values in words on cards and in the popover:
+    an object value is spelled out (`x 0, y 48`), never `[object Object]`, and an
+    equal value written anew is not listed. `describeAttrChanges` and
+    `changedAttrKeys` (new, `@scrivr/plugins`) are that one description, shared
+    by the popover and the panel. An image whose older `floatOffset` changed
+    with its `yOffset` reads as moved: `IMAGE_PLACEMENT_ATTRS` includes
+    `floatOffset`.
+  - Deleting what you added yourself takes it back out, as Word does: Backspace
+    on a list item you added with Enter, or Delete from the item above it, joins
+    it back and leaves no change, as it already did for a paragraph. The caret
+    stays in the line it was in. An image or horizontal line you added and then
+    delete leaves no change either.
+  - `editor.getMarkdown()` no longer throws on a document with formatting
+    Markdown cannot write: a colour or a font size is dropped and its words
+    kept. With TrackChanges installed, a pending change is written as
+    CriticMarkup.
+
+- 288119e: An agent edits like a person: it moves blocks, list items, headings and images,
+  its rewrites land as the phrases a person would change, and every edit is a
+  tracked suggestion a reviewer decides in one click.
+
+  **Agents — what they can do**
+
+  - `moveBlock` and `moveListItem` join `StructuralSemanticEditSchema`: an agent
+    reorders a document by naming a node and an anchor. `moveListItem` takes an
+    item id or a leaf inside it, and refuses a cross-list move before writing any
+    steps. The engine pairs the delete-at-old and insert-at-new into one
+    `CHANGE_OPERATION.move`, accepted or rejected as one decision.
+  - A heading's level is set with `richText` `attrs.level`: 1–6 on a heading
+    changes its level and on a paragraph makes it a heading; 0 makes a heading a
+    paragraph. It is tracked with the old type, so rejecting it restores the block.
+  - Images go through the protocol an agent already has. A paragraph holding one
+    image is an `image` unit carrying `image` (`src`, `alt`, `width`, `height`,
+    `wrap`, `align`); `insertBlock` adds one with `block.type: "image"` (`src`
+    must pass `safeImageUrl`); `richText` `attrs`, or the unit handed back with its
+    `image` edited, change `wrap`, `align`, size or `alt`; `deleteBlock` removes
+    it. Only the fields that change are checked, so an image placed by drag
+    (`align: "custom"`) can be handed back untouched. A new `src`, paragraph
+    styling on an image unit, and invalid values are rejected. Setting `wrap` or
+    `align` on an image laid out by the legacy `wrappingMode` takes effect.
+  - Every edit an agent makes is its suggestion: with TrackChanges installed,
+    `applySemanticEdits` tracks text, image and structural edits as `authorID`'s
+    (default "AI Assistant") whether or not the person is suggesting.
+  - The result says what happened. An edit that changes nothing — the level a
+    heading already has, attrs an agent may not set, an image layout it already
+    has, a move to where the block already is — is `rejected`, never `changed`
+    and never silently dropped. An edit is taken whole or not at all: attrs it
+    cannot apply refuse its text too. Restating the original to withdraw the
+    agent's own earlier suggestion is a change.
+  - A batch touches content once. A move or delete overlapping content the batch
+    already moved or added to, or adding an item or row inside content it moved,
+    is refused; so is a list or table op named by a node holding several of what
+    it acts on, such as a nested list.
+  - `getRichBlocks(from, to)` keeps image units inside the range.
+
+  **Rewrites read as a person's edit**
+
+  - `applyDiffAsSuggestion` and `applyRichDiffAsSuggestion`, for any caller, turn
+    a rewrite into phrase replacements: each run of changes is one deletion and
+    one insertion, a short unchanged gap inside a replacement is taken in, and no
+    change is made inside a word. A gap holding a line break, a newline, an
+    inline image, formatting or another author's suggestion is never taken in,
+    and words added near each other stay additions.
+  - A replacement is decided as one. Its two halves share a `groupId` nothing
+    else carries, from this diff or any other, and accepting or rejecting either
+    half — through a card,
+    `setChangeStatuses`, `reviewChanges` or accept-at-caret — decides both.
+  - The AI suggestion overlay groups the same way, so a proposal reads the same
+    before it is applied as after. `phraseReplacements` and `bridgeable` are
+    exported from `@scrivr/plugins` for hosts that build their own diffs;
+    `pairReplacements` stays for word-pair grouping.
+
+  **Resolving ids in a tracked document**
+
+  - A pending move leaves a deleted shadow and a live copy with the same `nodeId`.
+    `findLiveNodeById` in `@scrivr/plugins` decides which is live, and every
+    consumer uses it — rich and structural edits, drift detection, suggestion
+    overlays and popovers, ghost text, streamed insertion, block markers and
+    citation reveal. Writing into a shadow used to succeed and then vanish when
+    the deletion was accepted. `@scrivr/ai` re-exports it beside `findNodeById`.
+  - `findNodeById` in `@scrivr/core` takes an optional `accept` predicate and
+    returns the first match that satisfies it. It used to return the last match.
+  - `shadowRanges`, `isShadowNode` and `ShadowRange` are exported for a host
+    resolving ids itself. The ranges are memoised per document.
+  - **Hosts:** a helper that takes the first node with a `nodeId`
+    reads the shadow of a block moved down. Switch it to `findLiveNodeById`.
+
+  **Tracking**
+
+  - A deletion pairs with an insertion as a move only when they match, by content
+    and by id. Two blocks that only read the same — two empty paragraphs, a
+    `deleteBlock` beside an `insertBlock` of the same text — are a deletion and an
+    insertion.
+  - Rejecting a block added after a list or table, together with a later move, no
+    longer deletes the list's text; deleting a paragraph while typing its words
+    elsewhere in one transaction no longer errors.
+
+  **Review surfaces**
+
+  - Moves read as moves: double-underlined where the content went and
+    double-struck where it was, in one move colour (`renderTrackedMove`).
+  - A table row added or removed is washed and framed as a row, dashed when
+    removed (`renderTrackedRow`). With the caret anywhere in it, the popover
+    offers the row: "Accept row", "Reject row", previewed as "Adding row:
+    Headset · On request · Yes".
+  - `changePreviewText(doc, change, pending)` previews a block change as it will
+    read, and a move once, by where it went; the popover and the panel both use
+    it. A move's card reads "Moving".
+
+  **Semantic view**
+
+  - A semantic contribution can name what the proposed view leaves out
+    (`isRemoved`). Track changes supplies `proposedForDeletion`, exported, so an
+    image proposed for deletion is not read as present, and a paragraph whose
+    other text is proposed for deletion reads as its image. **Breaking** for a
+    hand-built `UnitCtx`: `isRemoved` is a required member.
+  - An image unit's rich hash covers its `image`, so an edited image is seen as
+    changed. Other units' hashes are unchanged.
+  - Core names the image values: `ImageWrap`, `ImageAlign`, `IMAGE_WRAPS`,
+    `IMAGE_ALIGNS` and `IMAGE_NODE_ATTRS`, with `SemanticImage`;
+    `SemanticImageAttrsSchema` in `@scrivr/ai` is built from them.
+
+  **Markdown**
+
+  - `getMarkdown()` writes pending changes as CriticMarkup — `{++added++}`,
+    `{--removed--}` — instead of throwing.
+  - Pasting a markdown table, or loading markdown that holds one, makes a table,
+    with the header row as header cells.
+
+- 189b6fa: Marks change the font only through the font modifiers their extensions
+  declare (`addFontModifiers`), and plain-text paste builds the schema's default
+  block. Bold, italic, font size and font family look, measure and report as
+  before.
+
+  - A mark from any extension that declares a font modifier is measured, asked
+    for before layout, and reported by `getActiveFontFamily` and
+    `getActiveFontSize` in the font it declares.
+  - `collectFontRequests` and `prepareDocumentFonts` take the editor's
+    `fontModifiers` and `fontConfig`, so a heading's text and a marked run are
+    installed before first paint in the face they are drawn in.
+    `IBaseEditor.getFontModifiers()` and `getBlockStyles()` are new;
+    `applyPageFont` is exported.
+  - A `fontSize` mark that is not a finite size of at least 1px, or a
+    `fontFamily` mark with an empty family, leaves the run in its block's font.
+  - A heading `level` stored as text ("2") is styled and drawn as that level.
+  - Headers and footers are styled by the editor's block styles, with a
+    paragraph's spacing dropped as before, so any block an extension styles
+    looks the same in a header as in the body.
+  - Plain-text paste and pasted-block merging use the schema's default
+    textblock, `paragraph` in every built-in schema.
+
+  **Breaking:**
+
+  - `resolveFont` no longer has a built-in fallback for `bold`, `italic`,
+    `fontSize` and `fontFamily`: pass the editor's font modifiers.
+  - `defaultFontConfig` holds only `paragraph`; heading styles come from
+    `Heading.addBlockStyles()`.
+  - `prepareDocumentFonts(doc, provider, constraints?)` is now
+    `prepareDocumentFonts(doc, provider, { fontModifiers?, fontConfig?, constraints? })`.
+  - `chromeFontConfig` (plugins, internal) is replaced by `chromeFontConfigOf`,
+    and `ResolvedHeaderFooter` carries the band's `fontConfig`.
+  - `IBaseEditor.getFontModifiers()` and `getBlockStyles()` are required: an
+    editor double must provide them.
+
+- 544d74e: Lists follow Word's levels and numbering.
+
+  - **Tab takes an item deeper, as in Word, and only that item.** Each Tab
+    goes one level further, past the item above, up to level 9 (Tab there is
+    consumed without a change); the items after it, and any list nested in it,
+    keep their levels. Shift-Tab
+    brings it back a level, then lifts it out as before, and so does Backspace
+    at the start of an item below the top level, which no longer joins it into
+    the item above. Backspace at the start of a line just below a list joins it
+    onto the list's last text, as Word does, instead of wrapping it into the list
+    as an item. In Suggesting mode a Tab is one change on that item ("List
+    indent: 0 → 1"), which rejecting takes back; moving a list item you added is
+    part of that proposal and records no change of its own.
+  - `listItem` gains `levelOffset` (default 0): how many levels deeper the item
+    sits than its list. Layout, markers, PDF and DOCX `ilvl` all read it, and an
+    ordered list numbers by level, as Word counts: an item follows the last item
+    at its level, and a shallower item restarts the deeper ones.
+  - **DOCX import keeps an item that skips a level** at its level, with
+    `levelOffset`, instead of hanging it under an empty item that drew a stray
+    bullet. `DocxListItem` gains `levelOffset` and `DocxBlock`'s list gains
+    `start` (both optional).
+  - **Each list restarts in Word.** DOCX export gives every top-level list its
+    own numbering (`numId`) over one shared definition, with level 0's
+    `startOverride` set to its `order`, so separate lists no longer continue
+    each other and a list starting at 3 starts at 3. `DocxContext.numbering.getOrCreate`
+    gains `instance` and `start` (both optional).
+  - **DOCX import reads where a list starts** (`w:start`, `startOverride`) into
+    `order`, and reads `numId` 0, Word's "no numbering", as a plain paragraph.
+
+- 3d45744: A node declares that it breaks the page or the line. Page breaks and line
+  breaks work exactly as before, now from `PageBreak` and `HardBreak` instead of
+  by name in the engine. (Which blocks are bookmarked in a PDF is declared by
+  `outlineLevel` on the node spec; see the outline-level note.)
+
+  - **`NodeLayout` gains `{ kind: "break", breaks: "page" | "line" }`** (`BreakKind`).
+    A block that breaks the page starts the next block on a new page; an inline
+    node that breaks the line ends its line. A break its context cannot honour
+    lays out as a plain leaf; a node that holds content ignores it. A page
+    break's flow `blockType` is its node's name. `breakOf(type)` reads it, and
+    the semantic exporter, the agent's rich diff and the header/footer surfaces
+    honour declared breaks as they do the built-in ones.
+  - **Pasted markdown goes through the tokens extensions declare.**
+    `Strikethrough` declares `~~text~~`, so it pastes struck through. Markdown
+    holding a construct no extension declares (a pipe table without `Table`)
+    pastes as plain text, one paragraph per line. Inline code, links,
+    blockquotes and images that no extension declares paste as their markdown
+    text; inline code was dropped before.
+
+  **Breaking:**
+
+  - Removed the `addMarkdownRules()` extension hook, `MarkdownBlockRule`,
+    `ExtensionManager.buildMarkdownRules()` and `ResolvedExtension.markdownRules`.
+    Declare markdown tokens with `addMarkdownParserTokens()` instead.
+  - `PasteTransformer`'s constructor drops its `extraMarkdownRules` argument:
+    `new PasteTransformer(schema, markdownParserTokens, options)`.
+
+- 01cc927: A node ends a section by declaring `sectionBoundary: true` on its spec, so the
+  sections model and layout no longer find section breaks by name. `Sections`
+  declares it; documents lay out exactly as before.
+
+  - A section boundary is a leaf with a `settings` attr between the document's
+    own blocks: one nested in a wrapper ends no section and no longer starts a
+    page, as the sections model already read it. Headers and footers refuse
+    section boundaries.
+
+- 31a013e: Three asks from hosts building their own review UI on suggestions.
+
+  - **Turn off the change colours.** `TrackChanges.configure({ renderMode: "none" })`
+    paints no tracked changes on the canvas; they are still recorded, reviewed
+    and exported. `AiToolkit.configure({ aiSuggestion: { renderMode: "none" } })`
+    passes the suggestion overlay's options through; `aiSuggestion: false` still
+    leaves it out.
+  - **A suggestion keeps its author.** `computeAiSuggestion` puts the `authorID`
+    it is given on the suggestion, and applying it records text and formatting
+    changes by that author. Before, every applied suggestion was by
+    `"ai:assistant"` whatever author it was computed for.
+  - **Hard breaks survive an agent's rich edit.** A `"\n"` an agent writes in a
+    rich edit is the block's line break, as the semantic export reads one:
+    `spansToFragment` builds the schema's line-break node (a newline in a code
+    block, a space where the schema has none), and `applyRichDiffAsSuggestion`
+    records it like any insert. One insertion is one change, breaks included, and
+    restating the original withdraws it. Before, an added break became a space.
+    The plain-text lanes (`applyDiffAsSuggestion`, `insertAsSuggestion`, AI
+    suggestion apply) read a block without its breaks, so they still write
+    `"\n"` as a space.
+  - **Formatting survives a paste in suggestion mode.** Adjacent runs with
+    different formatting no longer merge under the first run's marks
+    (`equalMarks` compared a node with itself).
+
+- a395c98: Track changes keeps its boundaries: editing content that already holds
+  suggestions no longer destroys authorship, selection, or unrelated decisions.
+
+  **Core**
+
+  - `editor.commands.*` and `runCommand` return whether the command ran, instead
+    of `void`. A read-only editor returns `false`. **Breaking** for an
+    `IBaseEditor` double: its `runCommand` must return a boolean.
+  - A node's `marks` restriction now limits formatting only. Review marks are
+    admitted wherever track changes is installed, so edits inside a code block
+    are tracked like any other text.
+  - `NORMALIZATION_META` marks an edit that keeps the document well-formed rather
+    than changing it. `UniqueId`, `TrailingNode` and the table normalizer set it,
+    so ids, trailing paragraphs and table repairs are never recorded as anyone's
+    suggestion.
+  - `TrailingNode` takes away the empty paragraph it added once the document ends
+    in a paragraph again, unless someone typed in it or put the caret in it.
+  - Cut and paste mark their transactions `uiEvent: "cut"` and `uiEvent: "paste"`,
+    so a plugin can tell them from deleting and typing.
+  - `renderTrackedObject` frames an image, rule or other object a change covers;
+    `renderTrackedFormatting` washes text whose formatting changed.
+    `TrailingNode`, `Typography` and `IMAGE_PLACEMENT_ATTRS` are exported.
+  - The overlay repaints after every content repaint, so overlay marks drawn over
+    a freshly painted tile no longer go missing.
+
+  **Track changes**
+
+  - Deleting pending work cancels it only when it is entirely your own. Deleting
+    someone else's insertion keeps it and records your deletion beside it, for
+    text and whole nodes alike.
+  - An edit is linked to the act it belongs to, decided where its record lands.
+    Your edits inside your own pending insertion fold into it (`creationId`).
+    Another author's depend on it (`dependsOn`, closed by `foldingClosed`). A
+    deletion recorded on a node and on the text inside is one change
+    (`deletionId`), and so is a record split by later typing or a paragraph break
+    (`continuesId`, with a unique id per span).
+  - `changeActs` is the one answer to what a decision covers: it groups records
+    into acts, each with a `primary` to show and name. Deciding any record of an
+    act decides all of it, so a whole-paragraph change can be decided from its
+    node or its text, and a paragraph break from either of its halves.
+  - Later steps inside what the same gesture inserted are now part of that
+    insertion, so inserting a block and typing in it no longer loses the typing. A
+    step that writes both inside and outside an insertion is split at its edge
+    where it can be (otherwise it is refused): inside, it takes back your own
+    text; outside, it proposes deleting what was there.
+  - Every tracker writes through the replay, so a gesture mixing formatting or
+    attribute changes with a position-shifting step records them on the right text.
+  - Formatting across someone else's insertion no longer spreads that insertion
+    over the text beside it, which made rejecting it delete real words.
+  - A decision is its own undo step. Undoing an accept brings the change back to
+    pending instead of also removing the edit.
+  - Rejecting a move takes the content back with the edits made since. Work done
+    on the moved-from shadow keeps its own record and must be explicitly reviewed
+    before either accepting or rejecting the move consumes that shadow.
+  - Review is planned before it runs. `planChangeReview`, `planReviewIn` and
+    `planReview` preview a decision; `reviewChanges` carries it out and returns
+    what happened. A decision is `ReviewDecisions` — `{ accepted, rejected }` —
+    so resolving a conflict is a single decision. Dependent work is never decided
+    silently. A refusal names its reason: `dependent-changes`, `missing-changes`,
+    `contradictory-decisions`, `not-permitted`, `read-only` or `invalid-result`.
+  - Before publishing, review validates the content it rewrote and checks that
+    selected identities were settled and unselected pending identities survived.
+    Unrelated invalid content does not block the decision.
+  - **Changed:** the low-level `setChangeStatuses` action payload is now
+    `ReviewDecisions` instead of `{ status, ids }`.
+  - **Changed:** the `setChangeStatuses` command keeps its signature, but returns
+    `false` and decides nothing when the plan is blocked, including when other work
+    depends on the change. A host ignoring the result sees a click that does
+    nothing; use `reviewChanges` to learn why.
+  - An edit tracking cannot represent is stopped before it applies, so someone
+    suggesting never changes the text directly. `onRefused` on
+    `TrackChanges.configure` receives the reason (`overlapping-steps`,
+    `unsupported-step`, `duplicate-transform-package`) so the host can say why.
+    Gestures of more than 20 steps used to be partly untracked and are now
+    tracked in full. `lastReview` reports the last decision.
+  - Nothing can be edited while viewing a snapshot of the changes.
+  - Deleting a paragraph break is a change of its own, `node_join`: the
+    paragraphs stay apart until it is accepted. Deleting a break you added
+    yourself takes it back instead.
+  - Moving paragraphs into, out of or between lists is a change to each
+    paragraph's place, `list_change`, kept as `oldList`; rejecting it rebuilds the
+    lists around it.
+  - Moved content is one change: a drag of text, or a cut pasted back by the same
+    author while the cut is still pending, links its deletion and insertion with
+    `moveId`, and deciding either decides both. Dragging a block, several blocks
+    at once, or a floating image alone in its paragraph is one move too. Undoing
+    the paste and pasting again is still the move.
+  - Pasted paragraphs are recorded as inserted, not as a paragraph break, so
+    rejecting a paste removes it. Enter at the end of a paragraph records the new
+    paragraph as inserted.
+  - Reviewing a formatting change keeps the mark's value, so colour, size and
+    link changes can be accepted and rejected. Neighbouring pieces of one
+    formatting change by the same author are one card, decided together.
+  - Changed objects are framed. Formatting changes are washed and barred in the
+    margin, as Word marks them, instead of looking like an insertion or a deletion.
+  - A collaborator's edit arriving through Scrivr's own sync is never recorded as
+    the local author's suggestion.
+  - Accepting a deleted break between list items names any change recorded on the
+    item it joins as dependent work, instead of failing; `joinsAt` on the change
+    says where the joined block starts.
+  - Selection survives tracking: a range stays a range in its direction, and the
+    caret lands where the gesture left it, through every step of a multi-step
+    gesture.
+  - `TrackChangesState`, `TrackingResult` and `TrackingRefusal` name what a host
+    reads from `trackChangesPluginKey`.
+  - `CHANGE_OPERATION` gains `node_join` and `list_change`, with `ListLevel` naming
+    an entry of a list change's `oldList`. A host that switches on the operation
+    should name them.
+
+  **React**
+
+  - Every Accept and Reject in the panel and popovers goes through
+    `useReviewAction`. A click either completes, or `ReviewRefusalNotice` says
+    what stopped it on the surface that was clicked. Dependent work is listed and
+    needs a second confirmation that replans first.
+  - Conflict resolution ("Keep insertion" / "Keep deletion") is one decision and
+    one undo step.
+  - `useTrackChangesPanel` gives each act one card, in `items`, with its records in
+    `pieces`; its `review` is the card's `useReviewAction`, and `accept`, `reject`,
+    `acceptAll` and `rejectAll` return the outcome. The panel's badge counts cards.
+    It takes any `IBaseEditor`, and `TrackChangesDisplayItem` names an item's type.
+  - Changes are named from one table, in the panel and the popover alike:
+    "Paragraph break added" and "removed", "List changed", "Moved", and "Image
+    moved" for an image dragged on its page. `ChangePopoverInfo.moveId` marks
+    either half of a move.
+  - `describeSuggestionRefusal` gives the message and remedy, as
+    `SuggestionRefusalText`, for a refusal passed to `onRefused`.
+
+- ba07451: Lists lay out, print and export like Word's.
+
+  - **Nested lists and multi-block items are drawn.** Layout used to lay out
+    only each list item's first paragraph, so an item nested with Tab, a second
+    paragraph in an item (which Backspace at the start of an item makes), and any
+    text in them vanished from the canvas and the PDF while staying in the
+    document. Every block of an item is now laid out, with the number on its
+    first block — as in Word, even when that paragraph holds only a floating
+    image, which then keeps one line for its number. A heading or code block in
+    an item keeps its own style and painter; a table in an item is indented with
+    it.
+  - **Word's geometry.** Each level's text sits half an inch further in than
+    the level above (the first level half an inch from the margin, where it was a
+    quarter inch), and the marker hangs a quarter inch before the text,
+    left-aligned. The text is never drawn over the number. Existing lists move a
+    quarter inch to the right.
+  - **Lists inside table cells are drawn.** A list in a cell (pasting one
+    there makes one) used to lay out as one empty line, its text never painted
+    on canvas or in PDF. A cell now lays out its blocks as the page body does:
+    numbered, nested, indented and spaced, the number and the first word kept
+    inside even a narrow cell, and a table nested in a cell shows its rows and
+    its bottom border.
+    A block that holds other blocks but is not a list or a table — a custom
+    container, say — lays out the blocks it holds instead of one empty line
+    (and still takes a line when it holds none), unless its node spec declares
+    `layout: { kind: "block" }`, which keeps its own box and the painter it
+    registered.
+  - **No block is indented past an inch from the right margin.** Any block's
+    indent — a deeply nested list, or a paragraph's own `indent` — leaves at
+    least an inch of the line for its text.
+  - **Markers by depth.** Bullets cycle •, ◦, ▪; ordered levels number
+    1. / a. / i., each nested list counting from its own start. Lists nested
+       past nine levels stay at the ninth. A list's start is kept within
+       0–32767 on the page, in copied HTML and in markdown.
+  - **Numbers stay right while editing.** A renumbered item is laid out
+    afresh, so Tab, Shift-Tab and joining items never leave an old number on
+    screen.
+  - **Bullets are drawn as shapes**, on the canvas and in the PDF alike, so a
+    second- or third-level bullet no longer prints as `?` with a standard PDF
+    font. Numbers are drawn in the face and size of the item's first text, past
+    any image that opens the line, on the canvas and in the PDF. Lists in
+    headers and footers draw their numbers again. In the PDF a block's number
+    is drawn once, after its handler, so a custom PDF handler that never calls
+    `draw.lines` keeps it.
+  - **DOCX levels match the screen.** Numbering has nine levels with the same
+    formats, glyphs and indents the editor draws; an item's further blocks
+    export as Word's unnumbered continuation paragraphs, a table in an item with
+    `w:tblInd` and a width that fits the rest of the column, and a sourced block
+    indented with them; list properties are written in schema order.
+
+  **API changes**
+
+  - `@scrivr/core` exports `isListType`, moved here from track changes and
+    now what the list extension, Clear formatting, the semantic exporter and
+    track changes ask.
+  - `ListItemStrategy` is removed, and blocks are no longer relabelled
+    `blockType: "list_item"`. Core draws a block's list marker itself, over
+    whatever painter draws the block, through the new `paintBlock` export —
+    use it in any loop that paints laid-out blocks. **Migration:** a painter
+    registered under `list_item` is never called now; register it under the
+    node type (`paragraph`, …) instead.
+  - `isListType` holds only for a node whose content allows list items and
+    nothing else.
+  - `nodeLayout` now defaults an undeclared node whose content is blocks to
+    `{ kind: "transparent" }`: its blocks lay out in its place.
+    `DEFAULT_NODE_LAYOUT` (`{ kind: "block" }`) is the default for undeclared
+    nodes that hold inline content or nothing. **Migration:** a container node
+    that holds blocks must declare `layout: { kind: "block" }` to keep its
+    registered painter; left undeclared, its painter is never called.
+  - `AvailableSegment.indentFrom` (new) records where a first line started
+    before its indent moved it.
+  - `LineBreaker.breakIntoLines` takes `firstLineMayStayEmpty` (new: a first
+    word that fits only the next line leaves the first line empty, as a list
+    number's push does) and `firstLineIndent` (new: how far the provider's first
+    line is indented, for a line a float starts some way in, so a float's
+    narrowing is told apart from the indent's).
+  - Up and Down step over a line that holds no text: a number left alone on
+    its line, and the gap a full-width image leaves in any paragraph, on the
+    same page or across one.
+  - `DocxContext.textWidthTwips` (new, required): the width of the exported
+    section's text column. Code that builds a `DocxContext` by hand must now
+    set it; contexts from `@scrivr/docx` have it.
+  - `DocxNumberingLevel.format` accepts `"lowerLetter"` and `"lowerRoman"`, and
+    takes optional `left` / `hanging` indents in twips.
+
+- Updated dependencies [31a013e]
+- Updated dependencies [4657757]
+- Updated dependencies [288119e]
+- Updated dependencies [e40e3d9]
+- Updated dependencies [a9e05e0]
+- Updated dependencies [5603fff]
+- Updated dependencies [aec0e05]
+- Updated dependencies [189b6fa]
+- Updated dependencies [6330e0a]
+- Updated dependencies [f72a5b3]
+- Updated dependencies [5287a8d]
+- Updated dependencies [544d74e]
+- Updated dependencies [fb180bb]
+- Updated dependencies [3d45744]
+- Updated dependencies [07b6e41]
+- Updated dependencies [f72a5b3]
+- Updated dependencies [01cc927]
+- Updated dependencies [31a013e]
+- Updated dependencies [7aca935]
+- Updated dependencies [a395c98]
+- Updated dependencies [ba07451]
+- Updated dependencies [22fb8f1]
+  - @scrivr/core@1.0.23
+
+## 1.0.22
+
+### Patch Changes
+
+- 27a85a2: `acceptedTextMapFor` — the accepted-text map, memoised on the block node.
+
+  Building it walks every inline child of a block, and the AI suggestion overlay
+  asked for one per suggested block, per page, on every paint frame. At the
+  default `renderMode: "active-only"` that is one block, which is why this never
+  bit; at `renderMode: "all"` on a long document it is a full inline walk per
+  block at the frame rate.
+
+  A ProseMirror node is immutable, so the node reference is the invalidation
+  signal — an edit produces a different node and misses the cache on its own,
+  with no staleness flag to keep in step. The node's position is compared too,
+  because the map holds absolute document positions: a block nobody touched that
+  text was inserted in front of needs a fresh one.
+
+  The suggestion overlay, the suggestion popover and the drift pass read through
+  it. `buildAcceptedTextMap` is unchanged and still exported — it is the pure
+  function the memo wraps, and what the tests compare against.
+
+- 44e6423: Two things the AI review surface could not express.
+
+  **A marker that proposes no edit.** A finding can be a Pass, or a decision a
+  person has to make. `computeAiSuggestion` drops a block whose proposed text
+  matches what is already there, which is correct — a diff overlay is not where a
+  finding with no change belongs — and there was no other layer, so such a
+  finding existed in the panel and nowhere the reader was looking.
+
+  `BlockMarkers` is that layer. `setBlockMarkers(editor, source, markers)` hangs
+  `{ nodeId, kind, summary }` on a block, `getBlockMarkers` reads them,
+  `activeBlockMarkers` answers the ones on the innermost marked block holding the
+  cursor, and `createBlockMarkerOverlay` — with `useBlockMarkerOverlay` in
+  `@scrivr/react` — gives them the show / move / hide lifecycle the suggestion
+  popover has.
+
+  Every call names its writer, which is what makes the layer additive: several
+  bridges write to the same surface and none owns it, so a writer replaces and
+  clears its own markers without erasing what the others say. Nothing is written
+  to the document and nothing enters history. A marker whose block has left the
+  document is dropped on read, and markers resolve in one pass over the document
+  rather than one walk each. `BLOCK_MARKERS_SET` is public, so a payload whose
+  markers are not markers is refused whole rather than half-applied.
+
+  **Accepting a span rather than a block.** `accept(blockId)` applied every op the
+  block carried, so a finding scoped to one sentence rewrote the clause around it.
+  `applyAiSuggestion` now takes `range`, and `actions.acceptRange(blockId, range,
+mode?)` exposes it. It returns whether it wrote, so a refusal is visible instead
+  of silent — including through `AiToolkit.apply`.
+
+  `range` carries the accepted text its offsets were measured against, and is
+  refused unless the block still holds that text. This is the part that makes a
+  scoped accept safe: settling rewrites a block's `acceptedText`, so comparing the
+  document against it proves nothing, and a caller still holding offsets from
+  before an earlier accept would edit whichever words now sit at those numbers.
+  Also refused: a span that is inverted, collapsed, or reaches outside the block.
+
+  Only groups the span covers are applied; one it merely clips is left pending. A
+  pure insertion is zero-width, so it belongs to the single span that starts at or
+  before its point and ends strictly after — otherwise both neighbouring sentences
+  claimed it. Every covered group is applied in one pass and settled as one set:
+  `rebaseAfterSettle` now takes the set of settled groups, because told one at a
+  time it read the pass's own writes as reader drift and discarded the groups the
+  span deliberately left pending.
+
+  **`docRangeToAcceptedRange`** (`@scrivr/plugins`) converts a document range to
+  the accepted-text offsets `range` wants. Only the forward direction existed, and
+  accepted text omits runs pending deletion, so arithmetic on document positions
+  was wrong in exactly the tracked-changes documents this serves — and wrong
+  silently.
+
+  **Drift has one owner, and it is no longer silent.** `staleBlockIds` had two
+  production readers — the card's `isStale` and the canvas overlay, which dims a
+  stale block — and no writer at all, so both read false for every block forever.
+  The plugin now computes it whenever the answer can change: a new suggestion (a
+  host can hand over one that was already out of date), a settled one (the rebase
+  refreshes each surviving block against the document the settlement left), or an
+  edit. Identical answers return the previous state unchanged, so the card
+  subscription's identity skip still holds.
+
+  Every accept path reads it and refuses a block the reader has edited since the
+  proposal was computed — the unscoped block accept, a group accept, and accept-all
+  as well as the new span accept. Previously only the span accept checked, so one
+  card had a button that refused and a button that wrote the model's words into
+  text that had moved: `"The quick fox"` edited to `"!The quick fox"` and then
+  accepted produced `"!Theslowk fox"`. Accept-all still applies the blocks that do
+  match and leaves the drifted ones pending, because an edit in one block says
+  nothing about the rest.
+
+  `AiSuggestionCardActions` gains a required `acceptRange`, so a hand-written
+  implementation of that interface needs the new member. `applyAiSuggestion` and
+  `AiToolkit.apply` returning `boolean` instead of `void` is a widening and breaks
+  no caller.
+
+- d4fc43d: Header and footer tokens now reserve the space they actually paint.
+
+  Chrome was measured without an inline registry, so an inline atom in a header
+  fell back to whatever width its node spec declared. `pageNumber` declared 7px:
+  a header read "428" but was laid out as though it read "1", overlapping
+  whatever sat beside it and mispositioning every right-aligned or centred band.
+  The date token was worse — a fixed 60px for a string whose width depends on
+  the locale.
+
+  `MiniPipelineOptions` and `PageChromeMeasureInput` now carry `inlineRegistry`,
+  and `runPipeline` populates it, so a chrome contributor measures its atoms with
+  the same strategies that will paint them. `InlineRegistry` is exported from
+  `@scrivr/core` so an extension can build one.
+
+  Two further fixes to the width itself:
+
+  - Digits were counted with `ceil(log10(n))`, which is one short at every exact
+    power of ten. A ten-page document reserved a single digit and painted two.
+  - The token strategies read the page count from a module context that painting
+    also writes, per page, as it draws. `resolveChrome` now seeds it from the
+    flow layout, so a measurement answers from the document rather than from
+    whichever page was painted last, and reports `stable: false` until it has
+    this run's count — a count remembered from the previous run predates the
+    edit being laid out, and during a streamed load belongs to a partial layout.
+
+  To keep that verification cheap, the chrome aggregator no longer re-paginates
+  when the computed page geometry is unchanged, including header and footer
+  band positions. If measuring tokens wraps a band and changes pagination, the
+  contributors see the new flow before the loop accepts convergence.
+
+  Streamed layout now resumes from a replayable snapshot of both the paginated
+  cursor and continuous-flow cursor. A pass owns its growing page buffers, so
+  retries cannot duplicate body blocks. When chrome changes the saved geometry,
+  layout replays the consumed prefix while preserving the chunk's progress — and
+  publishes a new layout version when it does, since pages already painted have
+  moved and their tiles must repaint before the caret is drawn against them. A
+  partial layout's cached tail is never reused: it has a cutoff rather than a
+  tail, and copying from it would truncate the document at the last chunk.
+
+  Chrome painting now receives the editor's font modifiers through the page
+  renderer. Live header/footer measurement uses the same modifiers as stored
+  measurement, preserving custom token typography and line geometry on entry
+  to editing.
+
+  A band is measured once and painted on every page, so a page number's box used
+  to hold the longest number in the document — page 2 of 1040 read "Page 2"
+  followed by three digits of nothing, where Word lays each page's header out
+  separately and closes the gap. A token is sized as widest-digit times digit
+  count, so the only thing that changes between pages is how many digits the
+  number has; the band is now arranged once per width (four times for a
+  thousand-page document) and painting looks the arrangement up. Canvas and PDF
+  read the same one. The band reserves the maximum height across all measured
+  arrangements: a narrower token can distribute tall inline objects over more
+  lines and need more height than the widest-number arrangement.
+
+  Each band measurement scopes both its page number and document total. A total
+  pages token therefore measures against the document being laid out, even if
+  another document was painted most recently. Nested measurements and exceptions
+  restore the enclosing measurement context without changing paint state.
+
+  Inline atoms are also painted in the font **and fill** their own marks resolve
+  to. An atom carries no text for a decorator to colour, so its marks never
+  reached the renderer: canvas painted it in whatever fill the previous span left
+  — the body's colour in a footer holding only a page number, and the page
+  background on a page whose body painted nothing — while PDF chose a colour of
+  its own. Object spans now carry their marks, both surfaces resolve through the
+  same cascade, and an atom with no colour of its own takes the theme's text
+  colour rather than a leftover.
+
+  New surface for this: `PdfNodeContext` carries `color` — the fill an atom's
+  marks resolved to, in the layout's 0-255 channels — so a PDF node handler
+  passes it through instead of choosing one. `PdfTextOp.color` is now optional
+  and defaults to the document's text colour, which is the rule canvas already
+  applies, so no handler has to name a colour to draw text. Inline atom spans
+  carry their `marks`.
+
+  The font half of the same defect:
+  A token carries no marks of its own, so it is measured in the band's base font
+  while the text beside it is often marked smaller; the strategies draw with
+  whatever font the context holds, so a 14px box was being filled with 10px
+  digits.
+
+  **Breaking (schema):** `pageNumber`, `totalPages` and `date` no longer declare
+  `width`/`height` attrs — their `InlineStrategy` measures them. Persisted
+  documents are unaffected, since ProseMirror ignores attrs a spec does not
+  declare. But `inlineRegistry` is now **required** to lay these tokens out, not
+  merely available: a measurement path that omits it drops them entirely and
+  warns, where it previously reserved a wrong-but-visible box. All in-repo paths
+  pass it; direct callers of `runMiniPipeline` must.
+
+- cc42506: A diff op now says where in the proposal it came from, and the ops reconstruct
+  the proposal they were built from.
+
+  `pairReplacements` emits deletes first so a consumer clears a whole deleted
+  range before writing its replacement — that is what keeps document-side offsets
+  correct, and it stays. What follows consumes the proposal, and is now emitted in
+  the proposal's own order. Absorbing a keep that sits inside a replacement turns
+  it into a re-insert, and that re-insert can belong _before_ a boundary keep:
+  rewriting "alpha beta gamma delta" to "beta delta epsilon" moved "beta" behind
+  "delta" and applied as " deltabeta epsilon". The ops described something the
+  proposal never said.
+
+  Each op that consumes the proposal carries `proposedOffset`, stamped where the
+  order still is the proposal's own. A consumer counting as it walks cannot
+  recover it, because the order it walks is the document's — which is how an
+  agent's bold landed on a word it never named.
+
+  Text that did not change is one keep, however long. The quadratic guard answered
+  "delete everything, insert everything" for two identical strings, so a
+  formatting proposal on a paragraph over ~450 characters — ordinary in a
+  contract — rewrote every character to change none of them, taking comment
+  anchors and existing tracked marks with it.
+
+  Generated group ids carry their block. They were an index into one block's ops,
+  so two paragraphs with a change at the same position shared an id, and settling
+  one settled the other.
+
+  Settling one group re-expresses what is left of the proposal against the
+  document that group left behind — but only when that document is the one the
+  settlement produced. If it moved for any other reason, the reader typed or a
+  collaborator edited, the remaining ops describe text that is no longer there and
+  rebuilding from them proposes putting it back: the reader's own edit returns as
+  a suggested deletion, wearing a refreshed `acceptedText` that makes it look
+  current. Nothing can map an intent through an edit it never saw, so the proposal
+  is spent and the block is dropped. The reader asks again. A suggestion's ops are offsets into the block's
+  text as it was when the suggestion was computed, so accepting or rejecting one
+  group invalidated every remaining op: the next accept landed on the wrong
+  characters, or past the end of the old text, where it silently did nothing —
+  accept a rewrite, then accept the formatting alongside it, and the formatting
+  never arrived.
+
+  Marking a group settled and stepping over it does not fix that, because the
+  offsets are still the old ones. So there is no settled-group bookkeeping at all
+  now: the outcome is known where the group is settled, the remaining proposal is
+  rebuilt there, and a settled group simply no longer exists. A block with nothing
+  left to propose is removed, and a suggestion with no blocks left is cleared —
+  an empty proposal used to be reported as a deletion of the whole paragraph.
+
+  Settling dispatches `AI_SUGGESTION_RESOLVE` rather than replacing the
+  suggestion, which used to clear the active block and blank the rest of the
+  overlay until the caret moved.
+
+  `AiSuggestionCardData.kind` gains `"format"`. Additive for a consumer that
+  switches with a default, but a consumer narrowing exhaustively against `never`
+  will stop compiling until it handles the new member — which is the point of
+  writing it that way.
+
+  A card can say `kind: "format"`; a formatting proposal was reported as a
+  deletion labelled with the paragraph's own text. The popover describes it
+  through `formattedText` instead of rendering an empty replaced→inserted pair.
+  `FormatRenderInstruction` is exported, so a consumer can name the arm it
+  narrows to. The underline groups glyphs by `lineY`, so a run of mixed sizes
+  draws one straight rule rather than disjoint stubs.
+
+- f6ff4a2: `isDocAttrEnvelope` and `DocAttrEnvelope` reach the package surface.
+
+  The doc-attrs release notes said both were exported. Only `DOC_ATTRS_MAP_NAME`
+  was: the guard was exported from its own module and never re-exported from the
+  barrel, so it appeared in `dist/index.d.ts` exactly once, inside a comment.
+
+  `seedDocAttrs`/`readDocAttrs` remain the answer for moving attrs across a
+  storage boundary — a caller should not have to know the values are wrapped. The
+  guard is for a host that reads the map directly and has to agree with the live
+  sync about which envelopes are real. The type ships with it: a predicate that
+  narrows to a name the caller cannot import vouches for a value it cannot
+  annotate.
+
+- 0332bcc: Per-editor state belongs to the editor, not to a configured extension.
+
+  Six extensions kept per-editor state in a map keyed by their own options object.
+  Options identify a _configured extension_, and one of those can serve several
+  editors — configure once, mount twice is the ordinary split-view shape. So the
+  second editor overwrote the first's entry, a seeding hook reset it on every
+  construction, and teardown nulled it for everyone.
+
+  `Collaboration` stored its Y binding that way, read by undo, redo and three
+  keymap handlers: undo in one pane drove the other pane's history, building a
+  second pane left the first with no binding at all, and closing either pane
+  disarmed its sibling. The binding moves into `collaborationRegistry`, which was
+  already keyed by the editor and already documented as such.
+
+  `PdfExport`, `DocxExport`, `DocxImport` and `SemanticExport` each stored _the
+  editor itself_ the same way — so `exportPdf` in one pane saved the other pane's
+  document, and `importDocxFromFile` **wrote** into it. All four now read
+  `this.editor()`, which resolves per editor, so the map, the `InstanceState`
+  type, the seeding plugin and the registration hook all delete. `PdfExport` needs an
+  editor with a layout pipeline, which is now a runtime check on what the export
+  actually calls — so any `IEditor` qualifies, not only the concrete browser
+  `Editor` the old view-only hook required.
+
+  `Image` held the same map with nothing reading it — its `onViewReady` already
+  returned the cleanup it needed. Removed.
+
+  `CollabState` gains a required `binding`, which a host names as
+  `CollabState["binding"]`. Teardown now deletes the editor's registry entry
+  instead of mutating a shared one.
+
+  Two behaviour changes worth knowing. These commands reach their editor through
+  `this.editor()`, which throws when an `ExtensionManager` was built without one,
+  where the old lookup returned `undefined` and the command returned `false` — no
+  production path builds an editorless manager, so this is latent rather than
+  something that happens today. And `exportPdf` now warns on the path it refuses,
+  the way `exportDocx` and `exportSemantic` already did, instead of returning
+  `false` silently.
+
+- 297dba9: Agent-proposed formatting is held to the document's own rules.
+
+  `resolveInlineMark` is the one place that decides what an agent's mark may be,
+  and it now refuses review marks and strips `dataTracked` from the ones it
+  allows. Proposed formatting said how text should read; it could also say who
+  reviewed it and when, which let agent output sign a change as another author.
+
+  Marks are also resolved against the textblock that will hold them. A bold run
+  proposed for a code block — which allows no marks — used to survive until
+  dispatch and then throw, taking the whole batch with it; the words land
+  unstyled instead, which is what the proposal meant.
+
+  Formatting comparison runs on one canonical description (`describeInlineMark`),
+  so bookkeeping a document carries and a proposal does not can no longer read as
+  a difference. Restating a block's existing formatting is not a suggestion.
+
+  Tracked formatting is applied with explicit suggestion intent rather than by
+  relying on the engine's ambient status. `mode: "tracked"` on an editor whose
+  tracking is switched off — the default — wrote formatting permanently, with no
+  review record to reject.
+
+  Table row inserts derive width from the grid and the row's spans rather than
+  counting physical cells, so a row anchored to a merged cell no longer drops the
+  content past the first column. Deleting the last child of a list or table
+  removes the container instead of leaving an empty one behind.
+
+- 8098340: Three capabilities a consuming application could not build on its own.
+
+  **Doc attrs across a storage boundary.** `seedDocAttrs` and `readDocAttrs` move a
+  document's own attributes between a plain `attrs` object and a `Y.Doc`. The live
+  binding already syncs them between peers through a map beside the content
+  fragment, which is the whole answer for a host that persists the `Y.Doc` — but a
+  host that persists a ProseMirror-JSON projection had no route in or out, because
+  both conversions walk the fragment's children and `doc.attrs` has no
+  representation in a `Y.XmlFragment` at all. A `.docx` imported with a header lost
+  it the first time the document was opened, and the save after wrote the schema's
+  nulls over the import.
+
+  Seed before the room is live or after it has synced, never in between: the
+  "leave what the room holds alone" check reads the local `Y.Doc`, which knows
+  nothing of a server value still in flight, and Yjs settles two concurrent sets by
+  client id rather than by which is newer. Seeding carries only attrs the reader's
+  extensions declare — which means the editor supplying those names must carry the
+  extensions that own them —
+  skips null values — every document offers one for every declared key, and writing
+  those syncs an absence over a real policy — and leaves keys the room already
+  holds alone, since the room may have been restored from cache before the
+  projection was consulted. `DOC_ATTRS_MAP_NAME` and `isDocAttrEnvelope` are both exported and both now have
+  one owner: the map was named in three places, and the shape had a second, looser
+  check that accepted envelopes the live sync refuses — so a value the editors
+  ignored was being persisted as real state and resurrected on every load.
+
+  **`getActiveFontSize()`.** The counterpart to `getActiveFontFamily`, resolving
+  inline mark then block style the way the family resolves through mark, attr and
+  page config. Styled from the textblock the cursor is in rather than its top-level
+  ancestor, so a heading inside a table cell reports a heading's size — the
+  ancestor is the table, which has no style of its own.
+
+  Returns `null` when the selection spans more than one size. Answering from the
+  first run would name a size the rest of the selection is not drawn at, and a
+  reader confirming it resizes everything else — so the control goes blank, which
+  is what Word and Google Docs do. The playground reads this instead of
+  re-deriving the rule with a hardcoded default, and blanks its box accordingly. A size control previously had to read the `fontSize` mark itself and
+  got `undefined` for every run without one — which is most runs, since a run with
+  no mark still renders at the block style's size — so the control showed "unset"
+  over text the document plainly draws at a size. Always returns a number, because
+  a control needs a value to show.
+
+  **`inlineRegistry` on `BaseEditor`.** Layout reaches an inline node's strategy
+  through a registry the caller supplies, and the registry lived on `Editor` only —
+  so a `ServerEditor` had nothing to pass. `measure()` never ran, the span carried
+  no resolved face, and a PDF node handler that draws its own text was given no
+  font to draw it in. An atom that sizes itself from a font was exactly the case
+  that could not work headlessly. `InlineStrategy.render` still takes a canvas
+  context and stays browser-only: the box is layout, the paint is a surface.
+
+- Updated dependencies [aa8529f]
+- Updated dependencies [297dba9]
+- Updated dependencies [24eccf9]
+- Updated dependencies [d4fc43d]
+- Updated dependencies [80b90e0]
+- Updated dependencies [0332bcc]
+- Updated dependencies [654c043]
+- Updated dependencies [24abe2c]
+- Updated dependencies [297dba9]
+- Updated dependencies [490abaf]
+- Updated dependencies [8098340]
+- Updated dependencies [bb357f6]
+  - @scrivr/core@1.0.22
+
 ## 1.0.21
 
 ### Patch Changes

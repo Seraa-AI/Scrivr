@@ -6,7 +6,8 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { AiTestEditor, doc, p } from "./helpers";
+import { TextSelection } from "@scrivr/core/pm";
+import { AiTestEditor, doc, moveFirstBlockToEnd, p } from "./helpers";
 import { subscribeToAiSuggestions } from "../subscribeToAiSuggestions";
 import { AI_SUGGESTION_SET_ACTIVE } from "../AiSuggestionPlugin";
 import type { AiSuggestion } from "../types";
@@ -91,6 +92,23 @@ describe("subscribeToAiSuggestions — initial call", () => {
 
 describe("subscribeToAiSuggestions — identity optimization", () => {
   it("does NOT re-call callback when unrelated transaction fires", () => {
+    // Unrelated means it changes nothing a card shows. An edit to a block with
+    // no proposal is that; an edit to the proposed block is not, because it
+    // makes the proposal stale — see the next test.
+    const editor = new AiTestEditor(doc(p("Hello world", "n1"), p("Untouched", "n2")));
+    editor.showSuggestion(rewriteSuggestion("n1"));
+
+    const cb = vi.fn();
+    subscribeToAiSuggestions(editor, cb);
+    const callsBefore = cb.mock.calls.length;
+
+    const state = editor.getState();
+    editor.applyTransaction(state.tr.insertText("!", state.doc.child(0).nodeSize + 1));
+
+    expect(cb.mock.calls.length).toBe(callsBefore);
+  });
+
+  it("re-calls callback when an edit makes a proposal stale", () => {
     const editor = new AiTestEditor(doc(p("Hello world", "n1")));
     editor.showSuggestion(rewriteSuggestion("n1"));
 
@@ -98,10 +116,11 @@ describe("subscribeToAiSuggestions — identity optimization", () => {
     subscribeToAiSuggestions(editor, cb);
     const callsBefore = cb.mock.calls.length;
 
-    // A plain text insert has no AI meta — plugin state reference unchanged
-    editor.applyTransaction(editor.getState().tr.insertText("!"));
+    editor.applyTransaction(editor.getState().tr.insertText("!", 1));
 
-    expect(cb.mock.calls.length).toBe(callsBefore);
+    expect(cb.mock.calls.length).toBeGreaterThan(callsBefore);
+    const cards = cb.mock.calls[cb.mock.calls.length - 1]![0];
+    expect(cards[0].isStale).toBe(true);
   });
 
   it("re-calls callback when suggestion changes", () => {
@@ -358,5 +377,29 @@ describe("subscribeToAiSuggestions — actions", () => {
 
     expect(editor.suggestionState!.suggestion).toBeNull();
     unsub();
+  });
+});
+
+describe("subscribeToAiSuggestions — activating a card whose block has a pending move", () => {
+  /** A headless editor with the one view-side call `activate` makes: move the caret. */
+  class EditorWithCaret extends AiTestEditor {
+    readonly selection = {
+      moveCursorTo: (pos: number) => {
+        const state = this.getState();
+        this.applyTransaction(state.tr.setSelection(TextSelection.create(state.doc, pos)));
+      },
+    };
+  }
+
+  it("puts the caret in the moved block, not the copy it left behind", () => {
+    const editor = new EditorWithCaret(doc(p("Hello world", "b1"), p("tail", "b2")));
+    editor.showSuggestion(rewriteSuggestion("b1"));
+    moveFirstBlockToEnd(editor);
+    let activate: ((blockId: string) => void) | undefined;
+    subscribeToAiSuggestions(editor, (_cards, actions) => { activate = actions.activate; });
+
+    activate?.("b1");
+    const { doc: after, selection } = editor.getState();
+    expect(selection.head).toBe(after.content.size - after.child(after.childCount - 1).nodeSize + 1);
   });
 });

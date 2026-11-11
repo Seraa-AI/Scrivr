@@ -1,7 +1,7 @@
 export { Extension } from "./Extension";
 export { ExtensionManager, getSchema, flattenExtensions } from "./ExtensionManager";
 export { StarterKit } from "./StarterKit";
-export { KeymapPriority } from "./types";
+export { KeymapPriority, DEFAULT_SLASH_ORDER } from "./types";
 
 // Built-in extensions — individually importable
 export { Document } from "./built-in/Document";
@@ -21,8 +21,10 @@ export { Link } from "./built-in/Link";
 export { Alignment } from "./built-in/Alignment";
 export { Indent, INDENT_STEP, TEXT_INDENT_STEP } from "./built-in/Indent";
 export { List } from "./built-in/List";
+// A list container from another extension declares List's wrapper to be drawn as a list.
+export { listWrap } from "./built-in/listLayout";
 export { Pagination } from "./built-in/Pagination";
-export { Image, prepareDocxImages } from "./built-in/Image";
+export { Image, prepareDocxImages, IMAGE_PLACEMENT_ATTRS } from "./built-in/Image";
 export { CodeBlock } from "./built-in/CodeBlock";
 export { HorizontalRule } from "./built-in/HorizontalRule";
 export { PageBreak } from "./built-in/PageBreak";
@@ -51,7 +53,9 @@ export type {
   SourcedBlockRecord,
   SourcedBlockDivergenceState,
 } from "./built-in/SourcedBlock";
-export { UniqueId, findNodeById, COLLAB_SYNC_META } from "./built-in/UniqueId";
+export { UniqueId, findNodeById, COLLAB_SYNC_META, NORMALIZATION_META } from "./built-in/UniqueId";
+export { TrailingNode } from "./built-in/TrailingNode";
+export { Typography } from "./built-in/Typography";
 export { ClearFormatting } from "./built-in/ClearFormatting";
 export { DefaultContent, type DefaultContentOptions } from "./built-in/DefaultContent";
 
@@ -61,6 +65,9 @@ export type {
   ScrivrNodeSpec,
   PasteTransform,
   PasteHtmlTransform,
+  CopyHtmlTransform,
+  PasteFileHandler,
+  PasteFileSpec,
   InitialDocContext,
   IBaseEditor,
   IEditor,
@@ -69,6 +76,12 @@ export type {
   SpanRect,
   FontModifier,
   ToolbarItemSpec,
+  BlockAncestor,
+  BlockInfo,
+  ToolbarState,
+  SlashCommandSpec,
+  SlashCommandContribution,
+  SlashCommandResolver,
   OverlayRenderHandler,
   CloneHandler,
   CloneHandlerContext,
@@ -97,6 +110,14 @@ export type {
   SelectionRect,
   SelectionRole,
 } from "../selection/types";
+export type {
+  HoverTarget,
+  HoverEvent,
+  HoverResolver,
+  MarkHoverResolver,
+  NodeHoverResolver,
+} from "../hover/types";
+export type { TableShape } from "../table/describeTable";
 // The seam's public API speaks ProseMirror `Selection`; re-export it so
 // extension authors get the whole selection vocabulary from "@scrivr/core".
 export type { Selection } from "prosemirror-state";

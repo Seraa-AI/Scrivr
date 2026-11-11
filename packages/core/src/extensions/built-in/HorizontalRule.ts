@@ -1,4 +1,5 @@
 import { Extension } from "../Extension";
+import type { SlashCommandContribution } from "../types";
 import type { PdfNodeHandler } from "../../exports/pdf";
 import type { Command } from "prosemirror-state";
 import { InputRule } from "prosemirror-inputrules";
@@ -96,7 +97,7 @@ export const HorizontalRule = Extension.create({
     return {
       horizontalRule: {
         group: "block",
-        attrs: { nodeId: { default: null } },
+        attrs: { nodeId: { default: null }, dataTracked: { default: [] } },
         parseDOM: [
           {
             tag: "hr",
@@ -183,6 +184,19 @@ export const HorizontalRule = Extension.create({
     ];
   },
 
+  addSlashCommands(): SlashCommandContribution[] {
+    return [{
+      items: [{
+        id: "horizontalRule.insert",
+        label: "Divider",
+        description: "Horizontal rule",
+        group: "insert",
+        order: 20,
+        command: "insertHorizontalRule",
+      }],
+    }];
+  },
+
   addMarkdownParserTokens() {
     return { hr: { node: "horizontalRule" } };
   },
@@ -196,18 +210,6 @@ export const HorizontalRule = Extension.create({
         },
       },
     };
-  },
-
-  addMarkdownRules() {
-    return [
-      {
-        // "---" (or more dashes) on its own line → horizontal rule (legacy paste fallback)
-        pattern: /^-{3,}$/,
-        createNode(_match, schema) {
-          return schema.nodes["horizontalRule"]?.create() ?? null;
-        },
-      },
-    ];
   },
 
   addInputRules() {

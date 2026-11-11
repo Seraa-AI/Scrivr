@@ -1,6 +1,7 @@
 /**
- * UniqueId now ships in `@scrivr/core` (and StarterKit) so stable block ids are
- * the default with or without the AI toolkit. Re-exported here for back-compat
- * with existing `@scrivr/plugins` consumers and the AiToolkit bundle.
+ * UniqueId ships in `@scrivr/core` (and StarterKit); re-exported here for hosts
+ * that imported it from the AI toolkit. Both id lookups are re-exported so an
+ * agent host has them; each one's doc says when to use it.
  */
 export { UniqueId, findNodeById } from "@scrivr/core";
+export { findLiveNodeById } from "@scrivr/plugins";

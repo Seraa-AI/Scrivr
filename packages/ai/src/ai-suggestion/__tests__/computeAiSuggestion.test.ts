@@ -9,7 +9,7 @@ import { describe, it, expect } from "vitest";
 import type { Node as PmNode } from "@scrivr/core/pm";
 import { EditorState } from "@scrivr/core/pm";
 import { computeAiSuggestion } from "../computeAiSuggestion";
-import { doc, p, h } from "./helpers";
+import { AiTestEditor, doc, moveFirstBlockToEnd, p, h, schema } from "./helpers";
 
 
 function makeState(d: PmNode) {
@@ -126,6 +126,47 @@ describe("computeAiSuggestion — op generation", () => {
   });
 });
 
+describe("computeAiSuggestion — phrases, as the tracked rewrite shows them", () => {
+  /** Each group's removed and added text, in document order. */
+  const groups = (state: EditorState, proposedText: string) => {
+    const ops = computeAiSuggestion(state, { blocks: [{ nodeId: "p1", proposedText }], authorID: "ai" })
+      ?.blocks[0]?.ops ?? [];
+    const byGroup = new Map<string, string[]>();
+    for (const op of ops) {
+      if (op.type === "keep" || !op.groupId) continue;
+      byGroup.set(op.groupId, [...(byGroup.get(op.groupId) ?? []), `${op.type === "delete" ? "-" : "+"}${op.text}`]);
+    }
+    return [...byGroup.values()];
+  };
+
+  it("replaces changes close together as one phrase", () => {
+    const state = makeState(doc(p("All staff, contractors is covered.", "p1")));
+    expect(groups(state, "All staff; contractors are covered.")).toEqual([["-, contractors is", "+; contractors are"]]);
+  });
+
+  it("keeps changes far apart as separate replacements", () => {
+    const state = makeState(doc(p("Core hours is ten to three in the employees local timezone.", "p1")));
+    expect(groups(state, "Core hours are ten to three in the employee's local timezone.")).toEqual([
+      ["-is", "+are"],
+      ["-employees", "+employee's"],
+    ]);
+  });
+
+  it("keeps formatted words out of a replacement, as the tracked rewrite does", () => {
+    const bold = schema.marks["bold"];
+    if (!bold) throw new Error("no bold mark");
+    const paragraph = schema.node("paragraph", { nodeId: "p1" }, [
+      schema.text("teh "), schema.text("big", [bold.create()]), schema.text(" smal"),
+    ]);
+    expect(groups(makeState(doc(paragraph)), "the big small")).toEqual([["-teh", "+the"], ["-smal", "+small"]]);
+  });
+
+  it("replaces a misspelt word whole, not the letters inside it", () => {
+    const state = makeState(doc(p("The policy applys to all staff.", "p1")));
+    expect(groups(state, "The policy applies to all staff.")).toEqual([["-applys", "+applies"]]);
+  });
+});
+
 describe("computeAiSuggestion — multi-block", () => {
   it("processes multiple blocks and returns one AiSuggestion with all blocks", () => {
     const state = makeState(doc(
@@ -222,5 +263,18 @@ describe("computeAiSuggestion — acceptedText", () => {
 
     expect(result).not.toBeNull();
     expect(result!.blocks[0]!.acceptedText).toBe("Introduction");
+  });
+});
+
+describe("computeAiSuggestion — a block with a pending move", () => {
+  it("diffs against the moved block, not the copy it left behind", () => {
+    const editor = new AiTestEditor(doc(p("The quick fox", "b1"), p("tail", "b2")));
+    moveFirstBlockToEnd(editor);
+
+    const result = computeAiSuggestion(editor.getState(), {
+      blocks: [{ nodeId: "b1", proposedText: "The slow fox" }],
+      authorID: "AI Assistant",
+    });
+    expect(result?.blocks.map((block) => block.acceptedText)).toEqual(["The quick fox"]);
   });
 });

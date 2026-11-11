@@ -101,20 +101,20 @@ describe("StarterKit keymap composition", () => {
       expect(countType(next!.doc, "listItem")).toBe(0);
     });
 
-    it("sinks a nested list item when the cursor is in a list", () => {
+    it("takes a list item a level deeper when the cursor is in a list", () => {
       const { schema, keymap } = makeKit();
       const { bulletList, listItem, paragraph } = schema.nodes;
 
       const item = (text: string) => listItem!.create(null, [paragraph!.create(null, schema.text(text))]);
       const doc = schema.topNodeType.create(null, [bulletList!.create(null, [item("one"), item("two")])]);
 
-      // Cursor inside the SECOND item — the first item can't sink (nothing to nest under).
       const secondItemTextPos = 1 + 1 + 1 + "one".length + 1 + 1 + 1;
       const next = press(keymap, "Tab", stateWithDoc(schema, doc, secondItemTextPos));
 
       expect(next).not.toBeNull();
-      // Sinking nests a new list inside the first item.
-      expect(countType(next!.doc, "bulletList")).toBe(2);
+      // As in Word, only that item goes deeper; the list's structure stays.
+      expect(countType(next!.doc, "bulletList")).toBe(1);
+      expect(next?.doc.child(0).child(1).attrs["levelOffset"]).toBe(1);
       expect(next!.doc.textContent).toBe("onetwo");
     });
   });

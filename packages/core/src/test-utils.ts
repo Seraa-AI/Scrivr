@@ -28,6 +28,7 @@ import { createNapiCanvasContext } from "./test/createNapiCanvasContext";
 import type { Node } from "prosemirror-model";
 import type { Schema } from "prosemirror-model";
 import type { FontConfig } from "./layout/FontConfig";
+import type { FontModifier } from "./extensions/types";
 import type { PageConfig } from "./layout/PageLayout";
 import type { SectionSettings } from "./model/sections";
 
@@ -161,6 +162,8 @@ export interface FullEditorContext {
   schema: Schema;
   /** Merged FontConfig from StarterKit — block styles for all built-in node types. */
   fontConfig: FontConfig;
+  /** StarterKit's font modifiers — how bold, italic, size and family marks change a run's font. */
+  fontModifiers: Map<string, FontModifier>;
 }
 
 /**
@@ -178,6 +181,7 @@ export function buildStarterKitContext(): FullEditorContext {
   return {
     schema: manager.schema,
     fontConfig: manager.buildBlockStyles(),
+    fontModifiers: manager.buildFontModifiers(),
   };
 }
 
@@ -323,6 +327,10 @@ export interface PointerControllerSetupOptions {
   tileHeight?: number;
   slotHeight?: number;
   pageConfig?: PageConfig;
+  /** Document JSON to load instead of the default one-page document. */
+  content?: EditorOptions["content"];
+  /** Extensions to load instead of the default StarterKit, e.g. one with tables. */
+  extensions?: EditorOptions["extensions"];
 }
 
 export interface PointerControllerSetup {
@@ -363,7 +371,8 @@ export function makePointerControllerSetup(
 
   const editor = createTestEditor({
     pageConfig,
-    content: makeNPageDoc(1),
+    content: opts.content ?? makeNPageDoc(1),
+    ...(opts.extensions ? { extensions: opts.extensions } : {}),
   });
 
   const container = document.createElement("div");
@@ -383,11 +392,6 @@ export function makePointerControllerSetup(
     slotHeight: () => slotHeight,
     tileHeight: () => tileHeight,
     isPageless: () => isPageless,
-    visualYToDocY: (y) => {
-      if (isPageless) return { page: 1, docY: y };
-      const tileIndex = Math.floor(y / slotHeight);
-      return { page: tileIndex + 1, docY: y - tileIndex * slotHeight };
-    },
     scheduleUpdate: () => {},
   };
   const controller = new PointerController(deps);

@@ -1,32 +1,47 @@
 /**
  * createLinkPopover — framework-agnostic controller for a link editing popover.
  *
- * Automatically shows when the cursor (or selection) overlaps a `link` mark.
- * Passes the link's href and the mark's doc range to the callbacks so the
- * consumer can render an "Open / Edit / Remove" popover.
+ * Shows in two presentations:
+ *   - "full" while the caret (the selection's head) is in a link — the
+ *     consumer renders "Open / Edit / Remove".
+ *   - "peek" when the pointer rests on a link — compact and read-only.
+ * Selection wins: while the caret is in a link, hover is ignored. The same
+ * link — peek → full, or moved by an edit — keeps the popover (onMove), so it
+ * grows or follows in place; a different link is shown anew (onShow).
  *
  * @example — vanilla JS
+ *   const place = (rect, { href }) => {
+ *     popover.style.cssText = `display:block;left:${rect.left}px;top:${rect.bottom + 8}px`;
+ *     popover.querySelector("a").href = href;
+ *   };
  *   const cleanup = createLinkPopover(editor, {
- *     onShow: (rect, href, range) => {
- *       popover.style.cssText = `display:block;left:${rect.left}px;top:${rect.bottom + 8}px`;
- *       popover.querySelector("a").href = href;
- *     },
+ *     onShow: place,
+ *     onMove: place,
  *     onHide: () => { popover.style.display = "none" },
  *   });
  */
-import type { Node, MarkType } from "prosemirror-model";
 import type { IEditor } from "../extensions/types";
+import type { HoverTarget } from "../hover/types";
+import { linkAt, type LinkRange } from "../extensions/built-in/Link";
 import { subscribeViewUpdates } from "./subscribeViewUpdates";
 import { subscribeEditorFocusOutside } from "./subscribeEditorFocusOutside";
 import { isAnchorInsideContainer } from "./anchorVisibility";
+import { trackShownRange } from "./shownRange";
+import {
+  subscribeHoverTarget,
+  type HoverOption,
+  type PopoverPresentation,
+} from "./subscribeHoverTarget";
 
 export interface LinkPopoverInfo {
-  /** The href attribute of the link mark under the cursor. */
+  /** The href of the link. */
   href: string;
-  /** Doc position where the link mark starts. */
+  /** Doc position where the link starts. */
   from: number;
-  /** Doc position where the link mark ends. */
+  /** Doc position where the link ends. */
   to: number;
+  /** "peek" when shown from hover, "full" when the caret is in the link. */
+  presentation: PopoverPresentation;
 }
 
 export interface LinkPopoverCallbacks {
@@ -39,8 +54,11 @@ export interface LinkPopoverOptions extends LinkPopoverCallbacks {
   /**
    * Accessor returning the popover's root DOM element (or null if unmounted).
    * Threaded into the focus-outside check; see createBubbleMenu for context.
+   * Also keeps a hover peek open while the pointer is over it.
    */
-  getPopoverElement?: () => HTMLElement | null;
+  getPopoverElement?: (() => HTMLElement | null) | undefined;
+  /** Hover peeks. Default true; false shows the popover from the selection only. */
+  hover?: HoverOption | undefined;
 }
 
 export function createLinkPopover(editor: IEditor, options: LinkPopoverOptions): () => void {
@@ -48,40 +66,74 @@ export function createLinkPopover(editor: IEditor, options: LinkPopoverOptions):
 
   let visible = false;
   let rafId: number | null = null;
+  let hovered: HoverTarget | null = null;
+  /** The shown link, mapped through edits. */
+  const shown = trackShownRange(editor);
+
+  function hide() {
+    shown.set(null);
+    if (visible) { visible = false; onHide(); }
+  }
+
+  /** The link the caret is in — the full presentation. */
+  function selectedLink(): LinkRange | null {
+    const state = editor.getState();
+    const linkType = state.schema.marks["link"];
+    return linkType ? linkAt(state.doc, state.selection.head, linkType) : null;
+  }
+
+  /** The hovered link, re-resolved against current state — the peek. */
+  function hoveredLink(): LinkRange | null {
+    if (!hovered) return null;
+    const state = editor.getState();
+    const linkType = state.schema.marks["link"];
+    if (!linkType || hovered.end > state.doc.content.size) return null;
+    // The link on the target's first character: a caret just after it.
+    return linkAt(state.doc, hovered.pos + 1, linkType);
+  }
+
+  /**
+   * The part of the link to anchor to: the line of the character at `at`, as
+   * a wrapped link peeks under the line the pointer rests on. A caret just
+   * past the link reads its last character. When that line is scrolled away,
+   * the first part still on screen; none on screen, nothing.
+   */
+  function anchorRect(link: LinkRange, pos: number): DOMRect | null {
+    const at = Math.min(Math.max(pos, link.from), link.to - 1);
+    const container = editor.getScrollContainerRect();
+    const parts = editor
+      .getRangeViewportRects(link.from, link.to)
+      .filter((part) => isAnchorInsideContainer(part, container));
+    // The part holding the character itself: its text line, or the image's
+    // own box when the character is a floating image. The tightest wins, so a
+    // tall image beside the text never takes a line it only overlaps.
+    const char = editor.getRangeViewportRects(at, at + 1)[0];
+    const holding = char ? parts.filter((part) => holds(part, char)).sort((a, b) => area(a) - area(b))[0] : undefined;
+    return holding ?? parts[0] ?? null;
+  }
 
   function update() {
-    const state    = editor.getState();
-    const { head } = state.selection;
-    const $pos     = state.doc.resolve(head);
+    const selected = selectedLink();
+    // Selection wins: a link with the caret in it shows full and hover is ignored.
+    const link = selected ?? hoveredLink();
+    if (!link) { hide(); return; }
 
-    // Find a link mark at the cursor position
-    const linkMark = state.schema.marks["link"];
-    if (!linkMark) {
-      if (visible) { visible = false; onHide(); }
+    const rect = anchorRect(link, selected ? editor.getState().selection.head : hovered?.at ?? link.from);
+    if (!rect) {
+      hide();
       return;
     }
 
-    const markInstance = $pos.marks().find((m) => m.type === linkMark)
-      ?? state.doc.resolve(Math.max(0, head - 1)).marks().find((m) => m.type === linkMark);
+    const info: LinkPopoverInfo = {
+      href: link.href,
+      from: link.from,
+      to: link.to,
+      presentation: selected ? "full" : "peek",
+    };
 
-    if (!markInstance) {
-      if (visible) { visible = false; onHide(); }
-      return;
-    }
-
-    // Walk outward from cursor to find the full extent of this mark
-    const { from, to } = findMarkRange(state.doc, head, markInstance.type);
-    const href = markInstance.attrs["href"] as string;
-
-    const rect = editor.getViewportRect(from, to);
-    if (!rect || !isAnchorInsideContainer(rect, editor.getScrollContainerRect())) {
-      if (visible) { visible = false; onHide(); }
-      return;
-    }
-
-    const info: LinkPopoverInfo = { href, from, to };
-
-    if (visible) {
+    const same = visible && shown.is(link.from, link.to);
+    shown.set({ from: link.from, to: link.to });
+    if (same) {
       onMove(rect, info);
     } else {
       visible = true;
@@ -89,53 +141,46 @@ export function createLinkPopover(editor: IEditor, options: LinkPopoverOptions):
     }
   }
 
-  const unsubscribe = subscribeViewUpdates(editor, () => {
+  function scheduleUpdate() {
     if (rafId !== null) return;
     rafId = requestAnimationFrame(() => { rafId = null; update(); });
-  });
+  }
+
+  const unsubscribe = subscribeViewUpdates(editor, scheduleUpdate);
+  const offHover = subscribeHoverTarget(
+    editor,
+    "link",
+    (target) => { hovered = target; scheduleUpdate(); },
+    { hover: options.hover ?? true, getPopoverElement: options.getPopoverElement },
+  );
   const offFocusOutside = subscribeEditorFocusOutside(
     editor,
     () => {
+      // A peek is pointer-driven, not focus-driven: losing focus to elsewhere
+      // on the page hides the full popover only.
+      if (hovered && !selectedLink()) return;
       if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
-      if (visible) { visible = false; onHide(); }
+      hide();
     },
     options.getPopoverElement ? { getPopoverElement: options.getPopoverElement } : {},
   );
 
   return () => {
     unsubscribe();
+    shown.dispose();
+    offHover();
     offFocusOutside();
     if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
-    if (visible) { visible = false; onHide(); }
+    hide();
   };
 }
 
-/** Walk the doc to find the contiguous range covered by a specific mark type around `pos`. */
-function findMarkRange(
-  doc: Node,
-  pos: number,
-  markType: MarkType,
-): { from: number; to: number } {
-  const $pos  = doc.resolve(pos);
-  const start = $pos.start();
-  const end   = $pos.end();
+const EDGE = 0.5;
+function holds(outer: DOMRect, inner: DOMRect): boolean {
+  return inner.left >= outer.left - EDGE && inner.right <= outer.right + EDGE
+    && inner.top >= outer.top - EDGE && inner.bottom <= outer.bottom + EDGE;
+}
 
-  let from = pos;
-  let to   = pos;
-
-  // Walk backwards to find start of mark
-  doc.nodesBetween(start, pos, (node, nodePos) => {
-    if (node.isText && node.marks.some((m) => m.type === markType)) {
-      from = Math.min(from, nodePos);
-    }
-  });
-
-  // Walk forwards to find end of mark
-  doc.nodesBetween(pos, end, (node, nodePos) => {
-    if (node.isText && node.marks.some((m) => m.type === markType)) {
-      to = Math.max(to, nodePos + node.nodeSize);
-    }
-  });
-
-  return { from, to };
+function area(r: DOMRect): number {
+  return r.width * r.height;
 }

@@ -1,8 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { EditorState, TextSelection, NodeSelection } from "prosemirror-state";
-import { collectLayoutItems } from "../../layout/PageLayout";
+import { collectLayoutItems } from "../../layout/layoutItems";
 import { nodeLayout } from "../../layout/BlockRegistry";
-import { defaultFontConfig } from "../../layout/FontConfig";
 import { PasteTransformer } from "../../input/PasteTransformer";
 import { ExtensionManager } from "../ExtensionManager";
 import { Schema, Fragment, type Node as PmNode } from "prosemirror-model";
@@ -568,7 +567,7 @@ describe("SourcedBlock Extension", () => {
 				]),
 			]);
 
-			const items = collectLayoutItems(doc, defaultFontConfig);
+			const items = collectLayoutItems(doc);
 
 			expect(items.map(i => i.node.type.name)).toEqual(["paragraph"]);
 		});
@@ -592,7 +591,7 @@ describe("SourcedBlock Extension", () => {
 				]),
 			]);
 
-			const items = collectLayoutItems(doc, defaultFontConfig);
+			const items = collectLayoutItems(doc);
 
 			// The wrapper itself never reaches layout — its children do, in order.
 			expect(items.map(i => i.node.type.name)).toEqual([
@@ -615,7 +614,7 @@ describe("SourcedBlock Extension", () => {
 				schema.node("sourcedBlock", attrs, [inner]),
 			]);
 
-			const items = collectLayoutItems(doc, defaultFontConfig);
+			const items = collectLayoutItems(doc);
 			const clauseItem = items[1];
 
 			// "before" paragraph occupies 0..8, wrapper opens at 8, inner at 9.
@@ -638,9 +637,9 @@ describe("SourcedBlock Extension", () => {
 				]),
 			]);
 
-			const items = collectLayoutItems(doc, defaultFontConfig);
+			const items = collectLayoutItems(doc);
 
-			expect(items.map(i => i.listMarker)).toEqual(["•", "•"]);
+			expect(items.map(i => i.marker?.data)).toEqual(["•", "•"]);
 			expect(items.map(i => i.node.textContent)).toEqual(["a", "b"]);
 			for (const item of items) {
 				expect(doc.nodeAt(item.nodePos)).toBe(item.node);
@@ -649,7 +648,7 @@ describe("SourcedBlock Extension", () => {
 	});
 
 	describe("divergence tracking", () => {
-		function editorWith(text: string, baseHash: string) {
+		function editorWith(text: string, baseHash: string | null) {
 			return new ServerEditor({
 				extensions: [StarterKit, SourcedBlockExtension],
 				content: {
@@ -696,6 +695,15 @@ describe("SourcedBlock Extension", () => {
 			const pristine = editorWith("Clause text", "placeholder");
 			const editor = editorWith("Clause text", hashOf(pristine));
 			expect(divergedIds(editor)).toEqual([]);
+		});
+
+		it.each([null, ""])("does not call a block modified when its base is %j", baseHash => {
+			const editor = editorWith("Clause text", baseHash);
+			expect(divergedIds(editor)).toEqual([]);
+
+			editor.applyTransaction(editor.getState().tr.insertText("!", 12));
+			expect(divergedIds(editor)).toEqual([]);
+			expect(collectSourcedBlocks(editor.getState().doc)[0]?.baseHash).toBeNull();
 		});
 
 		it("diverges on edit and clears again when the edit is reverted", () => {
@@ -829,7 +837,6 @@ describe("SourcedBlock Extension", () => {
 
 			const transformer = new PasteTransformer(
 				schema,
-				manager.buildMarkdownRules(),
 				manager.buildMarkdownParserTokens(),
 				{ pasteTransforms: manager.buildPasteTransforms() },
 			);

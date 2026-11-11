@@ -12,6 +12,7 @@
  */
 
 import type { Node as PmNode, Mark as PmMark, Schema } from "prosemirror-model";
+import { anchoredOf, type WrapMode, type XAlign } from "../layout/AnchoredObjects";
 
 // ── The unit ──────────────────────────────────────────────────────────────
 
@@ -32,11 +33,69 @@ export type SemanticUnitType =
 export type SemanticRole = "body" | "header" | "footer";
 
 /**
- * Text view exported by the semantic lane. In v1 this is the proposed review
- * view: pending inserts are included, pending deletes are excluded from text
- * and preserved in `changes`.
+ * Which document the semantic lane reads.
+ *
+ * - `"proposed"` (default): every pending proposal as if accepted — pending
+ *   inserts in the text, pending deletes out of it and kept in `changes`.
+ * - `"original"`: the document as agreed before any pending proposal, as
+ *   rejecting all of them would leave it. It carries no `changes`; there is
+ *   nothing pending in it. Only the proposed view is editable.
  */
-export type SemanticTextView = "proposed";
+export type SemanticTextView = "proposed" | "original";
+
+/** A block that heads a section, as a unit holds it. */
+export interface SemanticHeading {
+  /**
+   * The heading block's own id, or, for a nested heading with none, its
+   * position in the unit (`<unit id>/h<n>`): stable for the same tree, but it
+   * names no node, so a citation cannot resolve it.
+   */
+  nodeId: string;
+  level: number;
+  /** Its title (`outlineTitleOf`): the proposed text, a line break as a space, trimmed. */
+  title: string;
+  /** The headings it sits under, outermost first. */
+  breadcrumb: string[];
+}
+
+/**
+ * One section of the document's outline — the tree the headings imply, which a
+ * flat unit list states only implicitly.
+ *
+ * Derived from the same units, so the same JSON always yields the same
+ * outline: ids come from unit anchors and heading ids, never from fresh identity.
+ */
+export interface OutlineSection {
+  /** Its heading's id (`SemanticHeading.nodeId`), or the first unit's for content before any heading. Stable across reads. */
+  id: string;
+  /** The enclosing section's `id`, or null at the top level. */
+  parentId: string | null;
+  /** The heading's text, or the supplied name for content that precedes one. */
+  heading: string;
+  /**
+   * The heading block's own anchor id — what a citation points at.
+   *
+   * Null for the section covering content before the first heading: there is
+   * no heading block to point at. The absence is the signal, so a caller that
+   * needs a real heading can ask for one without a second flag.
+   */
+  headingNodeId: string | null;
+  /** The heading's level. A section with no heading of its own sits at 1. */
+  level: number;
+  /** Ancestor headings outermost-first, ending with this section's own. */
+  path: string[];
+  /**
+   * Index of the section's first unit: its heading's own unit, or the unit
+   * holding a nested heading, which it shares with the section before.
+   */
+  startUnit: number;
+  /**
+   * Index one past the section's last unit. The range is heading-inclusive and
+   * ends where the next section at this level or shallower opens, so an outer
+   * section's range contains its children's.
+   */
+  endUnit: number;
+}
 
 export interface SemanticUnit {
   /** Stable anchor id = `nodeIds[0]`. Always present. */
@@ -52,7 +111,15 @@ export interface SemanticUnit {
   view: SemanticTextView;
   /** Heading path, e.g. `["Limitation of Liability", "Exclusions"]`. */
   breadcrumb: string[];
+  /** The anchor block's outline level, when it heads a section (see `headings`). */
   headingLevel?: number;
+  /**
+   * Every block in this unit that heads a section, in document order: its
+   * anchor, a heading nested in a list, sourced block or table cell, each with
+   * the breadcrumb it sits under. A block heads a section when its spec
+   * declares an outline level and its proposed text is not empty.
+   */
+  headings?: SemanticHeading[];
   /** Monotonic document order. */
   order: number;
   /** Plain text for embedding. Tracked-delete text excluded, tracked-insert included. */
@@ -87,8 +154,68 @@ export interface SemanticUnit {
   markdown?: string;
   /** Structured rows/cells with spans — emitted for tables GFM can't encode. */
   cells?: TableCells;
-  /** Review changes excluded from `text` but preserved for audit/UI use. */
+  /** Pending review changes, each placed in `text`. */
   changes?: SemanticChange[];
+  /** The image an `image` unit is — a paragraph holding one image and nothing else. */
+  image?: SemanticImage;
+  /**
+   * The block itself is proposed for deletion — not only its text. It reads
+   * empty and cannot be edited or placed after; its deletion is in `changes`.
+   */
+  proposedForDeletion?: true;
+}
+
+/**
+ * An image as an agent reads it; it sets one through `SemanticImageAttrs`. An
+ * image has no id of its own; the unit that carries it is addressed by its
+ * paragraph's id.
+ */
+export interface SemanticImage {
+  src: string;
+  alt: string;
+  width: number;
+  height: number;
+  wrap: ImageWrap;
+  /** `custom` when it was dragged to a position of its own; an agent sets only an `ImageAlign`. */
+  align: ImageAlign | "custom";
+}
+
+/** How text flows around an image. */
+export type ImageWrap = WrapMode;
+/** Where an image sits across the line. */
+export type ImageAlign = Exclude<XAlign, "custom">;
+/** The wraps and alignments an agent may set; validate against these so validation follows the node. */
+export const IMAGE_WRAPS: readonly ImageWrap[] = ["inline", "square", "top-bottom", "behind", "front"];
+export const IMAGE_ALIGNS: readonly ImageAlign[] = ["left", "center", "right"];
+
+/** The image node attr each `SemanticImage` field reads from and writes to. */
+export const IMAGE_NODE_ATTRS: Record<keyof SemanticImage, string> = {
+  src: "src",
+  alt: "alt",
+  width: "width",
+  height: "height",
+  wrap: "wrapMode",
+  align: "xAlign",
+};
+
+/**
+ * The image a node is, as an agent reads it, or null when it is not one: an
+ * anchored object (its spec declares `anchored`) with a `src`. Use it wherever
+ * an image is reported — a unit's `image`, or the image a change inserts or
+ * deletes — so both read the same.
+ */
+export function semanticImage(node: PmNode): SemanticImage | null {
+  const placed = anchoredOf(node);
+  const { src, alt } = node.attrs;
+  if (!placed || typeof src !== "string") return null;
+  return {
+    src,
+    alt: typeof alt === "string" ? alt : "",
+    width: placed.width,
+    height: placed.height,
+    wrap: placed.wrapMode,
+    align: placed.xAlign,
+  };
 }
 
 /** One inline run of a unit's text and the formatting marks around it. */
@@ -120,16 +247,75 @@ export interface SemanticPart {
   text: string;
   spans?: InlineSpan[];
   attrs?: Record<string, unknown>;
+  /** Review changes inside this part, placed in `text`. Also in the parent unit. */
+  changes?: SemanticChange[];
+  /** The leaf itself is proposed for deletion, as on `SemanticUnit`. */
+  proposedForDeletion?: true;
 }
 
+/**
+ * One pending act of review as an agent reads it. `at`/`length` place it in the
+ * text owning the `changes` array it is in: `unit.text`, `part.text` or
+ * `cell.text`.
+ */
 export interface SemanticChange {
-  type: "suggestedDelete";
+  type: "suggestedDelete" | "suggestedInsert" | "suggestedAttrs";
+  /**
+   * This act's own content: what it removes or adds, "\n" for a paragraph or
+   * line break, "" for an attribute change or an object. Pieces in separate
+   * blocks are joined by "\n". Anything else lying between its pieces —
+   * another author's change, untouched text — is not part of it.
+   */
   text: string;
+  /**
+   * Offset into the owning text: where an insertion or attribute change
+   * starts, or where a deletion's first piece stood. Absent when a node
+   * handler overrides the unit's text.
+   */
+  at?: number;
+  /**
+   * The extent in the owning text, from this act's first piece to its last.
+   * For an insertion with nothing else inside it, `text.slice(at, at + length)`
+   * is `text`; otherwise the slice also holds what lies between its pieces.
+   * 0 for a deletion, which is not in the proposed text, and for an inserted
+   * paragraph break, which sits between units rather than in one.
+   */
+  length?: number;
+  /**
+   * The act's id: the one to pass to `reviewChanges`. Every piece of one act —
+   * both halves of a replacement or a move, a block and its text — shares it.
+   */
   id?: string;
   authorId?: string;
   status?: string;
   createdAt?: number;
+  /** Shared by the two halves of one replacement. */
   groupId?: string;
+  /** Shared by the two halves of one move. */
+  moveId?: string;
+  /**
+   * `suggestedAttrs` only: what it was before. A block: its former styling,
+   * with `level` for a heading and `nodeType` when the type changed. A list
+   * change: `{ list: [...] }`, the list types it sat in, outermost first. A
+   * formatting change: `{ marks: [...] }`, the text's formatting marks before.
+   */
+  oldAttrs?: Record<string, unknown>;
+  /**
+   * The image an inserted or deleted image is. Each image an act adds or
+   * removes is a change of its own, under the act's id.
+   */
+  image?: SemanticImage;
+}
+
+/**
+ * A review record a contributor reads off a node — a block's own attrs, or a
+ * text node's formatting marks. `covers` spans the node's text; `after` sits
+ * where it ends, as a paragraph break does. A covering insertion with no text
+ * of its own reads the text it covers.
+ */
+export interface SemanticNodeChange {
+  change: SemanticChange;
+  place: "covers" | "after";
 }
 
 export interface TableCells {
@@ -165,6 +351,7 @@ export interface TableCell {
 export interface SemanticNodeResult {
   type: SemanticUnitType;
   cells?: TableCells;
+  image?: SemanticImage;
   text?: string;
   markdown?: string;
 }
@@ -195,6 +382,28 @@ export type SemanticMarkHandler = (
 export interface SemanticHandlers {
   nodes?: Record<string, SemanticNodeHandler>;
   marks?: Record<string, SemanticMarkHandler>;
+  /**
+   * Whether the proposed view leaves a node out: an object proposed for
+   * deletion, which no mark handler can drop, or text proposed for deletion
+   * beside one.
+   */
+  isRemoved?: (node: PmNode) => boolean;
+  /**
+   * Review records on any node, text included: a block's own attrs, or a
+   * formatting mark's records, which no mark handler sees.
+   */
+  nodeChanges?: (node: PmNode, ctx: UnitCtx) => SemanticNodeChange[];
+  /**
+   * Whether the proposed view leaves a formatting mark off its text: one
+   * proposed for removal. Spans then read the text as it would be.
+   */
+  isMarkRemoved?: (mark: PmMark) => boolean;
+  /**
+   * The document as `view` reads it, or null when this contribution has
+   * nothing to change for it. Review records contribute the original view:
+   * the document their own Reject of every pending proposal leaves.
+   */
+  documentIn?: (doc: PmNode, view: SemanticTextView) => PmNode | null;
 }
 
 // ── Producer context ─────────────────────────────────────────────────────────
@@ -206,16 +415,20 @@ export interface SemanticHandlers {
  */
 export interface UnitCtx {
   readonly schema: Schema;
+  /** The document being read. A review act can span nodes, so naming one needs all of it. */
+  readonly doc: PmNode;
   /** Serialize one block, or an ordered group of blocks, to markdown. */
   toMarkdown(nodes: PmNode | readonly PmNode[]): string;
   /** Plain text for embedding; folds semantic mark handlers. */
   toText(nodes: PmNode | readonly PmNode[]): string;
   /** Inline formatting runs; reconstructs `toText` exactly (formatting marks only). */
   toSpans(nodes: PmNode | readonly PmNode[]): InlineSpan[];
-  /** Review changes found while applying semantic mark handlers. */
+  /** Review changes from the mark handlers and `nodeChanges`, placed in `toText`'s text. */
   toChanges(nodes: PmNode | readonly PmNode[]): SemanticChange[];
   /** A block's non-default styling attrs (align/indent/font/…), or undefined. */
   attrsOf(node: PmNode): Record<string, unknown> | undefined;
+  /** Whether the proposed view leaves this node out (see `SemanticHandlers.isRemoved`). */
+  isRemoved(node: PmNode): boolean;
   /** Physical column count = max over rows of Σ gridSpan (never TableMap.width). */
   physicalColumns(table: PmNode): number;
 }
@@ -236,4 +449,6 @@ export interface SemanticExportOptions {
    * @default true
    */
   groupBlocks?: boolean;
+  /** Which document to read. @default "proposed" */
+  view?: SemanticTextView;
 }

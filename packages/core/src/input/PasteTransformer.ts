@@ -1,16 +1,17 @@
 import {
   DOMParser as PMDOMParser,
   Fragment,
-  Mark,
   Slice,
 } from "prosemirror-model";
-import type { Schema, Node } from "prosemirror-model";
+import type { NodeType, Schema, Node } from "prosemirror-model";
 import type { EditorState, Transaction } from "prosemirror-state";
 import { MarkdownParser } from "prosemirror-markdown";
-import MarkdownIt from "markdown-it";
+import type MarkdownIt from "markdown-it";
+import { createMarkdownIt } from "../model/parseMarkdown";
 import type {
-  MarkdownBlockRule,
   MarkdownParserTokenSpec,
+  PasteFileHandler,
+  PasteFileSpec,
   PasteTransform,
   PasteHtmlTransform,
 } from "../extensions/types";
@@ -23,12 +24,22 @@ import { safeImageUrl } from "../model/safeUrl";
 // Require intentional block-level structure — mid-sentence asterisks are NOT markdown.
 const MARKDOWN_PATTERN = /^(#{1,6} |[*-] |\d+\. |`{3}|---)/m;
 
-// Tokens that markdown-it emits but our schema has no equivalent for.
-// These are self-closing inline tokens — { ignore: true } silently skips them.
+// A "two spaces, newline" break with no line break node declared reads as a space.
 const IGNORE_TOKENS: Record<string, MarkdownParserTokenSpec> = {
   hardbreak: { ignore: true },
-  code_inline: { ignore: true },
-  image: { ignore: true },
+};
+
+/**
+ * Inline and block markdown-it rules, by the token they emit. A rule whose
+ * token no extension declares is turned off, so its syntax pastes as the text
+ * it was rather than failing the whole paste.
+ */
+const RULE_TOKENS: Record<string, string> = {
+  blockquote: "blockquote",
+  link: "link",
+  autolink: "link",
+  image: "image",
+  backticks: "code_inline",
 };
 
 export interface PasteOptions {
@@ -59,6 +70,19 @@ export interface PasteTransformerOptions {
    * parsed. Collected by `ExtensionManager.buildPasteHtmlTransforms()`.
    */
   pasteHtmlTransforms?: PasteHtmlTransform[];
+
+  /**
+   * The pasted files each node type takes, declared by the extension that
+   * owns it (`addPasteFiles`). Collected by `ExtensionManager.buildPasteFiles()`.
+   */
+  pasteFiles?: readonly PasteFileHandler[];
+}
+
+/** A pasted file and the node type that takes it. */
+interface TakenFile {
+  file: File;
+  type: NodeType;
+  spec: PasteFileSpec;
 }
 
 /** A synchronous reservation followed by asynchronous image resolution. */
@@ -112,27 +136,24 @@ export function fitPastedImage(
  *
  * Priority:
  *   1. text/html  → ProseMirror DOMParser (handles bold, headings, lists, etc.)
- *   2. text/plain → prosemirror-markdown MarkdownParser (full CommonMark support)
- *   3. text/plain → legacy line-by-line parser (fallback for unsupported constructs)
- *   4. text/plain → plain text insertion
+ *   2. text/plain → prosemirror-markdown MarkdownParser, over the tokens extensions declare
+ *   3. text/plain → plain text insertion, when the markdown holds a token no extension declares
  */
 export class PasteTransformer {
   private readonly md: InstanceType<typeof MarkdownIt>;
 
   constructor(
     private readonly schema: Schema,
-    private readonly extraMarkdownRules: MarkdownBlockRule[] = [],
     private readonly markdownParserTokens: Record<
       string,
       MarkdownParserTokenSpec
     > = {},
     private readonly options: PasteTransformerOptions = {},
   ) {
-    // Disable rules that generate tokens our schema can't handle (blockquote, link, image).
-    // Their content still renders as plain text — no data loss, just no special formatting.
-    this.md = new MarkdownIt({ html: false });
-    //TODO: add these to the schema
-    this.md.disable(["blockquote", "image", "link"]);
+    this.md = createMarkdownIt();
+    this.md.disable(
+      Object.entries(RULE_TOKENS).flatMap(([rule, token]) => (token in markdownParserTokens ? [] : [rule])),
+    );
   }
 
   transform(
@@ -152,7 +173,7 @@ export class PasteTransformer {
     // An image copied from a file manager arrives as bytes plus a text/plain
     // file path. The bytes are the content the user meant; inserting the path
     // as well would paste the image twice, once as a URL string.
-    if (!html && hasImageFile(clipboardData)) return null;
+    if (!html && this.takenFiles(clipboardData).length > 0) return null;
 
     if (html) {
       try {
@@ -198,44 +219,29 @@ export class PasteTransformer {
   ): PendingImagePaste | null {
     if (clipboardData.getData("text/html").trim()) return null;
 
-    const imageType = this.schema.nodes["image"];
-    if (!imageType) return null;
+    const taken = this.takenFiles(clipboardData);
+    if (taken.length === 0) return null;
 
-    const files = imageFiles(clipboardData);
-    if (files.length === 0) return null;
-
-    const reservations = files.map(() => {
+    const reservations = taken.map(({ type, spec }) => {
       const id = crypto.randomUUID();
-      return {
-        id,
-        node: imageType.create({
-          src: PENDING_IMAGE_SRC,
-          alt: "Uploading image…",
-          pendingPasteId: id,
-        }),
-      };
+      return { id, spec, node: type.create(spec.pending(id)) };
     });
     const insert = state.tr.replaceSelection(
       new Slice(Fragment.from(reservations.map(({ node }) => node)), 0, 0),
     );
 
     let cancelled = false;
-    const reservationIds = reservations.map(({ id }) => id);
     return {
       insert,
       resolve: async (getState) => {
         if (cancelled) return null;
-        const resolved = await this.resolveImageFiles(files);
+        const resolved = await this.resolveImageFiles(taken.map(({ file }) => file));
         if (cancelled) return null;
-        return resolveImageReservations(getState(), reservationIds, resolved);
+        return resolveReservations(getState(), reservations.map((r, index) => ({ ...r, file: resolved[index] ?? null })));
       },
       cancel: (currentState) => {
         cancelled = true;
-        return resolveImageReservations(
-          currentState,
-          reservationIds,
-          reservationIds.map(() => null),
-        );
+        return resolveReservations(currentState, reservations.map((r) => ({ ...r, file: null })));
       },
     };
   }
@@ -249,19 +255,29 @@ export class PasteTransformer {
     getState: () => EditorState,
   ): Promise<Transaction | null> {
     if (clipboardData.getData("text/html").trim()) return null;
-    const imageType = this.schema.nodes["image"];
-    if (!imageType) return null;
-    const files = imageFiles(clipboardData);
-    if (files.length === 0) return null;
-    const resolved = await this.resolveImageFiles(files);
+    const taken = this.takenFiles(clipboardData);
+    if (taken.length === 0) return null;
+    const resolved = await this.resolveImageFiles(taken.map(({ file }) => file));
 
     const nodes: Node[] = [];
-    for (const image of resolved) {
-      if (image) nodes.push(imageType.create(image));
-    }
+    resolved.forEach((file, index) => {
+      const owner = taken[index];
+      if (file && owner) nodes.push(owner.type.create(owner.spec.resolved(file)));
+    });
     if (nodes.length === 0) return null;
 
     return getState().tr.replaceSelection(new Slice(Fragment.from(nodes), 0, 0));
+  }
+
+  /** Each pasted file a node type takes, with that type; a file none takes is left out. */
+  private takenFiles(clipboardData: DataTransfer): TakenFile[] {
+    return clipboardFiles(clipboardData).flatMap((file) => {
+      for (const { node, spec } of this.options.pasteFiles ?? []) {
+        const type = this.schema.nodes[node];
+        if (type && spec.accepts(file)) return [{ file, type, spec }];
+      }
+      return [];
+    });
   }
 
   private async resolveImageFiles(
@@ -288,21 +304,20 @@ export class PasteTransformer {
   /** Plain text */
 
   /**
-   * Insert text verbatim. Line breaks become paragraph breaks, matching
-   * Word/Docs — a run of text pasted into a document is a run of paragraphs,
-   * not one paragraph holding newline characters the canvas cannot render.
+   * Insert text verbatim. Line breaks become block breaks, matching
+   * Word/Docs — a run of text pasted into a document is a run of the schema's
+   * default blocks (paragraphs), not one holding newline characters the canvas
+   * cannot render.
    * The slice stays open at both ends so the outer lines merge with the text
    * already around the cursor.
    */
   private fromPlainText(state: EditorState, text: string): Transaction | null {
-    const paragraph = this.schema.nodes["paragraph"];
-    if (!paragraph || !/\r?\n/.test(text)) return insertText(state, text);
+    const block = defaultTextblock(this.schema);
+    if (!block || !/\r?\n/.test(text)) return insertText(state, text);
 
     const blocks = text
       .split(/\r?\n/)
-      .map((line) =>
-        paragraph.create(null, line ? this.schema.text(line) : null),
-      );
+      .map((line) => block.create(null, line ? this.schema.text(line) : null));
     return state.tr.replaceSelection(
       this.applyPasteTransforms(new Slice(Fragment.from(blocks), 1, 1)),
     );
@@ -377,249 +392,59 @@ export class PasteTransformer {
   /** Markdown */
 
   private looksLikeMarkdown(text: string): boolean {
-    if (MARKDOWN_PATTERN.test(text)) return true;
-    for (const line of text.split("\n")) {
-      const trimmed = line.trimEnd();
-      for (const rule of this.extraMarkdownRules) {
-        if (rule.pattern.test(trimmed)) return true;
-      }
-    }
-    return false;
+    return MARKDOWN_PATTERN.test(text);
   }
 
-  private fromMarkdown(text: string, state: EditorState): Transaction | null {
-    // Try prosemirror-markdown's full parser when we have token handlers
-    if (Object.keys(this.markdownParserTokens).length > 0) {
-      try {
-        const tokens = { ...IGNORE_TOKENS, ...this.markdownParserTokens };
-        const parser = new MarkdownParser(this.schema, this.md, tokens);
-        const doc = parser.parse(text);
-        if (doc) {
-          return state.tr.replaceSelection(
-            this.applyPasteTransforms(new Slice(doc.content, 0, 0)),
-          );
-        }
-      } catch {
-        // Unknown token or schema mismatch — fall through to legacy parser
-      }
-    }
-
-    // Legacy line-by-line parser (handles extension addMarkdownRules + built-in patterns)
-    const nodes = this.parseMarkdownBlocks(text);
-    if (nodes.length === 0) return insertText(state, text);
+  /** Throws on a token no extension declares; the caller pastes plain text instead. */
+  private fromMarkdown(text: string, state: EditorState): Transaction {
+    const tokens = { ...IGNORE_TOKENS, ...this.markdownParserTokens };
+    const doc = new MarkdownParser(this.schema, this.md, tokens).parse(text);
     return state.tr.replaceSelection(
-      this.applyPasteTransforms(new Slice(Fragment.from(nodes), 0, 0)),
+      this.applyPasteTransforms(new Slice(doc.content, 0, 0)),
     );
-  }
-
-  /** Legacy line-by-line parser */
-
-  /**
-   * Line-by-line block parser. Produces paragraph, heading, bulletList,
-   * and orderedList nodes. Inline marks (bold, italic) are handled within
-   * paragraph and heading text content.
-   *
-   * Kept as a fallback for when the MarkdownParser encounters tokens our
-   * schema doesn't support (blockquotes, nested structures, etc.).
-   */
-  private parseMarkdownBlocks(text: string): Node[] {
-    const lines = text.split("\n");
-    const nodes: Node[] = [];
-
-    let paraLines: string[] = [];
-
-    type ListState = { type: "bullet" | "ordered"; items: string[] };
-    let list: ListState | null = null;
-
-    const flushPara = () => {
-      if (paraLines.length === 0) return;
-      const content = paraLines.join(" ").trim();
-      if (content) nodes.push(this.makeParagraph(content));
-      paraLines = [];
-    };
-
-    const flushList = () => {
-      if (!list) return;
-      const items = list.items.map((itemText) =>
-        this.schema.nodes["listItem"]!.create(
-          null,
-          this.schema.nodes["paragraph"]!.create(
-            null,
-            this.parseInline(itemText),
-          ),
-        ),
-      );
-      const listType = list.type === "bullet" ? "bulletList" : "orderedList";
-      const listNode = this.schema.nodes[listType];
-      if (listNode && items.length > 0) {
-        nodes.push(listNode.create(null, items));
-      }
-      list = null;
-    };
-
-    for (const raw of lines) {
-      const line = raw.trimEnd();
-
-      if (line.trim() === "") {
-        flushPara();
-        flushList();
-        continue;
-      }
-
-      // Extension-contributed rules — tried before built-in handlers
-      let customMatched = false;
-      for (const rule of this.extraMarkdownRules) {
-        const match = rule.pattern.exec(line);
-        if (match) {
-          const node = rule.createNode(
-            match,
-            this.schema,
-            this.parseInline.bind(this),
-          );
-          if (node) {
-            flushPara();
-            flushList();
-            nodes.push(node);
-            customMatched = true;
-            break;
-          }
-        }
-      }
-      if (customMatched) continue;
-
-      // ATX heading
-      const headingMatch = /^(#{1,6}) (.+)/.exec(line);
-      if (headingMatch) {
-        flushPara();
-        flushList();
-        const level = headingMatch[1]!.length;
-        const content = headingMatch[2]!.trim();
-        const headingNode = this.schema.nodes["heading"];
-        if (headingNode) {
-          nodes.push(headingNode.create({ level }, this.parseInline(content)));
-        } else {
-          nodes.push(this.makeParagraph(content));
-        }
-        continue;
-      }
-
-      // Bullet list item
-      const bulletMatch = /^[*-] (.+)/.exec(line);
-      if (bulletMatch) {
-        flushPara();
-        if (list && list.type !== "bullet") flushList();
-        if (!list) list = { type: "bullet", items: [] };
-        list.items.push(bulletMatch[1]!);
-        continue;
-      }
-
-      // Ordered list item
-      const orderedMatch = /^\d+\. (.+)/.exec(line);
-      if (orderedMatch) {
-        flushPara();
-        if (list && list.type !== "ordered") flushList();
-        if (!list) list = { type: "ordered", items: [] };
-        list.items.push(orderedMatch[1]!);
-        continue;
-      }
-
-      if (list) flushList();
-      paraLines.push(line);
-    }
-
-    flushPara();
-    flushList();
-
-    return nodes;
-  }
-
-  private makeParagraph(text: string): Node {
-    return this.schema.nodes["paragraph"]!.create(null, this.parseInline(text));
-  }
-
-  /**
-   * Inline mark parser — handles **bold**, *italic*, __bold__, _italic_.
-   */
-  private parseInline(text: string): Node[] {
-    const nodes: Node[] = [];
-    const tokens = text.split(/(\*\*|__|[*_])/);
-    const boldMark = this.schema.marks["bold"];
-    const italicMark = this.schema.marks["italic"];
-
-    let bold = false;
-    let italic = false;
-
-    for (const token of tokens) {
-      if (token === "**" || token === "__") {
-        if (boldMark) bold = !bold;
-        continue;
-      }
-      if (token === "*" || token === "_") {
-        if (italicMark) italic = !italic;
-        continue;
-      }
-      if (!token) continue;
-
-      const marks: Mark[] = [];
-      if (bold && boldMark) marks.push(boldMark.create());
-      if (italic && italicMark) marks.push(italicMark.create());
-      nodes.push(this.schema.text(token, marks));
-    }
-
-    return nodes.length > 0 ? nodes : [this.schema.text("\u200B")];
   }
 }
 
 /** Image files */
 
-const PENDING_IMAGE_SRC =
-  "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=";
-
-function resolveImageReservations(
+/**
+ * Swap each placeholder for the node its file resolved to, through the spec
+ * that made it, or remove it when the file did not resolve.
+ */
+function resolveReservations(
   state: EditorState,
-  ids: readonly string[],
-  images: readonly ({ src: string; width: number; height: number } | null)[],
+  reservations: readonly { id: string; spec: PasteFileSpec; file: { src: string; width: number; height: number } | null }[],
 ): Transaction | null {
-  const byId = new Map(ids.map((id, index) => [id, images[index] ?? null]));
-  const matches: Array<{ pos: number; node: Node; image: { src: string; width: number; height: number } | null }> = [];
+  const byId = new Map(reservations.map((reservation) => [reservation.id, reservation]));
+  const matches: Array<{ pos: number; node: Node; spec: PasteFileSpec; file: { src: string; width: number; height: number } | null }> = [];
   state.doc.descendants((node, pos) => {
-    const id = node.attrs["pendingPasteId"];
-    if (typeof id === "string" && byId.has(id)) {
-      matches.push({ pos, node, image: byId.get(id) ?? null });
+    for (const { spec } of reservations) {
+      const id = spec.pendingIdOf(node);
+      const reservation = id === null ? undefined : byId.get(id);
+      if (reservation) {
+        matches.push({ pos, node, spec: reservation.spec, file: reservation.file });
+        return;
+      }
     }
   });
   if (matches.length === 0) return null;
 
   const tr = state.tr;
-  for (const { pos, node, image } of matches.sort((a, b) => b.pos - a.pos)) {
-    if (image) {
-      tr.setNodeMarkup(pos, undefined, {
-        ...node.attrs,
-        ...image,
-        alt: "",
-        pendingPasteId: null,
-      });
-    } else {
-      tr.delete(pos, pos + node.nodeSize);
-    }
+  for (const { pos, node, spec, file } of matches.sort((a, b) => b.pos - a.pos)) {
+    if (file) tr.setNodeMarkup(pos, undefined, { ...node.attrs, ...spec.resolved(file) });
+    else tr.delete(pos, pos + node.nodeSize);
   }
   tr.setMeta("addToHistory", false);
   return tr;
 }
 
-/** Image files on the clipboard, in order. Reading `files` can throw once the event's DataTransfer is detached. */
-function imageFiles(clipboardData: DataTransfer): File[] {
+/** Files on the clipboard, in order. Reading `files` can throw once the event's DataTransfer is detached. */
+function clipboardFiles(clipboardData: DataTransfer): File[] {
   try {
-    return Array.from(clipboardData.files ?? []).filter((f) =>
-      f.type.startsWith("image/"),
-    );
+    return Array.from(clipboardData.files ?? []);
   } catch {
     return [];
   }
-}
-
-function hasImageFile(clipboardData: DataTransfer): boolean {
-  return imageFiles(clipboardData).length > 0;
 }
 
 /** Default `uploadImage` — embed the bytes in the document as a data URL. */
@@ -729,13 +554,19 @@ function buildSlice(
   );
 }
 
+/** The block a document holds by default, when it holds text: a paragraph, in every built-in schema. */
+function defaultTextblock(schema: Schema): NodeType | null {
+  const type = schema.topNodeType.contentMatch.defaultType;
+  return type?.isTextblock ? type : null;
+}
+
 /**
- * A default-attr paragraph has no identity of its own to preserve. Compared
- * against a freshly-created paragraph: `sameMarkup` ignores content and, given
- * the same marks, reduces to "are all attrs still their defaults?".
+ * A default-attr default block has no identity of its own to preserve.
+ * Compared against a freshly-created one: `sameMarkup` ignores content and,
+ * given the same marks, reduces to "are all attrs still their defaults?".
  */
 function mergesIntoNeighbour(node: Node | null | undefined): boolean {
-  if (!node || node.type.name !== "paragraph") return false;
+  if (!node || node.type !== defaultTextblock(node.type.schema)) return false;
   return node.sameMarkup(node.type.create(null, null, node.marks));
 }
 

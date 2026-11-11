@@ -1,6 +1,7 @@
 /**
  * Chrome aggregator loop — runs PageChromeContributions until every one
- * reports stable:true or MAX_ITERATIONS is reached. Zero contributors exit
+ * accepts the current flow and its geometry is unchanged, or MAX_ITERATIONS
+ * is reached. Flow-independent contributors (including zero contributors) exit
  * after iteration 1 with convergence:"stable". Exhaustion accepts the last
  * iteration's layout and flags convergence:"exhausted" for debugging.
  *
@@ -17,6 +18,8 @@ import {
   runFlowPipeline,
 } from "./PageLayout";
 import {
+  createPageGeometry,
+  samePageMetrics,
   type ChromeContribution,
   type ResolvedChrome,
   type LayoutIterationContext,
@@ -31,7 +34,7 @@ export interface ChromeLoopResult {
   flow: FlowPipelineResult;
   /** Chrome resolution used in the final iteration. */
   resolved: ResolvedChrome;
-  /** "stable" when every contributor reported stable:true; otherwise "exhausted". */
+  /** "stable" when contributors accept the final flow; otherwise "exhausted". */
   convergence: "stable" | "exhausted";
   /** 1..MAX_ITERATIONS. Zero contributors always returns 1. */
   iterationCount: number;
@@ -81,10 +84,33 @@ export function runChromeLoop(
     }
 
     const resolved: ResolvedChrome = { contributions: contribs, metricsVersion: 0 };
-    currentFlow = runFlowPipeline(doc, options, resolved, runId);
+    // Compare the metrics pagination consumes, not the contributor inputs it
+    // derives them from. `metricsFor` memoizes per page, so the comparison and
+    // the pagination read one snapshot.
+    //
+    // Only pages that exist are compared, and that is the whole domain:
+    // pagination decides to create page p+1 from page p's own metrics, so page
+    // p+1's geometry first matters for content placed on it, by which point it
+    // has an entry of its own. A page that does not exist cannot become the
+    // page that does without one of pages 1..n moving first.
+    const geometry = createPageGeometry(options.pageConfig, resolved);
+    const needsPagination = currentFlow === null ||
+      !currentFlow.layout.metrics?.every((metrics) =>
+        samePageMetrics(metrics, geometry.metricsFor(metrics.pageNumber)),
+      );
+    // Captured before the reassignment below: "did the flow this contributor
+    // was shown get replaced?" is the question convergence turns on.
+    const geometryChanged = currentFlow !== null && needsPagination;
+    if (needsPagination) {
+      currentFlow = runFlowPipeline(doc, options, resolved, runId, geometry);
+    }
     finalContribs = contribs;
 
-    if (allStable) {
+    // A contributor can certify the flow it was shown, not a new flow built
+    // after measure() returned. If geometry moved, let every contributor see
+    // the result before accepting convergence. Flow-independent contributors
+    // may still settle on the first pass.
+    if (allStable && !geometryChanged) {
       converged = true;
       break;
     }

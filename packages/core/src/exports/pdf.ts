@@ -13,6 +13,7 @@
  * same line rather than each inventing its own geometry.
  */
 
+import type { Node } from "prosemirror-model";
 import type { ResolvedTheme } from "../model/theme";
 import type { Rgb } from "../model/cssColor";
 import type { FontResolutionId } from "../fonts/layoutResolver";
@@ -131,7 +132,8 @@ export interface PdfTextOp {
   /** Font size in layout pixels. */
   sizePx: number;
   font: PdfFontHandle;
-  color: Rgb;
+  /** Omit to take the document's text colour — the same default canvas uses. */
+  color?: Rgb;
   /** 0–1. Omit for opaque. */
   opacity?: number;
 }
@@ -154,6 +156,19 @@ export interface PdfRectOp extends PdfBox {
   border?: { color: Rgb; widthPx: number };
 }
 
+export interface PdfEllipseOp {
+  /** Centre, in layout pixels. */
+  center: PdfPoint;
+  radiusX: number;
+  radiusY: number;
+  /** Omit to leave it unfilled. With no border either, nothing is drawn. */
+  color?: Rgb;
+  /** Opacity of both the fill and border. Omit for opaque. */
+  opacity?: number;
+  /** Centred on the outline, as canvas strokes it. */
+  border?: { color: Rgb; widthPx: number };
+}
+
 export interface PdfImageOp extends PdfBox {
   image: PdfImageHandle;
   /** Opacity of the image, or the entire placeholder when it cannot be resolved. */
@@ -169,6 +184,7 @@ export interface PdfDrawSurface {
   text(op: PdfTextOp): void;
   line(op: PdfLineOp): void;
   rect(op: PdfRectOp): void;
+  ellipse(op: PdfEllipseOp): void;
   image(op: PdfImageOp): void;
   /** The box drawn in place of an image that could not be resolved. */
   imagePlaceholder(box: PdfBox): void;
@@ -177,14 +193,17 @@ export interface PdfDrawSurface {
 /** The primitives, plus the one helper that paints a whole block's text. */
 export interface PdfBlockDrawSurface extends PdfDrawSurface {
   /**
-   * Draw every line of a block — its list marker, each text span with its mark
-   * decorations, and the inline atoms sitting in the line.
+   * Draw every line of a block — each text span with its mark decorations,
+   * and the inline atoms sitting in the line.
    */
   lines(block: LayoutBlock, ctx: PdfNodeContext): void;
 }
 
 /** Draw a block (or inline atom) onto a PDF page. */
 export type PdfNodeHandler = (block: LayoutBlock, ctx: PdfNodeContext) => void;
+
+/** Where a node's embedded file lives (an image's `src`), or null when it needs none. */
+export type PdfEmbedSource = (node: Node) => string | null;
 
 /**
  * What a node handler is typed against: it paints through `draw` and renders
@@ -229,6 +248,14 @@ export interface PdfNodeContext {
    * canvas the atom is painted in it.
    */
   font?: PdfFontHandle;
+  /**
+   * The fill the atom's own marks resolve to — always present when the block
+   * is an inline atom, falling back to the document's text colour just as
+   * canvas does. A handler drawing its own text should pass this straight
+   * through: picking a colour here is how the screen and the file came to
+   * disagree about one node.
+   */
+  color?: Rgb;
   /** The editor whose export contributions were collected. */
   editor: IBaseEditor;
   /** Resolved colours every handler paints from. */

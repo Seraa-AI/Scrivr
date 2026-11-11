@@ -12,7 +12,7 @@ import type {
   MeasureCacheEntry,
   LayoutResumption,
 } from "./PageLayout";
-import type { FontConfig } from "./FontConfig";
+import { applyPageFont, DEFAULT_FONT_FAMILY, type FontConfig } from "./FontConfig";
 import type { InlineRegistry } from "./BlockRegistry";
 import type { TextMeasurerLike } from "./TextMeasurer";
 import type { FontModifier } from "../extensions/types";
@@ -242,6 +242,8 @@ export class LayoutCoordinator {
     // layout refines — but the first page is not held waiting on it.
     const fromDocument = collectFontRequests(this.opts.getDoc(), provider.defaultRequest(), {
       maxBlocks: LayoutCoordinator.INITIAL_BLOCKS,
+      fontModifiers: this.opts.fontModifiers,
+      fontConfig: applyPageFont(this.opts.fontConfig, this.opts.pageConfig.fontFamily ?? DEFAULT_FONT_FAMILY),
     });
     const fromLayout = [...(this.fontResolverValue?.table().values() ?? [])].map((r) => r.request);
     // Duplicates are free: `installFaces` keys by resource id.
@@ -882,10 +884,15 @@ export class LayoutCoordinator {
     this.charMap.clear();
     this.populatedPages.clear();
     performance.mark("scrivr:layout-chunk-start");
-    // Pass resumption so layout continues from the next unprocessed block
-    // rather than restarting from block 0 — O(N) total vs O(N²).
+    // Resume from the next block so each chunk stays O(chunkSize) rather than
+    // O(total). The previous layout lets chrome seed its page count, and lets
+    // carriedPlacements keep earlier chunks' anchored objects — without it they
+    // vanish from rendering and hit-testing mid-stream. Its cached tail is not
+    // reused while partial. If chrome moves the geometry, the pipeline replays
+    // the consumed prefix.
     this.layout = this.runLayout({
       resumption: this.layoutResumption,
+      previousLayout: this.layout,
       maxBlocks: chunkSize,
     });
     performance.mark("scrivr:layout-chunk-end");

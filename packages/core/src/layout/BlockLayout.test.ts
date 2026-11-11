@@ -30,7 +30,7 @@ function sumLineHeights(block: { lines: ReadonlyArray<{ lineHeight: number }> })
 }
 
 // StarterKit schema has the fontFamily attr on paragraph and heading nodes.
-const { schema } = buildStarterKitContext();
+const { schema, fontConfig, fontModifiers } = buildStarterKitContext();
 
 // Helper: paragraph node with a fontFamily attr set
 function paragraphWithFamily(text: string, fontFamily: string) {
@@ -117,6 +117,7 @@ describe("layoutBlock — basic", () => {
       availableWidth: 400,
       page: 1,
       measurer: createMeasurer(),
+      fontConfig,
     });
     // h1 spaceBefore=24, spaceAfter=12
     expect(block.spaceBefore).toBe(24);
@@ -184,6 +185,7 @@ describe("layoutBlock — mark resolution", () => {
       availableWidth: 400,
       page: 1,
       measurer: m,
+      fontModifiers,
     });
 
     const fontUsed = spy.mock.calls[0]?.[1];
@@ -963,6 +965,7 @@ describe("layoutBlock — node fontFamily attr", () => {
       availableWidth: 400,
       page: 1,
       measurer: createMeasurer(),
+      fontConfig,
     });
     const span = block.lines[0]?.spans[0];
     const font = span?.kind === "text" ? span.font : "";
@@ -1686,9 +1689,8 @@ describe("TextBlockStrategy — inline image rendering", () => {
 //
 // An extension declares an inline node and an `InlineStrategy` to measure and
 // paint it. That declaration is the whole contract — the node should not also
-// have to carry width/height attrs it does not use. `pageNumber` carries
-// `width: 7, height: 10` for exactly this reason and `measure()` overwrites
-// both, which is the workaround this covers.
+// have to carry width/height attrs it does not use, because a constant can
+// only ever be right for one font and one value.
 
 describe("an inline atom with a strategy but no size attrs", () => {
   const badgeSchema = new Schema({
@@ -1741,5 +1743,41 @@ describe("an inline atom with a strategy but no size attrs", () => {
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("badge"));
 
     warn.mockRestore();
+  });
+});
+
+
+/**
+ * An atom carries no text for a decorator to colour, so its own marks are the
+ * only thing a renderer can resolve a fill from. They travel on the span
+ * beside the font, by the same routes.
+ */
+describe("an inline atom's marks", () => {
+  it("are recorded on its span", () => {
+    const schema = new Schema({
+      nodes: {
+        doc: { content: "block+" },
+        paragraph: { group: "block", content: "inline*" },
+        text: { group: "inline" },
+        badge: { group: "inline", inline: true, atom: true },
+      },
+      marks: { tint: { attrs: { color: {} } } },
+    });
+    const inlineRegistry = new InlineRegistry();
+    inlineRegistry.register("badge", { measure: () => ({ width: 20, height: 12 }), render: () => {} });
+
+    const tint = schema.marks["tint"]!.create({ color: "#336699" });
+    const para = schema.node("paragraph", null, [
+      schema.text("wrapping text that runs on for a while so the line breaks somewhere"),
+      schema.nodes["badge"]!.create(null, null, [tint]),
+    ]);
+    const block = layoutBlock(para, {
+      nodePos: 0, x: 0, y: 0, availableWidth: 200, page: 1,
+      measurer: createMeasurer(), inlineRegistry,
+    });
+
+    const objectSpans = block.lines.flatMap((l) => l.spans).filter((sp) => sp.kind === "object");
+    expect(objectSpans).toHaveLength(1);
+    expect(objectSpans[0]!.marks).toEqual([{ name: "tint", attrs: { color: "#336699" } }]);
   });
 });

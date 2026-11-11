@@ -16,6 +16,7 @@
 
 import { xml, serializeXml } from "./xml";
 import type { DocxPackage, XmlNode } from "./context";
+import { PAGE_HEIGHT_TWIPS, PAGE_MARGIN_TWIPS, PAGE_WIDTH_TWIPS } from "./section";
 import type {
   DocxBuildState,
   NumberingEntry,
@@ -155,14 +156,14 @@ export function buildDocumentRoot(body: XmlNode[]): XmlNode {
 }
 
 function defaultSectionProperties(): XmlNode {
-  // US Letter at 1in margins. 1 inch = 1440 twentieths of a point.
+  const margin = String(PAGE_MARGIN_TWIPS);
   return xml("w:sectPr", undefined, [
-    xml("w:pgSz", { "w:w": "12240", "w:h": "15840" }),
+    xml("w:pgSz", { "w:w": String(PAGE_WIDTH_TWIPS), "w:h": String(PAGE_HEIGHT_TWIPS) }),
     xml("w:pgMar", {
-      "w:top": "1440",
-      "w:right": "1440",
-      "w:bottom": "1440",
-      "w:left": "1440",
+      "w:top": margin,
+      "w:right": margin,
+      "w:bottom": margin,
+      "w:left": margin,
       "w:header": "720",
       "w:footer": "720",
       "w:gutter": "0",
@@ -262,14 +263,21 @@ function buildNumberingRoot(entries: NumberingEntry[]): XmlNode {
     return xml("w:numbering", { "xmlns:w": W_NS });
   }
   const children: XmlNode[] = [];
+  const defined = new Set<number>();
   for (const entry of entries) {
-    const abstractId = entry.numId; // 1:1 mapping for v1
-    children.push(buildAbstractNum(abstractId, entry));
+    if (defined.has(entry.abstractId)) continue;
+    defined.add(entry.abstractId);
+    children.push(buildAbstractNum(entry.abstractId, entry));
   }
   for (const entry of entries) {
+    // A list's own numbering says where it starts, so it never continues another.
+    const override = entry.start === undefined ? [] : [
+      xml("w:lvlOverride", { "w:ilvl": "0" }, [xml("w:startOverride", { "w:val": String(entry.start) })]),
+    ];
     children.push(
       xml("w:num", { "w:numId": String(entry.numId) }, [
-        xml("w:abstractNumId", { "w:val": String(entry.numId) }),
+        xml("w:abstractNumId", { "w:val": String(entry.abstractId) }),
+        ...override,
       ]),
     );
   }
@@ -280,14 +288,14 @@ function buildAbstractNum(abstractId: number, entry: NumberingEntry): XmlNode {
   // Word's stock list-numbering defaults: each level gets `w:start="1"`
   // (otherwise ordered lists begin at 0), and `w:pPr/w:ind` so the paragraph
   // is actually indented — without it the bullet/number sits flush at the
-  // page margin. Spacing follows Word's own preset: 720 twips per nesting
-  // level (1/2 inch) with a 360-twip hanging indent so wrapped text aligns
-  // under the first content character, not under the bullet.
+  // page margin. A level that names no indent gets Word's own preset: 720
+  // twips per nesting level (1/2 inch) with a 360-twip hanging indent so
+  // wrapped text aligns under the first content character, not the bullet.
   const HANGING_TWIPS = 360;
   const LEVEL_INDENT_TWIPS = 720;
 
   const levels = entry.config.levels.map((lvl) => {
-    const left = (lvl.level + 1) * LEVEL_INDENT_TWIPS;
+    const left = lvl.left ?? (lvl.level + 1) * LEVEL_INDENT_TWIPS;
     return xml("w:lvl", { "w:ilvl": String(lvl.level) }, [
       xml("w:start", { "w:val": "1" }),
       xml("w:numFmt", { "w:val": lvl.format }),
@@ -296,7 +304,7 @@ function buildAbstractNum(abstractId: number, entry: NumberingEntry): XmlNode {
       xml("w:pPr", undefined, [
         xml("w:ind", {
           "w:left": String(left),
-          "w:hanging": String(HANGING_TWIPS),
+          "w:hanging": String(lvl.hanging ?? HANGING_TWIPS),
         }),
       ]),
     ]);

@@ -55,10 +55,10 @@ function docWithFloat(wrapMode: string) {
   };
 }
 
-function setup(wrapMode: string) {
+function setup(wrapMode: string, json: Record<string, unknown> = docWithFloat(wrapMode)) {
   const editor = createTestEditor({
     pageConfig: defaultPageConfig,
-    extensions: [StarterKit, DefaultContent.configure({ json: docWithFloat(wrapMode) })],
+    extensions: [StarterKit.configure({ table: true }), DefaultContent.configure({ json })],
   });
   const container = document.createElement("div");
   document.body.appendChild(container);
@@ -72,7 +72,6 @@ function setup(wrapMode: string) {
     slotHeight: () => 1224,
     tileHeight: () => 1200,
     isPageless: () => false,
-    visualYToDocY: (y) => ({ page: Math.floor(y / 1224) + 1, docY: y - Math.floor(y / 1224) * 1224 }),
     scheduleUpdate: () => {},
   };
   const controller = new PointerController(deps);
@@ -268,7 +267,6 @@ describe("a short line's empty tail", () => {
     const deps: PointerControllerDeps = {
       editor, tilesContainer: container, pool: [],
       slotHeight: () => 1224, tileHeight: () => 1200, isPageless: () => false,
-      visualYToDocY: (y) => ({ page: Math.floor(y / 1224) + 1, docY: y - Math.floor(y / 1224) * 1224 }),
       scheduleUpdate: () => {},
     };
     const controller = new PointerController(deps);
@@ -314,3 +312,83 @@ describe("a short line's empty tail", () => {
     expect(h.cursor()).toBe("move");
   });
 });
+
+/** A table, then the image's paragraph, its `yOffset` reaching back over the rows. */
+function docWithFloatOverTable(wrapMode: string) {
+  const cell = (text: string) => ({ type: "tableCell", content: [{ type: "paragraph", content: [{ type: "text", text }] }] });
+  return {
+    type: "doc",
+    content: [
+      {
+        type: "table",
+        content: Array.from({ length: 6 }, (_, row) => ({
+          type: "tableRow",
+          content: [cell(`Row ${row} first`), cell(`Row ${row} second`)],
+        })),
+      },
+      {
+        type: "paragraph",
+        content: [
+          { type: "image", attrs: { src: PNG, width: 160, height: 100, wrapMode, xAlign: "left", yOffset: -150 } },
+          { type: "text", text: "After the table." },
+        ],
+      },
+    ],
+  };
+}
+
+describe("clicking an anchored image painted over a table", () => {
+  for (const wrapMode of ["square", "front"]) {
+    it(`${wrapMode}: the image takes the click, not the cell under it`, () => {
+      const h = setup(wrapMode, docWithFloatOverTable(wrapMode));
+      clean = h.cleanup;
+
+      const float = h.float();
+      const x = float.x + float.width / 2;
+      const y = float.y + float.height / 2;
+      // The premise: the image is painted over a table row.
+      const row = h.editor.layout.pages[0]?.blocks.find(
+        (b) => b.kind === "composite" && b.y <= y && y < b.y + b.height,
+      );
+      expect(row).toBeDefined();
+
+      h.hoverAt(x, y);
+      expect(h.cursor()).toBe("move");
+      h.clickAt(x, y);
+      expect(h.editor.getState().selection).toBeInstanceOf(NodeSelection);
+    });
+  }
+});
+
+describe("a behind image reaching over a table", () => {
+  /** A point inside the image where no cell text is painted. */
+  function emptyCellPointOver(h: ReturnType<typeof setup>): { x: number; y: number } {
+    const float = h.float();
+    for (let y = float.y + 2; y < float.y + float.height; y += 4) {
+      for (let x = float.x + float.width - 2; x > float.x; x -= 4) {
+        if (!h.editor.charMap.hasTextAt(x, y, 1)) return { x, y };
+      }
+    }
+    throw new Error("no empty point inside the image");
+  }
+
+  it("is hovered as the cell and the table, as a click there selects the cell", () => {
+    const h = setup("behind", docWithFloatOverTable("behind"));
+    clean = h.cleanup;
+    const { x, y } = emptyCellPointOver(h);
+    const kinds = h.editor.resolveHoverTargets({ page: 1, x, y, region: "content" }).map((t) => t.kind);
+    expect(kinds).not.toContain("image");
+    expect(kinds).toEqual(expect.arrayContaining(["table-cell", "table"]));
+  });
+
+  it("leaves the click in empty cell space to the cell, because it paints under the table", () => {
+    const h = setup("behind", docWithFloatOverTable("behind"));
+    clean = h.cleanup;
+    const point = emptyCellPointOver(h);
+    h.hoverAt(point.x, point.y);
+    expect(h.cursor()).toBe("text");
+    h.clickAt(point.x, point.y);
+    expect(h.editor.getState().selection).not.toBeInstanceOf(NodeSelection);
+  });
+});
+

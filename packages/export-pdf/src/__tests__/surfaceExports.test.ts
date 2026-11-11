@@ -6,6 +6,7 @@ import type {
   PdfBox,
   PdfDrawHelpers,
   PdfDrawSurface,
+  PdfEllipseOp,
   PdfFontHandle,
   PdfImageHandle,
   PdfImageOp,
@@ -30,6 +31,7 @@ describe("the drawing contract an extension writes against", () => {
       text: (op: PdfTextOp) => drawn.push(`text:${op.text}`),
       line: (op: PdfLineOp) => drawn.push(`line:${op.to.x}`),
       rect: (op: PdfRectOp) => drawn.push(`rect:${op.border ? "bordered" : "plain"}`),
+      ellipse: (op: PdfEllipseOp) => drawn.push(`ellipse:${op.border ? "ring" : "disc"}`),
       image: (op: PdfImageOp) => drawn.push(`image:${op.image.src}`),
       imagePlaceholder: (box: PdfBox) => drawn.push(`placeholder:${box.width}`),
     };
@@ -37,6 +39,7 @@ describe("the drawing contract an extension writes against", () => {
     surface.text({ text: "hi", x: 0, baselineY: 10, sizePx: 12, font, color: grey });
     surface.line({ from, to: { x: 20, y: 10 }, thicknessPx: 1, color: grey });
     surface.rect({ x: 0, y: 0, width: 5, height: 5, border: { color: grey, widthPx: 1 } });
+    surface.ellipse({ center: from, radiusX: 3, radiusY: 3, border: { color: grey, widthPx: 1 } });
     surface.image({ x: 0, y: 0, width: 5, height: 5, image });
     surface.imagePlaceholder({ x: 0, y: 0, width: 5, height: 5 });
 
@@ -44,6 +47,7 @@ describe("the drawing contract an extension writes against", () => {
       "text:hi",
       "line:20",
       "rect:bordered",
+      "ellipse:ring",
       "image:a.png",
       "placeholder:5",
     ]);

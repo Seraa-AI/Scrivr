@@ -6,16 +6,19 @@
  * The agent's spans are model output: untrusted. This never crashes the merge
  * and never poisons the document:
  *  - empty-text runs are skipped (`schema.text("")` throws);
- *  - the `NEWLINE_SPAN` sentinel is dropped (block boundaries can't occur
- *    inside a single-block unit — the edit path reads one unit per block);
+ *  - a `"\n"` is a line break, as the export writes one: it becomes the
+ *    schema's line-break node (`breakOf` → `"line"`) where the destination
+ *    takes one, stays a newline in a block that holds text only (code), and
+ *    is a space where neither can stand, so words never run together;
  *  - an unknown mark type is dropped but its TEXT is kept, warned once;
  *  - url-bearing mark attrs (`link.href`) are sanitized through `safeUrl`;
  *    an unsafe url drops the mark, keeping the text;
  *  - a mark whose attrs `create` throws is dropped, keeping the text.
  */
-import { Fragment, Mark, type Node as PmNode, type Schema } from "prosemirror-model";
+import { Fragment, Mark, type Node as PmNode, type Schema, type NodeType } from "prosemirror-model";
 import type { InlineMark, InlineSpan } from "../exports/semantic";
 import { safeUrl } from "./safeUrl";
+import { breakOf } from "../layout/BlockRegistry";
 import { stableStringify } from "./hash";
 
 /** Mark attrs that carry a URL and must pass the `safeUrl` gate. */
@@ -24,6 +27,8 @@ const URL_ATTRS: Record<string, readonly string[]> = {
 };
 
 export interface SpansToFragmentOptions {
+  /** Destination textblock: marks must be allowed by its content schema. */
+  parentType?: NodeType;
   /** Called once per distinct dropped mark type (unknown type or bad attrs). */
   onWarn?: (message: string) => void;
 }
@@ -41,19 +46,26 @@ export function spansToFragment(
     options.onWarn?.(message);
   };
 
+  const lineBreak = lineBreakIn(schema, options.parentType);
+  const keepsNewlines = options.parentType?.spec.code === true;
   const nodes: PmNode[] = [];
   for (const span of spans) {
-    // Empty runs and the newline sentinel never become text nodes.
-    if (span.text === "" || (span.text === "\n" && span.marks.length === 0)) continue;
-
-    const marks: Mark[] = [];
-    for (const inline of span.marks) {
-      const mark = resolveInlineMark(inline, schema, warnOnce);
-      if (mark) marks.push(mark);
-    }
-    nodes.push(schema.text(span.text, marks.length > 0 ? marks : null));
+    if (span.text === "") continue;
+    const marks = resolveInlineMarks(span.marks, schema, options.parentType, warnOnce);
+    const lines = keepsNewlines ? [span.text] : lineBreak ? span.text.split("\n") : [span.text.replace(/\n/g, " ")];
+    lines.forEach((line, index) => {
+      if (index > 0 && lineBreak) nodes.push(lineBreak.create());
+      if (line !== "") nodes.push(schema.text(line, marks.length > 0 ? marks : null));
+    });
   }
   return Fragment.fromArray(nodes);
+}
+
+/** The node a line break is, when `parentType` (or, unknown, any textblock) can hold it. */
+function lineBreakIn(schema: Schema, parentType: NodeType | undefined): NodeType | null {
+  const type = Object.values(schema.nodes).find((node) => breakOf(node) === "line");
+  if (!type) return null;
+  return !parentType || parentType.contentMatch.matchType(type) ? type : null;
 }
 
 /**
@@ -71,13 +83,19 @@ export function resolveInlineMark(
   const warn = (why: string) =>
     onWarn?.(`[resolveInlineMark] dropped mark "${inline.type}": ${why}`);
 
+  if (isTrackedMark(inline.type)) {
+    warn("review metadata is not formatting");
+    return null;
+  }
   const markType = schema.marks[inline.type];
   if (!markType) {
     warn("not in schema");
     return null;
   }
 
-  let attrs = inline.attrs;
+  // Review metadata is engine-owned, even on ordinary formatting marks.
+  const { dataTracked: _review, ...styling } = inline.attrs ?? {};
+  let attrs = styling;
   for (const urlAttr of URL_ATTRS[inline.type] ?? []) {
     if (attrs && attrs[urlAttr] !== undefined) {
       const safe = safeUrl(attrs[urlAttr]);
@@ -109,4 +127,33 @@ export function sameMark(a: InlineMark, b: InlineMark): boolean {
     a.type === b.type &&
     stableStringify(a.attrs ?? {}) === stableStringify(b.attrs ?? {})
   );
+}
+
+/** Review marks never belong to the semantic formatting vocabulary. */
+export function isTrackedMark(name: string): boolean {
+  return name.startsWith("tracked");
+}
+
+/** Canonical semantic description shared by export, comparison, and edits. */
+export function describeInlineMark(mark: Mark): InlineMark {
+  const attrs: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(mark.attrs)) {
+    if (key !== "dataTracked" && value !== null && value !== undefined) attrs[key] = value;
+  }
+  return Object.keys(attrs).length ? { type: mark.type.name, attrs } : { type: mark.type.name };
+}
+
+/** Resolve a semantic mark set with schema ordering, exclusions, and destination rules. */
+export function resolveInlineMarks(
+  inline: readonly InlineMark[],
+  schema: Schema,
+  parentType?: NodeType,
+  onWarn?: (message: string) => void,
+): readonly Mark[] {
+  let marks: readonly Mark[] = [];
+  for (const value of inline) {
+    const mark = resolveInlineMark(value, schema, onWarn);
+    if (mark && (!parentType || parentType.allowsMarkType(mark.type))) marks = mark.addToSet(marks);
+  }
+  return marks;
 }

@@ -21,12 +21,51 @@ export type ListType = "bullet" | "ordered";
 export interface NumberingResolver {
   /** Return the list type for a given numId, or `"bullet"` as a safe default. */
   resolve(numId: number): ListType;
+  /** The first number of a level: the list's `startOverride`, else its definition's `w:start`, else 1. */
+  start(numId: number, ilvl: number): number;
+}
+
+const NONE: NumberingResolver = { resolve: () => "bullet", start: () => 1 };
+
+/** A whole number in an attribute, or undefined. */
+function intAttr(el: OoxmlElement | undefined, name: string): number | undefined {
+  const raw = el && attr(el, name);
+  const value = raw === undefined || raw === null ? NaN : Number(raw);
+  return Number.isInteger(value) ? value : undefined;
 }
 
 export function readNumberingMap(xml: string | undefined): NumberingResolver {
-  if (!xml) return { resolve: () => "bullet" };
+  if (!xml) return NONE;
   const root = parseOoxml(xml);
-  if (!root || root.name !== "w:numbering") return { resolve: () => "bullet" };
+  if (!root || root.name !== "w:numbering") return NONE;
+
+  // abstractNumId → ilvl → w:start
+  const abstractStart = new Map<string, Map<number, number>>();
+  for (const aNum of findChildren(root, "w:abstractNum")) {
+    const id = attr(aNum, "w:abstractNumId");
+    if (!id) continue;
+    const starts = new Map<number, number>();
+    for (const lvl of findChildren(aNum, "w:lvl")) {
+      const ilvl = intAttr(lvl, "w:ilvl");
+      const start = intAttr(findChild(lvl, "w:start"), "w:val");
+      if (ilvl !== undefined && start !== undefined) starts.set(ilvl, start);
+    }
+    abstractStart.set(id, starts);
+  }
+
+  // numId → ilvl → startOverride
+  const overrideStart = new Map<string, Map<number, number>>();
+  for (const num of findChildren(root, "w:num")) {
+    const id = attr(num, "w:numId");
+    if (!id) continue;
+    const starts = new Map<number, number>();
+    for (const override of findChildren(num, "w:lvlOverride")) {
+      const ilvl = intAttr(override, "w:ilvl");
+      const start = intAttr(findChild(override, "w:startOverride"), "w:val");
+      if (ilvl !== undefined && start !== undefined) starts.set(ilvl, start);
+    }
+    overrideStart.set(id, starts);
+  }
 
   // Build abstractNumId → ilvl=0 numFmt
   const abstractFmt = new Map<string, string>();
@@ -61,6 +100,12 @@ export function readNumberingMap(xml: string | undefined): NumberingResolver {
       const result: ListType = fmt && isOrderedFmt(fmt) ? "ordered" : "bullet";
       cache.set(numId, result);
       return result;
+    },
+    start(numId, ilvl) {
+      const abstractId = numIdToAbstract.get(String(numId));
+      return overrideStart.get(String(numId))?.get(ilvl)
+        ?? (abstractId ? abstractStart.get(abstractId)?.get(ilvl) : undefined)
+        ?? 1;
     },
   };
 }

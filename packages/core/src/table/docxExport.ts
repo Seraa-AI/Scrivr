@@ -21,7 +21,7 @@ import type { Node } from "prosemirror-model";
 import { xml, pxToTwips, type DocxNodeHandler, type XmlNode } from "../exports/docx";
 
 const BORDER_SIZE = "4"; // eighths of a point → 0.5pt, matching the canvas hairline.
-const BORDER_COLOR = "9CA3AF"; // neutral gray, same as TableRowStrategy.
+const BORDER_COLOR = "9CA3AF"; // neutral gray, same as the canvas row painter.
 
 /**
  * DOCX shading takes six hex digits, while a cell's fill is whatever CSS

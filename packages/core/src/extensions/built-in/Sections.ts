@@ -34,8 +34,10 @@ export const Sections = Extension.create({
         group: "block",
         atom: true,
         selectable: false,
+        sectionBoundary: true,
         attrs: {
           nodeId: { default: null },
+          dataTracked: { default: [] },
           /**
            * Settings of the section this break terminates. `null` means "the
            * defaults" — writers store only what they changed, matching how a

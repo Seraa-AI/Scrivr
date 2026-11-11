@@ -70,9 +70,10 @@ framework dependency. Use this to build a data-driven toolbar without hard-codin
 
 ### `commands`
 ```ts
-readonly commands: Record<string, (...args: unknown[]) => void>
+readonly commands: Record<string, (...args: unknown[]) => boolean>
 ```
 All bound extension commands. Closures that always read the latest state at call time.
+Each returns whether it ran — `false` when it did not apply, or in a read-only editor.
 
 ```ts
 editor.commands.toggleBold();
@@ -200,9 +201,9 @@ attrs.fontSize?.size; // 18
 
 ### `getBlockInfo()`
 ```ts
-getBlockInfo(): { blockType: string; blockAttrs: Record<string, unknown> }
+getBlockInfo(): BlockInfo // { blockType, blockAttrs, ancestors }
 ```
-Type name and attributes of the block node containing the cursor.
+Type name and attributes of the node holding the selection's start (its textblock for a text selection), and the nodes around it (`{ type, attrs }`), innermost first.
 
 ### `getMarkdown()`
 ```ts
@@ -264,9 +265,11 @@ if (rect) {
 ```ts
 getNodeViewportRect(docPos: number): DOMRect | null
 ```
-Converts a single node's doc position to a viewport-relative `DOMRect` covering the full
-visual bounds of that node. Used by `createImageMenu` to position the image toolbar below
-the selected image.
+Converts a node's doc position to a viewport-relative `DOMRect` covering its visual
+bounds: an image's full bounds, or the first painted fragment of a paragraph or table
+(`getNodeViewportRects(docPos)` returns one per page). Used by `createImageMenu` and
+`createTableMenu` to position their menus. Returns `null` while a header or footer is being
+edited: body geometry places body positions only.
 
 ### `scrollCursorIntoView()`
 ```ts

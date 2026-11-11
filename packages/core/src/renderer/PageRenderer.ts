@@ -9,10 +9,11 @@ import {
 } from "../layout/AnchoredObjects";
 import { LayoutBlock, computeAlignmentOffset, isHiddenAnchorLine } from "../layout/BlockLayout";
 import { CharacterMap } from "../layout/CharacterMap";
-import { computeObjectRenderY } from "../layout/LineBreaker";
+import { paintBlock } from "./paintBlock";
+import { atomStyle, computeObjectRenderY, paintInSpanStyle } from "../layout/LineBreaker";
 import type { TextMeasurerLike } from "../layout/TextMeasurer";
 import { clearCanvas } from "./canvas";
-import type { MarkDecorator } from "../extensions/types";
+import type { FontModifier, MarkDecorator } from "../extensions/types";
 import { resolveSpanFill } from "../layout/resolveSpanFill";
 import type { BlockRegistry, InlineRegistry } from "../layout/BlockRegistry";
 import type { PageChromeContribution, PageMetrics } from "../layout/PageMetrics";
@@ -31,6 +32,8 @@ export interface RenderPageOptions {
   fontResolutions?: ReadonlyMap<FontResolutionId, FontResolution>;
   /** The resolver this layout was measured with, for chrome that re-lays out. */
   fontResolver?: LayoutFontResolver;
+  /** Mark-to-font modifiers for chrome contributors that measure while painting. */
+  fontModifiers?: Map<string, FontModifier>;
   /**
    * The layout version this render was scheduled for.
    * If it doesn't match currentVersion, the render is aborted.
@@ -90,6 +93,7 @@ export function renderPage(options: RenderPageOptions): boolean {
     markDecorators,
     fontResolutions,
     fontResolver,
+    fontModifiers,
     blockRegistry,
     inlineRegistry,
     anchoredObjects,
@@ -145,38 +149,22 @@ export function renderPage(options: RenderPageOptions): boolean {
   // and posAtCoords can't distinguish lines in different paragraphs.
   let lineIndexOffset = 0;
   for (const block of page.blocks) {
-    const strategy = blockRegistry?.get(block.blockType);
-    if (strategy) {
-      lineIndexOffset = strategy.render(
-        block,
-        {
-          ctx,
-          pageNumber: page.pageNumber,
-          lineIndexOffset,
-          dpr,
-          measurer,
-          theme,
-          ...(blockRegistry ? { blockRegistry } : {}),
-          ...(markDecorators ? { markDecorators } : {}),
-          ...(inlineRegistry ? { inlineRegistry } : {}),
-          ...(fontResolutions ? { fontResolutions } : {}),
-        },
-        map,
-      );
-    } else {
-      lineIndexOffset = drawBlock(
+    lineIndexOffset = paintBlock(
+      block,
+      {
         ctx,
-        block,
-        measurer,
-        map,
-        page.pageNumber,
+        pageNumber: page.pageNumber,
         lineIndexOffset,
+        dpr,
+        measurer,
         theme,
-        markDecorators,
-        inlineRegistry,
-        fontResolutions,
-      );
-    }
+        ...(blockRegistry ? { blockRegistry } : {}),
+        ...(markDecorators ? { markDecorators } : {}),
+        ...(inlineRegistry ? { inlineRegistry } : {}),
+        ...(fontResolutions ? { fontResolutions } : {}),
+      },
+      map,
+    );
   }
 
   // ── Draw front/square floats AFTER blocks ─────────────────────────────────
@@ -220,6 +208,7 @@ export function renderPage(options: RenderPageOptions): boolean {
         ...(inlineRegistry ? { inlineRegistry } : {}),
         ...(fontResolutions ? { fontResolutions } : {}),
         ...(fontResolver ? { fontResolver } : {}),
+        ...(fontModifiers ? { fontModifiers } : {}),
       });
     }
   }
@@ -324,15 +313,12 @@ export function drawBlock(
         // available, then register glyphs with cursorHeight for hit-testing.
         const objX = block.x + lineOffsetX + span.x;
         const objY = computeObjectRenderY(lineY, line, span);
-        inlineRegistry?.get(span.node.type.name)?.render(
-          ctx,
-          objX,
-          objY,
-          span.width,
-          span.height,
-          span.node,
-          theme,
-        );
+        const objectStrategy = inlineRegistry?.get(span.node.type.name);
+        if (objectStrategy) {
+          paintInSpanStyle(ctx, atomStyle(span, objX, objY, markDecorators, theme, ctx), () => {
+            objectStrategy.render(ctx, objX, objY, span.width, span.height, span.node, theme);
+          });
+        }
         map.registerObjectRect({
           docPos: span.docPos,
           x: objX,

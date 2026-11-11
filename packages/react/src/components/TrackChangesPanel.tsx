@@ -8,159 +8,29 @@
  * Each row has Accept / Reject buttons. Header has Accept All / Reject All.
  */
 
-import type { Editor } from "@scrivr/core";
-import {
-  CHANGE_OPERATION,
-  CHANGE_STATUS,
-} from "@scrivr/plugins";
+import type { IBaseEditor } from "@scrivr/core";
+import { CHANGE_OPERATION, changePreviewText, describeAttrChanges } from "@scrivr/plugins";
 import type {
   TrackedChange,
   MarkChange,
-  NodeAttrChange,
 } from "@scrivr/plugins";
 import { cx } from "../utils/classNames";
+import { shortName } from "../utils/authorName";
+import { decisionLabel, getChangeMeta, MARK_LABELS, previewVerb } from "../utils/changeMeta";
+import type { ChangeMeta } from "../utils/changeMeta";
 import { useTrackChangesPanel } from "../hooks/useTrackChangesPanel";
 import type { TrackChangesDisplayItem } from "../hooks/useTrackChangesPanel";
-
-function shortName(authorID: string): string {
-  const name = authorID.split(":").pop() ?? authorID;
-  return name.length > 22 ? name.slice(0, 22) + "…" : name;
-}
+import { useReviewAction } from "../hooks/useReviewAction";
+import { ReviewRefusalNotice } from "./ReviewRefusalNotice";
 
 function truncate(text: string, max = 60): string {
   return text.length > max ? text.slice(0, max) + "…" : text;
 }
 
-interface ChangeMeta {
-  icon: string;
-  label: string;
-}
-
-const MARK_ICONS: Record<string, string> = {
-  bold: "B",
-  italic: "I",
-  underline: "U",
-  strikethrough: "S",
-  highlight: "H",
-  color: "●",
-  fontSize: "Aa",
-  fontFamily: "Ff",
-  link: "↗",
-};
-
-const MARK_LABELS: Record<string, string> = {
-  bold: "Bold",
-  italic: "Italic",
-  underline: "Underline",
-  strikethrough: "Strikethrough",
-  highlight: "Highlight",
-  color: "Color",
-  fontSize: "Font Size",
-  fontFamily: "Font Family",
-  link: "Link",
-};
-
-const ATTR_LABELS: Record<string, string> = {
-  align: "Alignment",
-  level: "Heading level",
-  fontFamily: "Font",
-  fontSize: "Font size",
-  indent: "Indent",
-};
-
-function getChangeMeta(change: TrackedChange): ChangeMeta {
-  const op = change.dataTracked.operation;
-
-  if (change.type === "text-change") {
-    if (op === CHANGE_OPERATION.insert)
-      return {
-        icon: "+",
-        label: "Insertion",
-      };
-    return {
-      icon: "−",
-      label: "Deletion",
-    };
-  }
-
-  if (change.type === "mark-change") {
-    const mc = change as MarkChange;
-    const name = mc.mark.type.name;
-    const isRemoval = op === CHANGE_OPERATION.delete;
-    return {
-      icon: MARK_ICONS[name] ?? "M",
-      label: `${MARK_LABELS[name] ?? name} ${isRemoval ? "removed" : "added"}`,
-    };
-  }
-
-  if (change.type === "node-attr-change") {
-    return {
-      icon: "≡",
-      label: "Style changed",
-    };
-  }
-
-  if (change.type === "wrap-change") {
-    return {
-      icon: "⊞",
-      label: "Structure",
-    };
-  }
-
-  if (change.type === "node-change") {
-    if (op === CHANGE_OPERATION.insert)
-      return {
-        icon: "□+",
-        label: "Block added",
-      };
-    if (op === CHANGE_OPERATION.delete)
-      return {
-        icon: "□−",
-        label: "Block removed",
-      };
-    return {
-      icon: "□",
-      label: "Block changed",
-    };
-  }
-
-  if (change.type === "reference-change") {
-    return {
-      icon: "↗",
-      label: "Reference",
-    };
-  }
-
-  return {
-    icon: "?",
-    label: op ?? "Change",
-  };
-}
-
-/** Describe what changed in a NodeAttrChange. */
-function describeAttrChange(change: NodeAttrChange): string {
-  const old = change.oldAttrs
-  const next = change.newAttrs
-  const parts: string[] = [];
-  const allKeys = new Set([...Object.keys(old), ...Object.keys(next)]);
-
-  for (const key of allKeys) {
-    if (key === "nodeId" || key === "dataTracked") continue;
-    if (old[key] !== next[key]) {
-      const label = ATTR_LABELS[key] ?? key;
-      const from = old[key] == null ? "none" : String(old[key]);
-      const to = next[key] == null ? "none" : String(next[key]);
-      parts.push(`${label}: ${from} → ${to}`);
-    }
-  }
-
-  return parts.join(" · ");
-}
-
 /** Describe a MarkChange for display. */
 function describeMarkChange(change: MarkChange): string {
-  const text = (change.node as { text?: string }).text;
-  const colorAttr = (change.mark.attrs as Record<string, unknown>).color;
+  const text = change.node.text;
+  const colorAttr: unknown = change.mark.attrs.color;
   if (colorAttr && typeof colorAttr === "string") {
     return text ? `"${truncate(text)}" → ${colorAttr}` : colorAttr;
   }
@@ -169,7 +39,7 @@ function describeMarkChange(change: MarkChange): string {
 
 
 export interface TrackChangesPanelProps {
-  editor: Editor | null;
+  editor: IBaseEditor | null;
   className?: string | undefined;
   itemClassName?: string | undefined;
   iconClassName?: string | undefined;
@@ -218,18 +88,18 @@ export function TrackChangesPanel({
         >
           Track Changes
         </span>
-        {panel.changes.length > 0 && (
+        {panel.items.length > 0 && (
           <span
             className={cx("scrivr-menu-icon", iconClassName)}
             data-part="icon"
             style={{
             }}
           >
-            {panel.changes.length}
+            {panel.items.length}
           </span>
         )}
 
-        {!panel.isEmpty && (
+        {!panel.isEmpty && panel.review.available && (
           <div style={{ marginLeft: "auto", display: "flex", gap: 5 }}>
             <button className={cx("scrivr-menu-item", itemClassName)} onClick={panel.rejectAll} style={actionBtn}>
               Reject all
@@ -240,6 +110,10 @@ export function TrackChangesPanel({
           </div>
         )}
       </div>
+
+      {/* Whatever stopped the last header decision belongs with the buttons
+          that made it, not on a card nobody clicked. */}
+      <ReviewRefusalNotice action={panel.review} />
 
       {/* Body */}
       <div
@@ -277,9 +151,9 @@ export function TrackChangesPanel({
         ) : (
           panel.items.map((item, i) =>
             item.kind === "replacement" ? (
-              <ReplacementRow key={i} item={item} editor={editor} />
+              <ReplacementRow key={item.ids.join(":")} item={item} editor={editor} />
             ) : (
-              <SingleRow key={i} change={item.change} editor={editor} />
+              <SingleRow key={item.change.id} change={item.change} pieces={item.pieces} pending={panel.changes} editor={editor} />
             ),
           )
         )}
@@ -293,9 +167,10 @@ function ReplacementRow({
   editor,
 }: {
   item: Extract<TrackChangesDisplayItem, { kind: "replacement" }>;
-  editor: Editor | null;
+  editor: IBaseEditor | null;
 }) {
-  const { deleteChange: del, insertChange: ins, ids, authorID } = item;
+  const { deletedText, insertedText, ids, authorID } = item;
+  const review = useReviewAction(editor);
 
   return (
     <ChangeRow
@@ -304,20 +179,17 @@ function ReplacementRow({
         label: "Replacement",
       }}
       authorID={authorID}
-      onAccept={() =>
-        editor?.commands.setChangeStatuses?.(CHANGE_STATUS.accepted, ids)
-      }
-      onReject={() =>
-        editor?.commands.setChangeStatuses?.(CHANGE_STATUS.rejected, ids)
-      }
+      onAccept={() => review.decide("accepted", ids)}
+      onReject={() => review.decide("rejected", ids)}
+      refusal={<ReviewRefusalNotice action={review} />}
     >
       <div style={previewLine}>
         <span style={prefixLabel}>Removing</span>
-        <em style={{ fontStyle: "italic" }}>"{truncate(del.text)}"</em>
+        <em style={{ fontStyle: "italic" }}>"{truncate(deletedText)}"</em>
       </div>
       <div style={previewLine}>
         <span style={prefixLabel}>Adding</span>
-        <em style={{ fontStyle: "italic" }}>"{truncate(ins.text)}"</em>
+        <em style={{ fontStyle: "italic" }}>"{truncate(insertedText)}"</em>
       </div>
     </ChangeRow>
   );
@@ -325,32 +197,40 @@ function ReplacementRow({
 
 function SingleRow({
   change,
+  pieces,
+  pending,
   editor,
 }: {
   change: TrackedChange;
-  editor: Editor | null;
+  pieces: TrackedChange[];
+  /** Every pending change, which a move's preview reads its moved copy from. */
+  pending: TrackedChange[];
+  editor: IBaseEditor | null;
 }) {
   const meta = getChangeMeta(change);
   const authorID = change.dataTracked.authorID;
+  const review = useReviewAction(editor);
 
   function accept() {
-    editor?.commands.setChangeStatuses?.(CHANGE_STATUS.accepted, [change.id]);
+    review.decide("accepted", [change.id]);
   }
   function reject() {
-    editor?.commands.setChangeStatuses?.(CHANGE_STATUS.rejected, [change.id]);
+    review.decide("rejected", [change.id]);
   }
 
   let preview: React.ReactNode = null;
 
   if (change.type === "text-change") {
-    const tc = change
-    const isDelete = tc.dataTracked.operation === CHANGE_OPERATION.delete;
+    // A move is shown once, by where it went, not as both of its halves.
+    const moving = !!change.dataTracked.moveId;
+    const verb = previewVerb(change.dataTracked.operation, moving);
+    const shown = moving ? pieces.filter(piece => piece.dataTracked.operation === CHANGE_OPERATION.insert) : pieces;
     preview = (
       <div
         style={previewLine}
       >
-        <span style={prefixLabel}>{isDelete ? "Removing" : "Adding"}</span>
-        <em>"{truncate(tc.text)}"</em>
+        <span style={prefixLabel}>{verb}</span>
+        <em>"{truncate(shown.map(piece => (piece.type === "text-change" ? piece.text : "")).join(" … "))}"</em>
       </div>
     );
   } else if (change.type === "mark-change") {
@@ -359,7 +239,7 @@ function SingleRow({
       preview = <div style={previewLine}>{desc}</div>;
     }
   } else if (change.type === "node-attr-change") {
-    const desc = describeAttrChange(change);
+    const desc = describeAttrChanges(change.oldAttrs, change.newAttrs);
     preview = <div style={previewLine}>{desc}</div>;
   } else if (change.type === "wrap-change") {
     const wc = change
@@ -369,14 +249,16 @@ function SingleRow({
       </div>
     );
   } else if (change.type === "node-change") {
-    const nc = change
-    preview = (
-      <div
-        style={previewLine}
-      >
-        {nc.node.type.name}
+    const verb = previewVerb(change.dataTracked.operation, !!change.dataTracked.moveNodeId);
+    const doc = editor?.getState().doc;
+    const text = doc ? changePreviewText(doc, change, pending) : "";
+    // A block with no words is named by its label alone: "List item added".
+    preview = text ? (
+      <div style={previewLine}>
+        {verb ? <span style={prefixLabel}>{decisionLabel(verb, meta)}</span> : null}
+        <em>"{truncate(text)}"</em>
       </div>
-    );
+    ) : null;
   }
 
   return (
@@ -385,6 +267,7 @@ function SingleRow({
       authorID={authorID}
       onAccept={accept}
       onReject={reject}
+      refusal={<ReviewRefusalNotice action={review} />}
     >
       {preview}
     </ChangeRow>
@@ -397,12 +280,15 @@ function ChangeRow({
   onAccept,
   onReject,
   children,
+  refusal,
 }: {
   meta: ChangeMeta;
   authorID: string;
   onAccept: () => void;
   onReject: () => void;
   children: React.ReactNode;
+  /** Shown under the row: why this card's last click did not complete. */
+  refusal?: React.ReactNode;
 }) {
   return (
     <div
@@ -436,14 +322,14 @@ function ChangeRow({
         </span>
         <button
           onClick={onReject}
-          title="Reject"
+          title={decisionLabel("Reject", meta)}
           style={iconBtn}
         >
           ✗
         </button>
         <button
           onClick={onAccept}
-          title="Accept"
+          title={decisionLabel("Accept", meta)}
           style={iconBtn}
         >
           ✓
@@ -452,6 +338,8 @@ function ChangeRow({
 
       {/* Preview */}
       {children}
+
+      {refusal}
     </div>
   );
 }

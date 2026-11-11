@@ -1,6 +1,7 @@
 /**
  * PdfExport — extension that adds an "Export PDF" toolbar button and
- * `exportPdf` command to any Scrivr editor instance.
+ * `exportPdf` command to a browser editor. Export renders from the live layout
+ * pipeline, so a headless host calls `exportToPdf(editor, opts)` directly.
  *
  * Lives in @scrivr/export (not core) because it depends on pdf-lib.
  *
@@ -15,7 +16,7 @@
  *   });
  */
 import { Extension } from "@scrivr/core";
-import type { IEditor } from "@scrivr/core";
+import type { IBaseEditor, IEditor } from "@scrivr/core";
 import { exportToPdf, type PdfExportOptions } from "./index";
 
 /** Options the extension itself is configured with. */
@@ -35,11 +36,10 @@ interface ExportPdfCallOptions extends PdfExportOptions {
   filename?: string;
 }
 
-/** Per-instance state — populated in onEditorReady, read in addCommands. */
-interface InstanceState {
-  editor: IEditor | null;
+/** Probes what the export calls: a headless editor has no layout pipeline. */
+function isViewEditor(editor: IBaseEditor): editor is IEditor {
+  return "layout" in editor && "ensureFullLayout" in editor;
 }
-const instanceState = new WeakMap<object, InstanceState>();
 
 export const PdfExport = Extension.create<PdfExportExtensionOptions>({
   name: "pdfExport",
@@ -48,19 +48,20 @@ export const PdfExport = Extension.create<PdfExportExtensionOptions>({
     filename: "document",
   },
 
-  // Seed the WeakMap early so addCommands can reference it via closure.
-  addProseMirrorPlugins() {
-    instanceState.set(this.options, { editor: null });
-    return [];
-  },
-
   addCommands() {
     return {
       exportPdf: (callOptions?: ExportPdfCallOptions) => (_state, dispatch) => {
-        const inst = instanceState.get(this.options);
-        if (!inst?.editor) return false;
+        const editor = this.editor();
+        if (!isViewEditor(editor)) {
+          if (dispatch) {
+            console.warn(
+              "[PdfExport] exportPdf needs an editor with a layout pipeline. " +
+                "Server callers should use the bare `exportToPdf(editor, opts)` function.",
+            );
+          }
+          return false;
+        }
         if (dispatch) {
-          const { editor } = inst;
           const filename =
             callOptions?.filename ?? this.options.filename ?? "document";
           const { filename: _filename, ...exportOptions } = callOptions ?? {};
@@ -100,20 +101,6 @@ export const PdfExport = Extension.create<PdfExportExtensionOptions>({
         isActive: () => false, // never "active" — it's an action, not a toggle
       },
     ];
-  },
-
-  onViewReady(editor: IEditor) {
-    // PDF export reads `editor.layout` + `editor.measurer` from the
-    // browser editor's live layout pipeline, so the registration that
-    // wires the `exportPdf` command to a concrete editor instance lives
-    // here. A headless PDF export path would need its own document →
-    // layout → PDF pipeline and is out of scope for this hook.
-    const inst = instanceState.get(this.options);
-    if (inst) inst.editor = editor;
-    return () => {
-      const i = instanceState.get(this.options);
-      if (i) i.editor = null;
-    };
   },
 });
 

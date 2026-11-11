@@ -1,65 +1,44 @@
 import { Node as PMNode, Slice } from "@scrivr/core/pm";
-import { Selection } from "@scrivr/core/pm";
 import { ReplaceAroundStep, ReplaceStep } from "@scrivr/core/pm";
 
-import { ChangeSet } from "../ChangeSet";
-import { CHANGE_OPERATION, CHANGE_STATUS, TrackedAttrs } from "../types";
 
 export const isDeleteStep = (step: ReplaceStep) =>
   step.from !== step.to && step.slice.content.size < step.to - step.from;
 
-export const isSplitStep = (
-  step: ReplaceStep,
-  selection: Selection,
-  uiEvent: string,
-) => {
+/**
+ * Does this step break a block in two, as Enter does? Read from where the step
+ * lands in the document it applied to: a break at a block's end starts a new,
+ * empty block, which is an insertion rather than a split. A list item breaks
+ * with its paragraph, so the halves are the same nodes down to a text block,
+ * as deep as the slice is open.
+ */
+export const isSplitStep = (step: ReplaceStep, doc: PMNode, uiEvent: string) => {
   const { from, to, slice } = step;
 
-  if (
-    from !== to ||
-    slice.content.childCount < 2 ||
-    (slice.content.firstChild?.isInline && slice.content.lastChild?.isInline)
-  ) {
-    return false;
-  }
+  // A break leaves exactly two halves; more is content inserted between them.
+  if (from !== to || slice.content.childCount !== 2 || slice.openStart !== slice.openEnd) return false;
+  // Pasted paragraphs are new content, not the caret's paragraph carried over.
+  if (uiEvent === "paste") return false;
 
-  const {
-    $anchor: { parentOffset: startOffset },
-    $head: { parentOffset: endOffset },
-    $from,
-  } = selection;
-  const parentSize = $from.node().content.size;
-
-  if (uiEvent === "paste") {
-    return !(
-      (startOffset === 0 && endOffset === 0) ||
-      (startOffset === parentSize && endOffset === parentSize)
-    );
-  }
-  const {
-    content: { firstChild, lastChild },
-    openStart,
-    openEnd,
-  } = slice;
-
-  if (
-    (uiEvent === "Enter" || uiEvent === "NumpadEnter") &&
-    firstChild?.type.name === "list_item"
-  ) {
-    return (
-      !(parentSize === startOffset && parentSize === endOffset) &&
-      lastChild?.type.name === "list_item"
-    );
-  }
-
-  return (
-    openStart === openEnd &&
-    firstChild!.type === lastChild!.type &&
-    firstChild!.inlineContent &&
-    lastChild!.inlineContent &&
-    !(startOffset === parentSize && endOffset === parentSize)
-  );
+  const $at = doc.resolve(from);
+  return splitDepthOf(slice.content.firstChild, slice.content.lastChild) === slice.openStart && $at.parentOffset !== $at.parent.content.size;
 };
+
+/**
+ * How many levels two halves of a break share, from the top: the same node
+ * type at each level, down to a text block. Zero when they are not halves.
+ */
+export function splitDepthOf(firstHalf: PMNode | null, secondHalf: PMNode | null): number {
+  let first = firstHalf;
+  let second = secondHalf;
+  for (let depth = 1; first && second && first.type === second.type; depth++) {
+    if (first.inlineContent) return depth;
+    // The first half is open at its end, the second at its start.
+    first = first.lastChild;
+    second = second.firstChild;
+  }
+  return 0;
+}
 
 export const isWrapStep = (step: ReplaceAroundStep) =>
   step.from === step.gapFrom &&
@@ -79,8 +58,8 @@ export const isWrapStep = (step: ReplaceAroundStep) =>
 export const isSetNodeMarkupStep = (step: ReplaceAroundStep): boolean => {
   const { from, to, gapFrom, gapTo } = step;
   // `structure` is set by ProseMirror internals but not in the public type.
-  const structure = (step as unknown as { structure?: boolean }).structure;
-  return !!(structure && gapFrom === from + 1 && gapTo === to - 1);
+  const structure = "structure" in step && !!step.structure;
+  return structure && gapFrom === from + 1 && gapTo === to - 1;
 };
 
 export const isLiftStep = (step: ReplaceAroundStep) => {
@@ -110,47 +89,3 @@ export function isLiftStepForGap(
   );
 }
 
-export const isDirectPendingMoveDeletion = (
-  step: ReplaceStep,
-  doc: PMNode,
-  movingSteps: Map<ReplaceStep, string>,
-): boolean => {
-  if (step.from === step.to || step.slice.content.size > 0) {
-    return false;
-  }
-
-  if (movingSteps.has(step)) {
-    return false;
-  }
-
-  const node = doc.nodeAt(step.from);
-  if (!node) {
-    return false;
-  }
-
-  return ChangeSet.isPendingChange(
-    node.attrs.dataTracked as TrackedAttrs[] | undefined,
-    CHANGE_OPERATION.move,
-  );
-};
-
-export const isDeletingPendingMovedNode = (step: ReplaceStep, doc: PMNode) => {
-  if (!step.slice || step.from === step.to || step.slice.content.size > 0) {
-    return undefined;
-  }
-
-  const node = doc.nodeAt(step.from);
-  if (!node) {
-    return undefined;
-  }
-  const trackedAttrs = node.attrs.dataTracked as TrackedAttrs[];
-  const found = trackedAttrs?.find(
-    tracked =>
-      tracked.operation === CHANGE_OPERATION.move &&
-      tracked.status === CHANGE_STATUS.pending,
-  );
-  if (found?.moveNodeId) {
-    return found.moveNodeId;
-  }
-  return undefined;
-};

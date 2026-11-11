@@ -1,25 +1,23 @@
 import { Node } from "prosemirror-model";
+import type { LaidMarker } from "./markers";
+import { parseFontSizePx } from "../fonts/activeFontSize";
 import type { FontResolutionId, LayoutFontResolver } from "../fonts/layoutResolver";
 import type { FontModifier } from "../extensions/types";
 import type { TextMeasurerLike } from "./TextMeasurer";
-import type { InlineRegistry } from "./BlockRegistry";
-import { normalizeImageAttrs } from "./AnchoredObjects";
-import { LineBreaker, LayoutLine, InputSpan, spanEndDocPos, computeObjectRenderY, type InlineObjectVerticalAlign, type LineSpaceProvider } from "./LineBreaker";
+import { breakOf, type CompositeLayout, type CompositeUnit, type InlineRegistry, type RegionInset } from "./BlockRegistry";
+import { anchoredOf, type WrapMode } from "./AnchoredObjects";
+import { LineBreaker, LayoutLine, InputSpan, indentFirstSegment, spanEndDocPos, computeObjectRenderY, type InlineObjectVerticalAlign, type LineSpaceProvider } from "./LineBreaker";
 import { CharacterMap } from "./CharacterMap";
 import {
   FontConfig,
   defaultFontConfig,
+  blockFontOf,
+  blockStyleOf,
   getBlockStyle,
   BlockStyle,
 } from "./FontConfig";
-import { resolveFont, substituteFamily, parseFont } from "./StyleResolver";
-import { layoutTableRowCells } from "./TableLayoutEngine";
-
-/** Extracts px size from a CSS font string like "bold 14px Georgia, serif". Returns null if not found. */
-function parseFontSizePx(font: string): number | null {
-  const m = font.match(/(\d+(?:\.\d+)?)px/);
-  return m ? parseFloat(m[1]!) : null;
-}
+import { resolveFont, parseFont } from "./StyleResolver";
+import { layoutRegions } from "./compositeLayout";
 
 /**
  * Resolves the rendered height and block spacing for a leaf block node.
@@ -68,46 +66,61 @@ export function resolveLeafBlockDimensions(
  * Discriminator for the variety of block this LayoutBlock represents.
  *
  *   - `"text"`     — block contributes textual lines that drive rendering and
- *                    cursor placement (paragraph, heading, list_item, codeBlock).
+ *                    cursor placement (paragraph, heading, codeBlock).
  *                    `lines` is non-empty (anchor-only paragraphs hold a single
  *                    hidden line — still "text").
  *   - `"leaf"`     — block has no inline content and contributes no lines
- *                    (image, horizontalRule, pageBreak, and inline-atom
+ *                    (image, horizontal rule, page break, and inline-atom
  *                    sub-blocks dispatched by the PDF exporter). `lines` is `[]`.
- *   - `"tableRow"` — produced by the Table extension; carries per-cell
- *                    sub-blocks (`cells`) instead of `lines`. `lines` is `[]`.
- *                    In Phase 1 the row is a fixed-height placeholder with
- *                    `cells: []`; Phase 4 fills `cells` with sandboxed cell
- *                    layouts.
+ *   - `"composite"` — one unit of a composite node (a table's row): carries
+ *                    its laid-out `regions` instead of `lines`. `lines` is `[]`.
  *
  * Consumers branch on `kind` instead of probing `lines.length === 0`, so the
  * shape of the discriminator is the single source of truth for renderer,
  * pagination, hit-testing, and export dispatch.
  */
-export type LayoutBlockKind = "text" | "leaf" | "tableRow";
+export type LayoutBlockKind = "text" | "leaf" | "composite";
 
 /**
- * One cell laid out inside a `kind: "tableRow"` LayoutBlock. Phase 1 always
- * carries an empty `cells` array; Phase 4 populates this with cell bounds and
- * the cell's child block layouts.
+ * One region of a composite unit, laid out: where it sits, and the blocks and
+ * images it holds. `x` is absolute; `y`, its blocks' `y` and its images' `y`
+ * are relative to the unit's top, so a cached unit lands on any page.
  */
-export interface CellSubBlock {
-  /** ProseMirror position of the tableCell or tableHeader node. */
-  cellPos: number;
-  /** Absolute x position of the cell in CSS pixels. */
+export interface LaidRegion {
+  /** Document position of the region's node (a cell). */
+  pos: number;
   x: number;
-  /** Y position RELATIVE to the row block's top (add `rowBlock.y` for absolute). */
   y: number;
-  /** Cell width including padding. */
+  /** The region's width and height, inset included. */
   width: number;
-  /** Cell height including padding. */
   height: number;
-  /** Vertical-merge state from the cell node — drives render border ownership. */
-  vMerge: "none" | "restart" | "continue";
-  /** Cell background color, or null. */
-  background: string | null;
-  /** Layout for the cell's child blocks. Empty array in Phase 1. */
+  inset: RegionInset;
   blocks: LayoutBlock[];
+  /** Images anchored in the region's blocks, laid out inside it. Absent when there are none. */
+  floats?: RegionFloat[];
+  /** The extension's own (`RegionPlacement.data`). */
+  data?: unknown;
+}
+
+/**
+ * An image laid out inside its region. `x` is absolute; `y` and `anchorY`
+ * (its paragraph's top) are relative to the unit's top, like the region's
+ * blocks, so a cached unit carries its images to any page.
+ */
+export interface RegionFloat {
+  docPos: number;
+  node: Node;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  wrapMode: WrapMode;
+  zIndex: number;
+  margin: number;
+  anchorY: number;
+  clamped?: true;
+  /** How far keeping clear of an earlier image moved it down. */
+  stackOffset?: number;
 }
 
 export interface LayoutBlock {
@@ -134,13 +147,11 @@ export interface LayoutBlock {
   align: BlockStyle["align"];
   /** Available width — renderer needs this to compute alignment offsets */
   availableWidth: number;
-  /** Bullet character or ordered number string (e.g. "•", "1."). Present on list item blocks only. */
-  listMarker?: string;
-  /** Absolute x position to draw the list marker — to the left of the indented text. */
-  listMarkerX?: number;
+  /** The marker a wrapper hangs before the block, on the part that carries its first visible line. */
+  marker?: LaidMarker;
   /**
    * True on the 2nd, 3rd, … visual parts of a block split across pages.
-   * Suppresses the list marker and sets spaceBefore = 0 for continuation parts.
+   * Suppresses the marker and sets spaceBefore = 0 for continuation parts.
    */
   isContinuation?: boolean;
   /**
@@ -164,13 +175,18 @@ export interface LayoutBlock {
    * Same as nodePos for the first part; allows grouping all parts of a split back to their origin.
    */
   sourceNodePos?: number;
-  /**
-   * Sub-cell layouts for `kind: "tableRow"` blocks. Empty in Phase 1; Phase 4
-   * fills this with the cell rectangles and their child block layouts.
-   */
-  cells?: CellSubBlock[];
-  /** True for the last row of a table — only it paints the table's bottom border. */
-  isLastRow?: boolean;
+  /** A composite unit's regions, laid out. */
+  regions?: LaidRegion[];
+  /** A composite unit's own data (`CompositeUnit.data`). */
+  unitData?: unknown;
+  /** True for the last unit of its composite: a table's last row. */
+  lastUnit?: true;
+}
+
+/** The first-line indent a node asks for itself, through its `textIndent` attr. */
+export function ownFirstLineIndent(node: Node): number {
+  const indent = node.attrs["textIndent"];
+  return typeof indent === "number" && Number.isFinite(indent) && indent > 0 ? indent : 0;
 }
 
 export function isHiddenAnchorLine(line: LayoutLine): boolean {
@@ -239,19 +255,33 @@ export interface BlockLayoutOptions {
   lineSpaceProvider?: LineSpaceProvider;
   /** Inline object registry — used to call measure() on tokens during layout. */
   inlineRegistry?: InlineRegistry | undefined;
+  /** The composite unit this block is, laid out as its regions. */
+  unit?: { composite: CompositeLayout; unit: CompositeUnit };
   /**
-   * Column widths (CSS px) for a `tableRow` node, from the parent table's
-   * `grid` attr. Only consulted when laying out a `tableRow`; ignored for
-   * every other block kind.
+   * The first-line room a marker takes. A block with a marker keeps a line
+   * for it even when it holds only floating images' anchors.
    */
-  tableColumns?: number[];
+  marker?: MarkerLine;
+}
+
+/** How a marker shapes its block's first line. */
+export interface MarkerLine {
+  /**
+   * Extra first-line indent, on top of the node's own `textIndent`: where a
+   * marker too wide for its hanging pushes the first line of text.
+   */
+  offset?: number;
+  /**
+   * The offset for a first line a float moves `lineStart` in from the
+   * block's left; `offset` holds where nothing moves it.
+   */
+  offsetAt?: (lineStart: number) => number;
 }
 
 // ── Constants ───────────────────────────────────────────────────────────────────
 const IMAGE_DEFAULT_HEIGHT = 200;
 const IMAGE_SPACE = 8;
 /** Fallback column width when a table row is laid out without a `grid`. */
-const TABLE_DEFAULT_COLUMN_WIDTH = 100;
 
 
 /**
@@ -330,40 +360,20 @@ export function layoutLeafBlock(
 }
 
 
-/** Sum of `gridSpan` across a row's physical cells — the column count. */
-function rowColumnCount(rowNode: Node): number {
-  let n = 0;
-  rowNode.forEach((cell) => {
-    const v = cell.attrs["gridSpan"];
-    n += typeof v === "number" && Number.isInteger(v) && v >= 1 ? v : 1;
-  });
-  return n;
-}
-
 /**
- * Layout for a `tableRow` node: delegates to `TableLayoutEngine` to lay out
- * each cell's child blocks inside its column box and size the row to its
- * tallest cell. Column widths come from `options.tableColumns` (the parent
- * table's `grid`); when absent, a uniform default grid is derived from the
- * row's column count so a row is never zero-width.
+ * Layout for one unit of a composite node: its regions where its extension
+ * places them, each region's content laid out by the shared walk, the unit as
+ * tall as its tallest region.
  */
-export function layoutTableRow(
+function layoutCompositeUnit(
   node: Node,
+  unit: { composite: CompositeLayout; unit: CompositeUnit },
   options: BlockLayoutOptions,
 ): LayoutBlock {
-  const { nodePos, x, y, availableWidth, page, measurer, fontConfig, fontModifiers, inlineRegistry, fonts, tableColumns } = options;
-
-  const columns =
-    tableColumns && tableColumns.length > 0
-      ? tableColumns
-      : Array.from({ length: Math.max(rowColumnCount(node), 1) }, () => TABLE_DEFAULT_COLUMN_WIDTH);
-
-  const { cells, height } = layoutTableRowCells(node, {
+  const { nodePos, x, y, availableWidth, page, measurer, fontConfig, fontModifiers, inlineRegistry, fonts } = options;
+  const { regions, height } = layoutRegions(unit.composite.regions(unit.unit, availableWidth), {
     x,
-    columns,
-    availableWidth,
     page,
-    rowNodePos: nodePos,
     measurer,
     ...(fontConfig ? { fontConfig } : {}),
     ...(fontModifiers ? { fontModifiers } : {}),
@@ -372,7 +382,7 @@ export function layoutTableRow(
   });
 
   return {
-    kind: "tableRow",
+    kind: "composite",
     node,
     nodePos,
     x,
@@ -380,10 +390,11 @@ export function layoutTableRow(
     width: availableWidth,
     height,
     lines: [],
-    cells,
+    regions,
+    unitData: unit.unit.data,
     spaceBefore: 0,
     spaceAfter: 0,
-    blockType: "tableRow",
+    blockType: node.type.name,
     align: "left",
     availableWidth,
   };
@@ -409,8 +420,8 @@ export function layoutBlock(
   node: Node,
   options: BlockLayoutOptions,
 ): LayoutBlock {
-  // Table rows are atomic units in v1: dispatch to the stub row engine.
-  if (node.type.name === "tableRow") return layoutTableRow(node, options);
+  // A composite unit (a table's row) is laid out as its regions.
+  if (options.unit) return layoutCompositeUnit(node, options.unit, options);
   // Leaf block nodes (no inline content): use fixed-height path.
   // TODO: Add isInline to extensions and use it here instead of isTextblock
   if (!node.childCount && !node.isTextblock)
@@ -429,18 +440,13 @@ export function layoutBlock(
     lineSpaceProvider,
     inlineRegistry,
     fonts,
+    marker,
   } = options;
 
   const fontConfig = options.fontConfig ?? defaultFontConfig;
-  const level = node.attrs["level"] as number | undefined;
-  const blockStyle = getBlockStyle(fontConfig, node.type.name, level);
+  const blockStyle = blockStyleOf(node, fontConfig);
 
-  // Node-level fontFamily attr overrides the block style's family.
-  // Priority: node attr > fontConfig (which may already have page font applied) > blockStyle default.
-  const nodeFontFamily = node.attrs["fontFamily"] as string | null | undefined;
-  const baseFont = nodeFontFamily
-    ? substituteFamily(blockStyle.font, nodeFontFamily)
-    : blockStyle.font;
+  const baseFont = blockFontOf(node, fontConfig);
 
   // Per-node alignment attr overrides the static BlockStyle default.
   // Guards against garbage values — only the four known align strings are accepted.
@@ -460,7 +466,7 @@ export function layoutBlock(
   });
 
   // ── 2. Empty node fallback ────────────────────────────────────────────────
-  // An empty paragraph (or one containing only hardBreak nodes) has no
+  // An empty paragraph (or one containing only line breaks) has no
   // renderable content. We create a virtual zero-width-space span so
   // LineBreaker returns one line and CharacterMap registers a cursor position.
   //
@@ -468,7 +474,8 @@ export function layoutBlock(
   // non-inline image sentinels is structural ownership, not visible document
   // content. Preserve those zero-size object spans so anchored-object layout
   // can find them, but do not inject a ZWS. That yields a zero-height flow
-  // instead of the blank line users were seeing behind floating images.
+  // instead of the blank line users were seeing behind floating images —
+  // unless the paragraph carries a marker, which needs its line.
   const hasNonZeroContent = spans.some(
     (s) =>
       s.kind === "text" ||
@@ -478,7 +485,7 @@ export function layoutBlock(
     (s) => s.kind === "object" && s.width === 0 && s.height === 0,
   );
   const isAnchorOnlyFlow = !hasNonZeroContent && hasZeroSizeObjectSentinel;
-  if (isAnchorOnlyFlow) {
+  if (isAnchorOnlyFlow && !marker) {
     return {
       kind: "text",
       node,
@@ -509,36 +516,38 @@ export function layoutBlock(
     ...(zwsAnswer ? { resolution: zwsAnswer.resolution } : {}),
     docPos: nodePos + 1,
   };
-  const inputSpans: InputSpan[] = hasNonZeroContent ? spans : [zwsSpan];
+  // A kept anchor line ends in the sentinel, after the anchors it carries.
+  const inputSpans: InputSpan[] = hasNonZeroContent
+    ? spans
+    : isAnchorOnlyFlow
+      ? [...spans, { ...zwsSpan, docPos: nodePos + 1 + node.content.size }]
+      : [zwsSpan];
 
   // ── 3. Break into lines ───────────────────────────────────────────────────
   const breaker = new LineBreaker(measurer);
 
   // First-line indent: reduce first line's width so text wraps earlier.
-  const rawTextIndent = node.attrs["textIndent"];
-  const textIndent = typeof rawTextIndent === "number" && rawTextIndent > 0 ? rawTextIndent : 0;
+  const ownIndent = ownFirstLineIndent(node);
+  const markerOffset = marker?.offset ?? 0;
+  const markerOffsetAt = marker?.offsetAt;
+  const firstLineIndentAt = (lineStart: number): number =>
+    ownIndent + (lineStart > 0 && markerOffsetAt ? markerOffsetAt(lineStart) : markerOffset);
+  const indentsFirstLine = ownIndent + markerOffset > 0 || markerOffsetAt !== undefined;
 
-  // Wrap the line-space provider to apply textIndent on the first line.
+  // Wrap the line-space provider to apply the indent on the first line.
   let firstLineConsumed = false;
   const indentAwareLineSpace: LineSpaceProvider | undefined =
-    textIndent > 0
+    indentsFirstLine
       ? (lineY: number, lineHeight: number) => {
           // Forward the real line height so the float-exclusion probe inside the
           // provider tests the line's true vertical extent (a 1px probe leaves a
           // straddling first line full-width under a float's top edge).
           const base = lineSpaceProvider?.(lineY, lineHeight) ?? { segments: [{ x: 0, width: availableWidth }] };
-          if (!firstLineConsumed) {
+          // A full-width float's gap is not the first line: the indent goes
+          // to the first line below it that holds text.
+          if (!firstLineConsumed && base.segments.length > 0) {
             firstLineConsumed = true;
-            return {
-              ...base,
-              segments: base.segments
-                .map((segment, index) =>
-                  index === 0
-                    ? { x: segment.x + textIndent, width: Math.max(0, segment.width - textIndent) }
-                    : segment,
-                )
-                .filter((segment) => segment.width > 0),
-            };
+            return { ...base, segments: indentFirstSegment(base.segments, firstLineIndentAt) };
           }
           return base;
         }
@@ -555,6 +564,8 @@ export function layoutBlock(
       defaultFontFamily: parsedBase.family,
       defaultFontSize: parseFloat(parsedBase.size),
       ...(indentAwareLineSpace ? { lineSpaceProvider: indentAwareLineSpace, startY: y } : {}),
+      ...(markerOffset > 0 || markerOffsetAt ? { firstLineMayStayEmpty: true } : {}),
+      ...(indentsFirstLine ? { firstLineIndent: firstLineIndentAt } : {}),
     },
   );
 
@@ -696,7 +707,6 @@ export function layoutBlock(
     blockType: node.type.name,
     align: resolvedAlign,
     availableWidth,
-    // listMarker and listMarkerX are set by layoutDocument for list items
   };
 }
 
@@ -748,8 +758,7 @@ function extractSpans(
       return;
     }
 
-    // Hard line break: flush the current line and start a new one.
-    if (child.type.name === "hardBreak") {
+    if (breakOf(child.type) === "line") {
       spans.push({ kind: "break", docPos: childDocPos });
       return;
     }
@@ -758,29 +767,25 @@ function extractSpans(
     //
     // Something has to claim it: either an `InlineStrategy`, which is an
     // extension saying it owns how this node is measured and painted, or
-    // explicit numeric width/height attrs. A structural leaf like a hardBreak
-    // has neither — and is intercepted by name above anyway — so it cannot be
+    // explicit numeric width/height attrs. A structural leaf like a line break
+    // has neither — and is intercepted above anyway — so it cannot be
     // mistaken for an object and given a 200px line box.
     //
-    // A strategy alone is enough. Requiring size attrs as well forced an
-    // extension to carry numbers it does not use: `pageNumber` declares
-    // `width: 7, height: 10` purely to get here, and `measure()` overwrites
-    // both a few lines down.
+    // A strategy alone is enough. An atom that measures itself — a page
+    // number, a date — has no size to declare, and demanding one would make it
+    // carry a number `measure()` overwrites a few lines down.
     if (child.isLeaf && !child.isText) {
       const w = child.attrs["width"] as number | null | undefined;
       const h = child.attrs["height"] as number | null | undefined;
-      const claimed = inlineRegistry?.get(child.type.name) !== undefined;
+      const placement = anchoredOf(child);
+      const claimed = inlineRegistry?.get(child.type.name) !== undefined || placement !== null;
       if (claimed || typeof w === "number" || typeof h === "number") {
-        // Anchored-object anchor span: when the image's resolved wrapMode is
+        // Anchored-object anchor span: when the node's declared placement is
         // anything other than "inline", emit a zero-width/zero-height object
         // span. This keeps the doc position in the line box but contributes
         // no line width or height — PageLayout's resolveAnchoredObjects pass
-        // places the visible image at its xAlign/x and creates the wrap
-        // zone. Read through normalizeImageAttrs so both new (`wrapMode`)
-        // and legacy (`wrappingMode`) attribute sets are honoured.
-        const isFloat =
-          child.type.name === "image" &&
-          normalizeImageAttrs(child).wrapMode !== "inline";
+        // places the visible object at its xAlign/x and creates the wrap zone.
+        const isFloat = placement !== null && placement.wrapMode !== "inline";
 
         if (isFloat) {
           spans.push({
@@ -805,8 +810,9 @@ function extractSpans(
           rawAlign === "text-bottom"
             ? rawAlign
             : "baseline";
-        let objWidth = typeof w === "number" ? w : 200;
-        let objHeight = typeof h === "number" ? h : 200;
+        // A node that declares its placement is the size it declares there.
+        let objWidth = placement ? placement.width : typeof w === "number" ? w : 200;
+        let objHeight = placement ? placement.height : typeof h === "number" ? h : 200;
 
         // An atom sized from a font — a page number, a date — inherits the
         // run's, and a renderer that paints it needs the same one the box was
@@ -838,6 +844,13 @@ function extractSpans(
           height: objHeight,
           ...(atomFont !== undefined ? { font: atomFont } : {}),
           ...(atomResolution !== undefined ? { resolution: atomResolution } : {}),
+          // Same shape a text span carries, so a fill resolves the same way.
+          ...(child.marks.length > 0 ? {
+            marks: child.marks.map((m) => ({
+              name: m.type.name,
+              attrs: m.attrs as Record<string, unknown>,
+            })),
+          } : {}),
           verticalAlign,
         });
       } else {
@@ -929,17 +942,15 @@ export function computeJustifySpaceBonus(
 /**
  * Number of CharacterMap line indices a block occupies — the amount the caller
  * advances the page-global line offset after registering this block. Text
- * blocks contribute one per line; leaf blocks one; table rows the sum across
- * every cell's child blocks.
+ * blocks contribute one per line; leaf blocks one; a composite unit the sum
+ * across every region's child blocks.
  */
 export function registeredLineCount(block: LayoutBlock): number {
   if (block.kind === "leaf") return 1;
-  if (block.kind === "tableRow") {
+  if (block.kind === "composite") {
     let n = 0;
-    for (const cell of block.cells ?? []) {
-      for (const child of cell.blocks) {
-        n += child.kind === "leaf" ? 1 : child.lines.length;
-      }
+    for (const region of block.regions ?? []) {
+      for (const child of region.blocks) n += registeredLineCount(child);
     }
     return n;
   }
@@ -981,16 +992,16 @@ export function populateCharMap(
     return;
   }
 
-  // Table row: register each cell's child blocks at their absolute y (the row
-  // block's final y plus the child's row-relative offset). Recursion reuses the
-  // text/leaf branches above for the actual cell content.
-  if (block.kind === "tableRow") {
+  // A composite unit: register each region's child blocks at their absolute y
+  // (the unit's final y plus the child's unit-relative offset). Recursion
+  // reuses the text/leaf branches above for the content.
+  if (block.kind === "composite") {
     let offset = lineIndexOffset;
-    for (const cell of block.cells ?? []) {
-      for (const child of cell.blocks) {
+    for (const region of block.regions ?? []) {
+      for (const child of region.blocks) {
         const absolute: LayoutBlock = { ...child, y: block.y + child.y };
         populateCharMap(absolute, map, page, offset, measurer);
-        offset += child.kind === "leaf" ? 1 : child.lines.length;
+        offset += registeredLineCount(child);
       }
     }
     return;
@@ -1122,7 +1133,7 @@ export function populateCharMap(
       spacesBeforeSpan += countSpaces(span.text);
     }
 
-    // Register a zero-width glyph at the hardBreak's doc position so
+    // Register a zero-width glyph at the line break's doc position so
     // coordsAtPos(breakDocPos) returns the correct cursor location at line-end.
     if (line.terminalBreakDocPos !== undefined) {
       const breakX = block.x + lineOffsetX + line.width;

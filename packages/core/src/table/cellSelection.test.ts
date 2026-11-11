@@ -2,11 +2,12 @@ import { describe, it, expect } from "vitest";
 import { Selection, TextSelection } from "prosemirror-state";
 import type { Node } from "prosemirror-model";
 import { ServerEditor } from "../ServerEditor";
+import { createTestEditor } from "../test-utils";
 import { StarterKit } from "../extensions/StarterKit";
 import { selectedCells, CellSelection, CELL_SELECTION_JSON_ID } from "./cellSelection";
 import { cellsCoveredBySelection } from "./cellSelectionSeam";
 import { serializeSelectionToHtml, serializeSelectionToText } from "../input/ClipboardSerializer";
-import { insertText } from "../model/commands";
+import { deleteSelection, insertText } from "../model/commands";
 
 /**
  * Cell selection geometry + the `CellSelection` class. A partially-covered
@@ -328,6 +329,104 @@ describe("typing over a CellSelection", () => {
   });
 });
 
+describe("deleting a CellSelection — cut, Delete, deleteSelection", () => {
+  function selectAll2x2() {
+    const editor = makeEditor(rect2x2());
+    const s0 = editor.getState();
+    const sel = CellSelection.between(s0.doc, cellNodePos(s0.doc, 0, 0), cellNodePos(s0.doc, 1, 1))!;
+    editor.applyTransaction(s0.tr.setSelection(sel));
+    return editor;
+  }
+
+  it("empties every cell to a paragraph and keeps the grid, as Word does", () => {
+    const editor = selectAll2x2();
+    editor.applyTransaction(editor.getState().tr.deleteSelection());
+
+    const cells: string[] = [];
+    editor.getState().doc.descendants((n) => {
+      if (n.type.name !== "tableCell") return true;
+      cells.push(`${n.childCount}:${n.firstChild?.type.name}:${n.textContent}`);
+      return false;
+    });
+    expect(cells).toEqual(["1:paragraph:", "1:paragraph:", "1:paragraph:", "1:paragraph:"]);
+  });
+
+  it("is what a cut does: the cells copied, then emptied in place", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const editor = createTestEditor({ extensions: [StarterKit.configure({ table: true })], content: rect2x2() });
+    editor.mount(container);
+    const s0 = editor.getState();
+    editor.applyTransaction(s0.tr.setSelection(CellSelection.between(s0.doc, cellNodePos(s0.doc, 0, 0), cellNodePos(s0.doc, 1, 1))!));
+
+    const clipboardData = new DataTransfer();
+    container.querySelector("textarea")?.dispatchEvent(new ClipboardEvent("cut", { bubbles: true, cancelable: true, clipboardData }));
+    const texts: string[] = [];
+    editor.getState().doc.descendants((n) => {
+      if (n.type.name === "tableCell") texts.push(n.textContent);
+      return n.type.name !== "tableCell";
+    });
+    editor.destroy();
+    container.remove();
+
+    expect(clipboardData.getData("text/plain")).toBe("A\tB\nC\tD");
+    expect(texts).toEqual(["", "", "", ""]);
+  });
+
+  it("empties a cell holding only a rule, which is no empty paragraph", () => {
+    const editor = selectAll2x2();
+    const s = editor.getState();
+    const firstCell = cellNodePos(s.doc, 0, 0);
+    // Make the top-left cell hold a lone horizontal rule, keeping the selection.
+    const cellNode = s.doc.nodeAt(firstCell)!;
+    editor.applyTransaction(s.tr.replaceWith(firstCell + 1, firstCell + cellNode.nodeSize - 1, s.schema.nodes["horizontalRule"]!.create()));
+    const s1 = editor.getState();
+    editor.applyTransaction(s1.tr.setSelection(CellSelection.between(s1.doc, cellNodePos(s1.doc, 0, 0), cellNodePos(s1.doc, 1, 1))!));
+    editor.applyTransaction(editor.getState().tr.deleteSelection());
+
+    const firsts: string[] = [];
+    editor.getState().doc.descendants((n) => {
+      if (n.type.name !== "tableCell") return true;
+      firsts.push(`${n.childCount}:${n.firstChild?.type.name}`);
+      return false;
+    });
+    expect(firsts).toEqual(["1:paragraph", "1:paragraph", "1:paragraph", "1:paragraph"]);
+    expect(editor.getState().selection.empty).toBe(true);
+  });
+
+  it("deletes nothing, and keeps the selection, when every cell is already empty", () => {
+    const editor = makeEditor(tableDoc([100, 100], [[{}, {}], [{}, {}]]));
+    const s0 = editor.getState();
+    editor.applyTransaction(s0.tr.setSelection(CellSelection.between(s0.doc, cellNodePos(s0.doc, 0, 0), cellNodePos(s0.doc, 1, 1))!));
+    expect(deleteSelection(editor.getState())).toBeNull();
+    const tr = editor.getState().tr.deleteSelection();
+    expect(tr.docChanged).toBe(false);
+    expect(tr.selectionSet).toBe(false);
+  });
+
+  it("types into the top-left cell, wherever the drag ended", () => {
+    const editor = makeEditor(rect2x2());
+    const s0 = editor.getState();
+    // Dragged from top-left to bottom-right: the head, where the caret sits, is bottom-right.
+    editor.applyTransaction(s0.tr.setSelection(CellSelection.between(s0.doc, cellNodePos(s0.doc, 0, 0), cellNodePos(s0.doc, 1, 1))!));
+    editor.applyTransaction(insertText(editor.getState(), "X")!);
+    const texts: string[] = [];
+    editor.getState().doc.descendants((n) => {
+      if (n.type.name === "tableCell") texts.push(n.textContent);
+      return n.type.name !== "tableCell";
+    });
+    expect(texts).toEqual(["X", "", "", ""]);
+  });
+
+  it("leaves the caret in the top-left cell", () => {
+    const editor = selectAll2x2();
+    editor.applyTransaction(editor.getState().tr.deleteSelection());
+    const { selection, doc } = editor.getState();
+    expect(selection.empty).toBe(true);
+    expect(selection.from).toBe(cellNodePos(doc, 0, 0) + 2);
+  });
+});
+
 describe("clipboard serialization of a CellSelection", () => {
   it("copies as an html table plus tab/newline text", () => {
     const editor = makeEditor(rect2x2());
@@ -336,7 +435,7 @@ describe("clipboard serialization of a CellSelection", () => {
     editor.applyTransaction(s0.tr.setSelection(sel));
     const state = editor.getState();
     expect(serializeSelectionToText(state)).toBe("A\tB\nC\tD");
-    const html = serializeSelectionToHtml(state, state.schema);
+    const html = serializeSelectionToHtml(state, state.schema, editor.getCopyHtmlTransforms());
     expect(html).toContain("<table");
     expect(html).toContain("<td");
     expect(html).toContain("A");
@@ -362,7 +461,7 @@ describe("clipboard serialization of a CellSelection", () => {
     )!;
     editor.applyTransaction(state.tr.setSelection(sel));
 
-    const html = serializeSelectionToHtml(editor.getState(), editor.getState().schema);
+    const html = serializeSelectionToHtml(editor.getState(), editor.getState().schema, editor.getCopyHtmlTransforms());
     expect(html).toContain('colspan="2"');
     expect(html).toContain('rowspan="2"');
   });

@@ -2,7 +2,7 @@ import { NodeSelection, Selection, TextSelection } from "prosemirror-state";
 import type { EditorState, Transaction } from "prosemirror-state";
 import type { Node as PmNode, ResolvedPos } from "prosemirror-model";
 import type { CharacterMap } from "./layout/CharacterMap";
-import { normalizeImageAttrs } from "./layout/AnchoredObjects";
+import { floats } from "./layout/AnchoredObjects";
 import type { EditorNavigator } from "./extensions/types";
 
 /**
@@ -343,5 +343,5 @@ function hiddenAnchorImagePosAt(doc: PmNode, pos: number, dir: -1 | 1): number |
 }
 
 function isNonInlineImage(node: PmNode | null): node is PmNode {
-  return node?.type.name === "image" && normalizeImageAttrs(node).wrapMode !== "inline";
+  return node ? floats(node) : false;
 }

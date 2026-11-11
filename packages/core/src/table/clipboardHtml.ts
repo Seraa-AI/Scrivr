@@ -1,4 +1,4 @@
-import { isCell, readGridSpan, readRowSpan } from "./domAttrs";
+import { isCell, readGridSpan, readRowSpan, readTableGrid } from "./domAttrs";
 
 /**
  * Translates table markup between the clipboard's shape and the schema's, in
@@ -93,8 +93,21 @@ function nextCoveredColumn(covered: Map<number, Occupancy>, from: number): numbe
  */
 export function collapseRowSpans(root: HTMLElement): void {
   for (const table of tablesIn(root)) {
-    for (const rows of rowGroups(table)) collapseGroup(rows);
+    const columns = readTableGrid(table).length;
+    rowGroups(table).forEach((rows, index) => collapseGroup(rows, index === 0 ? leadingGap(rows[0], columns) : 0));
   }
+}
+
+/**
+ * Columns missing before a table's first row. A copied range that starts
+ * partway into a row copies it without the cells before the start, so its
+ * cells sit at the right of the grid, not the left.
+ */
+function leadingGap(row: HTMLElement | undefined, columns: number): number {
+  if (!row) return 0;
+  let width = 0;
+  for (const cell of Array.from(row.children).filter(isCell)) width += readGridSpan(cell);
+  return Math.max(0, columns - width);
 }
 
 interface OpenMerge {
@@ -102,12 +115,12 @@ interface OpenMerge {
   rows: number;
 }
 
-function collapseGroup(rows: HTMLElement[]): void {
+function collapseGroup(rows: HTMLElement[], firstRowStart: number): void {
   // Column index → the merge still collecting continuations below it.
   const open = new Map<number, OpenMerge>();
 
-  for (const row of rows) {
-    let column = 0;
+  for (const [index, row] of rows.entries()) {
+    let column = index === 0 ? firstRowStart : 0;
     for (const cell of Array.from(row.children).filter(isCell)) {
       const span = readGridSpan(cell);
       const role = cell.getAttribute("data-vmerge");

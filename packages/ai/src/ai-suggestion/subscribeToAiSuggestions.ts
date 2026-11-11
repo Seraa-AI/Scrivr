@@ -20,8 +20,9 @@ import {
   AI_SUGGESTION_SET_HOVER,
 } from "./AiSuggestionPlugin";
 import { applyAiSuggestion, rejectAiSuggestion } from "./showHideApply";
-import { findNodeById } from "../ai-toolkit/UniqueId";
+import { findLiveNodeById } from "@scrivr/plugins";
 import type { AiSuggestionBlock, AiOp, AiSuggestionPluginState } from "./types";
+import type { AcceptedSpan } from "./groupSpans";
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -42,8 +43,11 @@ export interface AiSuggestionCardData {
    * UIs can use this to show richer context ("Simplified tone and removed jargon").
    */
   summary: string | undefined;
-  /** Semantic kind: "rewrite" | "insert" | "delete" */
-  kind: "rewrite" | "insert" | "delete";
+  /**
+   * What the proposal does: rewrites the wording, adds to it, removes from it,
+   * or changes how it reads without touching a word.
+   */
+  kind: "rewrite" | "insert" | "delete" | "format";
   /** True when the document has changed since the suggestion was set. */
   isStale: boolean;
   /** True when the cursor is inside this block. */
@@ -56,6 +60,16 @@ export interface AiSuggestionCardData {
 export interface AiSuggestionCardActions {
   /** Accept one block. mode defaults to "tracked". */
   accept(blockId: string, mode?: "tracked" | "direct"): void;
+  /**
+   * Accept only the part of a block one span covers — "accept this sentence",
+   * not "accept this block".
+   *
+   * The span states the accepted text its offsets were measured against, and
+   * is refused if the block no longer holds that text. Also refused when it
+   * covers no group, or describes nothing coherent. Returns whether anything
+   * was applied, so a refusal is visible rather than silent.
+   */
+  acceptRange(blockId: string, range: AcceptedSpan, mode?: "tracked" | "direct"): boolean;
   /** Reject one block. */
   reject(blockId: string): void;
   /** Accept all blocks. mode defaults to "tracked". */
@@ -105,18 +119,25 @@ function deriveCard(
   isActive: boolean,
   isHovered: boolean,
 ): AiSuggestionCardData {
-  const hasInsert = block.ops.some((o: AiOp) => o.type === "insert");
-  const hasDelete = block.ops.some((o: AiOp) => o.type === "delete");
+  const ops = block.ops;
+  const hasInsert = ops.some((o: AiOp) => o.type === "insert");
+  const hasDelete = ops.some((o: AiOp) => o.type === "delete");
+  // A keep carrying marks proposes formatting on text that stays, so a block
+  // can propose something while having neither an insert nor a delete.
+  const formatted = ops.filter((o: AiOp) => o.type === "keep" && o.marks);
 
   let autoLabel: string;
   let kind: AiSuggestionCardData["kind"];
 
-  if (hasInsert && hasDelete) {
+  if (!hasInsert && !hasDelete && formatted.length > 0) {
+    kind = "format";
+    autoLabel = truncate(formatted.map((o: AiOp) => o.text).join(" ").trim(), 36) || "Formatting";
+  } else if (hasInsert && hasDelete) {
     kind = "rewrite";
     autoLabel = truncate(block.acceptedText.trim(), 36) || "Rewrite";
   } else if (hasInsert) {
     kind = "insert";
-    const text = block.ops
+    const text = ops
       .filter((o: AiOp) => o.type === "insert")
       .map((o: AiOp) => o.text)
       .join(" ")
@@ -172,6 +193,9 @@ export function subscribeToAiSuggestions(
     accept(blockId, mode = "tracked") {
       applyAiSuggestion(editor, { blockId, mode });
     },
+    acceptRange(blockId, range, mode = "tracked") {
+      return applyAiSuggestion(editor, { blockId, range, mode });
+    },
     reject(blockId) {
       rejectAiSuggestion(editor, { blockId });
     },
@@ -190,7 +214,7 @@ export function subscribeToAiSuggestions(
       );
     },
     activate(blockId) {
-      const found = findNodeById(editor.getState().doc, blockId);
+      const found = findLiveNodeById(editor.getState().doc, blockId);
       if (!found) return;
       // `selection` only lives on the view-side `IEditor`. Headless callers
       // (e.g. ServerEditor in tests) skip the cursor move — they have no

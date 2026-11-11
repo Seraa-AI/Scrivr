@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
+import { NodeSelection } from "prosemirror-state";
 import { createTestEditor, makeNPageDoc } from "../test-utils";
 import { StarterKit } from "../extensions/StarterKit";
 import { Extension } from "../extensions/Extension";
@@ -80,7 +81,6 @@ function setup(calls: Calls, opts: { throwOnFinish?: boolean } = {}) {
     slotHeight: () => 1224,
     tileHeight: () => 1200,
     isPageless: () => false,
-    visualYToDocY: (y) => ({ page: Math.floor(y / 1224) + 1, docY: y - Math.floor(y / 1224) * 1224 }),
     scheduleUpdate: () => {},
   };
   const controller = new PointerController(deps);
@@ -154,7 +154,7 @@ describe("PointerController — gesture seam", () => {
     const calls: Calls = { begin: 0, update: 0, finish: 0, cancel: 0 };
     const s = setup(calls);
     clean = s.cleanup;
-    const imageHit = vi.spyOn(s.editor.charMap, "objectRectAtPoint").mockReturnValue({
+    vi.spyOn(s.editor.charMap, "objectRectAtPoint").mockReturnValue({
       docPos: 1,
       x: 100,
       y: 100,
@@ -166,7 +166,7 @@ describe("PointerController — gesture seam", () => {
     s.container.dispatchEvent(pointerEvent("pointerdown", 120, 120));
 
     expect(calls.begin).toBe(1);
-    expect(imageHit).not.toHaveBeenCalled();
+    expect(s.editor.getState().selection).not.toBeInstanceOf(NodeSelection);
   });
 
   it("offers Shift and repeated clicks to the registered gesture first", () => {

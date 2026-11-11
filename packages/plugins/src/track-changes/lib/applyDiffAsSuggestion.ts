@@ -7,12 +7,13 @@
  * Single-block flow (applyDiffAsSuggestion):
  *   1. Find the block node by its `nodeId` attribute.
  *   2. Build the accepted-text map for that node.
- *   3. Diff acceptedText → proposedText (legal-aware tokeniser).
- *   4. Group replacement pairs (look-ahead buffer, shared groupId).
- *   5. Expand similar word-level replacements to char-level marks.
- *   6. Convert each op's token offset to an absolute doc position.
- *   7. Apply inserts/deletes as tracked marks (conflict-aware).
- *   8. Dispatch the transaction.
+ *   3. Diff acceptedText → proposedText, word by word.
+ *   4. Group each run of changes into one phrase replacement — a deletion and
+ *      an insertion sharing a groupId — never across a line break, an inline
+ *      object or another suggestion.
+ *   5. Convert each op's offset to an absolute doc position.
+ *   6. Apply inserts/deletes as tracked marks (conflict-aware).
+ *   7. Dispatch the transaction.
  *
  * Multi-block flow (applyMultiBlockDiff):
  *   Same pipeline, but across an array of { nodeId, proposedText } pairs.
@@ -30,25 +31,21 @@
  *                   > 0.7 → full rewrite, offer "Accept rewrite" button
  */
 
-import type { Schema } from "@scrivr/core/pm";
+import type { Node as PMNode, Schema } from "@scrivr/core/pm";
 import type { EditorState, Transaction } from "@scrivr/core/pm";
 
-import { findNodeById } from "@scrivr/core";
+import { findLiveNodeById } from "../liveNode";
 import {
   addTrackIdIfDoesntExist,
   createNewDeleteAttrs,
   createNewInsertAttrs,
   createNewPendingAttrs,
 } from "../helpers";
-import { CHANGE_STATUS } from "../types";
-import { acceptedRangeToDocRange, buildAcceptedTextMap } from "./acceptedTextMap";
-import {
-  computeEditDensity,
-  diffText,
-  expandCharLevel,
-  pairReplacements,
-} from "./diffText";
+import { CHANGE_OPERATION, CHANGE_STATUS } from "../types";
+import { acceptedRangeToDocRange, bridgeable, buildAcceptedTextMap } from "./acceptedTextMap";
+import { computeEditDensity, diffText, phraseReplacements } from "./diffText";
 import { applyTrackedDelete } from "./splitRangeForNewMark";
+import { suggestedContent } from "./suggestedContent";
 import { skipTracking, TrackChangesAction, setAction } from "../actions";
 
 // ── Clear previous suggestions ────────────────────────────────────────────────
@@ -87,12 +84,18 @@ export function clearAuthorPendingMarks(
 
   // Walk the block content (nodeFrom+1 skips the opening token).
   tr.doc.nodesBetween(nodeFrom + 1, nodeTo - 1, (child, pos) => {
+    // A break or other inline object the author inserted is recorded on the
+    // node, not a mark: it goes with the rest of their suggestion.
+    if (child.isInline && !child.isText) {
+      if (ownPendingInsert(child, authorID)) insertRanges.push({ from: pos, to: pos + child.nodeSize });
+      return;
+    }
     if (!child.isText) return;
     const from = pos;
     const to = pos + child.nodeSize;
 
     for (const mark of child.marks) {
-      const data = mark.attrs.dataTracked as { authorID?: string; status?: string } | null;
+      const data: { authorID?: string; status?: string } | null = mark.attrs.dataTracked;
       if (!data || data.authorID !== authorID || data.status !== CHANGE_STATUS.pending) continue;
 
       if (mark.type === insertType) {
@@ -116,6 +119,16 @@ export function clearAuthorPendingMarks(
   for (const { from, to } of insertRanges) {
     tr.delete(from, to);
   }
+}
+
+/** Whether an inline node's own record is `authorID`'s pending insertion. */
+function ownPendingInsert(node: PMNode, authorID: string): boolean {
+  const records: unknown = node.attrs["dataTracked"];
+  return Array.isArray(records) && records.some((record: unknown) =>
+    typeof record === "object" && record !== null &&
+    "authorID" in record && record.authorID === authorID &&
+    "status" in record && record.status === CHANGE_STATUS.pending &&
+    "operation" in record && record.operation === CHANGE_OPERATION.insert);
 }
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -164,7 +177,9 @@ export interface ApplyDiffResult {
 function applyBlockToTr(
   state: EditorState,
   tr: Transaction,
-  found: ReturnType<typeof findNodeById> & {},
+  /** The id the caller resolved `found` by, so it can be resolved again after edits. */
+  nodeId: string,
+  found: ReturnType<typeof findLiveNodeById> & {},
   proposedText: string,
   authorID: string,
 ): { applied: boolean; editDensity: number; sourceChars: number } {
@@ -176,21 +191,24 @@ function applyBlockToTr(
   // every old delete from a different author, all at the same positions).
   const nodeFrom = found.pos;
   const nodeTo   = found.pos + found.node.nodeSize;
+  const stepsBefore = tr.steps.length;
   clearAuthorPendingMarks(tr, nodeFrom, nodeTo, authorID, schema);
+  // Restating the original withdraws the author's earlier suggestion: a change.
+  const withdrew = tr.steps.length > stepsBefore;
 
   // Re-resolve the node after mutations (positions may have shifted).
-  const updatedFound = findNodeById(tr.doc, found.node.attrs["nodeId"] as string);
-  if (!updatedFound) return { applied: false, editDensity: 0, sourceChars: 0 };
+  const updatedFound = findLiveNodeById(tr.doc, nodeId);
+  if (!updatedFound) return { applied: withdrew, editDensity: 0, sourceChars: 0 };
 
   const { acceptedText, map } = buildAcceptedTextMap(updatedFound.node, updatedFound.pos, schema);
 
   if (acceptedText === proposedText) {
-    return { applied: false, editDensity: 0, sourceChars: acceptedText.length };
+    return { applied: withdrew, editDensity: 0, sourceChars: acceptedText.length };
   }
 
   const rawOps     = diffText(acceptedText, proposedText);
   const editDensity = computeEditDensity(rawOps);
-  const ops        = expandCharLevel(pairReplacements(rawOps));
+  const ops        = phraseReplacements(rawOps, (from, to) => bridgeable(tr.doc, map, from, to));
 
   const now = Date.now();
   let acceptedOffset = 0; // cursor into acceptedText
@@ -211,7 +229,7 @@ function applyBlockToTr(
     if (op.type === "delete") {
       const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset + tokenLen);
       if (range) {
-        const dataTracked = addTrackIdIfDoesntExist(createNewDeleteAttrs(baseAttrs)) as Record<string, unknown>;
+        const dataTracked: Record<string, unknown> = addTrackIdIfDoesntExist(createNewDeleteAttrs(baseAttrs));
         if (op.groupId) dataTracked["groupId"] = op.groupId;
         applyTrackedDelete(tr, range.from + insertedChars, range.to + insertedChars, dataTracked, schema);
         applied = true;
@@ -223,12 +241,13 @@ function applyBlockToTr(
       if (range) {
         const insertMarkType = schema.marks.trackedInsert;
         if (insertMarkType) {
-          const dataTracked = addTrackIdIfDoesntExist(createNewInsertAttrs(baseAttrs)) as Record<string, unknown>;
-          if (op.groupId) dataTracked["groupId"] = op.groupId;
-          const safeText = op.text.replace(/\n/g, " ");
-          tr.insert(range.from + insertedChars, schema.text(safeText, [insertMarkType.create({ dataTracked })]));
-          insertedChars += safeText.length;
-          applied = true;
+          const at = range.from + insertedChars;
+          const insertAttrs = { ...createNewInsertAttrs(baseAttrs), ...(op.groupId ? { groupId: op.groupId } : {}) };
+          // This lane reads a block's text without its breaks (`buildAcceptedTextMap`), so it writes none.
+          const content = suggestedContent([{ text: op.text.replace(/\n/g, " "), marks: [] }], schema, tr.doc.resolve(at).parent.type, insertAttrs);
+          tr.insert(at, content);
+          insertedChars += content.size;
+          applied = content.size > 0 || applied;
         }
       }
       // acceptedOffset does NOT advance for inserts (they add new chars)
@@ -253,11 +272,11 @@ export function applyDiffAsSuggestion(
   dispatch: (tr: Transaction) => void,
   { nodeId, proposedText, authorID }: ApplyDiffOptions,
 ): ApplyDiffResult {
-  const found = findNodeById(state.doc, nodeId);
+  const found = findLiveNodeById(state.doc, nodeId);
   if (!found) return { applied: false, editDensity: 0 };
 
   const tr = state.tr;
-  const { applied, editDensity } = applyBlockToTr(state, tr, found, proposedText, authorID);
+  const { applied, editDensity } = applyBlockToTr(state, tr, nodeId, found, proposedText, authorID);
 
   if (!applied) return { applied: false, editDensity };
 
@@ -290,8 +309,8 @@ export function applyMultiBlockDiff(
 ): ApplyDiffResult {
   // Resolve nodeIds → drop any blocks whose node is no longer in the doc.
   const resolved = blocks.flatMap(b => {
-    const found = findNodeById(state.doc, b.nodeId);
-    return found ? [{ found, proposedText: b.proposedText }] : [];
+    const found = findLiveNodeById(state.doc, b.nodeId);
+    return found ? [{ nodeId: b.nodeId, found, proposedText: b.proposedText }] : [];
   });
 
   if (resolved.length === 0) return { applied: false, editDensity: 0 };
@@ -303,8 +322,8 @@ export function applyMultiBlockDiff(
   const density = { weighted: 0, sourceChars: 0 };
   let anyApplied = false;
 
-  for (const { found, proposedText } of resolved) {
-    const result = applyBlockToTr(state, tr, found, proposedText, authorID);
+  for (const { nodeId, found, proposedText } of resolved) {
+    const result = applyBlockToTr(state, tr, nodeId, found, proposedText, authorID);
     if (result.applied) anyApplied = true;
     density.weighted    += result.editDensity * result.sourceChars;
     density.sourceChars += result.sourceChars;

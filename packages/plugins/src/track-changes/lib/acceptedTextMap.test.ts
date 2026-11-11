@@ -5,6 +5,8 @@ import {
   buildAcceptedTextMap,
   acceptedOffsetToDocPos,
   acceptedRangeToDocRange,
+  docRangeToAcceptedRange,
+  acceptedTextMapFor,
 } from "./acceptedTextMap";
 
 // ── Minimal ProseMirror schema for testing ────────────────────────────────────
@@ -189,5 +191,128 @@ describe("acceptedRangeToDocRange", () => {
     // accepted range 2..4 = "ef" → docPos 5..7
     const range = acceptedRangeToDocRange(map, 2, 4);
     expect(range).toEqual({ from: 5, to: 7 });
+  });
+});
+
+// ── docRangeToAcceptedRange ───────────────────────────────────────────────────
+
+describe("docRangeToAcceptedRange", () => {
+  it("is the inverse of acceptedRangeToDocRange", () => {
+    const para = buildParagraph([{ text: "hello world" }]);
+    const { map } = buildAcceptedTextMap(para, 0, schema);
+    const doc = acceptedRangeToDocRange(map, 2, 7);
+
+    expect(docRangeToAcceptedRange(map, doc!.from, doc!.to)).toEqual({ from: 2, to: 7 });
+  });
+
+  it("skips text pending deletion, which accepted text does not contain", () => {
+    // "ab[DEL:cd]ef" — accepted is "abef", so a selection over the whole
+    // paragraph is four accepted characters, not six. This is the conversion a
+    // host cannot do with arithmetic.
+    const para = buildParagraph([
+      { text: "ab" },
+      { text: "cd", marks: [deleteMark()] },
+      { text: "ef" },
+    ]);
+    const { acceptedText, map } = buildAcceptedTextMap(para, 0, schema);
+
+    expect(acceptedText).toBe("abef");
+    // doc 1..7 is the paragraph's whole content, "abcdef".
+    expect(docRangeToAcceptedRange(map, 1, 7)).toEqual({ from: 0, to: 4 });
+  });
+
+  it("rounds a selection edge inside deleted text outward to the accepted char", () => {
+    const para = buildParagraph([
+      { text: "ab" },
+      { text: "cd", marks: [deleteMark()] },
+      { text: "ef" },
+    ]);
+    const { map } = buildAcceptedTextMap(para, 0, schema);
+
+    // doc 4 sits inside "cd", which has no accepted offset of its own.
+    expect(docRangeToAcceptedRange(map, 4, 7)).toEqual({ from: 2, to: 4 });
+  });
+
+  it("is a collapsed accepted range for a collapsed doc range", () => {
+    const para = buildParagraph([{ text: "abc" }]);
+    const { map } = buildAcceptedTextMap(para, 0, schema);
+
+    expect(docRangeToAcceptedRange(map, 2, 2)).toEqual({ from: 1, to: 1 });
+  });
+
+  it("is null when the range reaches no accepted character", () => {
+    // Every character is pending deletion, so there is no accepted text for a
+    // selection over it to name.
+    const para = buildParagraph([{ text: "abc", marks: [deleteMark()] }]);
+    const { map } = buildAcceptedTextMap(para, 0, schema);
+
+    expect(docRangeToAcceptedRange(map, 1, 4)).toBeNull();
+  });
+
+  it("is null for an inverted range", () => {
+    const para = buildParagraph([{ text: "abc" }]);
+    const { map } = buildAcceptedTextMap(para, 0, schema);
+
+    expect(docRangeToAcceptedRange(map, 3, 1)).toBeNull();
+  });
+
+  it("clamps a range that overruns the block to what the block holds", () => {
+    const para = buildParagraph([{ text: "abc" }]);
+    const { map } = buildAcceptedTextMap(para, 0, schema);
+
+    expect(docRangeToAcceptedRange(map, 0, 999)).toEqual({ from: 0, to: 3 });
+  });
+});
+
+// ── acceptedTextMapFor (memoised) ────────────────────────────────────────────
+
+describe("acceptedTextMapFor", () => {
+  it("answers exactly what the uncached build answers", () => {
+    const para = buildParagraph([
+      { text: "ab" },
+      { text: "cd", marks: [deleteMark()] },
+      { text: "ef", marks: [insertMark()] },
+    ]);
+
+    expect(acceptedTextMapFor(para, 0, schema)).toEqual(buildAcceptedTextMap(para, 0, schema));
+  });
+
+  it("reuses the result for the same block at the same place", () => {
+    // The overlay asks once per suggested block per page per paint frame, and
+    // the build walks every inline child to do it.
+    const para = buildParagraph([{ text: "hello world" }]);
+
+    expect(acceptedTextMapFor(para, 0, schema)).toBe(acceptedTextMapFor(para, 0, schema));
+  });
+
+  it("rebuilds when the block's content changes", () => {
+    // A node is immutable, so an edit produces a different node — which is the
+    // invalidation signal, with nothing to keep in step.
+    const before = buildParagraph([{ text: "hello" }]);
+    const after = buildParagraph([{ text: "hello!" }]);
+
+    expect(acceptedTextMapFor(after, 0, schema).acceptedText).toBe("hello!");
+    expect(acceptedTextMapFor(before, 0, schema).acceptedText).toBe("hello");
+  });
+
+  it("rebuilds when the same block moves", () => {
+    // The map holds absolute document positions, so an unchanged block that
+    // text was inserted in front of needs a fresh one.
+    const para = buildParagraph([{ text: "hi" }]);
+
+    const atZero = acceptedTextMapFor(para, 0, schema);
+    const atTen = acceptedTextMapFor(para, 10, schema);
+
+    expect(atZero.map[0]!.docPos).toBe(1);
+    expect(atTen.map[0]!.docPos).toBe(11);
+    expect(atTen).not.toBe(atZero);
+  });
+
+  it("does not hand a moved block a stale map on the way back", () => {
+    const para = buildParagraph([{ text: "hi" }]);
+    acceptedTextMapFor(para, 0, schema);
+    acceptedTextMapFor(para, 10, schema);
+
+    expect(acceptedTextMapFor(para, 0, schema).map[0]!.docPos).toBe(1);
   });
 });

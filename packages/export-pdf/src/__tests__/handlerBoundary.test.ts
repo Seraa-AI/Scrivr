@@ -49,7 +49,7 @@ describe("PDF contribution registry boundary", () => {
     const layout = marked(["inherited", "__proto__"]);
     const customBlock = block("paragraph", []);
     // buildPdf accepts layout directly, including externally provided node names.
-    customBlock.node = { type: { name: "__proto__" } } as typeof customBlock.node;
+    customBlock.node = { type: { name: "__proto__", spec: {} } } as typeof customBlock.node;
     layout.pages[0]!.blocks.push(customBlock);
     layout.chromePayloads = {};
     await buildPdf(layout, editor);

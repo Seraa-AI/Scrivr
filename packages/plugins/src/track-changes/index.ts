@@ -3,9 +3,16 @@ export { applyDiffAsSuggestion, applyMultiBlockDiff } from "./lib/applyDiffAsSug
 export type { ApplyDiffOptions, MultiBlockDiffOptions, ApplyDiffResult } from "./lib/applyDiffAsSuggestion";
 export { buildParagraphContexts } from "./lib/buildParagraphContexts";
 export type { ParagraphContext } from "./lib/buildParagraphContexts";
-export { diffText, pairReplacements } from "./lib/diffText";
+export { diffText, pairReplacements, phraseReplacements } from "./lib/diffText";
 export type { DiffOp, PairedDiffOp } from "./lib/diffText";
-export { buildAcceptedTextMap, acceptedOffsetToDocPos, acceptedRangeToDocRange } from "./lib/acceptedTextMap";
+export {
+  buildAcceptedTextMap,
+  bridgeable,
+  acceptedOffsetToDocPos,
+  acceptedRangeToDocRange,
+  docRangeToAcceptedRange,
+  acceptedTextMapFor,
+} from "./lib/acceptedTextMap";
 export type { PosMapEntry, AcceptedTextMapResult } from "./lib/acceptedTextMap";
 export { splitRangeForNewMark, applyTrackedDelete, applyTrackedInsert } from "./lib/splitRangeForNewMark";
 // Tracked-attrs builders — consumed by @scrivr/ai's suggestion apply path.
@@ -14,11 +21,17 @@ export {
   createNewDeleteAttrs,
   createNewInsertAttrs,
   createNewPendingAttrs,
+  proposedForDeletion,
 } from "./helpers";
-export { createChangePopover } from "./createChangePopover";
+export { changePreviewText, createChangePopover } from "./createChangePopover";
+export { changedAttrKeys, describeAttrChanges } from "./attrChanges";
 export type { ChangePopoverInfo, ChangePopoverCallbacks } from "./createChangePopover";
+export { isTrackedMark } from "./helpers";
 export { trackChangesPluginKey } from "./engine/trackChangesPlugin";
 export { findChanges } from "./findChanges";
+export { findLiveNodeById, isShadowNode, moveShadowRanges, shadowRanges } from "./liveNode";
+export { originalDocument } from "./originalView";
+export type { ShadowRange } from "./liveNode";
 export { applyChanges } from "./applyChanges";
 export { ChangeSet } from "./ChangeSet";
 export {
@@ -26,12 +39,15 @@ export {
   getAction,
   hasAction,
   skipTracking,
+  trackAsSuggestion,
   TrackChangesAction,
 } from "./actions";
 export type { TrackChangesActionParams } from "./actions";
 export { TrackChangesStatus, CHANGE_STATUS, CHANGE_OPERATION } from "./types";
+export type { TrackChangesState } from "./engine/trackChangesPlugin";
 export type {
   TrackChangesOptions,
+  TrackChangesRenderMode,
   TrackedAttrs,
   TrackedChange,
   TextChange,
@@ -42,10 +58,28 @@ export type {
   ReferenceChange,
   ChangeStep,
   IncompleteChange,
+  TrackingResult,
+  TrackingRefusal,
+  ListLevel,
 } from "./types";
 
 // Rich (leaf-based) semantic edits → tracked suggestions. The write-side merge
 // primitive @scrivr/ai's applyRichEdit drives.
-export { applyRichDiffAsSuggestion } from "./lib/applyRichDiffAsSuggestion";
+export { applyRichDiffAsSuggestion, pickAgentAttrs } from "./lib/applyRichDiffAsSuggestion";
 export type { RichBlockEdit, RichDiffOptions, RichDiffResult } from "./lib/applyRichDiffAsSuggestion";
 export { clearAuthorPendingMarks } from "./lib/applyDiffAsSuggestion";
+
+export { planChangeReview, changeActs } from "./reviewPlan";
+export { planReview, planReviewIn, reviewChanges } from "./reviewChanges";
+export type {
+  ChangeAct,
+  ReviewPlan,
+  ReviewOutcome,
+  ReviewRefusal,
+  ReviewUnavailable,
+  ReviewPlanResult,
+  ReviewDependency,
+  ReviewDecision,
+  ReviewDecisions,
+} from "./reviewPlan";
+

@@ -1,15 +1,16 @@
 import { describe, it, expect } from "vitest";
+import type { Node, Schema } from "prosemirror-model";
 import {
   runPipeline,
   buildBlockFlow,
   paginateFlow,
-  collectLayoutItems,
   defaultPageConfig,
   defaultPagelessConfig,
   collapseMargins,
   clampPlacementsToPages,
 } from "./PageLayout";
 import type { MeasureCacheEntry, LayoutFragment } from "./PageLayout";
+import { collectLayoutItems } from "./layoutItems";
 import type { AnchoredObjectPlacement } from "./AnchoredObjects";
 import { ANCHORED_OBJECT_MARGIN } from "./AnchoredObjects";
 import { computePageMetrics, createPageGeometry, EMPTY_RESOLVED_CHROME, type PageMetrics } from "./PageMetrics";
@@ -29,6 +30,9 @@ const DEFAULT_PARAGRAPH_LINE_HEIGHT = createMeasurer().getFontMetrics(
   applyPageFont(defaultFontConfig, "Arial, sans-serif").paragraph!.font,
 ).lineHeight;
 
+
+/** StarterKit's block styles and font modifiers: what styles a heading. */
+const starter = buildStarterKitContext();
 
 function h1(text: string) {
   return heading(1, text);
@@ -101,6 +105,7 @@ describe("runPipeline — multiple blocks", () => {
     const layout = runPipeline(doc(h1("Title"), p("Body")), {
       pageConfig: defaultPageConfig,
       measurer: createMeasurer(),
+      fontConfig: starter.fontConfig,
     });
     const [heading, para] = layout.pages[0]!.blocks;
     const gap = para!.y - (heading!.y + heading!.height);
@@ -1027,10 +1032,10 @@ describe("runPipeline — gap suppression at page boundary", () => {
     // heading_1's font to paragraph's so both blocks share the same line
     // height — the only varying signal is spaceBefore.
     const fontConfig: typeof defaultFontConfig = {
-      ...defaultFontConfig,
+      ...starter.fontConfig,
       heading_1: {
-        ...defaultFontConfig.heading_1!,
-        font: defaultFontConfig.paragraph!.font,
+        ...starter.fontConfig.heading_1!,
+        font: starter.fontConfig.paragraph!.font,
       },
     };
     const oneLineIntro = "aaaaaaaaa";
@@ -1074,9 +1079,9 @@ describe("runPipeline — gap suppression at page boundary", () => {
 
   it("drops a large collapsed margin when a natural page break starts a fresh page", () => {
     const fontConfig = {
-      ...defaultFontConfig,
+      ...starter.fontConfig,
       heading_1: {
-        ...defaultFontConfig.heading_1!,
+        ...starter.fontConfig.heading_1!,
         spaceBefore: 50,
       },
     };
@@ -1136,6 +1141,13 @@ describe("runPipeline — pageConfig.fontFamily", () => {
 });
 
 // ── Float layout (wrapping mode) ───────────────────────────────────────────────
+
+/** An image node from the StarterKit schema. */
+function imageNode(schema: Schema, attrs: Record<string, unknown>): Node {
+  const type = schema.nodes["image"];
+  if (!type) throw new Error("no image node");
+  return type.create(attrs);
+}
 
 describe("runPipeline — float image wrapping", () => {
   // Long text to force several wrapped lines in the constrained content width.
@@ -1599,13 +1611,13 @@ describe("runPipeline — float image wrapping", () => {
     expect(cachedTail.y).toBe(freshTail.y);
   });
 
-  it("float stacking: two same-side floats do not overlap each other", () => {
+  it("float stacking: with no room beside it, a second same-side float goes below the first", () => {
     // Fix 1: downward scan. A second square-left float anchored near the first
     // must be pushed below it, not placed at the same Y.
     const { schema, fontConfig } = buildStarterKitContext();
     const measurer = createMeasurer();
-    const img1 = schema.nodes["image"]!.create({ src: "", width: 150, height: 100, wrappingMode: "square-left" });
-    const img2 = schema.nodes["image"]!.create({ src: "", width: 150, height: 100, wrappingMode: "square-left" });
+    const img1 = imageNode(schema, { src: "", width: 400, height: 100, wrappingMode: "square-left" });
+    const img2 = imageNode(schema, { src: "", width: 400, height: 100, wrappingMode: "square-left" });
     // Both anchors are in adjacent paragraphs — without the fix they'd both
     // land at approximately the same Y and visually overlap.
     const para1 = schema.node("paragraph", null, [img1, schema.text("first float text here")]);
@@ -1619,6 +1631,30 @@ describe("runPipeline — float image wrapping", () => {
     const [f1, f2] = floats as [typeof floats[0], typeof floats[0]];
     // The second float must start at or below the bottom of the first.
     expect(f2!.y).toBeGreaterThanOrEqual(f1!.y + f1!.height - 0.001);
+  });
+
+  it("float stacking: with room beside it, a second same-side float sits beside the first, as Word does", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const img1 = imageNode(schema, { src: "", width: 150, height: 100, wrapMode: "square", xAlign: "left" });
+    const img2 = imageNode(schema, { src: "", width: 150, height: 100, wrapMode: "square", xAlign: "left" });
+    const para = schema.node("paragraph", null, [img1, img2, schema.text("text beside both images")]);
+    const layout = runPipeline(schema.node("doc", null, [para]), { pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer() });
+    const [f1, f2] = layout.anchoredObjects ?? [];
+    if (!f1 || !f2) throw new Error("expected two floats");
+    expect(f2.globalY).toBe(f1.globalY);
+    expect(f2.x).toBe(f1.x + f1.width);
+  });
+
+  it("float stacking: a right-aligned float moves left of the one it would cover", () => {
+    const { schema, fontConfig } = buildStarterKitContext();
+    const img1 = imageNode(schema, { src: "", width: 150, height: 100, wrapMode: "square", xAlign: "right" });
+    const img2 = imageNode(schema, { src: "", width: 150, height: 100, wrapMode: "square", xAlign: "right" });
+    const para = schema.node("paragraph", null, [img1, img2, schema.text("text beside both images")]);
+    const layout = runPipeline(schema.node("doc", null, [para]), { pageConfig: defaultPageConfig, fontConfig, measurer: createMeasurer() });
+    const [f1, f2] = layout.anchoredObjects ?? [];
+    if (!f1 || !f2) throw new Error("expected two floats");
+    expect(f2.globalY).toBe(f1.globalY);
+    expect(f2.x + f2.width).toBe(f1.x);
   });
 
   it("float Y reconciliation: float y tracks anchor block after Pass 3 yDelta shift", () => {
@@ -1683,9 +1719,10 @@ describe("runPipeline — float image wrapping", () => {
       pageHeight: 300,
       margins: { top: 20, right: 20, bottom: 20, left: 20 },
     };
-    // pageBottom = 300 - 20 = 280. Two floats each 160px tall stacked = 20 + 160 + 160 = 340 > 280.
-    const img1 = schema.nodes["image"]!.create({ src: "", width: 100, height: 160, wrappingMode: "square-left" });
-    const img2 = schema.nodes["image"]!.create({ src: "", width: 100, height: 160, wrappingMode: "square-left" });
+    // pageBottom = 300 - 20 = 280. Two floats each 160px tall stacked = 20 + 160 + 160 = 340 > 280,
+    // and too wide to sit side by side in the 260px column.
+    const img1 = imageNode(schema, { src: "", width: 160, height: 160, wrappingMode: "square-left" });
+    const img2 = imageNode(schema, { src: "", width: 160, height: 160, wrappingMode: "square-left" });
     const para1 = schema.node("paragraph", null, [img1, schema.text("first paragraph text")]);
     const para2 = schema.node("paragraph", null, [img2, schema.text("second paragraph text")]);
     const layout = runPipeline(
@@ -1719,8 +1756,8 @@ describe("runPipeline — float image wrapping", () => {
       pageHeight: 300,
       margins: { top: 20, right: 20, bottom: 20, left: 20 },
     };
-    const img1 = schema.nodes["image"]!.create({ src: "", width: 100, height: 160, wrappingMode: "square-left" });
-    const img2 = schema.nodes["image"]!.create({ src: "", width: 100, height: 160, wrappingMode: "square-left" });
+    const img1 = imageNode(schema, { src: "", width: 160, height: 160, wrappingMode: "square-left" });
+    const img2 = imageNode(schema, { src: "", width: 160, height: 160, wrappingMode: "square-left" });
     const para1 = schema.node("paragraph", null, [img1, schema.text("first para")]);
     const para2 = schema.node("paragraph", null, [img2, schema.text("second para")]);
     const layout = runPipeline(
@@ -2054,12 +2091,8 @@ describe("runPipeline — yOffset (Phase 1)", () => {
     // anchor-bottom against anchor-bottom. With image1.yOffset=100, image2
     // should stack against image1's painted bottom (anchor + 100 + height),
     // not its anchor bottom.
-    const img1 = schema.nodes["image"]!.create({
-      src: "", width: 100, height: 80, wrapMode: "square", yOffset: 100,
-    });
-    const img2 = schema.nodes["image"]!.create({
-      src: "", width: 100, height: 80, wrapMode: "square",
-    });
+    const img1 = imageNode(schema, { src: "", width: 400, height: 80, wrapMode: "square", yOffset: 100 });
+    const img2 = imageNode(schema, { src: "", width: 400, height: 80, wrapMode: "square" });
     const para1 = schema.node("paragraph", null, [img1, schema.text("first")]);
     const para2 = schema.node("paragraph", null, [img2, schema.text("second")]);
     const layout = runPipeline(
@@ -2583,7 +2616,7 @@ describe("buildBlockFlow — Stage 1", () => {
   it("returns one FlowBlock per top-level node", () => {
     const testDoc = doc(p("Hello"), p("World"));
     const measurer = createMeasurer();
-    const items = collectLayoutItems(testDoc, defaultFontConfig);
+    const items = collectLayoutItems(testDoc);
     const cfg = { margins: defaultPageConfig.margins, contentWidth: 650 };
     const { flows, reachedCutoff } = buildBlockFlow(items, 0, cfg, { measurer, fontConfig: defaultFontConfig });
     expect(flows).toHaveLength(2);
@@ -2593,7 +2626,7 @@ describe("buildBlockFlow — Stage 1", () => {
   it("every FlowBlock has height > 0 for non-empty paragraphs", () => {
     const testDoc = doc(p("Line one"), p("Line two"));
     const measurer = createMeasurer();
-    const items = collectLayoutItems(testDoc, defaultFontConfig);
+    const items = collectLayoutItems(testDoc);
     const cfg = { margins: defaultPageConfig.margins, contentWidth: 650 };
     const { flows } = buildBlockFlow(items, 0, cfg, { measurer, fontConfig: defaultFontConfig });
     for (const flow of flows) {
@@ -2604,7 +2637,7 @@ describe("buildBlockFlow — Stage 1", () => {
   it("respects maxBlocks and returns reachedCutoff: true", () => {
     const testDoc = doc(p("A"), p("B"), p("C"), p("D"), p("E"));
     const measurer = createMeasurer();
-    const items = collectLayoutItems(testDoc, defaultFontConfig);
+    const items = collectLayoutItems(testDoc);
     const cfg = { margins: defaultPageConfig.margins, contentWidth: 650 };
     const { flows, reachedCutoff, cutoffIndex } = buildBlockFlow(items, 0, cfg, { measurer, fontConfig: defaultFontConfig }, 3);
     expect(flows).toHaveLength(3);
@@ -2615,20 +2648,20 @@ describe("buildBlockFlow — Stage 1", () => {
   it("startIndex skips already-processed items", () => {
     const testDoc = doc(p("A"), p("B"), p("C"));
     const measurer = createMeasurer();
-    const items = collectLayoutItems(testDoc, defaultFontConfig);
+    const items = collectLayoutItems(testDoc);
     const cfg = { margins: defaultPageConfig.margins, contentWidth: 650 };
     const { flows } = buildBlockFlow(items, 2, cfg, { measurer, fontConfig: defaultFontConfig });
     expect(flows).toHaveLength(1);
   });
 
-  it("pageBreak item produces a zero-height isPageBreak FlowBlock", () => {
+  it("pageBreak item produces a zero-height FlowBlock that starts the next page", () => {
     const testDoc = doc(p("Before"), pageBreak(), p("After"));
     const measurer = createMeasurer();
-    const items = collectLayoutItems(testDoc, defaultFontConfig);
+    const items = collectLayoutItems(testDoc);
     const cfg = { margins: defaultPageConfig.margins, contentWidth: 650 };
     const { flows } = buildBlockFlow(items, 0, cfg, { measurer, fontConfig: defaultFontConfig });
     expect(flows).toHaveLength(3);
-    expect(flows[1]!.isPageBreak).toBe(true);
+    expect(flows[1]!.pageStart).toBe("nextPage");
     expect(flows[1]!.height).toBe(0);
   });
 });
@@ -2645,7 +2678,7 @@ describe("paginateFlow — Stage 2", () => {
     const measurer = createMeasurer();
     const { margins } = defaultPageConfig;
     const contentWidth  = defaultPageConfig.pageWidth  - margins.left - margins.right;
-    const items = collectLayoutItems(testDoc, defaultFontConfig);
+    const items = collectLayoutItems(testDoc);
     const cfg = { margins, contentWidth };
     const { flows } = buildBlockFlow(items, 0, cfg, { measurer, fontConfig: defaultFontConfig });
     const initPage = { pageNumber: 1, blocks: [] };
@@ -2664,7 +2697,7 @@ describe("paginateFlow — Stage 2", () => {
     const measurer = createMeasurer();
     const { margins } = defaultPageConfig;
     const contentWidth  = defaultPageConfig.pageWidth  - margins.left - margins.right;
-    const items = collectLayoutItems(testDoc, defaultFontConfig);
+    const items = collectLayoutItems(testDoc);
     const cfg = { margins, contentWidth };
     const { flows } = buildBlockFlow(items, 0, cfg, { measurer, fontConfig: defaultFontConfig });
     const initPage = { pageNumber: 1, blocks: [] };
@@ -2683,7 +2716,7 @@ describe("paginateFlow — Stage 2", () => {
     const measurer = createMeasurer();
     const { margins } = defaultPageConfig;
     const contentWidth  = defaultPageConfig.pageWidth  - margins.left - margins.right;
-    const items = collectLayoutItems(testDoc, defaultFontConfig);
+    const items = collectLayoutItems(testDoc);
     const { flows } = buildBlockFlow(items, 0, { margins, contentWidth }, { measurer, fontConfig: defaultFontConfig });
     const geometry = makeGeometry();
     const pr = paginateFlow(
@@ -2711,7 +2744,7 @@ describe("paginateFlow — Stage 2", () => {
     const measurer = createMeasurer();
     const { margins } = defaultPageConfig;
     const contentWidth = defaultPageConfig.pageWidth - margins.left - margins.right;
-    const items = collectLayoutItems(testDoc, defaultFontConfig);
+    const items = collectLayoutItems(testDoc);
     const { flows } = buildBlockFlow(items, 0, { margins, contentWidth }, { measurer, fontConfig: defaultFontConfig });
     const geometry = makeGeometry();
     const pr = paginateFlow(
@@ -2986,3 +3019,126 @@ describe("clampPlacementsToPages — phantom-page guard", () => {
     expect(result).toBe(placements);
   });
 });
+
+describe("streamed pagination snapshots", () => {
+  it("can replay a cursor without mutating the earlier result", () => {
+    const d = doc(...Array.from({ length: 100 }, (_, i) => p(`Block ${i}`)));
+    const options = { pageConfig: defaultPageConfig, measurer: createMeasurer(), maxBlocks: 40 };
+    const first = runPipeline(d, options);
+    const snapshot = JSON.stringify(first);
+    const second = runPipeline(d, { ...options, resumption: first.resumption! });
+    const replay = runPipeline(d, { ...options, resumption: first.resumption! });
+
+    expect(JSON.stringify(first)).toBe(snapshot);
+    expect(second.pages).toEqual(replay.pages);
+    expect(second.pages.flatMap((page) => page.blocks)).toHaveLength(80);
+    // Unchanged completed pages can be shared; only the growing buffers need copies.
+    expect(second.pages[0]).toBe(first.pages[0]);
+  });
+
+  it("preserves the cursor after pagination throws so the chunk can be retried", () => {
+    const d = doc(...Array.from({ length: 100 }, (_, i) => p(`Block ${i}`)));
+    const options = { pageConfig: defaultPageConfig, measurer: createMeasurer(), maxBlocks: 40 };
+    const first = runPipeline(d, options);
+    const snapshot = JSON.stringify(first);
+    expect(() => runPipeline(d, {
+      ...options,
+      resumption: first.resumption!,
+      pageChromeContributions: [{
+        name: "failing",
+        measure: () => ({
+          topForPage: (page) => {
+            if (page > first.pages.length) throw new Error("measurement failed");
+            return 0;
+          },
+          bottomForPage: () => 0,
+          stable: true,
+        }),
+        render: () => {},
+      }],
+    })).toThrow("measurement failed");
+    expect(JSON.stringify(first)).toBe(snapshot);
+    const retry = runPipeline(d, { ...options, resumption: first.resumption! });
+    expect(retry.pages.flatMap((page) => page.blocks)).toHaveLength(80);
+  });
+
+  it.each([1, 7, 40])("matches a full layout when resumed in %i-block chunks", (maxBlocks) => {
+    const d = doc(...Array.from({ length: 100 }, (_, i) =>
+      i === 49 ? pageBreak() : p(`Paragraph ${i}`),
+    ));
+    const options = { pageConfig: defaultPageConfig, measurer: createMeasurer(), maxBlocks };
+    let layout = runPipeline(d, options);
+    for (let chunk = 0; layout.isPartial && chunk < 100; chunk++) {
+      layout = runPipeline(d, { ...options, resumption: layout.resumption!, previousLayout: layout });
+    }
+    const fresh = runPipeline(d, { pageConfig: options.pageConfig, measurer: options.measurer });
+    expect(layout.isPartial).toBeUndefined();
+    expect(layout.pages).toEqual(fresh.pages);
+    expect(layout.metrics).toEqual(fresh.metrics);
+  });
+
+  it("replays the consumed prefix when geometry changes, preserving the chunk budget", () => {
+    const d = doc(p("first"), pageBreak(), ...Array.from({ length: 99 }, (_, i) => p(`Block ${i}`)));
+    const options = { pageConfig: defaultPageConfig, measurer: createMeasurer(), maxBlocks: 40 };
+    const first = runPipeline(d, options);
+    const changed = {
+      ...options,
+      pageChromeContributions: [{
+        name: "header",
+        measure: () => ({ topForPage: () => 100, bottomForPage: () => 0, stable: true }),
+        render: () => {},
+      }],
+    };
+    const second = runPipeline(d, { ...changed, resumption: first.resumption!, previousLayout: first });
+    const fresh = runPipeline(d, { ...changed, maxBlocks: 80 });
+    expect(second.resumption?.nextItemIndex).toBe(81); // page break is not a block
+    expect(second.pages).toEqual(fresh.pages);
+    expect(second.metrics).toEqual(fresh.metrics);
+  });
+});
+
+/**
+ * A layout's `version` is the one key paint and hit-testing share: tiles skip
+ * repainting when it is unchanged, and the charmap stamps itself with it. A
+ * resumed chunk only appends, so pages already painted still match their stamp.
+ * A replay re-paginates those pages, and must say so.
+ */
+describe("the version a streamed chunk publishes", () => {
+  const streamed = () => {
+    const d = doc(p("first"), pageBreak(), ...Array.from({ length: 99 }, (_, i) => p(`Block ${i}`)));
+    const options = { pageConfig: defaultPageConfig, measurer: createMeasurer(), maxBlocks: 40 };
+    return { d, options, first: runPipeline(d, options) };
+  };
+
+  const tallHeader = (top: number) => [{
+    name: "header",
+    measure: () => ({ topForPage: () => top, bottomForPage: () => 0, stable: true }),
+    render: () => {},
+  }];
+
+  it("keeps it while the chunk only appends", () => {
+    const { d, options, first } = streamed();
+
+    const next = runPipeline(d, { ...options, resumption: first.resumption!, previousLayout: first });
+
+    expect(next.version).toBe(first.version);
+  });
+
+  it("advances it when the prefix was re-paginated", () => {
+    // Pages 1..n were painted under the old geometry and are about to move.
+    // Republishing the same version leaves those tiles unrepainted while the
+    // charmap follows the new layout — caret and clicks land on stale pixels.
+    const { d, options, first } = streamed();
+
+    const replayed = runPipeline(d, {
+      ...options,
+      resumption: first.resumption!,
+      previousLayout: first,
+      pageChromeContributions: tallHeader(100),
+    });
+
+    expect(replayed.pages[0]!.blocks[0]!.y).not.toBe(first.pages[0]!.blocks[0]!.y);
+    expect(replayed.version).toBeGreaterThan(first.version);
+  });
+});
+

@@ -299,8 +299,9 @@ import { Typography } from '@scrivr/core';
 
 ### `TrailingNode`
 
-Ensures the document always ends with an empty paragraph, preventing cursor trapping at the last
-block node.
+Keeps a paragraph after a last block that isn't one (a heading, list or table), so there is always
+somewhere to click and type below it. The paragraph is taken away again if it is still empty once the
+document ends in a paragraph.
 
 ```ts
 import { TrailingNode } from '@scrivr/core';

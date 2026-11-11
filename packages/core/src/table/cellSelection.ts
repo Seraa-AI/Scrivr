@@ -1,7 +1,7 @@
 import { Selection, SelectionRange, TextSelection } from "prosemirror-state";
-import type { EditorState } from "prosemirror-state";
+import type { EditorState, Transaction } from "prosemirror-state";
 import { Fragment, Slice } from "prosemirror-model";
-import type { Node, ResolvedPos } from "prosemirror-model";
+import type { DOMSerializer, Node, ResolvedPos } from "prosemirror-model";
 import type { Mappable } from "prosemirror-transform";
 import { getTableMap, type Rect, type TableMap } from "./TableMap";
 import { cellGridSpan } from "./attrs";
@@ -47,7 +47,7 @@ interface CellInfo {
   tableStart: number;
 }
 
-function isCellType(name: string): boolean {
+export function isCellType(name: string): boolean {
   return name === "tableCell" || name === "tableHeader";
 }
 
@@ -193,6 +193,32 @@ export class CellSelection extends Selection {
   /** Normalized grid rect covering every cell in the selection. */
   readonly rect: Rect;
 
+  /**
+   * This selection as clipboard HTML: a standalone table of its cells. Their
+   * merge role is an attr until the Table's copy transform states it as
+   * `rowspan`, as for any copied table.
+   */
+  clipboardHtml(serializer: DOMSerializer): string {
+    const tableNode = this.content().content.firstChild;
+    if (!tableNode) return "";
+    const container = document.createElement("div");
+    container.appendChild(serializer.serializeNode(tableNode));
+    return container.innerHTML;
+  }
+
+  /** This selection as plain text: tab-separated columns, newline-separated rows (the spreadsheet convention). */
+  clipboardText(): string {
+    const table = this.content().content.firstChild;
+    if (!table) return "";
+    const rows: string[] = [];
+    table.forEach((row) => {
+      const cells: string[] = [];
+      row.forEach((cell) => cells.push(cell.textContent));
+      rows.push(cells.join("\t"));
+    });
+    return rows.join("\n");
+  }
+
   constructor($anchorCell: ResolvedPos, $headCell: ResolvedPos = $anchorCell) {
     if (
       !pointsAtCell($anchorCell) ||
@@ -278,6 +304,19 @@ export class CellSelection extends Selection {
     return new Slice(Fragment.from(sub), 0, 0);
   }
 
+  /**
+   * Deleting or typing over the cells: each is emptied to a paragraph and the
+   * grid stays, as Word clears a cell selection; what was typed goes into the
+   * top-left cell. Cut, Delete and `deleteSelection` all come here.
+   */
+  override replace(tr: Transaction, content: Slice = Slice.empty): void {
+    clearCells(tr, this.ranges.map((range) => range.$from.pos - 1), content);
+  }
+
+  override replaceWith(tr: Transaction, node: Node): void {
+    this.replace(tr, new Slice(Fragment.from(node), 0, 0));
+  }
+
   override eq(other: Selection): boolean {
     return (
       other instanceof CellSelection &&
@@ -352,10 +391,27 @@ export class CellBookmark {
  */
 export const CELL_SELECTION_JSON_ID = "scrivr:cell";
 
-// Register exactly once. A duplicate Scrivr runtime must fail fast: allowing a
-// second CellSelection class to share this id would make deserialized selections
-// fail that runtime's instanceof checks.
-Selection.jsonID(CELL_SELECTION_JSON_ID, CellSelection);
+/**
+ * Registers `selectionClass` under `id` with prosemirror-state, once. A second
+ * registration is a duplicate Scrivr runtime and fails fast: a second class
+ * sharing the id would make deserialized selections fail that runtime's
+ * `instanceof` checks. While a dev server reloads the module (`reloading`),
+ * prosemirror-state keeps the first registration and the module goes on.
+ */
+export function registerSelectionJsonId(
+  id: string,
+  selectionClass: Parameters<typeof Selection.jsonID>[1],
+  reloading: boolean,
+): void {
+  try {
+    Selection.jsonID(id, selectionClass);
+  } catch (error) {
+    if (!reloading || !(error instanceof RangeError)) throw error;
+  }
+}
+
+// A dev server that reloads modules in place sets `import.meta.hot`.
+registerSelectionJsonId(CELL_SELECTION_JSON_ID, CellSelection, Reflect.get(import.meta, "hot") !== undefined);
 
 /**
  * The active cell selection resolved to its cell positions, or null when the
@@ -391,4 +447,36 @@ export function enclosingCell(state: EditorState): EnclosingCell | null {
     }
   }
   return { tablePos: info.tablePos, cellPos: info.cellPos, cellDepth };
+}
+
+/**
+ * Empty each cell at `cellPositions` (in `tr.doc`) to the one block its
+ * content starts with by default (a paragraph), keeping the grid, then write
+ * `content` into the top-left cell and leave the caret there. A cell already
+ * that one empty block is left alone; when nothing was left to clear or
+ * write, neither the document nor the selection changes. Cells are cleared
+ * from the highest position down, so each edit leaves the lower positions
+ * valid.
+ */
+function clearCells(tr: Transaction, cellPositions: readonly number[], content: Slice): void {
+  const steps = tr.steps.length;
+  for (const cellPos of [...cellPositions].sort((a, b) => b - a)) {
+    const cell = tr.doc.nodeAt(cellPos);
+    const block = cell?.type.contentMatch.defaultType?.createAndFill();
+    if (!cell || !block || isOnly(cell, block)) continue;
+    tr.replaceWith(cellPos + 1, cellPos + cell.nodeSize - 1, block);
+  }
+  // The top-left cell has the smallest position and nothing before it was
+  // edited, so the start of its now-single block is stable.
+  const start = Math.min(...cellPositions) + 2;
+  const written = tr.steps.length;
+  if (content.size > 0) tr.replaceRange(start, start, content);
+  if (tr.steps.length === steps) return;
+  const end = tr.mapping.slice(written).map(start, 1);
+  tr.setSelection(Selection.near(tr.doc.resolve(Math.min(end, tr.doc.content.size)), -1));
+}
+
+/** Whether `cell` holds exactly `block`, as an empty cell holds its one empty paragraph. */
+function isOnly(cell: Node, block: Node): boolean {
+  return cell.childCount === 1 && cell.firstChild?.eq(block) === true;
 }

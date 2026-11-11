@@ -1,5 +1,1370 @@
 # @scrivr/core
 
+## 1.0.23
+
+### Patch Changes
+
+- 31a013e: Agents can read the document as originally agreed, and structural edits know
+  when what they name has changed.
+
+  - **The original view.** `toSemanticUnits(editor, { view: "original" })` and
+    `ai.getRichBlocks({ view: "original" })` read the document as it was before
+    every pending proposal — what rejecting all of them would leave, computed by
+    TrackChanges' own Reject on a copy. Its units say `view: "original"` and carry
+    no `changes`. `SemanticTextView` is now `"proposed" | "original"`, and
+    `SemanticHandlers` gains `documentIn(doc, view)`.
+  - **Only the proposed view is editable.** `applyRichEdit` reports a unit read in
+    another view under the new `wrongView` list and writes nothing for it. A unit
+    hash covers its view when it is not the proposed one; proposed hashes are
+    unchanged.
+  - **Structural ops carry hashes.** `expectedContentHash` on an op's own block
+    and `anchorContentHash` on its anchor; a mismatch is reported in `stale` and
+    nothing is written. `applySemanticEdits` returns `SemanticEditResult`, which
+    adds `alreadyProposed` (a delete whose block another author already proposed
+    for deletion) and `anchorProposedForDeletion` (an anchor that disappears on
+    Accept). Both were refused before, inside `rejected`. Hashes are judged
+    against the units `getRichBlocks` hands out; an id the document does not hold
+    is `notFound`, not `stale`.
+  - `@scrivr/export-semantic` exports `resolveNodeId`, the id rule units are
+    keyed by; `@scrivr/plugins` exports `originalDocument(doc)`, the original
+    document with the mapping into it.
+
+- 4657757: Agents read pending tracked changes and can review them.
+
+  - `SemanticChange` gains `at`, `length`, `moveId`, `oldAttrs` and `image`.
+    Each change is placed by offset into the text it belongs to: `unit.text`,
+    `part.text` or `cell.text`. Its `id` is the act's id, the one to pass to
+    `reviewChanges`, shared by every piece of the act.
+  - `SemanticPart` gains `changes`. `UnitRichInput.changes` and
+    `SemanticPartRichInput.changes` carry them into the rich hashes.
+  - `SemanticUnit` and `SemanticPart` gain `proposedForDeletion: true` when the
+    block itself — not only its text — is proposed for deletion. Such a unit
+    cannot be edited (`applyRichEdit` rejects it) or placed after.
+  - `@scrivr/export-semantic` re-exports `SemanticImage` and `SemanticPart`.
+  - `SemanticHandlers` gains `nodeChanges`, which runs for every node, text
+    included: it reports records on a block's own attrs and on a text node's
+    formatting marks, returning `SemanticNodeChange[]` (exported from
+    `@scrivr/core` and `@scrivr/export-semantic`). It also gains
+    `isMarkRemoved`, so a formatting mark proposed for removal is left off the
+    proposed spans.
+  - `UnitCtx` gains `doc`, the document being read. **It is required:** code
+    that builds a `UnitCtx` itself, such as a mock in a handler test, must now
+    supply it.
+  - `semanticImage(node)` is exported from `@scrivr/core`; `moveShadowRanges(doc)`
+    from `@scrivr/plugins`.
+  - TrackChanges reports pending insertions, deletions (including line breaks),
+    block insertions and deletions, paragraph joins and splits, heading, list and
+    formatting changes, wrapped and structurally moved nodes, table rows and
+    moves. An act reads as one change per type: a replacement or a move is its
+    two halves under one id, a formatting change over text with different
+    prior marks is one change per run, and each image an act adds or removes is
+    a change of its own — all under the act's id. An insertion reads what
+    remains of it in the proposed text. Text whose deletion is already decided
+    stays in the proposed text, as `proposedForDeletion` reads it.
+  - A tracked record naming an operation the engine does not know — including
+    one like `"toString"` from a synced document — is read as an unknown
+    operation instead of breaking `findChanges`.
+  - `ai.reviewChanges(decisions)` accepts or rejects changes by the ids an agent
+    read, returning the `ReviewOutcome` type from `@scrivr/plugins`. It is a
+    pass-through to `reviewChanges`, so the host's `canAcceptReject` still
+    decides whether an agent may review.
+
+  **`SemanticChange.type` gains two members**, `suggestedInsert` and
+  `suggestedAttrs`. An exhaustive `switch` on it, or code that assumed every
+  change is a deletion, must handle both.
+
+  One-time changes to watch for:
+
+  - **Hashes change once for any unit with a pending change.** `unitRichHash` and
+    `semanticPartRichHash` now cover `changes` when there are any. A unit with
+    none hashes exactly as before. An `expectedContentHash` pinned before the
+    upgrade on a unit with any pending change reads `stale` once.
+  - **Change ids stored before the upgrade can change.** `SemanticChange.id` is
+    now the act's id: both halves of a replacement or a move, and every piece of
+    a block act, report one id.
+  - **A block proposed for deletion now appears in `getRichBlocks`,** reading
+    `text: ""` with its deletion in `changes`. Only the copy a pending move
+    leaves behind stays out.
+  - **A deleted hard break, and a formatting mark proposed for removal, leave the
+    proposed view,** where they used to read as present.
+  - **`markdown` is omitted on units with any pending change,** not only those
+    with pending deletions.
+  - **Block ids are now unique after a split.** `UniqueId` gives the block an
+    edit creates — a split's new half, a list Enter's new item, a pasted copy
+    (rules and page breaks included) — a fresh id when another block already
+    carries its id. The copy holding the block's first words keeps it: Enter at
+    the start of a paragraph or a list item makes the empty one before it the
+    new block. Only the
+    author's client assigns it; a change arriving through sync is never
+    re-keyed, and undo and redo never rename. A pending move's two copies still
+    share their id. A tracked cut pasted elsewhere is a move, as Word tracks it,
+    so a pasted block the cut took whole keeps its id (approved by the user,
+    2026-11-09). A pasted copy of a block that is still in place is not that
+    cut, even when it reads the same.
+    Documents saved with duplicates keep them; edits never repair them.
+  - **An id two live blocks carry is refused.**
+    `findLiveNodeById` returns `null` for an id two live blocks carry, so every
+    write that resolves an id through it — the agent's edits and structural ops,
+    ghost text, suggestions, image layout — refuses that id rather than acting
+    on the first copy. That can happen in a document saved with duplicates, or
+    after concurrent cut-and-paste of one block in collaboration.
+  - `blockIdOf(node)` is exported from `@scrivr/core` (approved by the user,
+    2026-11-09): the one answer to which nodes carry a block id. An empty
+    `nodeId` counts as none, so `UniqueId` now stamps it as it stamps `null`.
+  - `ReferenceAttrs` gains `originalNodeId`, the id the block had when a tracked
+    split was made. Rejecting the split gives the rejoined block that id back.
+  - **Track changes marks its own recording transaction `NORMALIZATION_META`,**
+    as bookkeeping nobody authored.
+  - **A tracked Enter in a list item is recorded as a split** of the item and
+    its paragraph, as Enter in a paragraph is, no longer as an inserted item.
+    Rejecting it joins both levels back under the ids they had (user decision,
+    2026-11-09). Which half of a split keeps its ids is core's rule in either
+    order of registering `UniqueId` and `TrackChanges`: `planDuplicateIdAssignments`
+    is exported from `@scrivr/core` for it (approved by the user, 2026-11-09).
+  - Deleting the moved copy of a pending move proposes its deletion and drops
+    its move record. Before, the move record was stripped from whatever block
+    then sat at the copy's old place: the block after it lost its id, level and
+    records, or, with nothing after it, the deletion threw.
+  - An agent's reply is diffed against the proposed view it read: another
+    author's pending formatting removal stays theirs, and a pending deleted line
+    break no longer turns a small edit into a rewrite of the block.
+  - An inserted, deleted or moved empty line — a new empty list item or
+    paragraph — is marked on the canvas again. The caret's zero-width glyph on
+    the line counted as text, so it was left unmarked.
+  - Review cards and the change popover name a block added or removed by what
+    it is — "List item added", "Paragraph added", "Image removed" — instead of
+    "Block added", and leave out the preview line of a block with no words.
+    `ChangePopoverInfo.nodeTypeName` (new) says which block a node change is on,
+    so a host can name it too (asked for by the user, 2026-11-09).
+  - An attribute change reads its values in words on cards and in the popover:
+    an object value is spelled out (`x 0, y 48`), never `[object Object]`, and an
+    equal value written anew is not listed. `describeAttrChanges` and
+    `changedAttrKeys` (new, `@scrivr/plugins`) are that one description, shared
+    by the popover and the panel. An image whose older `floatOffset` changed
+    with its `yOffset` reads as moved: `IMAGE_PLACEMENT_ATTRS` includes
+    `floatOffset`.
+  - Deleting what you added yourself takes it back out, as Word does: Backspace
+    on a list item you added with Enter, or Delete from the item above it, joins
+    it back and leaves no change, as it already did for a paragraph. The caret
+    stays in the line it was in. An image or horizontal line you added and then
+    delete leaves no change either.
+  - `editor.getMarkdown()` no longer throws on a document with formatting
+    Markdown cannot write: a colour or a font size is dropped and its words
+    kept. With TrackChanges installed, a pending change is written as
+    CriticMarkup.
+
+- 288119e: An agent edits like a person: it moves blocks, list items, headings and images,
+  its rewrites land as the phrases a person would change, and every edit is a
+  tracked suggestion a reviewer decides in one click.
+
+  **Agents — what they can do**
+
+  - `moveBlock` and `moveListItem` join `StructuralSemanticEditSchema`: an agent
+    reorders a document by naming a node and an anchor. `moveListItem` takes an
+    item id or a leaf inside it, and refuses a cross-list move before writing any
+    steps. The engine pairs the delete-at-old and insert-at-new into one
+    `CHANGE_OPERATION.move`, accepted or rejected as one decision.
+  - A heading's level is set with `richText` `attrs.level`: 1–6 on a heading
+    changes its level and on a paragraph makes it a heading; 0 makes a heading a
+    paragraph. It is tracked with the old type, so rejecting it restores the block.
+  - Images go through the protocol an agent already has. A paragraph holding one
+    image is an `image` unit carrying `image` (`src`, `alt`, `width`, `height`,
+    `wrap`, `align`); `insertBlock` adds one with `block.type: "image"` (`src`
+    must pass `safeImageUrl`); `richText` `attrs`, or the unit handed back with its
+    `image` edited, change `wrap`, `align`, size or `alt`; `deleteBlock` removes
+    it. Only the fields that change are checked, so an image placed by drag
+    (`align: "custom"`) can be handed back untouched. A new `src`, paragraph
+    styling on an image unit, and invalid values are rejected. Setting `wrap` or
+    `align` on an image laid out by the legacy `wrappingMode` takes effect.
+  - Every edit an agent makes is its suggestion: with TrackChanges installed,
+    `applySemanticEdits` tracks text, image and structural edits as `authorID`'s
+    (default "AI Assistant") whether or not the person is suggesting.
+  - The result says what happened. An edit that changes nothing — the level a
+    heading already has, attrs an agent may not set, an image layout it already
+    has, a move to where the block already is — is `rejected`, never `changed`
+    and never silently dropped. An edit is taken whole or not at all: attrs it
+    cannot apply refuse its text too. Restating the original to withdraw the
+    agent's own earlier suggestion is a change.
+  - A batch touches content once. A move or delete overlapping content the batch
+    already moved or added to, or adding an item or row inside content it moved,
+    is refused; so is a list or table op named by a node holding several of what
+    it acts on, such as a nested list.
+  - `getRichBlocks(from, to)` keeps image units inside the range.
+
+  **Rewrites read as a person's edit**
+
+  - `applyDiffAsSuggestion` and `applyRichDiffAsSuggestion`, for any caller, turn
+    a rewrite into phrase replacements: each run of changes is one deletion and
+    one insertion, a short unchanged gap inside a replacement is taken in, and no
+    change is made inside a word. A gap holding a line break, a newline, an
+    inline image, formatting or another author's suggestion is never taken in,
+    and words added near each other stay additions.
+  - A replacement is decided as one. Its two halves share a `groupId` nothing
+    else carries, from this diff or any other, and accepting or rejecting either
+    half — through a card,
+    `setChangeStatuses`, `reviewChanges` or accept-at-caret — decides both.
+  - The AI suggestion overlay groups the same way, so a proposal reads the same
+    before it is applied as after. `phraseReplacements` and `bridgeable` are
+    exported from `@scrivr/plugins` for hosts that build their own diffs;
+    `pairReplacements` stays for word-pair grouping.
+
+  **Resolving ids in a tracked document**
+
+  - A pending move leaves a deleted shadow and a live copy with the same `nodeId`.
+    `findLiveNodeById` in `@scrivr/plugins` decides which is live, and every
+    consumer uses it — rich and structural edits, drift detection, suggestion
+    overlays and popovers, ghost text, streamed insertion, block markers and
+    citation reveal. Writing into a shadow used to succeed and then vanish when
+    the deletion was accepted. `@scrivr/ai` re-exports it beside `findNodeById`.
+  - `findNodeById` in `@scrivr/core` takes an optional `accept` predicate and
+    returns the first match that satisfies it. It used to return the last match.
+  - `shadowRanges`, `isShadowNode` and `ShadowRange` are exported for a host
+    resolving ids itself. The ranges are memoised per document.
+  - **Hosts:** a helper that takes the first node with a `nodeId`
+    reads the shadow of a block moved down. Switch it to `findLiveNodeById`.
+
+  **Tracking**
+
+  - A deletion pairs with an insertion as a move only when they match, by content
+    and by id. Two blocks that only read the same — two empty paragraphs, a
+    `deleteBlock` beside an `insertBlock` of the same text — are a deletion and an
+    insertion.
+  - Rejecting a block added after a list or table, together with a later move, no
+    longer deletes the list's text; deleting a paragraph while typing its words
+    elsewhere in one transaction no longer errors.
+
+  **Review surfaces**
+
+  - Moves read as moves: double-underlined where the content went and
+    double-struck where it was, in one move colour (`renderTrackedMove`).
+  - A table row added or removed is washed and framed as a row, dashed when
+    removed (`renderTrackedRow`). With the caret anywhere in it, the popover
+    offers the row: "Accept row", "Reject row", previewed as "Adding row:
+    Headset · On request · Yes".
+  - `changePreviewText(doc, change, pending)` previews a block change as it will
+    read, and a move once, by where it went; the popover and the panel both use
+    it. A move's card reads "Moving".
+
+  **Semantic view**
+
+  - A semantic contribution can name what the proposed view leaves out
+    (`isRemoved`). Track changes supplies `proposedForDeletion`, exported, so an
+    image proposed for deletion is not read as present, and a paragraph whose
+    other text is proposed for deletion reads as its image. **Breaking** for a
+    hand-built `UnitCtx`: `isRemoved` is a required member.
+  - An image unit's rich hash covers its `image`, so an edited image is seen as
+    changed. Other units' hashes are unchanged.
+  - Core names the image values: `ImageWrap`, `ImageAlign`, `IMAGE_WRAPS`,
+    `IMAGE_ALIGNS` and `IMAGE_NODE_ATTRS`, with `SemanticImage`;
+    `SemanticImageAttrsSchema` in `@scrivr/ai` is built from them.
+
+  **Markdown**
+
+  - `getMarkdown()` writes pending changes as CriticMarkup — `{++added++}`,
+    `{--removed--}` — instead of throwing.
+  - Pasting a markdown table, or loading markdown that holds one, makes a table,
+    with the header row as header cells.
+
+- e40e3d9: Editing the cell selection's module while a dev server runs no longer throws
+  "Duplicate use of selection JSON ID scrivr:cell": the `scrivr:cell`
+  registration goes on while a dev server hot-reloads the module
+  (`import.meta.hot`). A second registration anywhere else still fails fast, as
+  a duplicate Scrivr runtime.
+- a9e05e0: A node can lay itself out as a composite — units placed one at a time, each
+  of side-by-side regions — through `layout: { kind: "composite", composite }`.
+  Tables now lay out this way (each row a unit, each cell a region) and look,
+  paginate, hit-test, export and copy exactly as before; the engine no longer
+  knows what a table is.
+
+  - New: `CompositeLayout`, `CompositeUnit`, `RegionPlacement`, `RegionInset`,
+    `LaidRegion`, `RegionFloat`, `regionAtCoords`; `LayoutBlock.regions`,
+    `unitData`, `lastUnit`.
+  - A composite unit's block strategy and PDF handler draw only its decoration;
+    the engine paints and exports what its regions hold.
+
+  **Breaking:**
+
+  - `LayoutBlockKind` `"tableRow"` is `"composite"`; `LayoutBlock.cells` is
+    `regions` (`LaidRegion`: a region's `pos`, `inset` and `data`, where a cell's
+    merge and background now live), and `isLastRow` is `lastUnit`.
+  - `BlockLayoutOptions.tableColumns` is removed (a unit carries its own data).
+
+- 5603fff: Extensions can rewrite copied markup with `addCopyHtmlTransforms()`, the
+  counterpart to `addPasteHtmlTransforms()`. The transforms run on every copy
+  and cut, including a cell selection's table. Table declares its `rowspan`
+  rewrite this way, so the clipboard serializer no longer knows about tables.
+
+  **Breaking:** `serializeSelectionToHtml(state, schema, copyHtmlTransforms)`
+  takes the transforms to run, as a required argument. Pass
+  `editor.getCopyHtmlTransforms()` (new) to serialize what the editor copies.
+  `IBaseEditor.getCopyHtmlTransforms()` and `ResolvedExtension.copyHtmlTransforms`
+  are required: an editor double or a hand-built resolved extension must
+  provide them.
+
+  A copied range that starts partway into a table row now keeps a vertical merge
+  in its own column. It used to hand the merge to the cell to its right.
+
+- aec0e05: A cell selection deletes itself: `CellSelection.replace` empties each cell to
+  its default block (a paragraph), keeps the grid and leaves the caret in the
+  top-left cell, with whatever was typed or pasted there. Cut, Delete,
+  Backspace, typing and `tr.deleteSelection()` all go through it, so clipboard
+  cut no longer special-cases tables.
+
+  What changes for a reader: typing over a cell selection writes into the
+  top-left cell, as Word does, not the cell the drag ended in; a cell holding
+  only a horizontal rule or page break is emptied like any other; and cutting
+  cells that are already empty does nothing, keeping the selection, as Delete
+  does. `deleteSelection` returns null when nothing was deleted.
+
+- 189b6fa: Marks change the font only through the font modifiers their extensions
+  declare (`addFontModifiers`), and plain-text paste builds the schema's default
+  block. Bold, italic, font size and font family look, measure and report as
+  before.
+
+  - A mark from any extension that declares a font modifier is measured, asked
+    for before layout, and reported by `getActiveFontFamily` and
+    `getActiveFontSize` in the font it declares.
+  - `collectFontRequests` and `prepareDocumentFonts` take the editor's
+    `fontModifiers` and `fontConfig`, so a heading's text and a marked run are
+    installed before first paint in the face they are drawn in.
+    `IBaseEditor.getFontModifiers()` and `getBlockStyles()` are new;
+    `applyPageFont` is exported.
+  - A `fontSize` mark that is not a finite size of at least 1px, or a
+    `fontFamily` mark with an empty family, leaves the run in its block's font.
+  - A heading `level` stored as text ("2") is styled and drawn as that level.
+  - Headers and footers are styled by the editor's block styles, with a
+    paragraph's spacing dropped as before, so any block an extension styles
+    looks the same in a header as in the body.
+  - Plain-text paste and pasted-block merging use the schema's default
+    textblock, `paragraph` in every built-in schema.
+
+  **Breaking:**
+
+  - `resolveFont` no longer has a built-in fallback for `bold`, `italic`,
+    `fontSize` and `fontFamily`: pass the editor's font modifiers.
+  - `defaultFontConfig` holds only `paragraph`; heading styles come from
+    `Heading.addBlockStyles()`.
+  - `prepareDocumentFonts(doc, provider, constraints?)` is now
+    `prepareDocumentFonts(doc, provider, { fontModifiers?, fontConfig?, constraints? })`.
+  - `chromeFontConfig` (plugins, internal) is replaced by `chromeFontConfigOf`,
+    and `ResolvedHeaderFooter` carries the band's `fontConfig`.
+  - `IBaseEditor.getFontModifiers()` and `getBlockStyles()` are required: an
+    editor double must provide them.
+
+- 6330e0a: A floating image with square or top-and-bottom wrap no longer paints over a
+  table beside it. The table moves below the image as one unit, as Word does, and
+  is never narrowed; screen, cell clicks, PDF and DOCX export all follow. A float stays
+  on its anchor when a table or paragraph above that anchor moves. A square float
+  that would overlap another moves beside it while the column has room, and below
+  it otherwise, as Word does; its paragraph stays put, where before the paragraph
+  was pushed down too. A float whose own wrap keeps moving its
+  anchor locks at the placement it keeps returning to, so text wraps around it
+  instead of under it. A dragged image lands where it was dropped, stacked,
+  clamped or locked, on the page it was dropped on; dropped on a paragraph
+  carried over from the previous page, it anchors to the nearest paragraph that
+  starts on that page, as in Word; a square or top-and-bottom image dropped
+  there can still land a little below the drop. DOCX export marks
+  square images `allowOverlap="0"`, so Word keeps them apart too, and keeps the
+  user's offset.
+
+  An image anchored in a table cell is laid out in that cell, as Word does with
+  `layoutInCell`: the cell's text wraps around it, the row grows to hold it, and
+  it moves with its row; an image wider than its cell is scaled down to fit.
+  Dropping an image onto a table cell anchors it there;
+  dragging it out of the table anchors it back in the body. An image painted
+  over a table now takes the click, as its cursor shows; one behind the table
+  leaves the click to the cell.
+
+  In documents without floats, blocks no longer leave a blank band under the
+  first block of a page, matching Word.
+
+  A word too wide for the gap beside a square image now goes below the image, as
+  Word wraps it, instead of overflowing past the gap (in a narrow table cell it
+  ran into the next cell).
+
+  **Migration:** a dragged image's custom `x` (`xAlign: "custom"`) is now measured
+  from the content area's left edge, as the schema documents and as DOCX writes
+  it (`relativeFrom="column"`). Layout and drag used the page's left edge, so a
+  body image dragged sideways in an older document moves right by the left margin
+  when reopened, and Word files now open with images where Word put them. A named
+  `xAlign` (left, center, right) now wins over a leftover `x` in DOCX export, as
+  it does in layout.
+
+  `ExclusionManager.getNextFreeY` now takes `height, contentX, contentWidth` and
+  also clears side-wrap rects: it returns the first y where a band of that height
+  leaves the whole content width free.
+
+  `AnchoredObjectPlacement` gains an optional `stackOffset`: how far the solver
+  moved a stacked image below the float it would overlap. `globalY` includes it;
+  the user's `yOffset` does not. (Where an in-cell image is laid out is described
+  with the composite layout: `regionPos`, `LaidRegion.floats`.)
+
+- f72a5b3: Any inline node can float: its spec declares `anchored: { read, write }` and
+  the engine places, wraps, hits, drags, resizes and exports it as it does an
+  image, writing every placement change through `write`. Images behave exactly
+  as before.
+
+  - `anchoredOf(node)`, `floats(node)`, `placementAttrs(node, patch)`,
+    `AnchoredPlacement`, `AnchoredSpec` and `PlacementPatch` are new;
+    `isXAlignValue` is exported. A node that declares a placement is laid out at
+    the size it declares.
+  - `addPasteFiles()` declares which pasted files become which nodes
+    (`PasteFileSpec`, `PasteFileHandler`); `ExtensionManager.buildPasteFiles()`
+    and the `pasteFiles` option of `PasteTransformer` carry them.
+  - `addExports().pdf.embeds` (`PdfEmbedSource`) declares where a node's
+    embedded file lives.
+  - A later-registered extension takes a pasted file first, and
+    `normalizeDocument`'s new `pasteFiles` option sweeps any extension's
+    orphaned placeholder.
+  - An agent's image layout is written through the node's declaration.
+
+  **Breaking:**
+
+  - `normalizeImageAttrs` and `NormalizedImageAttrs` are removed: read a node's
+    placement with `anchoredOf` (`AnchoredPlacement`).
+  - `Editor.convertImageToInlineAtVisualPosition(docPos)` is now
+    `placeInlineAtVisualPosition(docPos)`, for any anchored node.
+  - `dropPendingPlaceholders(doc, isPending)` takes the predicate;
+    `normalizeDocument` sweeps placeholders only for the `pasteFiles` it is
+    given (the editors pass theirs).
+  - A `PasteTransformer` built without `pasteFiles` inserts no pasted files;
+    `Editor` passes them.
+  - `ResolvedExtension.pasteFiles` is required: a hand-built resolved extension
+    passes `{}`.
+
+- 5287a8d: Links peek on hover; images and tables can too. Selecting any of them expands
+  the same popover.
+
+  Hover used to pick a mouse cursor and nothing else. Reading where a link went
+  meant clicking into it, which moved the caret and opened the edit popover;
+  tables had no popover at all.
+
+  The editor now records what the pointer is over and emits `"hover"` when that
+  changes. `editor.getHoverTargets()` answers with every layer, innermost first —
+  a link in a table cell is `[link, table-cell, table]`. Click routing keeps
+  `resolveHitTarget`'s first-wins chain, so a hover claim never shadows a click.
+  Extensions claim marks or nodes through `addHoverResolvers`; `Link` and `Table`
+  ship theirs. Text is hovered only inside the content box; an image or table
+  cell is hovered wherever its own rect is, so an image hanging into the margin
+  still peeks. Hover positions follow edits made while the pointer rests; those
+  events carry `fromEdit: true`, and a peek whose target an edit deleted closes
+  at once.
+
+  `createLinkPopover` and `createImageMenu` now pass
+  `presentation: "peek" | "full"` on `LinkPopoverInfo` and `ImageMenuInfo` — a
+  required field, so code that builds either type by hand must set it. Peek is a
+  compact read-only card once the pointer has rested on the target; full is the
+  popover as before, shown when the selection is in it. Selection wins, and peek
+  → full grows in place through `onMove`.
+
+  **Hover is on by default for links**, so existing `createLinkPopover` and
+  `<LinkPopover>` consumers will see `onShow` fire on hover. Pass `hover: false`
+  to keep the popover selection-only. Images and tables default to
+  `hover: false`, as in Word, Docs and Pages; pass `hover: true` or
+  `{ showDelay, hideDelay }` to turn their peeks on. `subscribeHoverTarget` is the
+  debounced listener the controllers share.
+
+  `createTableMenu` is new, with `useTableMenu` and `<TableMenu>` in React. Its
+  full menu renders `editor.getNodeActions()`, and the `Table` extension now
+  contributes row, column and delete-table actions for a cell selection. They
+  are hidden in a read-only editor, where a cell selection shows the table's
+  peek instead. `<LinkPopover>`, `<ImageMenu>` and `<TableMenu>` take
+  `renderPeek` / `renderFull`.
+
+  `createImageMenu` now shows only for an image selection. It used to show for
+  any selection with node actions, which a table-cell selection now has.
+
+  `editor.getNodeViewportRects(docPos)` returns one rect per painted fragment, so
+  a table split across pages can be anchored on whichever page is on screen.
+  Nodes inside table cells are found too, so a table nested in a cell gets its
+  own menu.
+  `getNodeViewportRect(docPos)` is its first entry, so it now answers for tables
+  and paragraphs as well as images.
+
+  A wrapped link peeks under the line the pointer rests on, and shows full under
+  the line the caret is on. `editor.getRangeViewportRects(from, to)` is new: one
+  rect per line a range paints on, `Range.getClientRects()` for the canvas. Each
+  `HoverTarget` carries `at`, where in it the pointer rests; a target built by
+  hand must set it.
+
+  A popover keeps showing the same link, image or table through a
+  collaborator's edit (`onMove`), and shows a different one anew (`onShow`), so
+  an edit elsewhere no longer cancels a link edit or overwrites an image size
+  being typed. The `"update"` event now carries the transaction's `mapping`;
+  code that emits `"update"` itself must pass one (`StepMap.empty` will do).
+  Hover positions are mapped before `"update"` is emitted.
+
+  Escape or typing closes a peek at once, even under the pointer, with
+  `dismissed: true` on the hover event; a lone modifier, `Fn` and `Super`
+  included, does not. Moving onto another link while a peek is open swaps after
+  the grace period, so crossing it on the way into the peek keeps the peek.
+
+  While a header or footer is edited, body geometry answers nothing for a
+  surface position — `getNodeRect` included — so a header image's resize
+  handles and menu never land on the body image at the same number.
+  `subscribeViewUpdates` also fires when editing moves between the body and a
+  header or footer, so popovers hide and return with it.
+
+  `resolvePointOwner` takes a required `regionAt`: a `behind` image under a
+  table no longer owns points in the table's cells, for hover as for click. A
+  linked inline image is hovered as a link too.
+
+  `IEditor` gains `getNodeViewportRects`, `getRangeViewportRects` and
+  `getHoverTargets`. A hand-written `IEditor` test double needs all three;
+  returning `[]` from each is enough.
+  `ResolvedExtension` gains a required `hoverResolvers` array; code that builds
+  one by hand passes `[]`.
+
+- 544d74e: Lists follow Word's levels and numbering.
+
+  - **Tab takes an item deeper, as in Word, and only that item.** Each Tab
+    goes one level further, past the item above, up to level 9 (Tab there is
+    consumed without a change); the items after it, and any list nested in it,
+    keep their levels. Shift-Tab
+    brings it back a level, then lifts it out as before, and so does Backspace
+    at the start of an item below the top level, which no longer joins it into
+    the item above. Backspace at the start of a line just below a list joins it
+    onto the list's last text, as Word does, instead of wrapping it into the list
+    as an item. In Suggesting mode a Tab is one change on that item ("List
+    indent: 0 → 1"), which rejecting takes back; moving a list item you added is
+    part of that proposal and records no change of its own.
+  - `listItem` gains `levelOffset` (default 0): how many levels deeper the item
+    sits than its list. Layout, markers, PDF and DOCX `ilvl` all read it, and an
+    ordered list numbers by level, as Word counts: an item follows the last item
+    at its level, and a shallower item restarts the deeper ones.
+  - **DOCX import keeps an item that skips a level** at its level, with
+    `levelOffset`, instead of hanging it under an empty item that drew a stray
+    bullet. `DocxListItem` gains `levelOffset` and `DocxBlock`'s list gains
+    `start` (both optional).
+  - **Each list restarts in Word.** DOCX export gives every top-level list its
+    own numbering (`numId`) over one shared definition, with level 0's
+    `startOverride` set to its `order`, so separate lists no longer continue
+    each other and a list starting at 3 starts at 3. `DocxContext.numbering.getOrCreate`
+    gains `instance` and `start` (both optional).
+  - **DOCX import reads where a list starts** (`w:start`, `startOverride`) into
+    `order`, and reads `numId` 0, Word's "no numbering", as a plain paragraph.
+
+- fb180bb: A list number wider than its hanging indent no longer pushes its first line to
+  the next half-inch tab stop: the text starts where the number ends, as Word
+  lays out the same list. The same holds for a number moved past a floating
+  image on the item's left. Wrapped lines keep the item's indent, and canvas,
+  PDF and a DOCX export opened in Word agree.
+- 3d45744: A node declares that it breaks the page or the line. Page breaks and line
+  breaks work exactly as before, now from `PageBreak` and `HardBreak` instead of
+  by name in the engine. (Which blocks are bookmarked in a PDF is declared by
+  `outlineLevel` on the node spec; see the outline-level note.)
+
+  - **`NodeLayout` gains `{ kind: "break", breaks: "page" | "line" }`** (`BreakKind`).
+    A block that breaks the page starts the next block on a new page; an inline
+    node that breaks the line ends its line. A break its context cannot honour
+    lays out as a plain leaf; a node that holds content ignores it. A page
+    break's flow `blockType` is its node's name. `breakOf(type)` reads it, and
+    the semantic exporter, the agent's rich diff and the header/footer surfaces
+    honour declared breaks as they do the built-in ones.
+  - **Pasted markdown goes through the tokens extensions declare.**
+    `Strikethrough` declares `~~text~~`, so it pastes struck through. Markdown
+    holding a construct no extension declares (a pipe table without `Table`)
+    pastes as plain text, one paragraph per line. Inline code, links,
+    blockquotes and images that no extension declares paste as their markdown
+    text; inline code was dropped before.
+
+  **Breaking:**
+
+  - Removed the `addMarkdownRules()` extension hook, `MarkdownBlockRule`,
+    `ExtensionManager.buildMarkdownRules()` and `ResolvedExtension.markdownRules`.
+    Declare markdown tokens with `addMarkdownParserTokens()` instead.
+  - `PasteTransformer`'s constructor drops its `extraMarkdownRules` argument:
+    `new PasteTransformer(schema, markdownParserTokens, options)`.
+
+- 07b6e41: A block declares its outline level on its node spec (`outlineLevel`), read
+  by both the PDF bookmarks and the semantic outline, so a custom block heads a
+  section in both. `Heading` declares it; headings bookmark, nest and head
+  breadcrumbs as before.
+
+  - `outlineLevelOf(node)` reads the declaration.
+  - The semantic walker, its heading-led grouping and `toDocumentOutline` read
+    the declared level instead of the name `heading`.
+
+  **Breaking:**
+
+  - A node whose semantic handler returns `{ type: "heading" }` but whose spec
+    declares no `outlineLevel` no longer opens a section in `toDocumentOutline`
+    or heads breadcrumbs: declare `outlineLevel` on its spec.
+
+- f72a5b3: The PDF bookmarks and the semantic outline visit the same headings.
+
+  - A heading nested in a list, sourced block or table cell heads the semantic
+    breadcrumbs of what follows it and opens a section in `toDocumentOutline`,
+    as it is a PDF bookmark. A unit lists the headings it holds in the new
+    `SemanticUnit.headings` (`SemanticHeading`).
+  - A heading whose proposed text is empty (blank, or all proposed for deletion)
+    heads nothing in either outline; `headingLevel` is absent on such a unit.
+  - A section's title is its heading's text, without a grouped lede.
+  - `outlineTitleOf(node, isRemoved)` is the one title rule: the proposed text,
+    a line break as a space, trimmed. Bookmark and semantic titles now match.
+
+- 01cc927: A node ends a section by declaring `sectionBoundary: true` on its spec, so the
+  sections model and layout no longer find section breaks by name. `Sections`
+  declares it; documents lay out exactly as before.
+
+  - A section boundary is a leaf with a `settings` attr between the document's
+    own blocks: one nested in a wrapper ends no section and no longer starts a
+    page, as the sections model already read it. Headers and footers refuse
+    section boundaries.
+
+- 31a013e: Three asks from hosts building their own review UI on suggestions.
+
+  - **Turn off the change colours.** `TrackChanges.configure({ renderMode: "none" })`
+    paints no tracked changes on the canvas; they are still recorded, reviewed
+    and exported. `AiToolkit.configure({ aiSuggestion: { renderMode: "none" } })`
+    passes the suggestion overlay's options through; `aiSuggestion: false` still
+    leaves it out.
+  - **A suggestion keeps its author.** `computeAiSuggestion` puts the `authorID`
+    it is given on the suggestion, and applying it records text and formatting
+    changes by that author. Before, every applied suggestion was by
+    `"ai:assistant"` whatever author it was computed for.
+  - **Hard breaks survive an agent's rich edit.** A `"\n"` an agent writes in a
+    rich edit is the block's line break, as the semantic export reads one:
+    `spansToFragment` builds the schema's line-break node (a newline in a code
+    block, a space where the schema has none), and `applyRichDiffAsSuggestion`
+    records it like any insert. One insertion is one change, breaks included, and
+    restating the original withdraws it. Before, an added break became a space.
+    The plain-text lanes (`applyDiffAsSuggestion`, `insertAsSuggestion`, AI
+    suggestion apply) read a block without its breaks, so they still write
+    `"\n"` as a space.
+  - **Formatting survives a paste in suggestion mode.** Adjacent runs with
+    different formatting no longer merge under the first run's marks
+    (`equalMarks` compared a node with itself).
+
+- 7aca935: The toolbar shows the block the caret is in, as Word's ribbon does, in nested
+  lists and table cells. A numbered list nested in a bulleted one shows as
+  numbered. A list, heading or alignment inside a table cell shows. A centred
+  paragraph in a list shows as centred.
+
+  **Breaking:**
+
+  - `getBlockInfo()` and `SelectionSnapshot` now report the caret's own
+    textblock. They used to report the outermost block, which was the list
+    inside a list and the table inside a cell.
+  - They gain `ancestors`: the nodes around the textblock, `{ type, attrs }`,
+    innermost first.
+  - `ToolbarItemSpec.isActive` takes one `ToolbarState` object instead of
+    positional arguments. It holds `activeMarks`, `activeMarkAttrs`,
+    `blockType`, `blockAttrs` and `ancestors`; destructure what you need, e.g.
+    `isActive: ({ activeMarks }) => activeMarks.includes("bold")`. A
+    `SelectionSnapshot` is a `ToolbarState`, so a toolbar you render yourself
+    can pass `item.isActive(editor.getSelectionSnapshot())`.
+  - Inside a list, `blockType` is now `"paragraph"` (or `"heading"`), not
+    `"bulletList"`. `editor.isActive("bulletList")` asks whether the caret is
+    inside a bullet list at any depth; for toolbar state, call the item's
+    `isActive(editor.getSelectionSnapshot())`, which presses only the list
+    the paragraph belongs to.
+
+- a395c98: Track changes keeps its boundaries: editing content that already holds
+  suggestions no longer destroys authorship, selection, or unrelated decisions.
+
+  **Core**
+
+  - `editor.commands.*` and `runCommand` return whether the command ran, instead
+    of `void`. A read-only editor returns `false`. **Breaking** for an
+    `IBaseEditor` double: its `runCommand` must return a boolean.
+  - A node's `marks` restriction now limits formatting only. Review marks are
+    admitted wherever track changes is installed, so edits inside a code block
+    are tracked like any other text.
+  - `NORMALIZATION_META` marks an edit that keeps the document well-formed rather
+    than changing it. `UniqueId`, `TrailingNode` and the table normalizer set it,
+    so ids, trailing paragraphs and table repairs are never recorded as anyone's
+    suggestion.
+  - `TrailingNode` takes away the empty paragraph it added once the document ends
+    in a paragraph again, unless someone typed in it or put the caret in it.
+  - Cut and paste mark their transactions `uiEvent: "cut"` and `uiEvent: "paste"`,
+    so a plugin can tell them from deleting and typing.
+  - `renderTrackedObject` frames an image, rule or other object a change covers;
+    `renderTrackedFormatting` washes text whose formatting changed.
+    `TrailingNode`, `Typography` and `IMAGE_PLACEMENT_ATTRS` are exported.
+  - The overlay repaints after every content repaint, so overlay marks drawn over
+    a freshly painted tile no longer go missing.
+
+  **Track changes**
+
+  - Deleting pending work cancels it only when it is entirely your own. Deleting
+    someone else's insertion keeps it and records your deletion beside it, for
+    text and whole nodes alike.
+  - An edit is linked to the act it belongs to, decided where its record lands.
+    Your edits inside your own pending insertion fold into it (`creationId`).
+    Another author's depend on it (`dependsOn`, closed by `foldingClosed`). A
+    deletion recorded on a node and on the text inside is one change
+    (`deletionId`), and so is a record split by later typing or a paragraph break
+    (`continuesId`, with a unique id per span).
+  - `changeActs` is the one answer to what a decision covers: it groups records
+    into acts, each with a `primary` to show and name. Deciding any record of an
+    act decides all of it, so a whole-paragraph change can be decided from its
+    node or its text, and a paragraph break from either of its halves.
+  - Later steps inside what the same gesture inserted are now part of that
+    insertion, so inserting a block and typing in it no longer loses the typing. A
+    step that writes both inside and outside an insertion is split at its edge
+    where it can be (otherwise it is refused): inside, it takes back your own
+    text; outside, it proposes deleting what was there.
+  - Every tracker writes through the replay, so a gesture mixing formatting or
+    attribute changes with a position-shifting step records them on the right text.
+  - Formatting across someone else's insertion no longer spreads that insertion
+    over the text beside it, which made rejecting it delete real words.
+  - A decision is its own undo step. Undoing an accept brings the change back to
+    pending instead of also removing the edit.
+  - Rejecting a move takes the content back with the edits made since. Work done
+    on the moved-from shadow keeps its own record and must be explicitly reviewed
+    before either accepting or rejecting the move consumes that shadow.
+  - Review is planned before it runs. `planChangeReview`, `planReviewIn` and
+    `planReview` preview a decision; `reviewChanges` carries it out and returns
+    what happened. A decision is `ReviewDecisions` — `{ accepted, rejected }` —
+    so resolving a conflict is a single decision. Dependent work is never decided
+    silently. A refusal names its reason: `dependent-changes`, `missing-changes`,
+    `contradictory-decisions`, `not-permitted`, `read-only` or `invalid-result`.
+  - Before publishing, review validates the content it rewrote and checks that
+    selected identities were settled and unselected pending identities survived.
+    Unrelated invalid content does not block the decision.
+  - **Changed:** the low-level `setChangeStatuses` action payload is now
+    `ReviewDecisions` instead of `{ status, ids }`.
+  - **Changed:** the `setChangeStatuses` command keeps its signature, but returns
+    `false` and decides nothing when the plan is blocked, including when other work
+    depends on the change. A host ignoring the result sees a click that does
+    nothing; use `reviewChanges` to learn why.
+  - An edit tracking cannot represent is stopped before it applies, so someone
+    suggesting never changes the text directly. `onRefused` on
+    `TrackChanges.configure` receives the reason (`overlapping-steps`,
+    `unsupported-step`, `duplicate-transform-package`) so the host can say why.
+    Gestures of more than 20 steps used to be partly untracked and are now
+    tracked in full. `lastReview` reports the last decision.
+  - Nothing can be edited while viewing a snapshot of the changes.
+  - Deleting a paragraph break is a change of its own, `node_join`: the
+    paragraphs stay apart until it is accepted. Deleting a break you added
+    yourself takes it back instead.
+  - Moving paragraphs into, out of or between lists is a change to each
+    paragraph's place, `list_change`, kept as `oldList`; rejecting it rebuilds the
+    lists around it.
+  - Moved content is one change: a drag of text, or a cut pasted back by the same
+    author while the cut is still pending, links its deletion and insertion with
+    `moveId`, and deciding either decides both. Dragging a block, several blocks
+    at once, or a floating image alone in its paragraph is one move too. Undoing
+    the paste and pasting again is still the move.
+  - Pasted paragraphs are recorded as inserted, not as a paragraph break, so
+    rejecting a paste removes it. Enter at the end of a paragraph records the new
+    paragraph as inserted.
+  - Reviewing a formatting change keeps the mark's value, so colour, size and
+    link changes can be accepted and rejected. Neighbouring pieces of one
+    formatting change by the same author are one card, decided together.
+  - Changed objects are framed. Formatting changes are washed and barred in the
+    margin, as Word marks them, instead of looking like an insertion or a deletion.
+  - A collaborator's edit arriving through Scrivr's own sync is never recorded as
+    the local author's suggestion.
+  - Accepting a deleted break between list items names any change recorded on the
+    item it joins as dependent work, instead of failing; `joinsAt` on the change
+    says where the joined block starts.
+  - Selection survives tracking: a range stays a range in its direction, and the
+    caret lands where the gesture left it, through every step of a multi-step
+    gesture.
+  - `TrackChangesState`, `TrackingResult` and `TrackingRefusal` name what a host
+    reads from `trackChangesPluginKey`.
+  - `CHANGE_OPERATION` gains `node_join` and `list_change`, with `ListLevel` naming
+    an entry of a list change's `oldList`. A host that switches on the operation
+    should name them.
+
+  **React**
+
+  - Every Accept and Reject in the panel and popovers goes through
+    `useReviewAction`. A click either completes, or `ReviewRefusalNotice` says
+    what stopped it on the surface that was clicked. Dependent work is listed and
+    needs a second confirmation that replans first.
+  - Conflict resolution ("Keep insertion" / "Keep deletion") is one decision and
+    one undo step.
+  - `useTrackChangesPanel` gives each act one card, in `items`, with its records in
+    `pieces`; its `review` is the card's `useReviewAction`, and `accept`, `reject`,
+    `acceptAll` and `rejectAll` return the outcome. The panel's badge counts cards.
+    It takes any `IBaseEditor`, and `TrackChangesDisplayItem` names an item's type.
+  - Changes are named from one table, in the panel and the popover alike:
+    "Paragraph break added" and "removed", "List changed", "Moved", and "Image
+    moved" for an image dragged on its page. `ChangePopoverInfo.moveId` marks
+    either half of a move.
+  - `describeSuggestionRefusal` gives the message and remedy, as
+    `SuggestionRefusalText`, for a refusal passed to `onRefused`.
+
+- ba07451: Lists lay out, print and export like Word's.
+
+  - **Nested lists and multi-block items are drawn.** Layout used to lay out
+    only each list item's first paragraph, so an item nested with Tab, a second
+    paragraph in an item (which Backspace at the start of an item makes), and any
+    text in them vanished from the canvas and the PDF while staying in the
+    document. Every block of an item is now laid out, with the number on its
+    first block — as in Word, even when that paragraph holds only a floating
+    image, which then keeps one line for its number. A heading or code block in
+    an item keeps its own style and painter; a table in an item is indented with
+    it.
+  - **Word's geometry.** Each level's text sits half an inch further in than
+    the level above (the first level half an inch from the margin, where it was a
+    quarter inch), and the marker hangs a quarter inch before the text,
+    left-aligned. The text is never drawn over the number. Existing lists move a
+    quarter inch to the right.
+  - **Lists inside table cells are drawn.** A list in a cell (pasting one
+    there makes one) used to lay out as one empty line, its text never painted
+    on canvas or in PDF. A cell now lays out its blocks as the page body does:
+    numbered, nested, indented and spaced, the number and the first word kept
+    inside even a narrow cell, and a table nested in a cell shows its rows and
+    its bottom border.
+    A block that holds other blocks but is not a list or a table — a custom
+    container, say — lays out the blocks it holds instead of one empty line
+    (and still takes a line when it holds none), unless its node spec declares
+    `layout: { kind: "block" }`, which keeps its own box and the painter it
+    registered.
+  - **No block is indented past an inch from the right margin.** Any block's
+    indent — a deeply nested list, or a paragraph's own `indent` — leaves at
+    least an inch of the line for its text.
+  - **Markers by depth.** Bullets cycle •, ◦, ▪; ordered levels number
+    1. / a. / i., each nested list counting from its own start. Lists nested
+       past nine levels stay at the ninth. A list's start is kept within
+       0–32767 on the page, in copied HTML and in markdown.
+  - **Numbers stay right while editing.** A renumbered item is laid out
+    afresh, so Tab, Shift-Tab and joining items never leave an old number on
+    screen.
+  - **Bullets are drawn as shapes**, on the canvas and in the PDF alike, so a
+    second- or third-level bullet no longer prints as `?` with a standard PDF
+    font. Numbers are drawn in the face and size of the item's first text, past
+    any image that opens the line, on the canvas and in the PDF. Lists in
+    headers and footers draw their numbers again. In the PDF a block's number
+    is drawn once, after its handler, so a custom PDF handler that never calls
+    `draw.lines` keeps it.
+  - **DOCX levels match the screen.** Numbering has nine levels with the same
+    formats, glyphs and indents the editor draws; an item's further blocks
+    export as Word's unnumbered continuation paragraphs, a table in an item with
+    `w:tblInd` and a width that fits the rest of the column, and a sourced block
+    indented with them; list properties are written in schema order.
+
+  **API changes**
+
+  - `@scrivr/core` exports `isListType`, moved here from track changes and
+    now what the list extension, Clear formatting, the semantic exporter and
+    track changes ask.
+  - `ListItemStrategy` is removed, and blocks are no longer relabelled
+    `blockType: "list_item"`. Core draws a block's list marker itself, over
+    whatever painter draws the block, through the new `paintBlock` export —
+    use it in any loop that paints laid-out blocks. **Migration:** a painter
+    registered under `list_item` is never called now; register it under the
+    node type (`paragraph`, …) instead.
+  - `isListType` holds only for a node whose content allows list items and
+    nothing else.
+  - `nodeLayout` now defaults an undeclared node whose content is blocks to
+    `{ kind: "transparent" }`: its blocks lay out in its place.
+    `DEFAULT_NODE_LAYOUT` (`{ kind: "block" }`) is the default for undeclared
+    nodes that hold inline content or nothing. **Migration:** a container node
+    that holds blocks must declare `layout: { kind: "block" }` to keep its
+    registered painter; left undeclared, its painter is never called.
+  - `AvailableSegment.indentFrom` (new) records where a first line started
+    before its indent moved it.
+  - `LineBreaker.breakIntoLines` takes `firstLineMayStayEmpty` (new: a first
+    word that fits only the next line leaves the first line empty, as a list
+    number's push does) and `firstLineIndent` (new: how far the provider's first
+    line is indented, for a line a float starts some way in, so a float's
+    narrowing is told apart from the indent's).
+  - Up and Down step over a line that holds no text: a number left alone on
+    its line, and the gap a full-width image leaves in any paragraph, on the
+    same page or across one.
+  - `DocxContext.textWidthTwips` (new, required): the width of the exported
+    section's text column. Code that builds a `DocxContext` by hand must now
+    set it; contexts from `@scrivr/docx` have it.
+  - `DocxNumberingLevel.format` accepts `"lowerLetter"` and `"lowerRoman"`, and
+    takes optional `left` / `hanging` indents in twips.
+
+- 22fb8f1: A wrapper node shapes the blocks it wraps, and its extension paints the marker
+  it hangs. Lists now lay out and paint through this from `List`, so a task
+  list, legal numbering or a custom bullet is an extension, not an engine change.
+  Lists look and export exactly as before.
+
+  - **`NodeLayout`'s `transparent` kind takes `wrap: WrapperLayout`.** `enter`
+    hands a scope down; `place` is called for each block laid out inside, at any
+    depth, and returns its `indent`, an optional `marker` (`BlockMarker`) and an
+    optional `styleKey`. Indents add up; the innermost marker and style win. A
+    table row inside a wrapper takes its indent through `place`.
+  - **`addMarkerPainters()`** returns `{ [key]: { canvas, pdf } }`, side by side
+    so a marker never ships on one surface only. Canvas and PDF draw from the
+    same anchor, `markerAnchorOf(block)` (`PlacedMarker`).
+  - **A list container from another extension** declares List's wrapper,
+    `layout: { kind: "transparent", wrap: listWrap }`, to be drawn as a list.
+  - **`PdfDrawSurface` gains `ellipse(op: PdfEllipseOp)`**, which a marker painter
+    needs for a disc or ring.
+  - New: `WrapperLayout`, `WrapPlacement`, `WrapScope`, `BlockMarker`,
+    `LaidMarker`, `MarkerFace`, `MarkerPainter`, `PlacedMarker`, `MarkerLine`,
+    `markerAnchorOf`, `listWrap`, `PdfEllipseOp`; `LayoutBlock.marker`;
+    `BlockLayoutOptions.marker`; `BlockRegistry.registerMarkerPainter` and
+    `markerPainter`; `IBaseEditor.getMarkerPainters()`.
+
+  **Breaking:**
+
+  - Removed `LayoutBlock.listMarker` and `listMarkerX`; read
+    `LayoutBlock.marker` (`data` holds a list's bullet or number) and
+    `markerAnchorOf(block)` for where it is drawn.
+  - The `listMarker` theme token is renamed `marker`: the colour of any block
+    marker, a list's included. Same defaults, still resolved per surface, so the
+    PDF keeps its own print theme.
+  - A container holding only `listItem`s that does not declare `listWrap` is no
+    longer drawn as a bullet list; its items lay out as plain blocks.
+  - A custom `PdfDrawSurface` must implement `ellipse`.
+  - `IBaseEditor.getMarkerPainters()` and `ResolvedExtension.markerPainters` are
+    required: an editor double or a hand-built resolved extension must provide
+    them (`new Map()` and `{}` will do).
+
+## 1.0.22
+
+### Patch Changes
+
+- aa8529f: `getActiveFontFamily` can say that a selection is drawn in more than one family.
+
+  It answered from the first run, so a range covering Georgia and Arial named
+  Georgia — confidently, and wrongly for half the text. A reader confirming it from
+  the dropdown restyles everything else in the range, which is the same failure
+  `getActiveFontSize` had.
+
+  `ActiveFontFamily` gains `mixed: boolean`. Additive rather than a new return
+  shape: `requested`, `resolved` and `substituted` keep answering exactly as they
+  did, so a control that does not read `mixed` behaves as before, and one that does
+  shows nothing — the way Word and Google Docs blank a font box over a mixed
+  selection. The playground's family control blanks on it, as its size control
+  already does.
+
+  The only thing an existing consumer can notice is an exact-shape comparison:
+  `toEqual({ requested, resolved, substituted })` now needs the new field. Reading
+  properties is unaffected.
+
+- 297dba9: The AI edit protocol can now change a document's shape, and every node can say
+  what happened to it.
+
+  `applySemanticEdits` handles the six structural ops — `insertBlock`,
+  `deleteBlock`, `insertListItem`, `deleteListItem`, `insertTableRow`,
+  `deleteTableRow` — alongside the inline `richText` edits it already took. Each
+  addresses the document through a `nodeId` the agent was shown plus a side:
+  "an item after this one", never an index or a document position. An id may name
+  a container or the leaf inside it, and ops that act on a container climb to it,
+  because the agent sees leaves.
+
+  Nothing in the adapter marks a change as tracked. The engine already tracks the
+  transactions it sees, so an op's whole job is to resolve an anchor and build a
+  node; a structural batch is one transaction, and so one undo step and one review
+  unit.
+
+  **Every node now declares `dataTracked`.** It was on paragraphs, headings, code
+  blocks and lists, and missing from tables, images, horizontal rules, page breaks,
+  section breaks and hard breaks. A node without it is not rejected by the
+  engine — it is skipped, and the change is either attributed to a neighbour or
+  lost outright. Two consequences were live: inserting an image recorded no change
+  at all, and accepting a suggested table-row deletion left the row behind, empty,
+  because only the text inside it had been marked. A schema test now fails if a
+  node is added without it.
+
+  `insertBlock` and `deleteBlock` act on the document's own flow and now refuse an
+  id that resolves inside a list or a table. They used to climb to the top-level
+  ancestor, so `deleteBlock` on a list item's paragraph — the natural way to say
+  "remove this clause", since the agent is shown leaves — marked the entire list
+  deleted and reported success. `deleteListItem` and `deleteTableRow` are how
+  those are reached.
+
+  Attributes an agent supplies pass the same gate the rich lane already applies,
+  now shared rather than re-derived. An open `attrs` record reaching the document
+  let agent output write `nodeId` — colliding with the ids the protocol addresses
+  by — and `dataTracked`, forging a review history.
+
+  `deleteTableRow` names its target `nodeId`, matching `deleteBlock` and
+  `deleteListItem`. It was `anchorNodeId`, and everywhere else in this protocol an
+  anchor is a neighbour you position against rather than the thing being acted on —
+  an agent reading the three delete ops together would reasonably have concluded it
+  deleted the row beside the one it named.
+
+  **Breaking:** `parseRichEdits` is `parseSemanticEdits` and validates the whole
+  protocol rather than the inline half — a structural edit fed to the old name was
+  rejected as malformed. `applySemanticEdits` no longer returns `unsupported`. The
+  field could never be populated: the union it guarded had one member, and now the
+  schema itself refuses an op it does not define, by name, at parse time. A caller
+  reads `rejected` from the parse instead.
+
+- 24eccf9: An inline node renders because an extension claims it, not because it carries
+  size attributes it does not use.
+
+  Layout decided whether an inline leaf was an object by looking for numeric
+  `width`/`height` attrs. A node with neither produced no span at all — no
+  position in the line, no entry in the character map, no warning. An extension
+  that declared an inline node and an `InlineStrategy` to measure and paint it
+  still got nothing, because the strategy was only consulted _after_ that check
+  had already passed.
+
+  The workaround is in the repo: `pageNumber` declares `width: 7, height: 10`
+  purely to get through the gate, and `measure()` overwrites both immediately.
+  `InlineStrategy.measure`'s own documentation says it lets tokens size
+  themselves "instead of using fixed placeholders" — which the gate made
+  impossible.
+
+  A registered `InlineStrategy` is now enough on its own. Explicit size attrs
+  still work, so nothing that relied on them changes, and structural leaves are
+  unaffected — `hardBreak` is handled by name before this point.
+
+  A leaf that nothing claims is still skipped, because there is nothing honest to
+  lay out, but it now says so once by name rather than disappearing. That silence
+  is how this went unnoticed: the same lane broke once before and images "appeared
+  as blank cursors".
+
+- d4fc43d: Header and footer tokens now reserve the space they actually paint.
+
+  Chrome was measured without an inline registry, so an inline atom in a header
+  fell back to whatever width its node spec declared. `pageNumber` declared 7px:
+  a header read "428" but was laid out as though it read "1", overlapping
+  whatever sat beside it and mispositioning every right-aligned or centred band.
+  The date token was worse — a fixed 60px for a string whose width depends on
+  the locale.
+
+  `MiniPipelineOptions` and `PageChromeMeasureInput` now carry `inlineRegistry`,
+  and `runPipeline` populates it, so a chrome contributor measures its atoms with
+  the same strategies that will paint them. `InlineRegistry` is exported from
+  `@scrivr/core` so an extension can build one.
+
+  Two further fixes to the width itself:
+
+  - Digits were counted with `ceil(log10(n))`, which is one short at every exact
+    power of ten. A ten-page document reserved a single digit and painted two.
+  - The token strategies read the page count from a module context that painting
+    also writes, per page, as it draws. `resolveChrome` now seeds it from the
+    flow layout, so a measurement answers from the document rather than from
+    whichever page was painted last, and reports `stable: false` until it has
+    this run's count — a count remembered from the previous run predates the
+    edit being laid out, and during a streamed load belongs to a partial layout.
+
+  To keep that verification cheap, the chrome aggregator no longer re-paginates
+  when the computed page geometry is unchanged, including header and footer
+  band positions. If measuring tokens wraps a band and changes pagination, the
+  contributors see the new flow before the loop accepts convergence.
+
+  Streamed layout now resumes from a replayable snapshot of both the paginated
+  cursor and continuous-flow cursor. A pass owns its growing page buffers, so
+  retries cannot duplicate body blocks. When chrome changes the saved geometry,
+  layout replays the consumed prefix while preserving the chunk's progress — and
+  publishes a new layout version when it does, since pages already painted have
+  moved and their tiles must repaint before the caret is drawn against them. A
+  partial layout's cached tail is never reused: it has a cutoff rather than a
+  tail, and copying from it would truncate the document at the last chunk.
+
+  Chrome painting now receives the editor's font modifiers through the page
+  renderer. Live header/footer measurement uses the same modifiers as stored
+  measurement, preserving custom token typography and line geometry on entry
+  to editing.
+
+  A band is measured once and painted on every page, so a page number's box used
+  to hold the longest number in the document — page 2 of 1040 read "Page 2"
+  followed by three digits of nothing, where Word lays each page's header out
+  separately and closes the gap. A token is sized as widest-digit times digit
+  count, so the only thing that changes between pages is how many digits the
+  number has; the band is now arranged once per width (four times for a
+  thousand-page document) and painting looks the arrangement up. Canvas and PDF
+  read the same one. The band reserves the maximum height across all measured
+  arrangements: a narrower token can distribute tall inline objects over more
+  lines and need more height than the widest-number arrangement.
+
+  Each band measurement scopes both its page number and document total. A total
+  pages token therefore measures against the document being laid out, even if
+  another document was painted most recently. Nested measurements and exceptions
+  restore the enclosing measurement context without changing paint state.
+
+  Inline atoms are also painted in the font **and fill** their own marks resolve
+  to. An atom carries no text for a decorator to colour, so its marks never
+  reached the renderer: canvas painted it in whatever fill the previous span left
+  — the body's colour in a footer holding only a page number, and the page
+  background on a page whose body painted nothing — while PDF chose a colour of
+  its own. Object spans now carry their marks, both surfaces resolve through the
+  same cascade, and an atom with no colour of its own takes the theme's text
+  colour rather than a leftover.
+
+  New surface for this: `PdfNodeContext` carries `color` — the fill an atom's
+  marks resolved to, in the layout's 0-255 channels — so a PDF node handler
+  passes it through instead of choosing one. `PdfTextOp.color` is now optional
+  and defaults to the document's text colour, which is the rule canvas already
+  applies, so no handler has to name a colour to draw text. Inline atom spans
+  carry their `marks`.
+
+  The font half of the same defect:
+  A token carries no marks of its own, so it is measured in the band's base font
+  while the text beside it is often marked smaller; the strategies draw with
+  whatever font the context holds, so a 14px box was being filled with 10px
+  digits.
+
+  **Breaking (schema):** `pageNumber`, `totalPages` and `date` no longer declare
+  `width`/`height` attrs — their `InlineStrategy` measures them. Persisted
+  documents are unaffected, since ProseMirror ignores attrs a spec does not
+  declare. But `inlineRegistry` is now **required** to lay these tokens out, not
+  merely available: a measurement path that omits it drops them entirely and
+  warns, where it previously reserved a wrong-but-visible box. All in-repo paths
+  pass it; direct callers of `runMiniPipeline` must.
+
+- 80b90e0: A semantic unit can now be recognised in a document it did not come from.
+
+  `unit.id` addresses one block in one document, and `unitContentHash` answers
+  whether that block changed between two versions of the same document — it folds
+  in the breadcrumb for exactly that reason. Neither survives the clause being
+  seen somewhere else, which is the question a corpus asks on ingestion: is this
+  the indemnity I already hold, or a new one?
+
+  `unitContentKey` answers that one. It covers the unit's text alone, NFKC-
+  normalized with whitespace collapsed, so a clause that has been through a DOCX
+  round-trip or re-wrapped still keys the same. It is a companion to `unit.id`,
+  not a replacement: a corpus indexes by both — the instance id to find this block
+  again, the content key to find everywhere else the clause appears.
+
+  The key is SHA-256, added to `@scrivr/core` as `sha256Hex` — sync and
+  dependency-free, because `crypto.subtle` is async and Node's `crypto` is absent
+  in the browser, and an identity key computable on only one side of the wire is
+  not an identity key. The existing `fnv1aHex` stays where it belongs: it compares
+  a block against one prior value of itself, where 32 bits is ample. A corpus key
+  is compared against every key already held, so collisions follow the birthday
+  bound rather than luck — two fee clauses differing only in an amount collide
+  readily at 32 bits — and these documents arrive from counterparties, who are in
+  a position to aim for one.
+
+  It is still only a key. A hash cannot prove equality, so a corpus that acts on a
+  match — merging records, discarding an upload — confirms it by comparing
+  `unitAlignmentInput`, which is published for that purpose.
+
+  NFKC normalization is a deliberate loss of distinction, not just cleanup. It
+  folds the compatibility forms an importer introduces — ligatures, full-width
+  Latin, non-breaking spaces — and in doing so makes `m²` and `m2` the same text.
+  That is the right trade for matching a clause across formats and the wrong basis
+  for asserting two documents are byte-identical.
+
+  It is not a similarity measure. Two clauses differing by a word get unrelated
+  keys, by design; near-duplicate scoring is a separate question and a hash is the
+  wrong tool for it.
+
+  Grouping matters to the answer. A heading and its lede are deliberately one
+  unit, so a grouped unit carries its heading in `text`. Cross-document alignment
+  emits with `groupBlocks: false`, where a heading is its own unit and a clause is
+  keyed on the clause. `unitAlignmentInput` is exported alongside so a consumer
+  can see precisely what the key covers.
+
+  The rich lane now publishes its preimages too — `unitRichInput` and
+  `semanticPartRichInput`, the values `unitRichHash` and `semanticPartRichHash`
+  already hashed. A digest says a leaf changed; the preimage says which run did,
+  which is what a formatting-aware diff needs. Both are extracted from the hash
+  functions rather than restated, so the preimage and the digest cannot drift, and
+  both return named types — `UnitRichInput` and `SemanticPartRichInput` — so a
+  consumer reads `.spans` rather than asserting its way past the return type.
+
+- 0332bcc: Per-editor state belongs to the editor, not to a configured extension.
+
+  Six extensions kept per-editor state in a map keyed by their own options object.
+  Options identify a _configured extension_, and one of those can serve several
+  editors — configure once, mount twice is the ordinary split-view shape. So the
+  second editor overwrote the first's entry, a seeding hook reset it on every
+  construction, and teardown nulled it for everyone.
+
+  `Collaboration` stored its Y binding that way, read by undo, redo and three
+  keymap handlers: undo in one pane drove the other pane's history, building a
+  second pane left the first with no binding at all, and closing either pane
+  disarmed its sibling. The binding moves into `collaborationRegistry`, which was
+  already keyed by the editor and already documented as such.
+
+  `PdfExport`, `DocxExport`, `DocxImport` and `SemanticExport` each stored _the
+  editor itself_ the same way — so `exportPdf` in one pane saved the other pane's
+  document, and `importDocxFromFile` **wrote** into it. All four now read
+  `this.editor()`, which resolves per editor, so the map, the `InstanceState`
+  type, the seeding plugin and the registration hook all delete. `PdfExport` needs an
+  editor with a layout pipeline, which is now a runtime check on what the export
+  actually calls — so any `IEditor` qualifies, not only the concrete browser
+  `Editor` the old view-only hook required.
+
+  `Image` held the same map with nothing reading it — its `onViewReady` already
+  returned the cleanup it needed. Removed.
+
+  `CollabState` gains a required `binding`, which a host names as
+  `CollabState["binding"]`. Teardown now deletes the editor's registry entry
+  instead of mutating a shared one.
+
+  Two behaviour changes worth knowing. These commands reach their editor through
+  `this.editor()`, which throws when an `ExtensionManager` was built without one,
+  where the old lookup returned `undefined` and the command returned `false` — no
+  production path builds an editorless manager, so this is latent rather than
+  something that happens today. And `exportPdf` now warns on the path it refuses,
+  the way `exportDocx` and `exportSemantic` already did, instead of returning
+  `false` silently.
+
+- 654c043: An extension declares the slash entries that insert what it owns.
+
+  The slash menu hard-coded its formatting entries in the React hook and asked the
+  source providers directly, so an extension could not contribute to the menu that
+  inserts its own node — the one contribution of its kind that `addToolbarItems`
+  and `addNodeActions` already had.
+
+  `addSlashCommands()` returns `SlashCommandContribution[]`, each with optional
+  `items` (known up front, paints on the first frame) and `resolve` (query-driven
+  I/O, the only half that needs a spinner). A list rather than one contribution, so
+  an extension fronting several sources gives each its own resolver.
+  `getSlashCommands()` and `resolveSlashCommands(query, signal)` read them back,
+  merged by `group` then `order` — groups in the order first contributed, so
+  renaming one does not reorder the menu.
+
+  `SlashCommandSpec` is data only, like `ToolbarItemSpec`: `id`, `label`,
+  `description?`, `group?`, `order?`, `command`, `args?`. A command name and
+  arguments, never a closure. The eight built-in entries now come from `Heading`,
+  `List`, `CodeBlock` and `HorizontalRule`, and the heading entries follow the
+  configured `levels` — a kit built with fewer no longer offers entries it cannot
+  honour. The spec carries no icon, because Scrivr contributes no renderer; the
+  React menu keys a glyph off the command name, as the playground toolbar already
+  does.
+
+  A resolver that rejects is dropped from the round with a warning and the others
+  still answer: one source being down must not empty a menu whose formatting
+  entries are fine. `signal` is required, and is checked both before the resolvers
+  run and after they answer, so a resolver that ignores it still cannot replace the
+  entries for the query the author is now on.
+
+  `insertSourcedBlockFromSource({ kind, resourceId, versionId })` resolves through
+  `provider.fetch` and delegates to `insertSourcedBlock`, so a menu entry can be
+  identity rather than content — without it the contribution would have to be a
+  callback. `SourcedBlockExtension` contributes one resolver per provider, and
+  `SourceProvider.search` runs for the first time.
+
+  `editor.deferEdit({ at, work, edit, onAbandoned })` is the seam for async work
+  that ends in an edit. It captures a position, maps it through everything that
+  happens while the work runs, and abandons with a reason — `anchor-removed`,
+  `read-only`, `destroyed`, `failed`, `edit-failed` — rather than writing blind.
+  `insertSourcedBlockFromSource` is its first consumer: without it a clause chosen
+  from the menu replaced whatever the author had selected while it loaded.
+  `insertSourcedBlock` gains an optional `at`, resolved through `insertPoint`.
+
+  `ExtensionContext` carries an `editor()` thunk, so a contribution that must act
+  after an await can reach the editor it belongs to. Three extensions had each
+  invented a `WeakMap` keyed on their options object, which identifies the
+  configured extension rather than the editor — one instance shared by two editors
+  inserted into the wrong document. `addInitialDoc`'s context no longer inherits
+  it, because that phase genuinely runs before an editor exists.
+
+  `SlashMenuItem` carries the spec's `id` and `group` through to the renderer, and
+  the React menu debounces its searches, clears the previous query's entries up
+  front instead of leaving them selectable, and asks no resolver when a host
+  supplies its own `items`.
+
+  `editor.runCommand(name, args)` dispatches a declared spec by name. Doing that
+  through `commands` means spreading `unknown[]` into a union of fixed-arity
+  signatures, which only typechecks behind a cast; the playground had grown one and
+  it is deleted here.
+
+- 24abe2c: The link popover, and the commands it calls, act on exactly the link the caret is in.
+
+  - **The popover's range is one link.** In a paragraph with two or more links, `LinkPopoverInfo.from`/`to` used to cover everything from the first link to the last. So saving an edited href (`@scrivr/react`'s `LinkPopover`, or `setLinkHref(info.from, info.to, …)`) relinked all of them, and the plain text between them, to the new href. The range now ends where the href changes, so two adjacent links with different hrefs are two links. A one-character link now opens the popover when the caret sits just past it.
+  - **`unsetLink` removes whole links, as Word's Remove Hyperlink does.** A caret removes the link it is in, and a selection removes every link it touches, not just the selected part. It used to remove over the selection only, so with a caret the popover's Unlink button did nothing. It returns `false` when there is no link to remove.
+  - **`setLinkHref` keeps the link's `title`.** It used to reset it to `null`.
+
+- 297dba9: Agent-proposed formatting is held to the document's own rules.
+
+  `resolveInlineMark` is the one place that decides what an agent's mark may be,
+  and it now refuses review marks and strips `dataTracked` from the ones it
+  allows. Proposed formatting said how text should read; it could also say who
+  reviewed it and when, which let agent output sign a change as another author.
+
+  Marks are also resolved against the textblock that will hold them. A bold run
+  proposed for a code block — which allows no marks — used to survive until
+  dispatch and then throw, taking the whole batch with it; the words land
+  unstyled instead, which is what the proposal meant.
+
+  Formatting comparison runs on one canonical description (`describeInlineMark`),
+  so bookkeeping a document carries and a proposal does not can no longer read as
+  a difference. Restating a block's existing formatting is not a suggestion.
+
+  Tracked formatting is applied with explicit suggestion intent rather than by
+  relying on the engine's ambient status. `mode: "tracked"` on an editor whose
+  tracking is switched off — the default — wrote formatting permanently, with no
+  review record to reject.
+
+  Table row inserts derive width from the grid and the row's spans rather than
+  counting physical cells, so a row anchored to a merged cell no longer drops the
+  content past the first column. Deleting the last child of a list or table
+  removes the container instead of leaving an empty one behind.
+
+- 490abaf: `toDocumentOutline` — the section hierarchy the headings imply.
+
+  `toSemanticUnits` answers an ordered flat list, which states the document's
+  structure without describing it. Every consumer that wanted a navigable outline
+  rebuilt one: opening and closing sections on heading level, threading ancestor
+  titles, naming the content that precedes the first real heading. Each of those
+  is a judgement about what a section is, made by a consumer rather than by the
+  editor that owns the structure — so two places could disagree.
+
+  Three rules now live with the editor: content before the first heading is a
+  section and needs a name; a heading closes every open section at its level or
+  deeper; a section's range is heading-inclusive and ends where the next one
+  opens, so an outer section contains its children's range.
+
+  Each `OutlineSection` carries `id`, `parentId`, `heading`, `headingNodeId`,
+  `level`, `path`, and a `startUnit`/`endUnit` range into the same unit list.
+  `headingNodeId` is null exactly when the section covers content preceding the
+  first heading — there is no heading block to anchor a citation to, and the
+  absence says so without a second flag. The name for that section is the
+  `untitledHeading` option, because it is text a reader sees in a language only
+  the host knows.
+
+  Deterministic from the same units: every id is a unit's own anchor, so two
+  reads of an unchanged document return the same sections and a cached chunk
+  anchor keeps resolving. Nesting depth is read from the breadcrumb the walker
+  already threads rather than re-derived from heading levels, so a section's path
+  and its units' breadcrumbs cannot drift apart.
+
+- 8098340: Three capabilities a consuming application could not build on its own.
+
+  **Doc attrs across a storage boundary.** `seedDocAttrs` and `readDocAttrs` move a
+  document's own attributes between a plain `attrs` object and a `Y.Doc`. The live
+  binding already syncs them between peers through a map beside the content
+  fragment, which is the whole answer for a host that persists the `Y.Doc` — but a
+  host that persists a ProseMirror-JSON projection had no route in or out, because
+  both conversions walk the fragment's children and `doc.attrs` has no
+  representation in a `Y.XmlFragment` at all. A `.docx` imported with a header lost
+  it the first time the document was opened, and the save after wrote the schema's
+  nulls over the import.
+
+  Seed before the room is live or after it has synced, never in between: the
+  "leave what the room holds alone" check reads the local `Y.Doc`, which knows
+  nothing of a server value still in flight, and Yjs settles two concurrent sets by
+  client id rather than by which is newer. Seeding carries only attrs the reader's
+  extensions declare — which means the editor supplying those names must carry the
+  extensions that own them —
+  skips null values — every document offers one for every declared key, and writing
+  those syncs an absence over a real policy — and leaves keys the room already
+  holds alone, since the room may have been restored from cache before the
+  projection was consulted. `DOC_ATTRS_MAP_NAME` and `isDocAttrEnvelope` are both exported and both now have
+  one owner: the map was named in three places, and the shape had a second, looser
+  check that accepted envelopes the live sync refuses — so a value the editors
+  ignored was being persisted as real state and resurrected on every load.
+
+  **`getActiveFontSize()`.** The counterpart to `getActiveFontFamily`, resolving
+  inline mark then block style the way the family resolves through mark, attr and
+  page config. Styled from the textblock the cursor is in rather than its top-level
+  ancestor, so a heading inside a table cell reports a heading's size — the
+  ancestor is the table, which has no style of its own.
+
+  Returns `null` when the selection spans more than one size. Answering from the
+  first run would name a size the rest of the selection is not drawn at, and a
+  reader confirming it resizes everything else — so the control goes blank, which
+  is what Word and Google Docs do. The playground reads this instead of
+  re-deriving the rule with a hardcoded default, and blanks its box accordingly. A size control previously had to read the `fontSize` mark itself and
+  got `undefined` for every run without one — which is most runs, since a run with
+  no mark still renders at the block style's size — so the control showed "unset"
+  over text the document plainly draws at a size. Always returns a number, because
+  a control needs a value to show.
+
+  **`inlineRegistry` on `BaseEditor`.** Layout reaches an inline node's strategy
+  through a registry the caller supplies, and the registry lived on `Editor` only —
+  so a `ServerEditor` had nothing to pass. `measure()` never ran, the span carried
+  no resolved face, and a PDF node handler that draws its own text was given no
+  font to draw it in. An atom that sizes itself from a font was exactly the case
+  that could not work headlessly. `InlineStrategy.render` still takes a canvas
+  context and stays browser-only: the box is layout, the paint is a surface.
+
+- bb357f6: The modified-clause gutter bar now sits in the page's left margin, beside its sourced block and only that block. It used to be drawn beside the last character of the block before it, and it stretched over a horizontal rule or image next to the block. When a block runs onto the next page, each page shows a bar for only its own part of the block, instead of one bar that crossed the text, and a middle page of a block spanning three or more pages now has its bar. A sourced block inside a table cell gets its bar too.
+
+  - **Changed:** a sourced block with no `baseHash` (`null`, or the `""` that earlier DOCX imports wrote) is never modified, edited or not. With no recorded base there is nothing to compare against. Such blocks no longer show the bar, no longer appear in `sourcedBlockDivergenceKey`'s `diverged` set, and no longer report `modified: true` to `onInstanceChanged`. `collectSourcedBlocks` reports their `baseHash` as `null`, `""` included. To track edits on one, give it a `baseHash` from `computeBlockHash`. No event fires for a block's state when a document opens, so a host that stored `modified: true` for such a block should re-read it from `diverged` on load.
+  - `SourcedBlockExtension`'s DOCX importer keeps a missing `baseHash` as `null` instead of writing `""`.
+  - A table cell lays out a node declared `layout: { kind: "transparent" }` as its children, as the body flow does. A sourced block in a cell used to lay out as one box.
+
 ## 1.0.21
 
 ### Patch Changes

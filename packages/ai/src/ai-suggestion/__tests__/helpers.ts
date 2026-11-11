@@ -82,14 +82,18 @@ const AiSuggestionTestExtension = Extension.create({
  * `showAiSuggestion` / `applyAiSuggestion` / `rejectAiSuggestion`.
  */
 export class AiTestEditor extends ServerEditor {
-  constructor(initialDoc: PmNode, authorID = "user1") {
+  /**
+   * `trackChanges: false` drops the extension entirely — the shape a host that
+   * uses the suggestion lane without review gets, where a tracked apply has no
+   * tracked mark to write with.
+   */
+  constructor(initialDoc: PmNode, authorID = "user1", options: { trackChanges?: boolean; canAcceptReject?: boolean } = {}) {
     super({
       extensions: [
         StarterKit,
-        TrackChanges.configure({
-          userID: authorID,
-          initialStatus: TrackChangesStatus.enabled,
-        }),
+        ...(options.trackChanges === false
+          ? []
+          : [TrackChanges.configure({ userID: authorID, initialStatus: TrackChangesStatus.enabled, canAcceptReject: options.canAcceptReject ?? false })]),
         AiSuggestionTestExtension,
       ],
       content: initialDoc.toJSON() as Record<string, unknown>,
@@ -110,11 +114,31 @@ export class AiTestEditor extends ServerEditor {
     showAiSuggestion(this, suggestion);
   }
 
-  apply(options: ApplyAiSuggestionOptions): void {
-    applyAiSuggestion(this, options);
+  apply(options: ApplyAiSuggestionOptions): boolean {
+    return applyAiSuggestion(this, options);
   }
 
   reject(options?: RejectAiSuggestionOptions): void {
     rejectAiSuggestion(this, options);
   }
+}
+
+/** Text carrying a given mark — how a reader would see a formatting change. */
+export function markedText(editor: ServerEditor, markName: string): string {
+  let out = "";
+  editor.getState().doc.descendants((node) => {
+    if (node.isText && node.marks.some((m) => m.type.name === markName)) out += node.text;
+  });
+  return out;
+}
+
+/**
+ * Moves the first block to the end as a tracked move. The deleted copy it
+ * leaves stays first, so a resolver taking the first match by id finds it.
+ */
+export function moveFirstBlockToEnd(editor: ServerEditor): void {
+  const state = editor.getState();
+  const first = state.doc.child(0);
+  const tr = state.tr.delete(0, first.nodeSize);
+  editor.applyTransaction(tr.insert(tr.doc.content.size, first));
 }

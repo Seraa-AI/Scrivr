@@ -1,10 +1,13 @@
+import type { HoverResolver } from "../../hover/types";
+import type { NodeAction, NodeActionContext, NodeActionContribution } from "../../selection/types";
 import { Extension } from "../Extension";
 import { TextSelection } from "prosemirror-state";
 import type { Command } from "prosemirror-state";
 import type { Node, NodeSpec, Schema } from "prosemirror-model";
 import type { IEditor } from "../types";
 import { KeymapPriority } from "../types";
-import { TableRowStrategy } from "../../renderer/TableRowStrategy";
+import { tableRowPainter } from "../../table/rowPainter";
+import { tableLayout } from "../../table/layout";
 import { tableIntegrityPlugin } from "../../table/normalize";
 import {
   tabToNextCell,
@@ -23,7 +26,7 @@ import { renderTableRowPdf } from "../../table/pdfExport";
 import { tableDocxExportHandlers } from "../../table/docxExport";
 import { tableDocxImportHandlers } from "../../table/docxImport";
 import { tableSemanticHandler } from "../../table/semanticExport";
-import { expandRowSpans } from "../../table/clipboardHtml";
+import { collapseRowSpans, expandRowSpans } from "../../table/clipboardHtml";
 import {
   readGridSpan,
   readCellHAlign,
@@ -52,18 +55,22 @@ import {
  *   - Word-shaped schema for `table` / `tableRow` / `tableCell` / `tableHeader`.
  *   - `insertTable({ rows, cols })` / `deleteTable()` + row/column structural
  *     commands and cell navigation.
- *   - Real canvas cell layout + rendering (TableRowStrategy) and PDF/DOCX parity.
+ *   - Real canvas cell layout (a composite: rows are units, cells regions),
+ *     row painting (tableRowPainter) and PDF/DOCX parity.
  *   - PageLayout dispatches each row as an atomic block (whole-row pagination).
  *   - `tableIntegrityPlugin()` — document-validity normalization on every
  *     doc-changing transaction (grid/gridSpan/vMerge repair, row padding).
  *   - `tableEditingGuards()` — editing-UX layer: Tab/Shift-Tab cell navigation
- *     (Tab past the last cell appends a row), Backspace/Delete cell-boundary
- *     guards, and paste distribution into a multi-cell selection.
+ *     (Tab past the last cell appends a row) and Backspace/Delete cell-boundary
+ *     guards. A cell selection deletes itself (`CellSelection.replace`):
+ *     cut, Delete and typing empty its cells and keep the grid.
  *   - HTML clipboard round trip: spans, column widths, alignment, and fill
  *     survive a copy in either direction, including to and from Word.
  *
  * What is intentionally deferred:
  *   - Cell merge/split commands — Phase 6.
+ *   - Pasting cells across a multi-cell selection; today the paste goes into
+ *     its top-left cell — Phase 7.
  *   - Markdown export — Phase 8.
  */
 
@@ -128,6 +135,8 @@ function tableSpec(): NodeSpec {
     group: "block",
     content: "tableRow+",
     isolating: true,
+    // Laid out as a composite: each row a unit, each cell a region.
+    layout: { kind: "composite", composite: tableLayout },
     // A selection that spans the table washes its cells (tableCellWashHandler),
     // so the text behavior defers the table's interior instead of banding it.
     selectionWash: true,
@@ -135,6 +144,11 @@ function tableSpec(): NodeSpec {
       layout: { default: "fixed" },
       grid: { default: [] as number[] },
       nodeId: { default: null },
+      // Tracked-change bookkeeping, as every other block node declares it. A
+      // table node that cannot hold it is invisible to node-level tracking:
+      // a suggested row deletion marks only the text inside, and accepting it
+      // empties the row instead of removing it.
+      dataTracked: { default: [] },
     },
     parseDOM: [{ tag: "table", getAttrs: parseTableAttrs }],
     toDOM(node) {
@@ -153,6 +167,7 @@ function tableRowSpec(): NodeSpec {
       repeatHeader: { default: false },
       allowBreakAcrossPages: { default: false },
       nodeId: { default: null },
+      dataTracked: { default: [] },
     },
     parseDOM: [{ tag: "tr", getAttrs: parseNodeId }],
     toDOM(node) {
@@ -172,6 +187,7 @@ function cellAttrs(): NonNullable<NodeSpec["attrs"]> {
     margins: { default: null },
     borders: { default: null },
     nodeId: { default: null },
+    dataTracked: { default: [] },
   };
 }
 
@@ -335,6 +351,60 @@ export const Table = Extension.create({
     return [cellHitTester];
   },
 
+  addHoverResolvers(): HoverResolver[] {
+    return [
+      { node: "tableCell", kind: "table-cell" },
+      { node: "tableHeader", kind: "table-cell" },
+      { node: "table", kind: "table" },
+    ];
+  },
+
+  addNodeActions(): NodeActionContribution[] {
+    // Hidden, not disabled, in a read-only editor: none of them could ever run.
+    const editable = ({ readOnly }: NodeActionContext) => !readOnly;
+    const structure = (
+      id: string,
+      command: "addRowBefore" | "addRowAfter" | "deleteRow" | "addColumnBefore" | "addColumnAfter" | "deleteColumn",
+      label: string,
+      title: string,
+      order: number,
+    ): NodeAction => ({
+      id,
+      label,
+      title,
+      group: "structure",
+      order,
+      when: editable,
+      run: ({ editor }) => {
+        editor.runCommand(command);
+      },
+    });
+    return [
+      {
+        kind: "table-cell",
+        actions: [
+          structure("table.addRowBefore", "addRowBefore", "Row ↑", "Insert row above", 10),
+          structure("table.addRowAfter", "addRowAfter", "Row ↓", "Insert row below", 20),
+          structure("table.deleteRow", "deleteRow", "− Row", "Delete row", 30),
+          structure("table.addColumnBefore", "addColumnBefore", "Col ←", "Insert column left", 40),
+          structure("table.addColumnAfter", "addColumnAfter", "Col →", "Insert column right", 50),
+          structure("table.deleteColumn", "deleteColumn", "− Col", "Delete column", 60),
+          {
+            id: "table.delete",
+            label: "Delete table",
+            title: "Delete the whole table",
+            group: "table",
+            danger: true,
+            when: editable,
+            run: ({ editor }) => {
+              editor.runCommand("deleteTable");
+            },
+          },
+        ],
+      },
+    ];
+  },
+
   addSelectionGesture() {
     return [cellSelectionGesture];
   },
@@ -344,6 +414,12 @@ export const Table = Extension.create({
   // point where the covered rows can still be identified.
   addPasteHtmlTransforms() {
     return [expandRowSpans];
+  },
+
+  // The reverse on the way out: a merge leaves as one `rowspan` cell, the
+  // markup other editors read.
+  addCopyHtmlTransforms() {
+    return [collapseRowSpans];
   },
 
   onViewReady(editor: IEditor) {
@@ -379,7 +455,7 @@ export const Table = Extension.create({
   },
 
   addLayoutHandlers() {
-    return { tableRow: TableRowStrategy };
+    return { tableRow: tableRowPainter };
   },
 
   addToolbarItems() {
@@ -393,6 +469,17 @@ export const Table = Extension.create({
         isActive: () => false,
       },
     ];
+  },
+
+  addMarkdownParserTokens() {
+    return {
+      table: { block: "table" },
+      thead: { ignore: true },
+      tbody: { ignore: true },
+      tr: { block: "tableRow" },
+      th: { block: "tableHeader" },
+      td: { block: "tableCell" },
+    };
   },
 
   addMarkdownSerializerRules() {

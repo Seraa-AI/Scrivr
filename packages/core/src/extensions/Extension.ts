@@ -74,14 +74,25 @@ export class Extension<Options extends object = object> {
    * @param schema — the fully built ProseMirror Schema.
    *                 Required for Phase 2 callbacks. Omit during schema-build phase.
    */
-  resolve(schema?: Schema): ResolvedExtension {
+  resolve(schema?: Schema, editor?: () => IBaseEditor): ResolvedExtension {
     const { config, name, options } = this;
 
     // Phase 1 context — options available, schema not yet built
     const p1: Phase1Context<Options> = { name, options };
 
     // Phase 2 context — schema now available
-    const p2: ExtensionContext<Options> = { name, options, schema: schema! };
+    const p2: ExtensionContext<Options> = {
+      name,
+      options,
+      schema: schema!,
+      editor:
+        editor ??
+        (() => {
+          throw new Error(
+            `Extension "${name}": no editor owns this manager, so a contribution cannot reach one`,
+          );
+        }),
+    };
 
     return {
       name,
@@ -126,18 +137,22 @@ export class Extension<Options extends object = object> {
       // Phase 3/4: options available, no schema needed
       layoutHandlers: config.addLayoutHandlers?.call(p1) ?? {},
       inlineHandlers: config.addInlineHandlers?.call(p1) ?? {},
+      markerPainters: config.addMarkerPainters?.call(p1) ?? {},
       blockStyles: config.addBlockStyles?.call(p1) ?? {},
       markDecorators: new Map(Object.entries(config.addMarkDecorators?.call(p1) ?? {})),
       fontModifiers: config.addFontModifiers?.call(p1) ?? new Map(),
       toolbarItems: config.addToolbarItems?.call(p1) ?? [],
+      slashCommands: config.addSlashCommands?.call(p1) ?? [],
       nodeActions: config.addNodeActions?.call(p1) ?? [],
       selectionBehaviors: config.addSelectionBehavior?.call(p1) ?? [],
       hitTesters: config.addHitTester?.call(p1) ?? [],
+      hoverResolvers: config.addHoverResolvers?.call(p1) ?? [],
       selectionGestures: config.addSelectionGesture?.call(p1) ?? [],
       inputHandlers: config.addInputHandlers?.call(p1) ?? {},
-      markdownRules: config.addMarkdownRules?.call(p1) ?? [],
       pasteTransforms: config.addPasteTransforms?.call(p1) ?? [],
       pasteHtmlTransforms: config.addPasteHtmlTransforms?.call(p1) ?? [],
+      copyHtmlTransforms: config.addCopyHtmlTransforms?.call(p1) ?? [],
+      pasteFiles: config.addPasteFiles?.call(p1) ?? {},
       inputRules: schema ? (config.addInputRules?.call(p2) ?? []) : [],
       markdownParserTokens: config.addMarkdownParserTokens?.call(p1) ?? {},
       markdownSerializerRules: config.addMarkdownSerializerRules?.call(p1) ?? {},

@@ -56,9 +56,9 @@ export interface EditorTheme {
   /** Image placeholder text (alt label). */
   imagePlaceholderText?: string;
 
-  // Block / list / horizontal rule
-  /** Bullet/number color in lists. */
-  listMarker?: string;
+  // Block markers / horizontal rule
+  /** Fill of a block's marker: a list's bullets and numbers. */
+  marker?: string;
   /** Horizontal rule stroke color. */
   hrColor?: string;
 
@@ -89,7 +89,7 @@ export interface ResolvedTheme {
   imagePlaceholderBg: string;
   imagePlaceholderBorder: string;
   imagePlaceholderText: string;
-  listMarker: string;
+  marker: string;
   hrColor: string;
   resizeHandle: string;
   divergedGutter: string;
@@ -107,7 +107,7 @@ export interface ResolvedTheme {
  * - cursor: slate-800 — OverlayRenderer cursor fill
  * - selectionFill: blue-500 @ 25% — OverlayRenderer selection rect
  * - imagePlaceholderBg / Border / Text: slate-100 / 300 / 500 — Image.ts
- * - listMarker: slate-800 — ListItemStrategy bullet/number fill
+ * - marker: slate-800 — List's bullets and numbers (extensions/built-in/listLayout.ts)
  * - hrColor: slate-300 — HorizontalRule.ts HR_COLOR
  * - resizeHandle: blue-500 — ResizeController.ts HANDLE_COLOR
  */
@@ -121,7 +121,7 @@ export const defaultEditorTheme: ResolvedTheme = Object.freeze({
   imagePlaceholderBg: "#f1f5f9",
   imagePlaceholderBorder: "#cbd5e1",
   imagePlaceholderText: "#64748b",
-  listMarker: "#1e293b",
+  marker: "#1e293b",
   hrColor: "#cbd5e1",
   resizeHandle: "#3b82f6",
   divergedGutter: "#fbbf24",
@@ -145,7 +145,7 @@ export const defaultPdfTheme: ResolvedTheme = Object.freeze({
   imagePlaceholderBg: "#f5f5f5",
   imagePlaceholderBorder: "#cccccc",
   imagePlaceholderText: "#666666",
-  listMarker: "#000000",
+  marker: "#000000",
   hrColor: "#999999",
   resizeHandle: "#000000",
   divergedGutter: "#fbbf24",

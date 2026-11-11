@@ -3,14 +3,17 @@
  *
  * Renders a block-type picker below the cursor when the user types "/" at
  * the start of a text block. Supports keyboard navigation (↑↓ Enter Escape)
- * and filters items as the user continues typing.
+ * and filters items as the user continues typing. Entries come from the
+ * editor's extensions; those a provider has to search for are appended as
+ * they arrive.
  *
  * @example
  *   <SlashMenu editor={editor} />
  *
- *   // Custom items:
+ *   // Replacing the entries entirely:
  *   <SlashMenu editor={editor} items={[
- *     { label: "H1", title: "Heading 1", description: "Large title", command: "setHeading1" },
+ *     { id: "my.h1", label: "H1", title: "Heading 1", description: "Large title",
+ *       action: () => editor.commands.setHeading1() },
  *   ]} />
  */
 import { createPortal } from "react-dom";
@@ -20,7 +23,7 @@ import { useSlashMenu, type SlashMenuItem } from "../hooks/useSlashMenu";
 
 export interface SlashMenuProps {
   editor: Editor | null;
-  /** Override the default block items. If omitted, a typed default list is built from editor.commands. */
+  /** Replace the entries entirely. If omitted, they come from the editor's extensions. */
   items?: SlashMenuItem[];
   className?: string | undefined;
   itemClassName?: string | undefined;
@@ -65,7 +68,7 @@ export function SlashMenu({
       ) : (
         menu.items.map((item, i) => (
           <button
-            key={item.title}
+            key={item.id ?? item.title}
             className={cx("scrivr-menu-item", itemClassName)}
             data-active={i === menu.activeIndex ? "" : undefined}
             onMouseDown={(e) => {

@@ -91,12 +91,17 @@ export function AiSuggestionPopover({
           </div>
         </div>
       )}
+      {popover.isFormatting && (
+        <div className={cx("scrivr-menu-description", descriptionClassName)} data-part="description" style={previewStyle}>
+          Reformatting: <em>"{popover.info.formattedText}"</em>
+        </div>
+      )}
       {popover.isPureInsert && (
         <div className={cx("scrivr-menu-description", descriptionClassName)} data-part="description" style={previewStyle}>
           Adding: <em>"{popover.info.insertedText}"</em>
         </div>
       )}
-      {!popover.isReplacement && !popover.isPureInsert && popover.info.replacedText && (
+      {!popover.isReplacement && !popover.isPureInsert && !popover.isFormatting && popover.info.replacedText && (
         <div className={cx("scrivr-menu-description", descriptionClassName)} data-part="description" style={previewStyle}>
           Removing: <em>"{popover.info.replacedText}"</em>
         </div>

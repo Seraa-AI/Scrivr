@@ -77,6 +77,12 @@ describe("assignBlockIds — idempotency", () => {
     expect(typeof ids[1]).toBe("string");
     expect(ids[1]).not.toBe("fixed-id-1");
   });
+
+  it("stamps a block whose id is empty, which counts as none", () => {
+    const [id] = collectIds(assignBlockIds(doc(paragraph("a", { nodeId: "" }))));
+    expect(typeof id).toBe("string");
+    expect(id).not.toBe("");
+  });
 });
 
 describe("assignBlockIds — generator override", () => {
