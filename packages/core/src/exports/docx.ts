@@ -474,6 +474,8 @@ export interface DocxSdtInline {
   tag: string | null;
   /** `w:showingPlcHdr` — the content is placeholder text, not a value. */
   placeholder: boolean;
+  /** A dropdown or combo box's choices (`w:listItem/@w:value`), in order. */
+  listItems: string[];
   content: DocxInline[];
   marks: DocxMark[];
 }

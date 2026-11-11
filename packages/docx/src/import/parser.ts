@@ -446,9 +446,22 @@ function parseInlineSdt(el: OoxmlElement, diag: ParserDiagnostics): DocxInline {
     type: "sdt",
     tag: (tagEl && attr(tagEl, "w:val")) ?? null,
     placeholder: sdtPr ? findChild(sdtPr, "w:showingPlcHdr") !== undefined : false,
+    listItems: sdtPr ? sdtListItems(sdtPr) : [],
     content: contentEl ? parseParagraphInlines(contentEl, diag) : [],
     marks: [],
   };
+}
+
+function sdtListItems(sdtPr: OoxmlElement): string[] {
+  const list = findChild(sdtPr, "w:dropDownList") ?? findChild(sdtPr, "w:comboBox");
+  if (!list) return [];
+  const values: string[] = [];
+  for (const item of list.children) {
+    if (typeof item === "string" || item.name !== "w:listItem") continue;
+    const value = attr(item, "w:value") ?? attr(item, "w:displayText");
+    if (value !== undefined) values.push(value);
+  }
+  return values;
 }
 
 function buildHyperlinkMark(hyperlink: OoxmlElement): DocxMark {

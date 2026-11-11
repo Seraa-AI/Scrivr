@@ -7,6 +7,14 @@ import type { PdfNodeHandler } from "../../exports/pdf";
 import { compositeColor, parseCssColor, type Rgb } from "../../model/cssColor";
 import type { ResolvedTheme } from "../../model/theme";
 import {
+  BUILT_IN_FIELD_KINDS,
+  controlOf,
+  fieldCaption,
+  type FieldKind,
+  type FieldKinds,
+  type FieldOptions,
+} from "./fieldKinds";
+import {
   fieldBlockDocx,
   fieldBlockImport,
   fieldDocx,
@@ -24,8 +32,6 @@ import {
   type InsertFieldRangeOptions,
 } from "./fieldRange";
 
-export type FieldKind = "signature" | "initials" | "date" | "text" | "checkbox";
-
 /** Who fills a control: the author while drafting, or a signer after the seal. */
 export type FieldFill = "author" | "signer";
 
@@ -37,6 +43,8 @@ export interface InsertFieldOptions {
   required?: boolean;
   width?: number;
   height?: number;
+  /** The choices a dropdown offers. Required for one. */
+  options?: string[];
 }
 
 /** A field a signer completes, as the host needs it to assign people to roles. */
@@ -46,27 +54,6 @@ export interface SignerFieldDescriptor {
   kind: FieldKind;
   required: boolean;
 }
-
-const KINDS: readonly FieldKind[] = ["signature", "initials", "date", "text", "checkbox"];
-
-const isKind = (value: unknown): value is FieldKind =>
-  typeof value === "string" && KINDS.some((kind) => kind === value);
-
-const SIZES: Record<FieldKind, { width: number; height: number }> = {
-  signature: { width: 180, height: 44 },
-  initials: { width: 64, height: 36 },
-  date: { width: 110, height: 24 },
-  text: { width: 160, height: 24 },
-  checkbox: { width: 16, height: 16 },
-};
-
-const LABELS: Record<FieldKind, string> = {
-  signature: "Signature",
-  initials: "Initials",
-  date: "Date",
-  text: "Text",
-  checkbox: "",
-};
 
 /**
  * The signer fields in a document, in reading order — what a host assigns
@@ -78,7 +65,7 @@ export function listSignerFields(doc: PmNode): SignerFieldDescriptor[] {
   doc.descendants((node) => {
     if (node.type.name !== "field" || node.attrs["fill"] !== "signer") return true;
     const { nodeId, role, kind, required } = node.attrs;
-    if (typeof nodeId === "string" && typeof role === "string" && isKind(kind)) {
+    if (typeof nodeId === "string" && typeof role === "string" && typeof kind === "string") {
       fields.push({ id: nodeId, role, kind, required: required === true });
     }
     return false;
@@ -86,23 +73,27 @@ export function listSignerFields(doc: PmNode): SignerFieldDescriptor[] {
   return fields;
 }
 
-function insertField(options: InsertFieldOptions): Command {
+function insertField(options: InsertFieldOptions, kinds: FieldKinds): Command {
   return (state, dispatch) => {
     const type = state.schema.nodes["field"];
-    if (!type) return false;
-    const { kind, fill, role, required = false } = options;
+    const spec = kinds[options.kind];
+    if (!type || !spec) return false;
+    const { kind, fill, role, required = false, options: choices = [] } = options;
+    const control = spec.control ?? "text";
     // A signer field nobody is named for could never be completed; an author
-    // fills anything but a checkbox as ordinary text.
+    // fills anything but a checkbox as ordinary text; a dropdown with nothing
+    // to choose offers no choice.
     if (fill === "signer" && !role) return false;
-    if (fill === "author" && kind !== "checkbox") return false;
-    const size = SIZES[kind];
+    if (fill === "author" && control !== "checkbox") return false;
+    if (control === "dropdown" && choices.length === 0) return false;
     const node = type.create({
       kind,
       fill,
       role: fill === "signer" ? role : null,
       required: fill === "signer" && required,
-      width: options.width ?? size.width,
-      height: options.height ?? size.height,
+      width: options.width ?? spec.size.width,
+      height: options.height ?? spec.size.height,
+      options: control === "dropdown" ? choices : [],
     });
     if (dispatch) dispatch(state.tr.replaceSelectionWith(node).scrollIntoView());
     return true;
@@ -110,17 +101,19 @@ function insertField(options: InsertFieldOptions): Command {
 }
 
 /** Check or uncheck the selected author checkbox. A signer's checkbox holds no state. */
-const toggleFieldChecked: Command = (state, dispatch) => {
-  const { selection } = state;
-  if (!(selection instanceof NodeSelection)) return false;
-  const { node, from } = selection;
-  if (node.type.name !== "field") return false;
-  if (node.attrs["kind"] !== "checkbox" || node.attrs["fill"] !== "author") return false;
-  if (dispatch) {
-    dispatch(state.tr.setNodeMarkup(from, undefined, { ...node.attrs, checked: node.attrs["checked"] !== true }));
-  }
-  return true;
-};
+const toggleFieldChecked =
+  (kinds: FieldKinds): Command =>
+  (state, dispatch) => {
+    const { selection } = state;
+    if (!(selection instanceof NodeSelection)) return false;
+    const { node, from } = selection;
+    if (node.type.name !== "field") return false;
+    if (controlOf(kinds, node) !== "checkbox" || node.attrs["fill"] !== "author") return false;
+    if (dispatch) {
+      dispatch(state.tr.setNodeMarkup(from, undefined, { ...node.attrs, checked: node.attrs["checked"] !== true }));
+    }
+    return true;
+  };
 
 /** Wrap the selected blocks in a block field — Word's block-level content control. */
 function insertFieldBlock({ kind, prompt }: InsertFieldRangeOptions): Command {
@@ -141,19 +134,16 @@ const unwrapFieldBlock: Command = (state, dispatch) => {
 
 const isSigner = (node: PmNode) => node.attrs["fill"] === "signer";
 
-function caption(node: PmNode): string {
-  const kind = isKind(node.attrs["kind"]) ? node.attrs["kind"] : "text";
-  const role = node.attrs["role"];
-  return typeof role === "string" && LABELS[kind] ? `${LABELS[kind]} · ${role}` : LABELS[kind];
-}
+/** The built-in kinds, with the host's added over them. */
+const resolveKinds = (options: FieldOptions): FieldKinds => ({ ...BUILT_IN_FIELD_KINDS, ...options.kinds });
 
-const fieldStrategy: InlineStrategy = {
+const fieldStrategy = (kinds: FieldKinds): InlineStrategy => ({
   verticalAlign: "baseline",
   render(ctx, x, y, width, height, node, theme: ResolvedTheme) {
     ctx.save();
     ctx.strokeStyle = theme.imagePlaceholderBorder;
     ctx.lineWidth = 1;
-    if (node.attrs["kind"] === "checkbox") {
+    if (controlOf(kinds, node) === "checkbox") {
       ctx.strokeRect(x + 0.5, y + 0.5, width - 1, height - 1);
       if (node.attrs["checked"] === true) {
         ctx.strokeStyle = theme.defaultText;
@@ -172,11 +162,11 @@ const fieldStrategy: InlineStrategy = {
       ctx.fillStyle = theme.imagePlaceholderText;
       ctx.font = `${Math.min(12, height * 0.5)}px sans-serif`;
       ctx.textBaseline = "middle";
-      ctx.fillText(caption(node), x + 4, y + height / 2, width - 8);
+      ctx.fillText(fieldCaption(kinds, node), x + 4, y + height / 2, width - 8);
     }
     ctx.restore();
   },
-};
+});
 
 const WHITE: Rgb = { r: 255, g: 255, b: 255 };
 const BLACK: Rgb = { r: 0, g: 0, b: 0 };
@@ -186,10 +176,10 @@ const pdfColor = (css: string): Rgb => {
 };
 
 /** The same box as on canvas; a PDF cannot dash, so a signer field is outlined solid. */
-const fieldPdf: PdfNodeHandler = (block, ctx) => {
+const fieldPdf = (kinds: FieldKinds): PdfNodeHandler => (block, ctx) => {
   const { node, x, y, width, height } = block;
   const border = { color: pdfColor(ctx.theme.imagePlaceholderBorder), widthPx: 1 };
-  if (node.attrs["kind"] === "checkbox") {
+  if (controlOf(kinds, node) === "checkbox") {
     ctx.draw.rect({ x, y, width, height, border });
     if (node.attrs["checked"] === true) {
       const color = pdfColor(ctx.theme.defaultText);
@@ -205,7 +195,7 @@ const fieldPdf: PdfNodeHandler = (block, ctx) => {
   if (!ctx.font) return;
   const sizePx = Math.min(12, height * 0.5);
   ctx.draw.text({
-    text: caption(node),
+    text: fieldCaption(kinds, node),
     x: x + 4,
     baselineY: y + height / 2 + sizePx * 0.35,
     sizePx,
@@ -221,10 +211,13 @@ const fieldPdf: PdfNodeHandler = (block, ctx) => {
  * document never holds, or an author's checkbox. Not in StarterKit; add it
  * where documents carry fields.
  */
-export const Field = Extension.create({
+export const Field = Extension.create<FieldOptions>({
   name: "field",
 
+  defaultOptions: { kinds: {} },
+
   addNodes() {
+    const kinds = resolveKinds(this.options);
     return {
       field: {
         inline: true,
@@ -238,8 +231,9 @@ export const Field = Extension.create({
           role: { default: null },
           required: { default: false },
           checked: { default: false },
-          width: { default: SIZES.text.width },
-          height: { default: SIZES.text.height },
+          options: { default: [] },
+          width: { default: BUILT_IN_FIELD_KINDS.text.size.width },
+          height: { default: BUILT_IN_FIELD_KINDS.text.size.height },
         },
         parseDOM: [
           {
@@ -247,7 +241,8 @@ export const Field = Extension.create({
             getAttrs(dom) {
               if (!(dom instanceof Element)) return false;
               const kind = dom.getAttribute("data-field");
-              if (!isKind(kind)) return false;
+              const spec = kind === null ? undefined : kinds[kind];
+              if (!spec) return false;
               const fill = dom.getAttribute("data-fill") === "author" ? "author" : "signer";
               const role = dom.getAttribute("data-role");
               if (fill === "signer" && !role) return false;
@@ -257,14 +252,15 @@ export const Field = Extension.create({
                 role: fill === "signer" ? role : null,
                 required: fill === "signer" && dom.hasAttribute("data-required"),
                 checked: fill === "author" && dom.hasAttribute("data-checked"),
-                width: Number(dom.getAttribute("data-width")) || SIZES[kind].width,
-                height: Number(dom.getAttribute("data-height")) || SIZES[kind].height,
+                options: (dom.getAttribute("data-options") ?? "").split("\n").filter(Boolean),
+                width: Number(dom.getAttribute("data-width")) || spec.size.width,
+                height: Number(dom.getAttribute("data-height")) || spec.size.height,
               };
             },
           },
         ],
         toDOM(node) {
-          const { kind, fill, role, required, checked, width, height } = node.attrs;
+          const { kind, fill, role, required, checked, options, width, height } = node.attrs;
           return [
             "span",
             {
@@ -273,6 +269,7 @@ export const Field = Extension.create({
               ...(typeof role === "string" ? { "data-role": role } : {}),
               ...(required === true ? { "data-required": "" } : {}),
               ...(checked === true ? { "data-checked": "" } : {}),
+              ...(Array.isArray(options) && options.length > 0 ? { "data-options": options.join("\n") } : {}),
               "data-width": String(width),
               "data-height": String(height),
             },
@@ -369,8 +366,8 @@ export const Field = Extension.create({
 
   addCommands() {
     return {
-      insertField: (options: InsertFieldOptions) => insertField(options),
-      toggleFieldChecked: () => toggleFieldChecked,
+      insertField: (options: InsertFieldOptions) => insertField(options, resolveKinds(this.options)),
+      toggleFieldChecked: () => toggleFieldChecked(resolveKinds(this.options)),
       insertFieldRange: (options: InsertFieldRangeOptions) => insertFieldRange(options),
       exitFieldRange: () => exitFieldRange,
       insertFieldBlock: (options: InsertFieldRangeOptions) => insertFieldBlock(options),
@@ -379,15 +376,16 @@ export const Field = Extension.create({
   },
 
   addInlineHandlers() {
-    return { field: fieldStrategy };
+    return { field: fieldStrategy(resolveKinds(this.options)) };
   },
 
   addExports() {
+    const kinds = resolveKinds(this.options);
     return {
-      pdf: { nodes: { field: fieldPdf }, marks: { fieldRange: fieldRangePdf } },
+      pdf: { nodes: { field: fieldPdf(kinds) }, marks: { fieldRange: fieldRangePdf } },
       semantic: { nodes: { fieldBlock: () => ({ type: "fieldBlock" }) } },
       docx: {
-        nodes: { field: fieldDocx, fieldBlock: fieldBlockDocx },
+        nodes: { field: fieldDocx(kinds), fieldBlock: fieldBlockDocx },
         marks: { fieldRange: fieldRangeRunProps },
         markWrappers: { fieldRange: fieldRangeWrapper },
       },
@@ -397,15 +395,16 @@ export const Field = Extension.create({
   addMarkdownSerializerRules() {
     // Markdown has no fields: a field reads as its caption, a text field as
     // its text, a block field as what it holds.
+    const kinds = resolveKinds(this.options);
     return {
       nodes: {
         field(state, node) {
-          if (node.attrs["kind"] === "checkbox") {
+          if (controlOf(kinds, node) === "checkbox") {
             state.text(node.attrs["checked"] === true ? "☒" : "☐");
             return;
           }
           state.text("[", false);
-          state.text(caption(node));
+          state.text(fieldCaption(kinds, node));
           state.text("]", false);
         },
         fieldBlock(state, node) {

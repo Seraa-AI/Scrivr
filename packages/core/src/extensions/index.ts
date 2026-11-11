@@ -7,12 +7,15 @@ export { KeymapPriority, DEFAULT_SLASH_ORDER } from "./types";
 export { Document } from "./built-in/Document";
 export { HardBreak } from "./built-in/HardBreak";
 export { Field, listSignerFields } from "./built-in/Field";
+export type { FieldFill, InsertFieldOptions, SignerFieldDescriptor } from "./built-in/Field";
+export { BUILT_IN_FIELD_KINDS } from "./built-in/fieldKinds";
 export type {
-  FieldFill,
+  BuiltInFieldKind,
+  FieldControl,
   FieldKind,
-  InsertFieldOptions,
-  SignerFieldDescriptor,
-} from "./built-in/Field";
+  FieldKindSpec,
+  FieldOptions,
+} from "./built-in/fieldKinds";
 export type { FieldRangeKind, InsertFieldRangeOptions } from "./built-in/fieldRange";
 export { Paragraph } from "./built-in/Paragraph";
 export { Heading } from "./built-in/Heading";

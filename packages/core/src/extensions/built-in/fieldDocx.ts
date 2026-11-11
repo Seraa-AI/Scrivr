@@ -1,4 +1,5 @@
 import type { Node as PmNode } from "prosemirror-model";
+import { fieldCaption, type FieldControl, type FieldKinds } from "./fieldKinds";
 import {
   DOCX_TAG_MAX_LENGTH,
   xml,
@@ -117,10 +118,21 @@ function checkbox(checked: boolean): XmlNode {
 const dateControl = (): XmlNode =>
   xml("w:date", undefined, [xml("w:dateFormat", { "w:val": "yyyy-MM-dd" }), xml("w:lid", { "w:val": "en-US" })]);
 
-export const fieldDocx: DocxNodeHandler = (node, _children, ctx) => {
+const dropdown = (choices: readonly string[]): XmlNode =>
+  xml(
+    "w:dropDownList",
+    undefined,
+    choices.map((choice) => xml("w:listItem", { "w:displayText": choice, "w:value": choice })),
+  );
+
+const choicesOf = (node: PmNode): string[] =>
+  Array.isArray(node.attrs["options"]) ? node.attrs["options"].filter((o): o is string => typeof o === "string") : [];
+
+/** Each field as the control its kind declares; a kind Word has no control for is a text control. */
+export const fieldDocx = (kinds: FieldKinds): DocxNodeHandler => (node, _children, ctx) => {
   const id = String(node.attrs["nodeId"] ?? "");
   const kind = String(node.attrs["kind"]);
-  const caption = [kind, node.attrs["role"]].filter((part) => typeof part === "string").join(" · ");
+  const caption = fieldCaption(kinds, node);
   const tag = tagFor(
     FIELD_TAG,
     {
@@ -135,14 +147,14 @@ export const fieldDocx: DocxNodeHandler = (node, _children, ctx) => {
     ctx,
   );
   const checked = node.attrs["checked"] === true;
-  const shape: Record<string, { props: XmlNode[]; content: XmlNode }> = {
-    signature: { props: [], content: signatureLine(node, id) },
-    checkbox: { props: [checkbox(checked)], content: glyphRun(checked ? "☒" : "☐") },
-    date: { props: [xml("w:showingPlcHdr"), dateControl()], content: plainRun(caption) },
-    initials: { props: [xml("w:showingPlcHdr"), xml("w:text")], content: plainRun(caption) },
-    text: { props: [xml("w:showingPlcHdr"), xml("w:text")], content: plainRun(caption) },
+  const shapes: Record<FieldControl, () => { props: XmlNode[]; content: XmlNode }> = {
+    signatureLine: () => ({ props: [], content: signatureLine(node, id) }),
+    checkbox: () => ({ props: [checkbox(checked)], content: glyphRun(checked ? "☒" : "☐") }),
+    date: () => ({ props: [xml("w:showingPlcHdr"), dateControl()], content: plainRun(caption) }),
+    dropdown: () => ({ props: [xml("w:showingPlcHdr"), dropdown(choicesOf(node))], content: plainRun(caption) }),
+    text: () => ({ props: [xml("w:showingPlcHdr"), xml("w:text")], content: plainRun(caption) }),
   };
-  const { props, content } = shape[kind] ?? shape["text"]!;
+  const { props, content } = shapes[kinds[kind]?.control ?? "text"]();
   return xml("w:sdt", undefined, [
     xml("w:sdtPr", undefined, [xml("w:alias", { "w:val": caption }), tag, controlId(ctx), ...props]),
     xml("w:sdtContent", undefined, [content]),
@@ -195,6 +207,7 @@ export const fieldImport: DocxInlineTransform = (inline, _marks, ctx) => {
     role: fill === "signer" ? params.get("role") : null,
     required: params.get("required") === "1",
     checked: fill === "author" && checked,
+    options: inline.listItems,
     ...(Number(params.get("width")) > 0 ? { width: Number(params.get("width")) } : {}),
     ...(Number(params.get("height")) > 0 ? { height: Number(params.get("height")) } : {}),
   });

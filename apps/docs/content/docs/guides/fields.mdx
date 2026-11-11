@@ -1,0 +1,179 @@
+---
+title: Fields
+description: Signature, date, text, checkbox and dropdown fields — authored in a document, completed on a sealed revision, and how to add a kind of your own.
+---
+
+A field is a place in a document that someone fills in: a signature, a date, a name, a box to tick. Scrivr keeps one rule about them that everything else follows from:
+
+**A field's definition is part of the document. A signer's value never is.**
+
+The author places an empty field, and it is saved, hashed and exported with the rest of the document. When a signer completes it, the value is held by your application and painted over the page — the document, and the hash that proves what was agreed, do not change from the first signer to the last.
+
+---
+
+## Adding fields to an editor
+
+`Field` is not part of `StarterKit`. Add it where documents carry fields:
+
+```ts
+import { Editor, Field, StarterKit } from "@scrivr/core";
+
+const editor = new Editor({ extensions: [StarterKit, Field] });
+```
+
+## Three shapes of field
+
+| Shape | Insert with | For |
+|---|---|---|
+| An inline box | `insertField` | Everything a **signer** completes, and an author's checkbox |
+| Text the author fills | `insertFieldRange` | A client name, an amount — text that belongs to the document |
+| A block | `insertFieldBlock` | A templated section: special terms, a schedule |
+
+### A signer field
+
+Each field says who completes it, **by role, not by person** — `client-authorized-signatory`, not Jane. Your application decides who holds each role when it sends the document out, which keeps a document a reusable template.
+
+```ts
+editor.commands.insertField({
+  kind: "signature",
+  fill: "signer",
+  role: "client-authorized-signatory",
+  required: true,
+});
+```
+
+The command refuses a signer field with no `role`: nobody could ever be asked to complete it.
+
+### An author's text
+
+Text the author fills is ordinary text, so it is a range rather than a box. Insert a placeholder at the caret — or select text to make it the field's value:
+
+```ts
+editor.commands.insertFieldRange({ kind: "text", prompt: "Client name" });
+```
+
+It behaves like a content control in Word: clicking the placeholder selects it whole, typing replaces it, deleting the text brings the placeholder back, and **ArrowRight** at its end steps out so what follows is plain text.
+
+### A block
+
+```ts
+editor.commands.insertFieldBlock({ kind: "text", prompt: "Special terms" }); // wraps the selected paragraphs
+editor.commands.unwrapFieldBlock();
+```
+
+## Built-in kinds
+
+| Kind | Label | Control |
+|---|---|---|
+| `signature` | Signature | signature line |
+| `initials` | Initials | text |
+| `date` | Date | date |
+| `text` | Text | text |
+| `checkbox` | — | checkbox |
+| `name` | Name | text |
+| `email` | Email | text |
+| `title` | Title | text |
+| `company` | Company | text |
+| `number` | Number | text |
+| `dropdown` | Choose | dropdown |
+
+The **control** is what a field *is*: how its box is drawn, whether it can be ticked, and what Word receives when the document is exported. A dropdown needs its choices:
+
+```ts
+editor.commands.insertField({
+  kind: "dropdown",
+  fill: "signer",
+  role: "client",
+  options: ["Net 30", "Net 60"],
+});
+```
+
+## Adding a kind of your own
+
+Register kinds with `Field.configure`. A kind needs a label and the size of box it reserves; `control` defaults to `"text"`.
+
+```ts
+const editor = new Editor({
+  extensions: [
+    StarterKit,
+    Field.configure({
+      kinds: {
+        stamp: { label: "Company stamp", size: { width: 120, height: 120 } },
+        agree: { label: "I agree", size: { width: 16, height: 16 }, control: "checkbox" },
+      },
+    }),
+  ],
+});
+
+editor.commands.insertField({ kind: "stamp", fill: "signer", role: "client" });
+```
+
+A kind you register behaves as the control it declares everywhere at once: `agree` above draws as a checkbox, can be ticked by an author, prints as one in the PDF, and exports to Word as Word's checkbox. A kind whose control is `"text"` exports as a Word text control and still comes back as your kind when the document is imported. Registering a name that is already built in replaces the built-in.
+
+<Callout type="info">
+The box size is fixed when the field is inserted, from the kind's `size` or the `width` / `height` you pass. Layout reserves that box whether the field is empty or completed, which is why a value never moves the text around it.
+</Callout>
+
+## Reading the fields in a document
+
+`listSignerFields` gives you every signer field, in reading order, with its id. It works on any document — including on the server, so a backend can check a template before anything is sent:
+
+```ts
+import { listSignerFields, ServerEditor, StarterKit, Field } from "@scrivr/core";
+
+const editor = new ServerEditor({ extensions: [StarterKit, Field], content: templateJson });
+listSignerFields(editor.getState().doc);
+// [{ id: "…", role: "client-authorized-signatory", kind: "signature", required: true }]
+```
+
+A copied or pasted field gets a fresh id, so one signature can never fill two boxes.
+
+## Completing fields on a sealed revision
+
+Sealing freezes a document into a snapshot and its hash. It refuses while suggestions are still pending, or while the roles you assign do not match the fields:
+
+```ts
+import { createSnapshot } from "@scrivr/core";
+
+const result = await createSnapshot(editor.getState().doc, {
+  assignedRoles: ["client-authorized-signatory"],
+});
+if (!result.ok) throw new Error(result.refusal.reason);
+const { content, contentHash, fields } = result.snapshot;
+```
+
+A signer then opens the snapshot in a sealed editor. `FieldCompletion` (from `@scrivr/plugins`) shows each field this signer may complete and asks **your application** for the value when they press it — your signature pad, your consent text, your record of what happened:
+
+```tsx
+import { FieldCompletion, ReadingProgress } from "@scrivr/plugins";
+
+const editor = new Editor({
+  content: JSON.parse(content),
+  sealed: true,
+  extensions: [
+    StarterKit,
+    Field,
+    FieldCompletion.configure({
+      fields,
+      completable: fieldsForThisSigner,
+      values: valuesAlreadyGiven,
+      onFieldRequest: async (field) => {
+        const value = await openSignaturePad(field); // yours
+        await recordSignature(field.id, value);       // yours
+        return value; // shown in the field's box; or null to leave it open
+      },
+    }),
+    ReadingProgress.configure({ onReading: (event) => recordReading(event) }),
+  ],
+});
+```
+
+When another participant completes a field, show it with `setFieldValue(editor, fieldId, value)`.
+
+## In other formats
+
+| Format | A field becomes |
+|---|---|
+| PDF | The same box the canvas draws; a checked checkbox with its tick |
+| DOCX | A Word content control carrying the field's id, kind and role, so it imports back as the same field. A signature is Word's own signature line, which Word can sign |
+| Markdown | Its caption — `[Signature · client]`; a checkbox as ☐ or ☒ |

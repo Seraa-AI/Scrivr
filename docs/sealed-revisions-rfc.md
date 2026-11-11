@@ -662,6 +662,27 @@ this section says so rather than the proposal being quietly rewritten to match.
   2007's handling of `w14` without `mc:Ignorable`. A content control from a
   document Scrivr did not write keeps its text but is not a field.
 
+**Phase 3e — kinds of field.** Shipped on PR #256, before phase 5 by decision,
+so Seraa can retire its own signature extension against a complete set.
+
+- A kind is a `FieldKindSpec`: `label`, `size`, and `control` — one of
+  `signatureLine | checkbox | date | dropdown | text`, default `text`. The
+  control is what a field *is*: how its box draws, whether an author can tick
+  it, how the PDF prints it and what Word receives. Nothing branches on a
+  kind's name any more.
+- Built-ins add name, email, title, company, number and dropdown to the
+  original five. A dropdown carries its own `options` and exports as
+  `w:dropDownList`; the parser now reads a control's `w:listItem`s, so its
+  choices come back.
+- Hosts register kinds with `Field.configure({ kinds })`, over the built-ins.
+  A kind with no control of its own exports as a Word text control and imports
+  back as itself.
+- `listSignerFields` reports any kind name; the registry, not a fixed union,
+  decides what can be inserted.
+- The registry lives in `fieldKinds.ts`, imported by both `Field.ts` and its
+  DOCX handlers, so the two do not import each other.
+- Guide: `apps/docs/content/docs/guides/fields.mdx`.
+
 **Phase 4 — snapshot and hashes.** Shipped on PR #256.
 
 - `createSnapshot(doc, { assignedRoles })` → `{ ok: true, snapshot: { content,

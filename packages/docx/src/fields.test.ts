@@ -141,3 +141,34 @@ describe("fields in DOCX", () => {
     expect(listSignerFields(doc).map((f) => f.id)).toEqual(listSignerFields(editor.getState().doc).map((f) => f.id));
   });
 });
+
+describe("kinds of field in DOCX", () => {
+  const withKinds = [StarterKit, Field.configure({ kinds: { stamp: { label: "Company stamp", size: { width: 120, height: 120 } } } })];
+  const doc = (attrs: Record<string, unknown>) => ({
+    type: "doc",
+    content: [{ type: "paragraph", content: [{ type: "field", attrs: { nodeId: crypto.randomUUID(), fill: "signer", role: "client", ...attrs } }] }],
+  });
+
+  it("writes a dropdown as Word's dropdown, and reads its choices back", async () => {
+    const editor = new ServerEditor({ extensions, content: doc({ kind: "dropdown", options: ["Net 30", "Net 60"] }) });
+    const bytes = await exportDocxBytes(editor);
+    const document = strFromU8(unzipSync(bytes)["word/document.xml"]!);
+
+    expect(document).toMatch(/<w:dropDownList>.*?w:value="Net 30".*?w:value="Net 60".*?<\/w:dropDownList>/);
+    const { doc: back } = await importDocx(new ServerEditor({ extensions }), bytes);
+    let options: unknown = null;
+    back.descendants((node) => {
+      if (node.type.name === "field") options = node.attrs["options"];
+    });
+    expect(options).toEqual(["Net 30", "Net 60"]);
+  });
+
+  it("keeps a host's own kind, sent to Word as a text control", async () => {
+    const editor = new ServerEditor({ extensions: withKinds, content: doc({ kind: "stamp", width: 120, height: 120 }) });
+    const bytes = await exportDocxBytes(editor);
+
+    expect(strFromU8(unzipSync(bytes)["word/document.xml"]!)).toMatch(/<w:sdtPr>.*?<w:text\/>/);
+    const { doc: back } = await importDocx(new ServerEditor({ extensions: withKinds }), bytes);
+    expect(listSignerFields(back).map((f) => f.kind)).toEqual(["stamp"]);
+  });
+});

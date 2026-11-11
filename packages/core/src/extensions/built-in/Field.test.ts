@@ -302,3 +302,63 @@ describe("fields as Markdown", () => {
     expect(editor.getMarkdown()).toBe("Client: Acme [Signature · client]\n\nNet 30.");
   });
 });
+
+describe("kinds of field", () => {
+  const editorWith = (field = Field) => {
+    const editor = new ServerEditor({ extensions: [StarterKit, field], content: terms });
+    const state = editor.getState();
+    editor.applyTransaction(state.tr.setSelection(TextSelection.create(state.doc, 9)));
+    return editor;
+  };
+  const only = (editor: ServerEditor) => fields(editor)[0]!.attrs;
+
+  it("include the common signing details, each labelled", () => {
+    const editor = editorWith();
+    for (const kind of ["name", "email", "title", "company", "number"]) {
+      expect(editor.commands.insertField({ kind, fill: "signer", role: "client" })).toBe(true);
+    }
+
+    expect(editor.getMarkdown()).toBe(
+      "Signed: [Name · client][Email · client][Title · client][Company · client][Number · client]",
+    );
+  });
+
+  it("include a dropdown, which needs the choices it offers", () => {
+    const editor = editorWith();
+
+    expect(editor.commands.insertField({ kind: "dropdown", fill: "signer", role: "client" })).toBe(false);
+    expect(
+      editor.commands.insertField({ kind: "dropdown", fill: "signer", role: "client", options: ["Net 30", "Net 60"] }),
+    ).toBe(true);
+    expect(only(editor)["options"]).toEqual(["Net 30", "Net 60"]);
+  });
+
+  it("can be added by the host, with its own label and size", () => {
+    const editor = editorWith(
+      Field.configure({ kinds: { stamp: { label: "Company stamp", size: { width: 120, height: 120 } } } }),
+    );
+
+    expect(editor.commands.insertField({ kind: "stamp", fill: "signer", role: "client" })).toBe(true);
+
+    expect([only(editor)["width"], only(editor)["height"]]).toEqual([120, 120]);
+    expect(editor.getMarkdown()).toBe("Signed: [Company stamp · client]");
+    expect(listSignerFields(editor.getState().doc)[0]!.kind).toBe("stamp");
+  });
+
+  it("must be registered to be inserted", () => {
+    expect(editorWith().commands.insertField({ kind: "stamp", fill: "signer", role: "client" })).toBe(false);
+  });
+
+  it("behave as the control they declare — a host's agreement box is a checkbox", () => {
+    const editor = editorWith(
+      Field.configure({ kinds: { agree: { label: "I agree", size: { width: 16, height: 16 }, control: "checkbox" } } }),
+    );
+    editor.commands.insertField({ kind: "agree", fill: "author" });
+    editor.applyTransaction(
+      editor.getState().tr.setSelection(NodeSelection.create(editor.getState().doc, fields(editor)[0]!.pos)),
+    );
+
+    expect(editor.commands.toggleFieldChecked()).toBe(true);
+    expect(only(editor)["checked"]).toBe(true);
+  });
+});
