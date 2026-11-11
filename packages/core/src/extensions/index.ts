@@ -15,6 +15,7 @@ export type {
   FieldKind,
   FieldKindSpec,
   FieldOptions,
+  FieldValue,
 } from "./built-in/fieldKinds";
 export type { FieldRangeKind, InsertFieldRangeOptions } from "./built-in/fieldRange";
 export { Paragraph } from "./built-in/Paragraph";

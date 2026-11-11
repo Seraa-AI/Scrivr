@@ -740,3 +740,17 @@ so Seraa can retire its own signature extension against a complete set.
 - The design's "epoch" became the revision id: the stamp, not a counter, is
   what a client compares, and a host's revision ids already order its history.
 - Guide: `apps/docs/content/docs/guides/sealing.mdx`, with the hook wiring.
+
+**The executed document.** Shipped on PR #256 — the last link of the chain
+sealed revision → snapshot hash → signer values → executed PDF hash.
+
+- The draft's `renderExecutedPdf` became `Field.configure({ values })` on the
+  editor that exports: values are printed by the field's own PDF handler, in
+  the field's box in that layout, through the kind registry — so a host's
+  kinds print right — and a drawn signature is declared as an embed so its
+  bytes are fetched before the pages are written. No new exporter API.
+- `PdfImageOp` gained `fit: "contain"`: a signature keeps its proportions,
+  centred, as the canvas overlay draws it. The exporter knows each embedded
+  image's size, so the fit is computed there.
+- `FieldValue` moved to core, shared by `FieldCompletion` and `Field`;
+  `@scrivr/plugins` re-exports it.

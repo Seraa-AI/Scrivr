@@ -32,9 +32,21 @@ export type BuiltInFieldKind = keyof typeof BUILT_IN_FIELD_KINDS;
 /** A built-in kind's name, or the name a host registered a kind under. */
 export type FieldKind = BuiltInFieldKind | (string & {});
 
+/** What fills a field. `image` is a raster drawn signature; `data:` URLs allowed, SVG not. */
+export type FieldValue =
+  | { kind: "text"; text: string }
+  | { kind: "image"; src: string }
+  | { kind: "checkbox"; checked: boolean };
+
 export interface FieldOptions {
   /** Kinds added to — or replacing — the built-ins, by name. */
   kinds: Record<string, FieldKindSpec>;
+  /**
+   * Completed values by field id, printed in their fields when this editor
+   * exports a PDF — the executed document a signing ends with. They never
+   * enter the document. On screen, `FieldCompletion` shows values instead.
+   */
+  values: Record<string, FieldValue>;
 }
 
 export type FieldKinds = Readonly<Record<string, FieldKindSpec>>;

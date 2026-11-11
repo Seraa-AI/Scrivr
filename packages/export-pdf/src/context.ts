@@ -222,11 +222,16 @@ export function createDrawHelpers(
   function drawImage(op: PdfImageOp): void {
     const image = images.get(op.image.src) ?? null;
     if (!image) return drawImagePlaceholder(op, op.opacity);
+    const scale = op.fit === "contain" ? Math.min(op.width / image.width, op.height / image.height) : null;
+    const width = scale === null ? op.width : image.width * scale;
+    const height = scale === null ? op.height : image.height * scale;
+    const x = op.x + (op.width - width) / 2;
+    const y = op.y + (op.height - height) / 2;
     getPage().drawImage(image, {
-      x: op.x * PT_PER_PX,
-      y: flipY(op.y + op.height, pageHeightPt),
-      width: op.width * PT_PER_PX,
-      height: op.height * PT_PER_PX,
+      x: x * PT_PER_PX,
+      y: flipY(y + height, pageHeightPt),
+      width: width * PT_PER_PX,
+      height: height * PT_PER_PX,
       ...alpha(op.opacity),
     });
   }

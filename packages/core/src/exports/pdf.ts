@@ -171,6 +171,11 @@ export interface PdfEllipseOp {
 
 export interface PdfImageOp extends PdfBox {
   image: PdfImageHandle;
+  /**
+   * `"fill"` (default) stretches the image to the box. `"contain"` keeps its
+   * proportions, as large as fits, centred — a drawn signature in its field.
+   */
+  fit?: "fill" | "contain";
   /** Opacity of the image, or the entire placeholder when it cannot be resolved. */
   opacity?: number;
 }

@@ -170,6 +170,25 @@ const editor = new Editor({
 
 When another participant completes a field, show it with `setFieldValue(editor, fieldId, value)`.
 
+## The executed document
+
+When everyone has signed, render the sealed snapshot with the values printed in their fields. Give `Field` the values on the editor that exports — a drawn signature keeps its proportions in its box, a typed one prints as text, a field nobody completed prints empty:
+
+```ts
+import { exportToPdf } from "@scrivr/export-pdf";
+import { hashArtifact } from "@scrivr/core";
+
+const executed = new Editor({
+  content: JSON.parse(content),
+  sealed: true,
+  extensions: [StarterKit, Field.configure({ kinds, values: allSignedValues })],
+});
+const pdf = await exportToPdf(executed);
+const artifactHash = await hashArtifact(pdf); // what was displayed, with the signatures in it
+```
+
+The values are printed, never written: the snapshot, and its `contentHash`, are the same before and after.
+
 ## In other formats
 
 | Format | A field becomes |

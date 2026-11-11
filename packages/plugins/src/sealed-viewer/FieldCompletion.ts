@@ -1,12 +1,6 @@
 import { Extension, safeImageUrl } from "@scrivr/core";
-import type { IBaseEditor, IEditor, PagePoint, SignerFieldDescriptor } from "@scrivr/core";
+import type { FieldValue, IBaseEditor, IEditor, PagePoint, SignerFieldDescriptor } from "@scrivr/core";
 import type { Node as PmNode } from "@scrivr/core/pm";
-
-/** What fills a field. `image` is a raster drawn signature; `data:` URLs allowed, SVG not. */
-export type FieldValue =
-  | { kind: "text"; text: string }
-  | { kind: "image"; src: string }
-  | { kind: "checkbox"; checked: boolean };
 
 export interface FieldCompletionOptions {
   /** The sealed snapshot's signer fields. */

@@ -13,7 +13,9 @@ import {
   type FieldKind,
   type FieldKinds,
   type FieldOptions,
+  type FieldValue,
 } from "./fieldKinds";
+import { safeImageUrl } from "../../model/safeUrl";
 import {
   fieldBlockDocx,
   fieldBlockImport,
@@ -175,34 +177,57 @@ const pdfColor = (css: string): Rgb => {
   return parsed ? compositeColor(parsed, WHITE) : BLACK;
 };
 
-/** The same box as on canvas; a PDF cannot dash, so a signer field is outlined solid. */
-const fieldPdf = (kinds: FieldKinds): PdfNodeHandler => (block, ctx) => {
-  const { node, x, y, width, height } = block;
-  const border = { color: pdfColor(ctx.theme.imagePlaceholderBorder), widthPx: 1 };
-  if (controlOf(kinds, node) === "checkbox") {
-    ctx.draw.rect({ x, y, width, height, border });
-    if (node.attrs["checked"] === true) {
-      const color = pdfColor(ctx.theme.defaultText);
-      const a = { x: x + width * 0.2, y: y + height * 0.55 };
-      const b = { x: x + width * 0.42, y: y + height * 0.78 };
-      const c = { x: x + width * 0.8, y: y + height * 0.25 };
-      ctx.draw.line({ from: a, to: b, thicknessPx: 1.5, color });
-      ctx.draw.line({ from: b, to: c, thicknessPx: 1.5, color });
-    }
-    return;
-  }
-  ctx.draw.rect({ x, y, width, height, color: pdfColor(ctx.theme.imagePlaceholderBg), border });
-  if (!ctx.font) return;
-  const sizePx = Math.min(12, height * 0.5);
-  ctx.draw.text({
-    text: fieldCaption(kinds, node),
-    x: x + 4,
-    baselineY: y + height / 2 + sizePx * 0.35,
-    sizePx,
-    font: ctx.font,
-    color: pdfColor(ctx.theme.imagePlaceholderText),
-  });
+const valueOf = (values: Readonly<Record<string, FieldValue>>, node: PmNode): FieldValue | undefined => {
+  const id = node.attrs["nodeId"];
+  return typeof id === "string" ? values[id] : undefined;
 };
+
+/**
+ * The same box as on canvas; a PDF cannot dash, so a signer field is outlined
+ * solid. A field given a value prints the value instead — the executed document.
+ */
+const fieldPdf =
+  (kinds: FieldKinds, values: Readonly<Record<string, FieldValue>>): PdfNodeHandler =>
+  (block, ctx) => {
+    const { node, x, y, width, height } = block;
+    const value = valueOf(values, node);
+    const border = { color: pdfColor(ctx.theme.imagePlaceholderBorder), widthPx: 1 };
+    const ink = pdfColor(ctx.theme.defaultText);
+    if (controlOf(kinds, node) === "checkbox") {
+      ctx.draw.rect({ x, y, width, height, border });
+      const checked = value?.kind === "checkbox" ? value.checked : node.attrs["checked"] === true;
+      if (checked) {
+        const a = { x: x + width * 0.2, y: y + height * 0.55 };
+        const b = { x: x + width * 0.42, y: y + height * 0.78 };
+        const c = { x: x + width * 0.8, y: y + height * 0.25 };
+        ctx.draw.line({ from: a, to: b, thicknessPx: 1.5, color: ink });
+        ctx.draw.line({ from: b, to: c, thicknessPx: 1.5, color: ink });
+      }
+      return;
+    }
+    if (value?.kind === "image") {
+      const src = safeImageUrl(value.src);
+      if (src) ctx.draw.image({ x, y, width, height, image: { src }, fit: "contain" });
+      return;
+    }
+    if (value?.kind === "text") {
+      if (!ctx.font) return;
+      const sizePx = Math.min(16, height * 0.6);
+      ctx.draw.text({ text: value.text, x: x + 4, baselineY: y + height / 2 + sizePx * 0.35, sizePx, font: ctx.font, color: ink });
+      return;
+    }
+    ctx.draw.rect({ x, y, width, height, color: pdfColor(ctx.theme.imagePlaceholderBg), border });
+    if (!ctx.font) return;
+    const sizePx = Math.min(12, height * 0.5);
+    ctx.draw.text({
+      text: fieldCaption(kinds, node),
+      x: x + 4,
+      baselineY: y + height / 2 + sizePx * 0.35,
+      sizePx,
+      font: ctx.font,
+      color: pdfColor(ctx.theme.imagePlaceholderText),
+    });
+  };
 
 /**
  * Fields, kept independent of any file format: DOCX maps a signature to a
@@ -214,7 +239,7 @@ const fieldPdf = (kinds: FieldKinds): PdfNodeHandler => (block, ctx) => {
 export const Field = Extension.create<FieldOptions>({
   name: "field",
 
-  defaultOptions: { kinds: {} },
+  defaultOptions: { kinds: {}, values: {} },
 
   addNodes() {
     const kinds = resolveKinds(this.options);
@@ -382,7 +407,17 @@ export const Field = Extension.create<FieldOptions>({
   addExports() {
     const kinds = resolveKinds(this.options);
     return {
-      pdf: { nodes: { field: fieldPdf(kinds) }, marks: { fieldRange: fieldRangePdf } },
+      pdf: {
+        nodes: { field: fieldPdf(kinds, this.options.values) },
+        marks: { fieldRange: fieldRangePdf },
+        // A drawn signature's bytes are fetched before the pages are written.
+        embeds: {
+          field: (node: PmNode) => {
+            const value = valueOf(this.options.values, node);
+            return value?.kind === "image" ? safeImageUrl(value.src) : null;
+          },
+        },
+      },
       semantic: { nodes: { fieldBlock: () => ({ type: "fieldBlock" }) } },
       docx: {
         nodes: { field: fieldDocx(kinds), fieldBlock: fieldBlockDocx },
