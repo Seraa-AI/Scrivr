@@ -176,7 +176,7 @@ export class TileManager {
   private unsubscribe: (() => void) | null = null;
   private rafId: number | null = null;
   private readonly gap: number;
-  private pagesInView: { first: number; last: number; pageCount: number } | null = null;
+  private pagesInView: { first: number; last: number; pageCount: number; complete: boolean } | null = null;
   private readonly overscan: number;
   private readonly showMarginGuides: boolean;
   private readonly smallTileHeight: number;
@@ -422,15 +422,38 @@ export class TileManager {
    * starts here. Pageless has no pages and reports nothing.
    */
   private reportPagesInView(layout: DocumentLayout, scrollTop: number, viewportH: number): void {
-    if (this.editor.isPageless || layout.pages.length === 0) return;
+    if (this.editor.isPageless || layout.pages.length === 0 || viewportH <= 0) return;
     const sh = this.slotHeight;
-    const first = Math.max(1, Math.floor((scrollTop - this.tileHeight) / sh) + 2);
-    const last = Math.min(layout.pages.length, Math.ceil((scrollTop + viewportH) / sh));
+    // The pages start below whatever the scroll container shows above them —
+    // its padding, a toolbar — so the viewport is measured from there.
+    const top = scrollTop - this.offsetInScrollParent();
+    const first = Math.max(1, Math.floor((top - this.tileHeight) / sh) + 2);
+    const last = Math.min(layout.pages.length, Math.ceil((top + viewportH) / sh));
     const pageCount = layout.pages.length;
+    const complete = !layout.isPartial;
     const previous = this.pagesInView;
-    if (previous?.first === first && previous.last === last && previous.pageCount === pageCount) return;
-    this.pagesInView = { first, last, pageCount };
+    if (
+      previous?.first === first &&
+      previous.last === last &&
+      previous.pageCount === pageCount &&
+      previous.complete === complete
+    ) {
+      return;
+    }
+    this.pagesInView = { first, last, pageCount, complete };
     this.editor.emit("pagesInView", this.pagesInView);
+  }
+
+  /** How far below the top of the scroll container's content the pages begin. */
+  private offsetInScrollParent(): number {
+    const parent = this.scrollParent;
+    if (!parent) return 0;
+    return (
+      this.container.getBoundingClientRect().top -
+      parent.getBoundingClientRect().top -
+      parent.clientTop +
+      parent.scrollTop
+    );
   }
 
   /** Content painting */

@@ -69,6 +69,12 @@ export function walkNode(
       runs.push(textRun(child, ctx, handlers));
       return;
     }
+    // A line break inside a link or a field belongs to its stretch.
+    if (child.isInline) {
+      const wrapping = wrappingMarks(child, handlers);
+      runs.push(...walkNode(child, ctx, handlers, { inline: true }).map((xml) => ({ xml, wrapping })));
+      return;
+    }
     children.push(...wrapRuns(runs, ctx, handlers));
     runs = [];
     const childMeta: DocxNodeMeta = { inline: child.isInline };
@@ -93,6 +99,8 @@ function mergeMarks(
   let props: DocxRunProps = {};
   for (const mark of marks) {
     const handler = handlers.marks[mark.type.name];
+    // A mark that wraps its runs has said how it exports.
+    if (!handler && handlers.markWrappers?.[mark.type.name]) continue;
     if (!handler) {
       ctx.diagnostics.warn({
         code: "unsupported-mark",
@@ -112,23 +120,28 @@ interface PendingRun {
   wrapping: readonly Mark[];
 }
 
-/**
- * A mark with no wrapper is not a gap — `mergeMarks` already warned about
- * marks with no handler at all, and most marks legitimately have nothing to
- * wrap with.
- */
+/** A text node's run, with the marks that will wrap it. */
 function textRun(node: Node, ctx: DocxContext, handlers: WalkerHandlers): PendingRun {
-  const wrappers = handlers.markWrappers;
   return {
     xml: renderRun(node.text ?? "", mergeMarks(node.marks, ctx, handlers)),
-    wrapping: wrappers ? node.marks.filter((mark) => wrappers[mark.type.name]) : [],
+    wrapping: wrappingMarks(node, handlers),
   };
 }
 
 /**
+ * The marks on `node` that wrap their runs. One with no wrapper is not a gap:
+ * `mergeMarks` warns about a mark with neither, and most legitimately have
+ * nothing to wrap with.
+ */
+function wrappingMarks(node: Node, handlers: WalkerHandlers): readonly Mark[] {
+  const wrappers = handlers.markWrappers;
+  return wrappers ? node.marks.filter((mark) => wrappers[mark.type.name]) : [];
+}
+
+/**
  * Wrap consecutive runs once per stretch of each wrapping mark. Where marks
- * overlap, the one covering the most runs goes outermost, so the longer
- * stretch — a content control around a link — is never split.
+ * overlap, the one covering the most runs goes outermost, so a content
+ * control around a link stays one element.
  */
 function wrapRuns(runs: readonly PendingRun[], ctx: DocxContext, handlers: WalkerHandlers): XmlNode[] {
   const out: XmlNode[] = [];

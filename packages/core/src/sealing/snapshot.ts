@@ -20,7 +20,12 @@ export type SealRefusal =
   /** Suggestions are still open; a signer would agree to wording not yet decided. */
   | { reason: "pending-tracked-changes"; count: number }
   /** Text the author fills still shows its prompt; a signer would agree to a blank. */
-  | { reason: "unfilled-fields"; prompts: string[] };
+  | { reason: "unfilled-fields"; prompts: string[] }
+  /**
+   * Signer fields with no id, no role, or another field's id — nobody could
+   * be asked to complete them, or their values would land in each other.
+   */
+  | { reason: "unidentified-fields"; count: number };
 
 export type SnapshotResult = { ok: true; snapshot: SealedSnapshot } | { ok: false; refusal: SealRefusal };
 
@@ -88,6 +93,20 @@ function unfilledPrompts(doc: PmNode): string[] {
   return [...prompts.values()];
 }
 
+/** Signer fields that lack an id or a role, or repeat an earlier field's id. */
+function unidentifiedFields(doc: PmNode): number {
+  const ids = new Set<string>();
+  let count = 0;
+  doc.descendants((node) => {
+    if (node.type.name !== "field" || node.attrs["fill"] !== "signer") return true;
+    const { nodeId, role } = node.attrs;
+    if (typeof nodeId !== "string" || typeof role !== "string" || ids.has(nodeId)) count++;
+    else ids.add(nodeId);
+    return false;
+  });
+  return count;
+}
+
 function roleRefusal(fields: readonly SignerFieldDescriptor[], assigned: readonly string[]): SealRefusal | null {
   const roles = new Set(fields.map((f) => f.role));
   const missing = [...new Set(fields.filter((f) => f.required && !assigned.includes(f.role)).map((f) => f.role))];
@@ -107,6 +126,8 @@ export async function createSnapshot(doc: PmNode, { assignedRoles }: CreateSnaps
   if (count > 0) return { ok: false, refusal: { reason: "pending-tracked-changes", count } };
   const prompts = unfilledPrompts(doc);
   if (prompts.length > 0) return { ok: false, refusal: { reason: "unfilled-fields", prompts } };
+  const unidentified = unidentifiedFields(doc);
+  if (unidentified > 0) return { ok: false, refusal: { reason: "unidentified-fields", count: unidentified } };
   const fields = listSignerFields(doc);
   const refusal = roleRefusal(fields, assignedRoles);
   if (refusal) return { ok: false, refusal };

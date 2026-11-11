@@ -53,7 +53,7 @@
 
 import type { EditorSurface } from "./EditorSurface";
 import type { SurfaceId, Unsubscribe } from "./types";
-import type { MutationGate } from "../mutationGate";
+import { applyUngated, type MutationGate } from "../mutationGate";
 
 // Typed `globalThis.__SURFACE_DEBUG__` flag used by activate() transition logs.
 // Augmentation keeps consumers from needing casts.
@@ -92,8 +92,8 @@ export class SurfaceRegistry {
   private readonly changeListeners = new Set<SurfaceChangeHandler>();
   private mediator: SurfaceOwnerMediator = noopMediator;
 
-  /** `admits` is the owning editor's mutation gate, installed on every surface. */
-  constructor(private readonly admits: MutationGate = () => true) {}
+  /** `gate` is the owning editor's mutation gate, installed on every surface. */
+  constructor(private readonly gate: MutationGate = applyUngated) {}
 
   /** Register a surface. Throws if `surface.id` is already registered. */
   register(surface: EditorSurface): void {
@@ -103,7 +103,7 @@ export class SurfaceRegistry {
         `Call unregister() first or use a distinct id.`,
       );
     }
-    surface.admits = this.admits;
+    surface.gate = this.gate;
     this.surfaces.set(surface.id, surface);
   }
 

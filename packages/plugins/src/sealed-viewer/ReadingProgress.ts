@@ -31,7 +31,7 @@ export const ReadingProgress = Extension.create<ReadingProgressOptions>({
     let furthest = 0;
     let reachedEnd = false;
 
-    const off = editor.on("pagesInView", ({ first, last, pageCount }) => {
+    const off = editor.on("pagesInView", ({ first, last, pageCount, complete }) => {
       const at = Date.now();
       const next = new Set<number>();
       for (let page = first; page <= last; page++) next.add(page);
@@ -44,7 +44,7 @@ export const ReadingProgress = Extension.create<ReadingProgressOptions>({
         furthest = last;
         onReading({ type: "furthestPage", page: last, at });
       }
-      if (!reachedEnd && last === pageCount) {
+      if (!reachedEnd && complete && last === pageCount) {
         reachedEnd = true;
         onReading({ type: "reachedEnd", at });
       }

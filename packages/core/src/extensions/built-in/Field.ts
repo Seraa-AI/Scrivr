@@ -8,9 +8,11 @@ import { compositeColor, parseCssColor, type Rgb } from "../../model/cssColor";
 import type { ResolvedTheme } from "../../model/theme";
 import {
   BUILT_IN_FIELD_KINDS,
+  checkboxTick,
   controlOf,
   fieldCaption,
   fieldChoices,
+  fieldValueSizePx,
   type FieldChoice,
   type FieldKind,
   type FieldKinds,
@@ -24,7 +26,6 @@ import {
   fieldDocx,
   fieldImport,
   fieldRangeImport,
-  fieldRangeRunProps,
   fieldRangeWrapper,
 } from "./fieldDocx";
 import {
@@ -159,8 +160,8 @@ const resolveKinds = (options: FieldOptions): FieldKinds => ({ ...BUILT_IN_FIELD
 
 const fieldStrategy = (kinds: FieldKinds): InlineStrategy => ({
   verticalAlign: "baseline",
-  // The box is the size it was authored at. Measuring it anyway sets the field
-  // in the face of the text around it, which an export prints its value in.
+  // The box is the size it was authored at. Defining `measure` anyway records
+  // the run's font on the span — the face a PDF prints the value in.
   measure: (node) => ({ width: Number(node.attrs["width"]), height: Number(node.attrs["height"]) }),
   render(ctx, x, y, width, height, node, theme: ResolvedTheme) {
     ctx.save();
@@ -171,10 +172,11 @@ const fieldStrategy = (kinds: FieldKinds): InlineStrategy => ({
       if (node.attrs["checked"] === true) {
         ctx.strokeStyle = theme.defaultText;
         ctx.lineWidth = 1.5;
+        const [a, b, c] = checkboxTick({ x, y, width, height });
         ctx.beginPath();
-        ctx.moveTo(x + width * 0.2, y + height * 0.55);
-        ctx.lineTo(x + width * 0.42, y + height * 0.78);
-        ctx.lineTo(x + width * 0.8, y + height * 0.25);
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.lineTo(c.x, c.y);
         ctx.stroke();
       }
     } else {
@@ -218,9 +220,7 @@ const fieldPdf =
       ctx.draw.rect({ x, y, width, height, border });
       const checked = value?.kind === "checkbox" ? value.checked : node.attrs["checked"] === true;
       if (checked) {
-        const a = { x: x + width * 0.2, y: y + height * 0.55 };
-        const b = { x: x + width * 0.42, y: y + height * 0.78 };
-        const c = { x: x + width * 0.8, y: y + height * 0.25 };
+        const [a, b, c] = checkboxTick({ x, y, width, height });
         ctx.draw.line({ from: a, to: b, thicknessPx: 1.5, color: ink });
         ctx.draw.line({ from: b, to: c, thicknessPx: 1.5, color: ink });
       }
@@ -233,7 +233,7 @@ const fieldPdf =
     }
     if (value?.kind === "text") {
       if (!ctx.font) return;
-      const sizePx = Math.min(16, height * 0.6);
+      const sizePx = fieldValueSizePx(value.text, { width, height });
       ctx.draw.text({ text: value.text, x: x + 4, baselineY: y + height / 2 + sizePx * 0.35, sizePx, font: ctx.font, color: ink });
       return;
     }
@@ -251,11 +251,12 @@ const fieldPdf =
   };
 
 /**
- * Fields, kept independent of any file format: DOCX maps a signature to a
- * Word signature line and the other kinds to content controls. This is the
- * inline field: one a signer completes after the seal, whose value the
- * document never holds, or an author's checkbox. Not in StarterKit; add it
- * where documents carry fields.
+ * Fields, in three shapes: a box a signer completes after the seal, whose
+ * value the document never holds (or an author's checkbox); text the author
+ * fills, as a `fieldRange` mark; and a templated block of paragraphs, as a
+ * `fieldBlock` node. Kept independent of any file format: DOCX maps a
+ * signature to a Word signature line and the rest to content controls. Not in
+ * StarterKit; add it where documents carry fields.
  */
 export const Field = Extension.create<FieldOptions>({
   name: "field",
@@ -442,7 +443,6 @@ export const Field = Extension.create<FieldOptions>({
       semantic: { nodes: { fieldBlock: () => ({ type: "fieldBlock" }) } },
       docx: {
         nodes: { field: fieldDocx(kinds), fieldBlock: fieldBlockDocx },
-        marks: { fieldRange: fieldRangeRunProps },
         markWrappers: { fieldRange: fieldRangeWrapper },
       },
     };

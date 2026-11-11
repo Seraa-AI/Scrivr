@@ -1,4 +1,4 @@
-import { EditorState, Transaction } from "prosemirror-state";
+import { EditorState, Plugin, Transaction } from "prosemirror-state";
 import type { FontProvider } from "./fonts/types";
 import type { FontConfig } from "./layout/FontConfig";
 import type { InlineRegistry } from "./layout/BlockRegistry";
@@ -21,7 +21,7 @@ import { DEFAULT_SLASH_ORDER } from "./extensions/types";
 import type { ExportContributionMap, ImportContributionMap } from "./extensions/export";
 import type { SafeFlatCommands, EditorEvents, ExtensionStorage } from "./types/augmentation";
 import { parseMarkdownToDoc } from "./model/parseMarkdown";
-import { mutationDenial } from "./mutationGate";
+import { holdStill, lockOn, mutationDenial } from "./mutationGate";
 import {
   normalizeDocument,
   type NormalizeResult,
@@ -155,6 +155,8 @@ export class BaseEditor implements IBaseEditor {
 
   private readOnlyValue = false;
   private sealedValue = false;
+  /** True only while the gate applies a caret move to a locked document. */
+  private holdingStill = false;
   private destroyed = false;
   /**
    * Anchors for edits whose work has not finished. Mapped on every document
@@ -299,7 +301,7 @@ export class BaseEditor implements IBaseEditor {
 
     this.editorState = EditorState.create({
       schema: this.manager.schema,
-      plugins: this.manager.buildPlugins(),
+      plugins: this.buildStatePlugins(),
       ...(initialDoc ? { doc: initialDoc } : {}),
     });
 
@@ -736,8 +738,8 @@ export class BaseEditor implements IBaseEditor {
    * decided; a refused transaction leaves state exactly as it was.
    */
   protected applyState(tr: Transaction): boolean {
-    const { state, transactions } = this.editorState.applyTransaction(tr);
-    if (!this.admits(tr, transactions)) return false;
+    const state = this.applyThroughGate(this.editorState, tr);
+    if (!state) return false;
     this.editorState = state;
     if (tr.docChanged) this.mapThroughEdit(tr);
     this.emit("update", { docChanged: tr.docChanged, mapping: tr.mapping });
@@ -745,14 +747,28 @@ export class BaseEditor implements IBaseEditor {
     return true;
   }
 
-  /** Whether `applied` may land; reports a refusal through `"mutationDenied"`. */
-  protected admits(root: Transaction, applied: readonly Transaction[]): boolean {
-    const denied = mutationDenial(root, applied, {
-      readOnly: this.readOnlyValue,
-      sealed: this.sealedValue,
-    });
+  /**
+   * Applies `tr` to `state` as the locks allow — the body's and every
+   * surface's. Returns `null` when it is refused, reported through
+   * `"mutationDenied"`. A caret move or a selection is never refused.
+   */
+  protected applyThroughGate(state: EditorState, tr: Transaction): EditorState | null {
+    const locks = { readOnly: this.readOnlyValue, sealed: this.sealedValue };
+    this.holdingStill = !tr.docChanged && lockOn(tr, locks) !== null;
+    let result: { state: EditorState; transactions: readonly Transaction[] };
+    try {
+      result = state.applyTransaction(tr);
+    } finally {
+      this.holdingStill = false;
+    }
+    const denied = mutationDenial(tr, result.transactions, locks);
     if (denied) this.emit("mutationDenied", denied);
-    return denied === null;
+    return denied ? null : result.state;
+  }
+
+  /** The body's plugins, and the gate's own. */
+  protected buildStatePlugins(): Plugin[] {
+    return [...this.manager.buildPlugins(), holdStill(() => this.holdingStill)];
   }
 
   /**
@@ -834,8 +850,8 @@ export class BaseEditor implements IBaseEditor {
    * `BaseEditor` routes through `applyTransaction` (no view side-effects).
    * `Editor` overrides this to route through `dispatch()` (full view updates).
    */
-  protected dispatchToActive(tr: Transaction): void {
-    this.applyTransaction(tr);
+  protected dispatchToActive(tr: Transaction): boolean {
+    return this.applyTransaction(tr);
   }
 
   // ── Private ──────────────────────────────────────────────────────────────────

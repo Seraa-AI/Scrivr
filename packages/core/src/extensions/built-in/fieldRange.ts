@@ -27,11 +27,14 @@ const idOf = (mark: Mark): string | null => {
   return typeof id === "string" && id.length > 0 ? id : null;
 };
 
-/** Each field's contiguous runs of text, by id. Two runs under one id are a copy. */
+/**
+ * Each field's contiguous runs of inline content — text and the line breaks
+ * inside it — by id. Two runs under one id are a copy.
+ */
 function fieldSpans(doc: PmNode, type: MarkType): Map<string, FieldSpan[]> {
   const spans = new Map<string, FieldSpan[]>();
   doc.descendants((node, pos) => {
-    if (!node.isText) return true;
+    if (!node.isInline) return true;
     const mark = type.isInSet(node.marks);
     const id = mark ? idOf(mark) : null;
     if (!mark || id === null) return true;
@@ -115,9 +118,35 @@ function normalizeFields(
       if (nodeId === id && placeholder === run.mark.attrs["placeholder"]) continue;
       tr.addMark(run.from, run.to, type.create({ ...run.mark.attrs, nodeId, placeholder }));
     }
+    if (origin?.mark.attrs["placeholder"] === true && runs.length === 1) {
+      replacePlaceholder(tr, origin, keeper, mapping, type);
+    }
   }
   restorePlaceholders(tr, before, after, mapping, type);
   return tr.docChanged ? tr : null;
+}
+
+/**
+ * An edit to a placeholder replaces all of it, as in Word: what was typed
+ * becomes the value, and a deletion that typed nothing leaves the prompt.
+ */
+function replacePlaceholder(tr: Transaction, origin: FieldSpan, run: FieldSpan, mapping: Mapping, type: MarkType): void {
+  // Where each character of the prompt the edit left standing now is.
+  const kept: number[] = [];
+  for (let pos = origin.from; pos < origin.to; pos++) {
+    const result = mapping.mapResult(pos, 1);
+    if (!result.deletedAfter) kept.push(result.pos);
+  }
+  const typedNothing = kept.length === run.to - run.from;
+  if (typedNothing && kept.length === origin.to - origin.from) return;
+  if (typedNothing) {
+    const prompt = String(run.mark.attrs["prompt"]);
+    const from = tr.mapping.map(run.from);
+    tr.insertText(prompt, from, tr.mapping.map(run.to));
+    tr.addMark(from, from + prompt.length, type.create({ ...run.mark.attrs, placeholder: true }));
+    return;
+  }
+  for (const pos of kept.reverse()) tr.delete(tr.mapping.map(pos), tr.mapping.map(pos + 1));
 }
 
 /** The placeholder a collapsed caret sits strictly inside, if any. */

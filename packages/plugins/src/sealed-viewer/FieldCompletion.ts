@@ -1,4 +1,4 @@
-import { Extension, safeImageUrl } from "@scrivr/core";
+import { Extension, checkboxTick, fieldValueSizePx, safeImageUrl } from "@scrivr/core";
 import type { FieldValue, IBaseEditor, IEditor, PagePoint, SignerFieldDescriptor } from "@scrivr/core";
 import type { Node as PmNode } from "@scrivr/core/pm";
 
@@ -35,7 +35,7 @@ export function setFieldValue(editor: IBaseEditor, id: string, value: FieldValue
   state.repaint();
 }
 
-/** Where each field node is in `doc`, by id. A sealed document never changes, so this is read once. */
+/** Where each field node is in `doc`, by id. Read again only when the document is replaced. */
 function fieldPositions(doc: PmNode): Map<string, number> {
   const positions = new Map<string, number>();
   doc.descendants((node, pos) => {
@@ -113,12 +113,15 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
       );
       if (!field) return;
       pending.add(field.id);
-      onFieldRequest(field)
+      // Asked inside an executor, so a request that throws before returning a
+      // promise fails like one that rejects.
+      new Promise<FieldValue | null>((resolve) => resolve(onFieldRequest(field)))
         .then((value) => {
           if (value) state.values.set(field.id, value);
         })
         .catch(() => {
-          // The host declined or failed; the field stays open.
+          // The host's request failed; the field stays open. Declining is
+          // answering `null`, which leaves it open too.
         })
         .finally(() => {
           pending.delete(field.id);
@@ -176,7 +179,7 @@ function paintValue(
   ctx.fillStyle = ink;
   ctx.textBaseline = "middle";
   if (value.kind === "text") {
-    ctx.font = `${Math.min(18, height * 0.6)}px sans-serif`;
+    ctx.font = `${fieldValueSizePx(value.text, box)}px sans-serif`;
     ctx.fillText(value.text, x + 4, y + height / 2, width - 8);
   } else if (value.kind === "image") {
     const img = imageFor(value.src);
@@ -186,13 +189,13 @@ function paintValue(
     const h = img.naturalHeight * scale;
     ctx.drawImage(img, x + (width - w) / 2, y + (height - h) / 2, w, h);
   } else if (value.checked) {
-    // The tick an author's checked checkbox has on canvas and in the PDF.
+    const [a, b, c] = checkboxTick(box);
     ctx.strokeStyle = ink;
     ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.moveTo(x + width * 0.2, y + height * 0.55);
-    ctx.lineTo(x + width * 0.42, y + height * 0.78);
-    ctx.lineTo(x + width * 0.8, y + height * 0.25);
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.lineTo(c.x, c.y);
     ctx.stroke();
   }
 }

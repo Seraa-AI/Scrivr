@@ -116,7 +116,6 @@ export class YBinding {
    */
   private synced = false;
 
-
   /**
    * Y.js-aware undo manager. Tracks LOCAL_ORIGIN transactions on both the
    * content fragment AND the attrs map, so undo reverses content edits and
@@ -175,8 +174,9 @@ export class YBinding {
       // author already assigned (which would diverge across clients).
       tr = tr.setMeta(COLLAB_SYNC_META, true);
 
-      this.prevDoc = tr.doc;
-      this.editor.applyTransaction(tr);
+      // A sealed editor refuses it; remembering it anyway would let the next
+      // local transaction write this editor's older copy back over the room.
+      if (this.editor.applyTransaction(tr)) this.prevDoc = tr.doc;
     });
   };
 
@@ -192,7 +192,6 @@ export class YBinding {
    *   3. Structural equality: skip when the PM attr already matches.
    */
   private readonly attrsObserver = (): void => {
-    if (!this.synced) return;
     this.mux(() => {
       this.applyAttrsFromMap();
     });
@@ -208,6 +207,7 @@ export class YBinding {
     // attrs and risk re-applying values that the previous step already set.
     let tr = state.tr;
     let touched = false;
+    const received: Record<string, unknown> = {};
 
     for (const key of this.editor.getDocAttrNames()) {
       const envelope = this.attrsMap.get(key);
@@ -221,7 +221,7 @@ export class YBinding {
           tr = tr.setDocAttribute(key, defaultValue);
           touched = true;
         }
-        this.lastWrittenValue[key] = defaultValue;
+        received[key] = defaultValue;
         continue;
       }
 
@@ -232,13 +232,14 @@ export class YBinding {
         tr = tr.setDocAttribute(key, envelope.value);
         touched = true;
       }
-      // Mark this value as known so the subsequent targetObserver pass
-      // doesn't echo it back to the Y.Map under our own LOCAL_ORIGIN.
-      this.lastWrittenValue[key] = envelope.value;
+      received[key] = envelope.value;
     }
 
     // A collaborator's change, so a read-only viewer still receives it.
-    if (touched) this.editor.applyTransaction(tr.setMeta(COLLAB_SYNC_META, true));
+    if (touched && !this.editor.applyTransaction(tr.setMeta(COLLAB_SYNC_META, true))) return;
+    // Known now, so the next targetObserver pass doesn't echo them back to the
+    // Y.Map under our own LOCAL_ORIGIN — but only once this editor holds them.
+    Object.assign(this.lastWrittenValue, received);
   }
 
   // ── PM → Y.js ───────────────────────────────────────────────────────────────
@@ -298,10 +299,9 @@ export class YBinding {
 
   /**
    * Called by Collaboration.onEditorReady once the HocusPocus provider fires
-   * its onSynced event. Applies any pre-existing attrs from the Y.Map onto
-   * the PM state, seeds the dedup tables, and then enables the PM→Y.js
-   * direction so a late-joining peer sees the room's current header policy
-   * but doesn't immediately push its local defaults over it.
+   * its onSynced event. Seeds the dedup tables — attrs absent from the Y.Map
+   * included — and then enables the PM→Y.js direction, so a late-joining peer
+   * doesn't immediately push its local defaults over the room's policy.
    */
   markSynced(): void {
     // synced is still false here — applyAttrsFromMap() can dispatch

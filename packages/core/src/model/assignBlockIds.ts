@@ -73,7 +73,7 @@ function walk(node: Node, generate: () => string): Node {
   return node.type.create(attrs, content, node.marks);
 }
 
-/** A block whose schema declares an id, without one `blockIdOf` would read. */
+/** A node whose schema declares an id, without one `blockIdOf` would read. */
 function needsBlockId(node: Node): boolean {
   return declaresBlockId(node) && blockIdOf(node) === null;
 }

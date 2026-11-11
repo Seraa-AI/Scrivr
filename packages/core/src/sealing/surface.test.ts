@@ -1,0 +1,75 @@
+// Imported through the package barrel on purpose: these are what a signing
+// host builds on, and `tsc` fails here the moment one stops being exported.
+import { describe, expect, it } from "vitest";
+import {
+  BUILT_IN_FIELD_KINDS,
+  Field,
+  FieldChoiceSchema,
+  ServerEditor,
+  StarterKit,
+  checkboxTick,
+  contentHashOf,
+  createSnapshot,
+  fieldValueSizePx,
+  hashArtifact,
+  listSignerFields,
+  verifySnapshot,
+  type BuiltInFieldKind,
+  type CreateSnapshotOptions,
+  type FieldChoice,
+  type FieldControl,
+  type FieldFill,
+  type FieldKind,
+  type FieldKindSpec,
+  type FieldOptions,
+  type FieldRangeKind,
+  type FieldValue,
+  type InsertFieldOptions,
+  type InsertFieldRangeOptions,
+  type MutationDenied,
+  type MutationDenialReason,
+  type MutationGate,
+  type MutationOrigin,
+  type SealRefusal,
+  type SealedSnapshot,
+  type SignerFieldDescriptor,
+  type SnapshotResult,
+} from "../index";
+
+describe("what a signing host builds on", () => {
+  it("is reachable from the package: fields, the seal, and its refusals", async () => {
+    const kind: BuiltInFieldKind = "signature";
+    const control: FieldControl = BUILT_IN_FIELD_KINDS[kind].control ?? "text";
+    const choice: FieldChoice = FieldChoiceSchema.parse({ id: "net-30", label: "Net 30" });
+    const spec = { label: "Agree", size: { width: 16, height: 16 }, control: "checkbox" } satisfies FieldKindSpec;
+    const options = { kinds: { agree: spec }, values: {} } satisfies FieldOptions;
+    const insert = { kind: "dropdown" satisfies FieldKind, fill: "signer" satisfies FieldFill, role: "client", options: [choice] } satisfies InsertFieldOptions;
+    const range = { kind: "text" satisfies FieldRangeKind, prompt: "Client name" } satisfies InsertFieldRangeOptions;
+    const value: FieldValue = { kind: "text", text: "Ada" };
+    const denied = { reason: "sealed" satisfies MutationDenialReason, origin: "remote" satisfies MutationOrigin } satisfies MutationDenied;
+    const gate: MutationGate = (state, tr) => state.apply(tr);
+
+    const editor = new ServerEditor({ extensions: [StarterKit, Field.configure(options)] });
+    const doc = editor.getState().doc;
+    const fields: SignerFieldDescriptor[] = listSignerFields(doc);
+    const snapshotOptions: CreateSnapshotOptions = { assignedRoles: [] };
+    const result: SnapshotResult = await createSnapshot(doc, snapshotOptions);
+    const snapshot: SealedSnapshot | null = result.ok ? result.snapshot : null;
+    const refusal: SealRefusal | null = result.ok ? null : result.refusal;
+
+    expect(snapshot && (await verifySnapshot(snapshot.content, snapshot.contentHash))).toBe(true);
+    expect(snapshot?.contentHash).toBe(await contentHashOf(doc));
+    expect(await hashArtifact(new Uint8Array([1]))).toMatch(/^sha256:/);
+    expect(checkboxTick({ x: 0, y: 0, width: 10, height: 10 })).toHaveLength(3);
+    expect(fieldValueSizePx(value.text, { width: 180, height: 44 })).toBe(16);
+    expect([control, insert.kind, range.kind, denied.reason, typeof gate, fields, refusal]).toEqual([
+      "signatureLine",
+      "dropdown",
+      "text",
+      "sealed",
+      "function",
+      [],
+      null,
+    ]);
+  });
+});

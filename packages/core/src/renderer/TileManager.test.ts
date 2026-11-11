@@ -901,8 +901,8 @@ describe("what chrome painting is given", () => {
 
 describe("pagesInView — what a reader actually has on screen", () => {
   const GAP = 20;
-  const mountScrolled = (pageConfig?: PageConfig) => {
-    const setup = makeRendererTestSetup({ scrollParent: true, ...(pageConfig ? { pageConfig } : {}) });
+  const mountScrolled = (pageConfig?: PageConfig, offsetInScrollParent = 0) => {
+    const setup = makeRendererTestSetup({ scrollParent: true, offsetInScrollParent, ...(pageConfig ? { pageConfig } : {}) });
     const seen: Array<{ first: number; last: number }> = [];
     setup.editor.on("pagesInView", ({ first, last }) => seen.push({ first, last }));
     const tm = new TileManager(setup.editor, setup.container, { gap: GAP });
@@ -929,6 +929,24 @@ describe("pagesInView — what a reader actually has on screen", () => {
     // Viewport is 800px: starts 500px into page 2, ends past the top of page 3.
     scrollTo(slot + 500);
     expect(seen.at(-1)).toEqual({ first: 2, last: 3 });
+    tm.destroy();
+    setup.cleanup();
+  });
+
+  it("measures from where the pages begin, below the scroll parent's padding", () => {
+    const { setup, seen, tm, scrollTo, slot } = mountScrolled(undefined, 300);
+    // 300px of padding above page 1: the viewport ends 100px short of page 3.
+    scrollTo(slot + 600);
+    expect(seen.at(-1)).toEqual({ first: 2, last: 2 });
+    tm.destroy();
+    setup.cleanup();
+  });
+
+  it("reports nothing while the viewport has no height", () => {
+    const { setup, seen, tm } = mountScrolled();
+    Object.defineProperty(setup.scrollParent!, "clientHeight", { value: 0, configurable: true });
+    tm.update();
+    expect(seen).toEqual([]);
     tm.destroy();
     setup.cleanup();
   });

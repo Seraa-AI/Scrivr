@@ -85,7 +85,6 @@ export interface SourceProvider<TMeta = unknown> {
 
 export const NORMALIZER_VERSION = 1;
 
-
 /** The diverged bar sits this far into the left margin, like Word's change bar. */
 const DIVERGED_GUTTER_INSET = 12;
 const DIVERGED_GUTTER_WIDTH = 3;
@@ -320,7 +319,6 @@ const cloneSourcedBlocks: CloneHandler = ({ doc, newId, recordId }) => {
 export interface SourcedBlockOptions {
 	providers?: SourceProvider[];
 }
-
 
 declare module "@scrivr/core" {
 	interface Commands<ReturnType> {

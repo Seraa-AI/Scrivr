@@ -19,6 +19,11 @@ export type RevisionStamp =
   | { mode: "editable"; revisionId: string; parentRevisionId: string | null }
   | { mode: "sealed"; revisionId: string; contentHash: string; sealedAt: string };
 
+/** A room's stamp while it is sealed. */
+export type SealedStamp = Extract<RevisionStamp, { mode: "sealed" }>;
+/** A room's stamp while it is being edited. */
+export type EditableStamp = Extract<RevisionStamp, { mode: "editable" }>;
+
 const STAMP_KEY = "stamp";
 
 function isRevisionStamp(value: unknown): value is RevisionStamp {

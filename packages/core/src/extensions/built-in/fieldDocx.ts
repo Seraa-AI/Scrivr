@@ -6,7 +6,6 @@ import {
   type DocxBlockTransform,
   type DocxContext,
   type DocxInlineTransform,
-  type DocxMarkHandler,
   type DocxMarkTransform,
   type DocxNodeHandler,
   type DocxRunWrapper,
@@ -237,6 +236,3 @@ export const fieldBlockImport: DocxBlockTransform = (block, content, ctx) => {
     content,
   );
 };
-
-/** Run properties are untouched: a field wraps its runs rather than styling them. */
-export const fieldRangeRunProps: DocxMarkHandler = (props) => props;

@@ -100,6 +100,17 @@ describe("createSnapshot", () => {
     });
   });
 
+  it("refuses a signer field that cannot be told apart — no id, no role, or another field's id", async () => {
+    const unnamed = { type: "field", attrs: { kind: "signature", fill: "signer", role: "client", required: true } };
+    const roleless = { type: "field", attrs: { nodeId: "loose", kind: "signature", fill: "signer", required: true } };
+    const refused = (fields: unknown[]) =>
+      createSnapshot(docOf([para("Terms."), { type: "paragraph", content: fields }]), { assignedRoles: ["client"] });
+
+    for (const fields of [[unnamed], [roleless], [signerField("client", true), signerField("client", true)]]) {
+      expect(await refused(fields)).toEqual({ ok: false, refusal: { reason: "unidentified-fields", count: 1 } });
+    }
+  });
+
   it("refuses while text the author fills still shows its prompt", async () => {
     const range = (id: string, text: string, placeholder: boolean) =>
       para(text, [{ type: "fieldRange", attrs: { nodeId: id, kind: "text", prompt: "Client name", placeholder } }]);

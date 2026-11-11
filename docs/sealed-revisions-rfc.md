@@ -776,3 +776,37 @@ the executed PDF with its hash. Driving it found:
 - **No sealed mount in React.** `useScrivrEditor` gained `sealed`.
 - Paint: values in the theme's text colour (they vanished on a dark page), a
   ticked checkbox keeps its box, no outline left at a completed field's edge.
+
+**Hardened by the pre-ship review.** Seven reviewers read the whole branch; what
+they found, each fixed test first:
+
+- **A sealed client overwrote its room.** The binding recorded a collaborator's
+  change as applied even when the sealed editor refused it, so the next click
+  wrote the client's older copy back — undoing even a server's
+  `resetToSnapshot`. It now records only what the editor accepted.
+- **A late joiner lost the room's attributes.** They were held back until
+  `markSynced`, which ran after the seal, so they were refused and the client
+  reported stale edits it never made. Attributes now land as they arrive, as
+  content always did; only the outgoing direction waits for the sync.
+- **A click refused in a locked document.** TrailingNode answers any
+  transaction on a document ending in a table or rule with a paragraph, so the
+  gate refused even selections. The gate now holds the document still while it
+  applies a caret move (a `filterTransaction` plugin): the move lands, the
+  appended edit does not, and nothing is reported.
+- **Seals that skipped their checks.** A signer field with no id, no role or a
+  shared id was left out of the manifest — `unidentified-fields` now refuses
+  it. Typing at a prompt's edge, or one Backspace, counted as filling it; an
+  edit now replaces the whole prompt, as Word does, judged from the
+  transaction's mapping rather than the text.
+- **A line break split a field** into two with different ids, in the editor and
+  in DOCX both ways. A break now belongs to the field's stretch.
+- **`ServerEditor.setContent`** replaced a sealed document; `moveNode` reported
+  a refused move as done. Both refuse now.
+- **The sealing guide's server code** was written against a Hocuspocus API that
+  version 2.15 does not have; it now reads the seal from the host's record in
+  `onAuthenticate` and makes open connections read-only when it seals.
+- Smaller: one value size and one tick shared by screen and PDF; "reached the
+  end" waits for a complete layout and measures below the scroll container's
+  padding; a host request that throws leaves the field open; Word's own prompt
+  in an unowned content control is not imported as text; several owners of
+  `<w:sdt>` marks coexist.

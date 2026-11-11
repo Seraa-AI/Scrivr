@@ -1,9 +1,6 @@
 import type * as Y from "yjs";
 import { contentHashOf, type IBaseEditor } from "@scrivr/core";
-import { readRevisionStamp, type RevisionStamp } from "./revision";
-
-type SealedStamp = Extract<RevisionStamp, { mode: "sealed" }>;
-type EditableStamp = Extract<RevisionStamp, { mode: "editable" }>;
+import { readRevisionStamp, type EditableStamp, type RevisionStamp, type SealedStamp } from "./revision";
 
 export interface RevisionCallbacks {
   /** The room was sealed, and this client holds exactly what was sealed. */

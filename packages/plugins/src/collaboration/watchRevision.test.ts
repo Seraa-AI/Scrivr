@@ -5,7 +5,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
-import { ServerEditor, StarterKit } from "@scrivr/core";
+import { Extension, ServerEditor, StarterKit } from "@scrivr/core";
 import { TextSelection } from "@scrivr/core/pm";
 import { YBinding, DOC_ATTRS_MAP_NAME, type DocAttrEnvelope } from "./YBinding";
 import { snapshotFromYDoc, stampEditable, stampSeal } from "./revision";
@@ -13,9 +13,15 @@ import { watchRevision, type RevisionCallbacks } from "./watchRevision";
 
 const SYNC_ORIGIN = "test-relay";
 
+/** A document attribute, arriving with the room's content as headers and sections do. */
+const Policy = Extension.create({
+  name: "policy",
+  addDocAttrs: () => ({ policy: { default: null } }),
+});
+
 function client(callbacks: RevisionCallbacks, synced = true) {
   const editor = new ServerEditor({
-    extensions: [StarterKit],
+    extensions: [StarterKit, Policy],
     content: { type: "doc", content: [{ type: "paragraph" }] },
   });
   const ydoc = new Y.Doc();
@@ -71,6 +77,12 @@ async function sealRoom(server: Y.Doc, schema: ServerEditor["schema"]) {
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
+/** The verdict waits on a SHA-256 digest, which can take longer than a tick. */
+const verdict = (callbacks: { onSealed: ReturnType<typeof vi.fn>; onStaleEdits: ReturnType<typeof vi.fn> }) =>
+  vi.waitFor(() => {
+    if (callbacks.onSealed.mock.calls.length + callbacks.onStaleEdits.mock.calls.length === 0) throw new Error("no verdict yet");
+  });
+
 let cleanups: Array<() => void> = [];
 beforeEach(() => {
   cleanups = [];
@@ -86,7 +98,7 @@ describe("watchRevision", () => {
     type(peer.editor, "Net 30.");
 
     const stamp = await sealRoom(server, peer.editor.schema);
-    await flush();
+    await verdict(callbacks);
 
     expect(peer.editor.sealed).toBe(true);
     expect(callbacks.onSealed).toHaveBeenCalledWith(stamp);
@@ -105,7 +117,7 @@ describe("watchRevision", () => {
 
     const stamp = await sealRoom(server, peer.editor.schema);
     Y.applyUpdate(peer.ydoc, Y.encodeStateAsUpdate(server), SYNC_ORIGIN);
-    await flush();
+    await verdict(callbacks);
 
     expect(peer.editor.sealed).toBe(true);
     expect(callbacks.onSealed).not.toHaveBeenCalled();
@@ -134,7 +146,27 @@ describe("watchRevision", () => {
     expect(callbacks.onSealed).not.toHaveBeenCalled();
 
     late.sync();
-    await flush();
+    await verdict(callbacks);
+    expect(callbacks.onSealed).toHaveBeenCalledWith(stamp);
+  });
+
+  it("a client opening a sealed room holds all of it — its attributes too — and so what was sealed", async () => {
+    const callbacks = { onSealed: vi.fn(), onStaleEdits: vi.fn() };
+    const server = new Y.Doc();
+    const author = client({});
+    cleanups.push(connect(server, author.ydoc), author.watcher.dispose);
+    const state = author.editor.getState();
+    author.editor.applyTransaction(state.tr.insertText("Net 30.", 1).setDocAttribute("policy", { pages: 2 }));
+    const stamp = await sealRoom(server, author.editor.schema);
+
+    const late = client(callbacks, false);
+    cleanups.push(late.watcher.dispose);
+    Y.applyUpdate(late.ydoc, Y.encodeStateAsUpdate(server), SYNC_ORIGIN);
+    late.sync();
+    await verdict(callbacks);
+
+    expect(late.editor.getState().doc.attrs["policy"]).toEqual({ pages: 2 });
+    expect(callbacks.onStaleEdits).not.toHaveBeenCalled();
     expect(callbacks.onSealed).toHaveBeenCalledWith(stamp);
   });
 

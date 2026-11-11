@@ -202,6 +202,11 @@ function describeSealRefusal(refusal: SealRefusal): SuggestionRefusalText {
       return { message: `Can't seal: ${refusal.prompts.join(", ")} is still blank.`, remedy: "Click the grey prompt and type over it, then seal again." };
     case "unknown-roles":
       return { message: `Can't seal: no field is left for ${roles(refusal.unknown)}.`, remedy: "Add a signer field for that party, then seal again." };
+    case "unidentified-fields":
+      return {
+        message: `Can't seal: ${refusal.count} signer field${refusal.count === 1 ? " has" : "s have"} no id or party of its own.`,
+        remedy: "Delete the field and insert it again from the Insert field menu.",
+      };
   }
 }
 

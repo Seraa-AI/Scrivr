@@ -318,9 +318,9 @@ export type DocxNodeHandler = (
  * A wrapper receives every consecutive run the mark covers — differently
  * formatted text is several runs — and returns what stands in their place;
  * returning `runs` unchanged declines. One element per stretch is what Word
- * writes, and for a content control it is required: two `<w:sdt>` sharing an
- * id make Word discard all but the last. Where wrapping marks overlap, the one
- * covering the longest stretch is outermost.
+ * writes, and for a content control it matters: a field split across several
+ * controls comes back as several pieces sharing one id, read as copies. Where
+ * wrapping marks overlap, the one covering the longest stretch is outermost.
  */
 export type DocxRunWrapper = (
   runs: readonly XmlNode[],
@@ -462,18 +462,19 @@ export interface DocxFieldInline {
   marks: DocxMark[];
 }
 
-/**
- * An inline content control (`<w:sdt>` inside a paragraph). Several owners
- * store things in one, each recognising its own by `tag`. An `inlines.sdt`
- * handler may claim it whole; otherwise its content is imported with an `sdt`
- * mark (`attrs: { tag, placeholder }`) a `marks.sdt` handler can claim.
- */
 /** One `w:listItem`: what is stored (`w:value`) and what is shown (`w:displayText`). */
 export interface DocxSdtListItem {
   value: string;
   displayText: string;
 }
 
+/**
+ * An inline content control (`<w:sdt>` inside a paragraph). Several owners
+ * store things in one, each recognising its own by `tag`. An `inlines.sdt`
+ * handler may claim it whole; otherwise its content is imported with an `sdt`
+ * mark (`attrs: { tag, placeholder }`) a `marks.sdt` handler can claim. A
+ * prompt no handler claims is left out — it is Word's text, not the document's.
+ */
 export interface DocxSdtInline {
   type: "sdt";
   /** `w:tag/@w:val` — who the control belongs to. */

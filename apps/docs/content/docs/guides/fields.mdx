@@ -126,7 +126,7 @@ import { listSignerFields, ServerEditor, StarterKit, Field } from "@scrivr/core"
 
 const editor = new ServerEditor({ extensions: [StarterKit, Field], content: templateJson });
 listSignerFields(editor.getState().doc);
-// [{ id: "…", role: "client-authorized-signatory", kind: "signature", required: true }]
+// [{ id: "…", role: "client-authorized-signatory", kind: "signature", required: true, options: [] }]
 ```
 
 A copied or pasted field gets a fresh id, so one signature can never fill two boxes.
@@ -196,6 +196,6 @@ The values are printed, never written: the snapshot, and its `contentHash`, are 
 
 | Format | A field becomes |
 |---|---|
-| PDF | The same box the canvas draws; a checked checkbox with its tick |
+| PDF | The same box the canvas draws, outlined solid since a PDF cannot dash; a checked checkbox with its tick |
 | DOCX | A Word content control carrying the field's id, kind and role, so it imports back as the same field. A signature is Word's own signature line, which Word can sign |
 | Markdown | Its caption — `[Signature · client]`; a checkbox as ☐ or ☒ |

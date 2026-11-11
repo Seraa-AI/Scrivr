@@ -204,7 +204,9 @@ export interface EditorOptions {
 	readOnly?: boolean;
 	/**
 	 * Start sealed: the content loads, then the document refuses every change,
-	 * from this client and collaborators alike. There is no unseal.
+	 * from this client and collaborators alike. There is no unseal. Leave it
+	 * off for an editor joining a room — the room's content would be refused;
+	 * `Collaboration` seals the editor when the room is sealed.
 	 * Defaults to false.
 	 */
 	sealed?: boolean;
@@ -616,7 +618,7 @@ export class Editor extends BaseEditor implements IEditor {
 		});
 
 		// ── Surface registry — plugins register their own surfaces lazily.
-		this.surfaces = new SurfaceRegistry((root, applied) => this.admits(root, applied));
+		this.surfaces = new SurfaceRegistry((state, tr) => this.applyThroughGate(state, tr));
 		const owners = this.manager.getSurfaceOwners();
 		this.surfaces.setOwnerMediator({
 			commit: s => {
@@ -799,13 +801,9 @@ export class Editor extends BaseEditor implements IEditor {
 		return this.surfaces.activeSurface?.state ?? this.editorState;
 	}
 
-	protected override dispatchToActive(tr: Transaction): void {
+	protected override dispatchToActive(tr: Transaction): boolean {
 		const active = this.surfaces.activeSurface;
-		if (active) {
-			active.dispatch(tr);
-		} else {
-			this.viewDispatch(tr);
-		}
+		return active ? active.dispatch(tr) : this.viewDispatch(tr);
 	}
 
 	/**
@@ -860,8 +858,7 @@ export class Editor extends BaseEditor implements IEditor {
 			);
 			tr = tr.insert(finalInsertPos, node);
 			tr = tr.setSelection(NodeSelection.create(tr.doc, finalInsertPos));
-			this.dispatchToActive(tr);
-			return true;
+			return this.dispatchToActive(tr);
 		} catch {
 			return false;
 		}
@@ -912,8 +909,7 @@ export class Editor extends BaseEditor implements IEditor {
 			);
 			tr = tr.insert(finalInsertPos, updated);
 			tr = tr.setSelection(NodeSelection.create(tr.doc, finalInsertPos));
-			this.dispatchToActive(tr);
-			return true;
+			return this.dispatchToActive(tr);
 		} catch {
 			return false;
 		}
@@ -1849,7 +1845,6 @@ export class Editor extends BaseEditor implements IEditor {
 		// matches the stale layout it came from, so the geometry looks coherent
 		// while describing text that has already moved.
 		this.lc.invalidate();
-		// applyState is in BaseEditor: applies tr, emits "update", notifyListeners
 		if (!this.applyState(tr)) return false;
 		// resetSilent: reset blink state WITHOUT calling onTick (which fires notifyListeners).
 		// Calling reset() here was the root cause of O(N²) repaints during Y.js initial sync.

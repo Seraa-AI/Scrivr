@@ -9,6 +9,7 @@ import { DOMParser, DOMSerializer, type Node as PmNode } from "prosemirror-model
 import { ServerEditor } from "../../ServerEditor";
 import { StarterKit } from "../StarterKit";
 import { Field, listSignerFields } from "./Field";
+import { fieldValueSizePx } from "./fieldKinds";
 import { createTestEditor } from "../../test-utils";
 import { DefaultFontProvider } from "../../fonts/DefaultFontProvider";
 
@@ -166,6 +167,24 @@ describe("an author's text field", () => {
     expect(ranges(editor)).toEqual([{ text: "Acme Ltd", id: placeholder!.id, placeholder: false }]);
   });
 
+  it("replaces the whole placeholder with what is typed at its edge, as Word does", () => {
+    const editor = withPlaceholder();
+    const [placeholder] = ranges(editor);
+
+    editor.applyTransaction(editor.getState().tr.insertText("A", 20));
+
+    expect(ranges(editor)).toEqual([{ text: "A", id: placeholder!.id, placeholder: false }]);
+  });
+
+  it("keeps showing the placeholder when part of it is deleted, so it never counts as filled", () => {
+    const editor = withPlaceholder();
+    const [placeholder] = ranges(editor);
+
+    editor.applyTransaction(editor.getState().tr.delete(19, 20));
+
+    expect(ranges(editor)).toEqual([{ text: "Client name", id: placeholder!.id, placeholder: true }]);
+  });
+
   it("wraps selected text as an already-filled field", () => {
     const editor = drafter();
     type(editor, "Acme Ltd");
@@ -186,6 +205,20 @@ describe("an author's text field", () => {
     type(editor, " Ltd");
 
     expect(ranges(editor).map((r) => r.text)).toEqual(["Acme Ltd"]);
+  });
+
+  it("stays one field across a line break, as an address does", () => {
+    const editor = drafter();
+    type(editor, "1 Main St");
+    select(editor, 9, 18);
+    editor.commands.insertFieldRange({ kind: "text", prompt: "Address" });
+    const [address] = ranges(editor);
+    caret(editor, 18);
+
+    editor.commands.insertHardBreak();
+    type(editor, "Springfield");
+
+    expect(ranges(editor)).toEqual([{ text: "1 Main StSpringfield", id: address!.id, placeholder: false }]);
   });
 
   it("lets the author step out at its end, so what follows is plain text", () => {
@@ -394,6 +427,17 @@ describe("kinds of field", () => {
 
     expect(editor.commands.toggleFieldChecked()).toBe(true);
     expect(only(editor)["checked"]).toBe(true);
+  });
+});
+
+describe("a value typed into a field", () => {
+  it("is set as large as its box allows, and smaller when it is too long to fit across", () => {
+    const box = { width: 180, height: 44 };
+
+    const long = "Northwind Studio International Holdings";
+    expect(fieldValueSizePx("Ada", box)).toBe(16);
+    expect(fieldValueSizePx(long, box)).toBeLessThan(16);
+    expect(fieldValueSizePx(`${long} Limited`, box)).toBeLessThan(fieldValueSizePx(long, box));
   });
 });
 

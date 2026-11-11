@@ -14,8 +14,8 @@ const viewer = () => {
   const editor = new ServerEditor({
     extensions: [StarterKit, ReadingProgress.configure({ onReading: (e) => events.push(e) })],
   });
-  const view = (first: number, last: number, pageCount = 5) =>
-    editor.emit("pagesInView", { first, last, pageCount });
+  const view = (first: number, last: number, pageCount = 5, complete = true) =>
+    editor.emit("pagesInView", { first, last, pageCount, complete });
   return { editor, events, view };
 };
 
@@ -68,6 +68,15 @@ describe("ReadingProgress", () => {
     view(3, 4);
     view(4, 5);
 
+    expect(events.filter((e) => e.type === "reachedEnd")).toEqual([{ type: "reachedEnd", at: T0 }]);
+  });
+
+  it("does not record reaching the end of pages still being laid out", () => {
+    const { events, view } = viewer();
+    view(1, 2, 2, false);
+    expect(events.filter((e) => e.type === "reachedEnd")).toEqual([]);
+
+    view(1, 2, 2, true);
     expect(events.filter((e) => e.type === "reachedEnd")).toEqual([{ type: "reachedEnd", at: T0 }]);
   });
 

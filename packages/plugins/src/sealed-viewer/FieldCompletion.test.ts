@@ -154,6 +154,21 @@ describe("FieldCompletion", () => {
     expect(request).toHaveBeenCalledTimes(3);
   });
 
+  it("leaves the field open when the host's request throws before it can answer", async () => {
+    let answer: () => Promise<FieldValue | null> = () => {
+      throw new Error("no signature pad");
+    };
+    const request = vi.fn(() => answer());
+    const e = viewer(request);
+
+    press(e, point(2, 150, 620));
+    await flush();
+    answer = async () => signature;
+    press(e, point(2, 150, 620));
+
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+
   it("shows a value another participant completed, given by the host", () => {
     const request = vi.fn(async () => signature);
     const e = viewer(request);

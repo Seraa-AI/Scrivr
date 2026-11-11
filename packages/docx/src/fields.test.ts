@@ -6,10 +6,10 @@
  * written, and discards all but the last of two controls sharing a `w:id`.
  */
 import { describe, expect, it } from "vitest";
-import { unzipSync, strFromU8 } from "fflate";
-import { Field, ServerEditor, StarterKit, listSignerFields } from "@scrivr/core";
+import { unzipSync, strFromU8, strToU8, zipSync } from "fflate";
+import { Extension, Field, ServerEditor, StarterKit, listSignerFields } from "@scrivr/core";
 import type { Node as PmNode } from "@scrivr/core/pm";
-import { exportDocxBytes } from "./export/export";
+import { exportDocx, exportDocxBytes } from "./export/export";
 import { importDocx } from "./import/import";
 
 const extensions = [StarterKit, Field];
@@ -93,10 +93,44 @@ describe("fields in DOCX", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
+  it("exports every field without a warning — a text field wraps its runs, which is all it needs", async () => {
+    const { diagnostics } = await exportDocx(new ServerEditor({ extensions, content: contract }));
+
+    expect(diagnostics).toEqual([]);
+  });
+
   it("keeps a text field over mixed formatting in one control", async () => {
     const { document } = await exported();
 
     expect(document.match(/scrivr:fieldRange:/g)).toHaveLength(1);
+  });
+
+  it("keeps a text field across a line break in one control", async () => {
+    const range = [{ type: "fieldRange", attrs: { nodeId: "address", kind: "text", prompt: "Address", placeholder: false } }];
+    const editor = new ServerEditor({
+      extensions,
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              { type: "text", text: "1 Main St", marks: range },
+              { type: "hardBreak", marks: range },
+              { type: "text", text: "Springfield", marks: range },
+            ],
+          },
+        ],
+      },
+    });
+    const document = strFromU8(unzipSync(await exportDocxBytes(editor))["word/document.xml"]!);
+
+    expect(document.match(/scrivr:fieldRange:/g)).toHaveLength(1);
+    expect(document).toMatch(/<w:sdtContent>.*1 Main St.*<w:br\/>.*Springfield.*<\/w:sdtContent>/);
+
+    const { doc } = await importDocx(new ServerEditor({ extensions }), await exportDocxBytes(editor));
+    const marked = doc.child(0).content.content.map((node) => node.marks.some((m) => m.attrs["nodeId"] === "address"));
+    expect(marked).toEqual([true, true, true]);
   });
 
   it("writes an author's checkbox as Word's checkbox, checked", async () => {
@@ -139,6 +173,64 @@ describe("fields in DOCX", () => {
     const { doc } = await importDocx(new ServerEditor({ extensions }), bytes);
 
     expect(listSignerFields(doc).map((f) => f.id)).toEqual(listSignerFields(editor.getState().doc).map((f) => f.id));
+  });
+});
+
+describe("content controls Scrivr did not write", () => {
+  /** A Word file whose body is `paragraph`, built on an exported package. */
+  const wordFile = async (paragraph: string) => {
+    const files = unzipSync(await exportDocxBytes(new ServerEditor({ extensions })));
+    const document = strFromU8(files["word/document.xml"]!).replace(/<w:body>.*<\/w:body>/s, `<w:body>${paragraph}</w:body>`);
+    return zipSync({ ...files, "word/document.xml": strToU8(document) });
+  };
+  const control = (tag: string, text: string, showingPrompt: boolean) =>
+    `<w:sdt><w:sdtPr><w:tag w:val="${tag}"/>${showingPrompt ? "<w:showingPlcHdr/>" : ""}</w:sdtPr>` +
+    `<w:sdtContent><w:r><w:t>${text}</w:t></w:r></w:sdtContent></w:sdt>`;
+
+  it("keeps what was typed into one, and leaves out Word's prompt in one nobody filled", async () => {
+    const bytes = await wordFile(
+      `<w:p><w:r><w:t xml:space="preserve">Client: </w:t></w:r>${control("crm-client", "Acme", false)}` +
+        `<w:r><w:t xml:space="preserve"> Ref: </w:t></w:r>${control("crm-ref", "Click or tap here to enter text.", true)}</w:p>`,
+    );
+    const { doc } = await importDocx(new ServerEditor({ extensions }), bytes);
+
+    expect(doc.textContent).toBe("Client: Acme Ref: ");
+  });
+
+  it("is read by whichever extension owns its tag, beside Field's own", async () => {
+    // A host's own control, kept as a highlight — one more owner of `<w:sdt>`.
+    const CrmControls = Extension.create({
+      name: "crmControls",
+      addImports() {
+        return {
+          docx: {
+            marks: {
+              sdt: (mark, ctx) =>
+                mark.attrs?.["tag"] === "crm-client" ? (ctx.schema.marks["highlight"]?.create() ?? null) : null,
+            },
+          },
+        };
+      },
+    });
+    const range = [{ type: "fieldRange", attrs: { nodeId: "range-1", kind: "text", prompt: "Name", placeholder: false } }];
+    const ours = await exportDocxBytes(
+      new ServerEditor({ extensions, content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Ada", marks: range }] }] } }),
+    );
+    const files = unzipSync(ours);
+    const document = strFromU8(files["word/document.xml"]!).replace("</w:p>", `${control("crm-client", "Acme", false)}</w:p>`);
+    const bytes = zipSync({ ...files, "word/document.xml": strToU8(document) });
+
+    const { doc } = await importDocx(new ServerEditor({ extensions: [...extensions, CrmControls] }), bytes);
+    const marksOf = (text: string) => {
+      let names: string[] = [];
+      doc.descendants((node) => {
+        if (node.text === text) names = node.marks.map((m) => m.type.name);
+      });
+      return names;
+    };
+
+    expect(marksOf("Ada")).toEqual(["fieldRange"]);
+    expect(marksOf("Acme")).toEqual(["highlight"]);
   });
 });
 

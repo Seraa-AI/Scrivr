@@ -74,3 +74,31 @@ export function fieldCaption(kinds: FieldKinds, node: PmNode): string {
   const role = node.attrs["role"];
   return typeof role === "string" && label ? `${label} · ${role}` : label;
 }
+
+interface FieldBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** The three points of the tick in a checked box, on screen and in the PDF alike. */
+export const checkboxTick = ({ x, y, width, height }: FieldBox) =>
+  [
+    { x: x + width * 0.2, y: y + height * 0.55 },
+    { x: x + width * 0.42, y: y + height * 0.78 },
+    { x: x + width * 0.8, y: y + height * 0.25 },
+  ] as const;
+
+/** A sans-serif glyph's average advance, in ems — enough to size a value to its box. */
+const AVERAGE_ADVANCE_EM = 0.55;
+
+/**
+ * The size a value typed into a field is set at, on screen and in the PDF
+ * alike: as large as the box's height allows, smaller when the value is too
+ * long to fit across it at that size.
+ */
+export function fieldValueSizePx(text: string, box: Pick<FieldBox, "width" | "height">): number {
+  const across = (box.width - 8) / (Math.max(1, text.length) * AVERAGE_ADVANCE_EM);
+  return Math.min(16, box.height * 0.6, across);
+}

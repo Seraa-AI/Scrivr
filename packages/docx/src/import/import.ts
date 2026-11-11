@@ -316,7 +316,7 @@ function collectHandlers(
     if (!docx) continue;
     if (docx.blocks) layerOver(blocks, docx.blocks);
     if (docx.paragraphStyles) Object.assign(paragraphStyles, docx.paragraphStyles);
-    if (docx.marks) Object.assign(marks, docx.marks);
+    if (docx.marks) layerOver(marks, docx.marks);
     if (docx.inlines) layerOver(inlines, docx.inlines);
   }
 
@@ -324,7 +324,7 @@ function collectHandlers(
     if (overrides.blocks) layerOver(blocks, overrides.blocks);
     if (overrides.paragraphStyles)
       Object.assign(paragraphStyles, overrides.paragraphStyles);
-    if (overrides.marks) Object.assign(marks, overrides.marks);
+    if (overrides.marks) layerOver(marks, overrides.marks);
     if (overrides.inlines) layerOver(inlines, overrides.inlines);
   }
 
@@ -335,7 +335,8 @@ function collectHandlers(
  * Register handlers over the ones already there. A later handler is asked
  * first; when it declines with `null`, the earlier one is asked. One element
  * serves several owners — every extension that stores something in a content
- * control claims `<w:sdt>` by its tag — so replacing would hide all but one.
+ * control claims `<w:sdt>`, and its marks, by its tag — so replacing would
+ * hide all but one.
  */
 function layerOver<Args extends unknown[], Result>(
   registry: Record<string, (...args: Args) => Result | null>,

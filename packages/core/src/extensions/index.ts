@@ -8,7 +8,7 @@ export { Document } from "./built-in/Document";
 export { HardBreak } from "./built-in/HardBreak";
 export { Field, listSignerFields } from "./built-in/Field";
 export type { FieldFill, InsertFieldOptions, SignerFieldDescriptor } from "./built-in/Field";
-export { BUILT_IN_FIELD_KINDS, FieldChoiceSchema } from "./built-in/fieldKinds";
+export { BUILT_IN_FIELD_KINDS, FieldChoiceSchema, checkboxTick, fieldValueSizePx } from "./built-in/fieldKinds";
 export type {
   BuiltInFieldKind,
   FieldChoice,

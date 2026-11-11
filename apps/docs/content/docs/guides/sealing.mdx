@@ -23,10 +23,12 @@ Seal inside whatever your server already uses to order a seal against a save —
 ```ts
 import { ServerEditor, StarterKit, Field } from "@scrivr/core";
 import { snapshotFromYDoc, stampSeal } from "@scrivr/plugins";
+import type { Document } from "@hocuspocus/server";
 
 const { schema } = new ServerEditor({ extensions: [StarterKit, Field] });
 
-async function seal(document /* the room's Y.Doc */, revisionId: string, assignedRoles: string[]) {
+// `document` is the room's HocusPocus Document — a Y.Doc — e.g. `server.documents.get(name)`.
+async function seal(document: Document, revisionId: string, assignedRoles: string[]) {
   const result = await snapshotFromYDoc(document, schema, { assignedRoles });
   if (!result.ok) return result.refusal; // show it to whoever asked to seal
 
@@ -34,6 +36,8 @@ async function seal(document /* the room's Y.Doc */, revisionId: string, assigne
   await saveSealedRevision({ revisionId, content, contentHash, fields }); // yours
 
   stampSeal(document, { revisionId, contentHash, sealedAt: new Date().toISOString() });
+  // Connections already open stop being able to write, not only new ones.
+  for (const connection of document.getConnections()) connection.readOnly = true;
   return null;
 }
 ```
@@ -46,6 +50,7 @@ A seal is refused, with a reason, while:
 | `unfilled-fields` | Text the author fills still shows its prompt — fill it first |
 | `unassigned-roles` | A required field's role has nobody assigned |
 | `unknown-roles` | You assigned a role no field carries — its field was removed |
+| `unidentified-fields` | A signer field has no id or role, or shares another's id — nobody could complete it, or two values would collide |
 
 ## Enforcing it, in your HocusPocus hooks
 
@@ -53,9 +58,10 @@ A seal is refused, with a reason, while:
 import { isSealed, matchesSnapshot, resetToSnapshot } from "@scrivr/plugins";
 
 const server = new Hocuspocus({
-  async onAuthenticate({ document, connectionConfig }) {
-    // Your own auth first. A sealed room is read-only for everyone.
-    if (document && isSealed(document)) connectionConfig.readOnly = true;
+  async onAuthenticate({ documentName, connection }) {
+    // Your own auth first. The room is not loaded yet here, so ask your own
+    // record: a sealed room is read-only for everyone who joins it.
+    if (await latestRevisionIsSealed(documentName)) connection.readOnly = true; // yours
   },
 
   async onLoadDocument({ document, documentName }) {
@@ -74,7 +80,7 @@ const server = new Hocuspocus({
 });
 ```
 
-The stamp is in the room itself, so a client that is already connected learns of the seal on its next sync — it does not keep writing until your server next re-checks its connection.
+The stamp is in the room itself, so a client that is already connected learns of the seal on its next sync, and `seal` has already made its connection read-only — the server drops anything it sends meanwhile.
 
 ## On the client
 
@@ -93,6 +99,8 @@ Collaboration.configure({
   onRevision: () => remountEditor(), // the room was unsealed into a new revision
 });
 ```
+
+Leave the editor's own `sealed` option off when it joins a room. The room's content reaches it as a collaborator's change, which a sealed editor refuses, so it would open empty; the stamp seals it once the content is in. `sealed: true` is for showing a stored snapshot with no room.
 
 ## Unsealing
 

@@ -119,6 +119,18 @@ describe("a sealed editor", () => {
     expect(editor.applyTransaction(typed(editor, "X"))).toBe(false);
   });
 
+  it("refuses a host replacing its content", () => {
+    const editor = serverEditor();
+    editor.seal();
+    const denied = vi.fn();
+    editor.on("mutationDenied", denied);
+
+    expect(editor.setContent({ type: "doc", content: [{ type: "paragraph" }] })).toBe(false);
+
+    expect(textOf(editor)).toBe("Hello");
+    expect(denied).toHaveBeenCalledWith({ reason: "sealed", origin: "local" });
+  });
+
   it("abandons a deferred edit that finishes after the seal", async () => {
     const editor = serverEditor();
     const onAbandoned = vi.fn();
@@ -145,6 +157,13 @@ describe("an editor constructed sealed", () => {
     expect(textOf(editor)).toBe("Hello");
     expect(editor.sealed).toBe(true);
     expect(editor.applyTransaction(fromCollaborator(typed(editor, "X")))).toBe(false);
+  });
+
+  it("says a refused move did not happen", () => {
+    const editor = createTestEditor({ extensions: [StarterKit], content: { type: "doc", content: [...hello.content, { type: "horizontalRule" }] }, sealed: true });
+
+    expect(editor.moveNode(7, 0)).toBe(false);
+    editor.destroy();
   });
 
   it("is sealed in the browser editor too, with input and caret off", () => {
@@ -174,15 +193,35 @@ describe("what the gate judges", () => {
     },
   });
 
-  it("refuses the whole result when an appended transaction changes the document", () => {
+  it("lets a caret move land without what a plugin wrote in answer, when the document is locked", () => {
     const editor = serverEditor([WritesOnCaretMove]);
     editor.setReadOnly(true);
+    const denied = vi.fn();
+    editor.on("mutationDenied", denied);
 
-    expect(editor.applyTransaction(caretAt(editor, 3))).toBe(false);
+    expect(editor.applyTransaction(caretAt(editor, 3))).toBe(true);
 
-    // Nothing partial lands: not the appended write, not the caret move.
+    expect(editor.getState().selection.head).toBe(3);
     expect(textOf(editor)).toBe("Hello");
-    expect(editor.getState().selection.head).not.toBe(3);
+    expect(denied).not.toHaveBeenCalled();
+  });
+
+  it("lets a reader select in a sealed document that ends in a rule", () => {
+    const editor = new ServerEditor({
+      extensions: [StarterKit],
+      sealed: true,
+      content: { type: "doc", content: [...hello.content, { type: "horizontalRule" }] },
+    });
+    const denied = vi.fn();
+    editor.on("mutationDenied", denied);
+    const before = editor.getState().doc;
+    const state = editor.getState();
+
+    expect(editor.applyTransaction(state.tr.setSelection(TextSelection.create(state.doc, 2, 5)))).toBe(true);
+
+    expect(editor.getState().selection.from).toBe(2);
+    expect(editor.getState().doc.eq(before)).toBe(true);
+    expect(denied).not.toHaveBeenCalled();
   });
 });
 

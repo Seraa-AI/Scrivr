@@ -5,17 +5,41 @@ import { TextSelection } from "@scrivr/core/pm";
 import { TrackChanges, TrackChangesStatus } from "../index";
 
 describe("sealing a document under review", () => {
-  it("is refused while a typed suggestion is pending", async () => {
+  const reviewing = () => {
     const editor = new ServerEditor({
       extensions: [StarterKit, Field, TrackChanges.configure({ userID: "alice", initialStatus: TrackChangesStatus.enabled })],
       content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Net 30." }] }] },
     });
-    const state = editor.getState();
-    editor.applyTransaction(state.tr.setSelection(TextSelection.create(state.doc, 5)));
+    const select = (from: number, to = from) => {
+      const state = editor.getState();
+      editor.applyTransaction(state.tr.setSelection(TextSelection.create(state.doc, from, to)));
+    };
+    const sealing = () => createSnapshot(editor.getState().doc, { assignedRoles: [] });
+    return { editor, select, sealing };
+  };
+  const refusedFor = (count: number) => ({ ok: false, refusal: { reason: "pending-tracked-changes", count } });
+
+  it("is refused while a typed suggestion is pending", async () => {
+    const { editor, select, sealing } = reviewing();
+    select(5);
     editor.applyTransaction(editor.getState().tr.insertText("6"));
 
-    const result = await createSnapshot(editor.getState().doc, { assignedRoles: [] });
+    expect(await sealing()).toEqual(refusedFor(1));
+  });
 
-    expect(result).toEqual({ ok: false, refusal: { reason: "pending-tracked-changes", count: 1 } });
+  it("is refused while a suggested deletion is pending", async () => {
+    const { editor, select, sealing } = reviewing();
+    select(5, 7);
+    editor.applyTransaction(editor.getState().tr.deleteSelection());
+
+    expect(await sealing()).toEqual(refusedFor(1));
+  });
+
+  it("is refused while a suggested formatting change is pending", async () => {
+    const { editor, select, sealing } = reviewing();
+    select(1, 4);
+    editor.commands.toggleBold();
+
+    expect(await sealing()).toEqual(refusedFor(1));
   });
 });

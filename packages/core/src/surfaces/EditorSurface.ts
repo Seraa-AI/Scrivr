@@ -19,7 +19,7 @@
 import { Node, type Schema } from "prosemirror-model";
 import { EditorState, type Transaction, type Plugin } from "prosemirror-state";
 import { CharacterMap } from "../layout/CharacterMap";
-import type { MutationGate } from "../mutationGate";
+import { applyUngated, type MutationGate } from "../mutationGate";
 import type { SurfaceId, Unsubscribe } from "./types";
 
 export interface EditorSurfaceInit {
@@ -64,11 +64,12 @@ export class EditorSurface {
   committing = false;
 
   /**
+   * @internal
    * Set by SurfaceRegistry on `register()`: the owning editor's gate, so a
    * read-only or sealed editor refuses header/footer edits as it does body ones.
    * An unregistered surface admits everything.
    */
-  admits: MutationGate = () => true;
+  gate: MutationGate = applyUngated;
 
   constructor(init: EditorSurfaceInit) {
     this.id = init.id;
@@ -122,8 +123,8 @@ export class EditorSurface {
         `the surface they are committing.`,
       );
     }
-    const { state, transactions } = this.editorState.applyTransaction(tr);
-    if (!this.admits(tr, transactions)) return false;
+    const state = this.gate(this.editorState, tr);
+    if (!state) return false;
     this.editorState = state;
     const docChanged = tr.docChanged;
     if (docChanged) {

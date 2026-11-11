@@ -137,7 +137,13 @@ export interface EditorEvents {
    * overscan). Reading telemetry builds on this: the canvas has no DOM a host
    * could observe instead.
    */
-  pagesInView: { first: number; last: number; pageCount: number };
+  pagesInView: {
+    first: number;
+    last: number;
+    pageCount: number;
+    /** False while a long document is still being laid out, so more pages may follow. */
+    complete: boolean;
+  };
   /**
    * A primary press landed on the page — fired for every one, before routing,
    * read-only and sealed included. For what is painted over a page without
