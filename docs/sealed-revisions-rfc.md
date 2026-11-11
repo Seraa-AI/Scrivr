@@ -404,6 +404,38 @@ its own import/export handlers (`todo_extension_owned_format_paths`). Answer the
 controls serve forms *and* templating, and if signature fields are the same
 feature we should not build two.
 
+Decided 2026-11-11 for phase 3:
+
+- **One content-control concept, not a signature node.** Signature fields are
+  content controls — Word's `<w:sdt>` — so forms and templating are the same
+  feature and nothing is built twice.
+- **Each control says who fills it: `fill: "author" | "signer"`.** An
+  author-filled value is document content and part of the hash. A signer-filled
+  control is always empty in the document; its value is lane C's overlay.
+- **Inline and block**, as Word allows both.
+- **Kinds:** signature, initials, date, text, checkbox. Dropdown later.
+
+Model — three schema pieces, one extension, one `<w:sdt>` mapping. New, flagged:
+
+| Piece | For | Why this shape |
+|---|---|---|
+| `contentControl` — inline atom | every signer-filled control; author checkbox | a signer field holds nothing, so it is a box; a checkbox is a glyph |
+| `contentControlRange` — mark | author-filled text | Word's run-level `<w:sdt>` wraps runs, which is a mark over a range. An inline node *with* content would need LineBreaker, CharacterMap and caret work the engine has never needed — it flattens a textblock to text plus atoms |
+| `contentControlBlock` — block, `block+` | block-level `<w:sdt>` | the container path `SourcedBlock` already uses |
+
+ProseMirror refuses a node and a mark sharing a name, hence three names.
+
+A signer-filled control carries `role` and `required` and no value attr. The
+editor lists them — `getFields()` on `BaseEditor`, so a backend can validate a
+template on `ServerEditor` — as `{ id, role, kind, required }`. Geometry is added
+at seal time (phase 4).
+
+Sub-phases, each its own commit:
+**3a** inline control — node, canvas, PDF parity, `getFields()`, commands.
+**3b** `contentControlRange` mark for author text, with Word's placeholder.
+**3c** `contentControlBlock`.
+**3d** DOCX `<w:sdt>` import and export, semantic, markdown.
+
 **Phase 4 — canonical snapshot + hashing.** SHA-256 over canonical semantic
 content; sealed field geometry; `artifactHash` over exported bytes. Forces the
 determinism contract on `@scrivr/export-semantic`.
