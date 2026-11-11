@@ -1,24 +1,6 @@
 import { Extension, safeImageUrl } from "@scrivr/core";
-import type { IBaseEditor, IEditor, PagePoint } from "@scrivr/core";
-
-export type SealedFieldKind = "signature" | "initials" | "date" | "text" | "checkbox";
-
-/**
- * A field as the seal recorded it. Its place on the page was computed once,
- * when the revision was sealed, so every surface shows it in the same spot —
- * never re-derived from layout, whose fonts differ between browser and server.
- */
-export interface SealedField {
-  id: string;
-  /** Who completes it, by role — the host maps roles to people. */
-  role: string;
-  kind: SealedFieldKind;
-  required: boolean;
-  /** 1-based page number. */
-  page: number;
-  /** Page-local, in CSS pixels. */
-  rect: { x: number; y: number; width: number; height: number };
-}
+import type { IBaseEditor, IEditor, PagePoint, SignerFieldDescriptor } from "@scrivr/core";
+import type { Node as PmNode } from "@scrivr/core/pm";
 
 /** What fills a field. `image` is a raster drawn signature; `data:` URLs allowed, SVG not. */
 export type FieldValue =
@@ -27,8 +9,8 @@ export type FieldValue =
   | { kind: "checkbox"; checked: boolean };
 
 export interface FieldCompletionOptions {
-  /** The sealed field manifest. */
-  fields: SealedField[];
+  /** The sealed snapshot's signer fields. */
+  fields: SignerFieldDescriptor[];
   /** Ids of the fields this viewer may complete. */
   completable: string[];
   /** Values already completed, by field id — shown, never requested again. */
@@ -39,7 +21,7 @@ export interface FieldCompletionOptions {
    * evidence, and resolves with the value to show, or `null` to leave the
    * field open. Scrivr keeps nothing.
    */
-  onFieldRequest: (field: SealedField) => Promise<FieldValue | null>;
+  onFieldRequest: (field: SignerFieldDescriptor) => Promise<FieldValue | null>;
   /** Outline of a field this viewer may complete. */
   accentColor: string;
 }
@@ -59,25 +41,23 @@ export function setFieldValue(editor: IBaseEditor, id: string, value: FieldValue
   state.repaint();
 }
 
-const LABELS: Record<SealedFieldKind, string> = {
-  signature: "Sign here",
-  initials: "Initial",
-  date: "Date",
-  text: "Fill in",
-  checkbox: "Check",
-};
-
-const contains = (field: SealedField, at: PagePoint): boolean =>
-  field.page === at.page &&
-  at.x >= field.rect.x &&
-  at.x <= field.rect.x + field.rect.width &&
-  at.y >= field.rect.y &&
-  at.y <= field.rect.y + field.rect.height;
+/** Where each field node is in `doc`, by id. A sealed document never changes, so this is read once. */
+function fieldPositions(doc: PmNode): Map<string, number> {
+  const positions = new Map<string, number>();
+  doc.descendants((node, pos) => {
+    const id = node.attrs["nodeId"];
+    if (node.type.name === "field" && typeof id === "string") positions.set(id, pos);
+    return node.isBlock;
+  });
+  return positions;
+}
 
 /**
- * Completing fields on a sealed revision. Values are painted over the page and
- * never written to the document, so the seal — and its hash — hold from the
- * first signer to the last.
+ * Completing fields on a sealed revision. A value is painted inside its
+ * field's box, wherever this editor laid that box out, and never written to
+ * the document: the box's size was fixed when the field was authored, so a
+ * value changes neither the document nor its layout, and the seal — and its
+ * hash — hold from the first signer to the last.
  */
 export const FieldCompletion = Extension.create<FieldCompletionOptions>({
   name: "fieldCompletion",
@@ -101,6 +81,13 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
     };
     fieldStates.set(editor, state);
 
+    let positionsOf: { doc: PmNode; positions: Map<string, number> } | null = null;
+    const positionOf = (id: string): number | undefined => {
+      const doc = editor.getState().doc;
+      if (positionsOf?.doc !== doc) positionsOf = { doc, positions: fieldPositions(doc) };
+      return positionsOf.positions.get(id);
+    };
+
     const imageFor = (src: string): HTMLImageElement | null => {
       const safe = safeImageUrl(src);
       if (!safe) return null;
@@ -113,10 +100,22 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
       return null;
     };
 
+    /** Whether the press landed in the field's box — the same box the overlay paints. */
+    const pressedOn = (field: SignerFieldDescriptor, at: PagePoint): boolean => {
+      const pos = positionOf(field.id);
+      const page = editor.getPageScreenPosition(at.page);
+      if (pos === undefined || !page) return false;
+      return editor.getNodeViewportRects(pos).some((rect) => {
+        const x = rect.left - page.screenLeft;
+        const y = rect.top - page.screenTop;
+        return at.x >= x && at.x <= x + rect.width && at.y >= y && at.y <= y + rect.height;
+      });
+    };
+
     const offPress = editor.on("press", ({ point, clickCount }) => {
       if (clickCount !== 1) return;
       const field = fields.find(
-        (f) => mayComplete.has(f.id) && !state.values.has(f.id) && !pending.has(f.id) && contains(f, point),
+        (f) => mayComplete.has(f.id) && !state.values.has(f.id) && !pending.has(f.id) && pressedOn(f, point),
       );
       if (!field) return;
       pending.add(field.id);
@@ -133,32 +132,28 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
         });
     });
 
-    const offPaint = editor.addOverlayRenderHandler((ctx, pageNumber) => {
+    const offPaint = editor.addOverlayRenderHandler((ctx, pageNumber, _pageConfig, charMap, theme) => {
       for (const field of fields) {
-        if (field.page !== pageNumber) continue;
-        const { x, y, width, height } = field.rect;
+        const pos = positionOf(field.id);
+        const box = pos === undefined ? undefined : charMap.getObjectRect(pos);
+        if (!box || box.page !== pageNumber) continue;
         const value = state.values.get(field.id);
+        if (!value && !mayComplete.has(field.id)) continue;
+        const { x, y, width, height } = box;
         ctx.save();
+        // Whatever is drawn stays in the box the field reserved.
+        ctx.beginPath();
+        ctx.rect(x, y, width, height);
+        ctx.clip();
         if (value) {
-          paintValue(ctx, field, value, imageFor);
-        } else {
-          const own = mayComplete.has(field.id);
-          ctx.setLineDash([4, 3]);
-          ctx.lineWidth = own ? 1.5 : 1;
-          const tone = own ? accentColor : "#000000";
-          ctx.fillStyle = tone;
-          ctx.globalAlpha = own ? 0.06 : 0.02;
+          // The empty field's caption is underneath; the value replaces it.
+          ctx.fillStyle = theme.pageBg;
           ctx.fillRect(x, y, width, height);
-          ctx.globalAlpha = own ? 1 : 0.3;
-          ctx.strokeStyle = tone;
-          ctx.strokeRect(x, y, width, height);
-          ctx.globalAlpha = 1;
-          if (own) {
-            ctx.fillStyle = accentColor;
-            ctx.font = `${Math.min(14, height * 0.4)}px sans-serif`;
-            ctx.textBaseline = "middle";
-            ctx.fillText(LABELS[field.kind], x + 6, y + height / 2, width - 12);
-          }
+          paintValue(ctx, { x, y, width, height }, value, imageFor);
+        } else if (!pending.has(field.id)) {
+          ctx.strokeStyle = accentColor;
+          ctx.lineWidth = 2;
+          ctx.strokeRect(x + 1, y + 1, width - 2, height - 2);
         }
         ctx.restore();
       }
@@ -174,11 +169,11 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
 
 function paintValue(
   ctx: CanvasRenderingContext2D,
-  field: SealedField,
+  box: { x: number; y: number; width: number; height: number },
   value: FieldValue,
   imageFor: (src: string) => HTMLImageElement | null,
 ): void {
-  const { x, y, width, height } = field.rect;
+  const { x, y, width, height } = box;
   ctx.fillStyle = "#111827";
   ctx.textBaseline = "middle";
   if (value.kind === "text") {

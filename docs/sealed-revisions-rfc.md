@@ -238,18 +238,26 @@ So:
 The host's certificate probably wants the second. Both are cheap; pretending one
 covers both is not.
 
-### Field geometry is sealed, not re-derived
+### A value is painted in its field's box (revised 2026-11-11)
 
-A viewer shows a field at a coordinate; the executed PDF must paint its value at
-the same coordinate. Both derive from the layout engine over the same snapshot —
-identical only if fonts resolve identically, which across a signer's browser and
-a render server they will not.
+The draft sealed field geometry as coordinates, computed once at seal time,
+because a field was not then part of the document — nothing else could say
+where its value goes. Phase 3 made fields nodes, which answers that better:
 
-Resolve it by computing field geometry **once, at seal time**, and carrying it in
-the snapshot. Field placement becomes an immutable property of the sealed
-revision rather than something re-derived per surface. This is smaller than
-pinning font bytes and it is the more honest model: where the signature goes was
-decided when the document was frozen.
+- **A value never enters the document.** The document holds only the empty
+  field; `FieldCompletion` holds values outside it, and a sealed editor refuses
+  every change at the mutation gate besides. The hash cannot move.
+- **A value never changes the layout.** The field's box is fixed by its
+  `width`/`height`, set when it was authored; layout reserves it whether empty
+  or signed, so nothing reflows.
+- **A value stays in its box** — clipped to it, text fitted, an image scaled.
+
+Each surface paints the value in the field's box in *its own* layout: the
+viewer in the browser's, the executed PDF in the server's. Where fonts differ
+the box moves with its line on both, and the value with it; frozen coordinates
+would leave the value where the line used to be. Sealing also no longer needs a
+layout engine on a backend that has none. What was displayed is still provable:
+that is `artifactHash`, over the executed PDF.
 
 ## 4. Viewport telemetry (consumption)
 
@@ -325,7 +333,7 @@ new Editor({
   content: snapshot,
   sealed: true,
   extensions: [FieldCompletion.configure({
-    fields,                              // sealed manifest: id, role, kind, required, page, rect
+    fields,                              // snapshot.fields: id, role, kind, required
     completable,                         // field ids THIS viewer may complete
     values,                              // already completed, for display
     onFieldRequest: (field) => Promise<FieldValue | null>,
@@ -477,6 +485,20 @@ Sub-phases, each its own commit:
 content; sealed field geometry; `artifactHash` over exported bytes. Forces the
 determinism contract on `@scrivr/export-semantic`.
 
+Revised 2026-11-11, before building:
+
+- **The hash is over canonical document JSON, not semantic units.** Every node,
+  mark and attr, `doc.attrs` included — so headers and footers are covered with
+  no extra walk — with keys sorted and no whitespace. Semantic units drop
+  formatting (a bold "not" and a plain one hash alike), walk only the body, and
+  change as `export-semantic` evolves. The snapshot stores the exact bytes it
+  hashed, so verifying later hashes what was stored and never depends on how a
+  newer Scrivr would serialize. This also lifts the determinism contract off
+  `export-semantic`.
+- **No sealed geometry** — see §3, revised.
+- **Pending tracked changes refuse the seal**: a signer never agrees to wording
+  still marked as a suggestion.
+
 **Phase 5 — revision identity, fencing, fork.** Client contract *and* server
 extension together. The largest phase, last, because it is the only one needing
 the collaboration extraction.
@@ -564,7 +586,8 @@ this section says so rather than the proposal being quietly rewritten to match.
 - A drawn signature is a raster image, gated by `safeImageUrl`.
 - Closing the viewer ends the reading record: `pageLeft` for every page
   still in view.
-- Not yet: phases 3–5; keyboard traversal between fields.
+- Not yet: phases 3–5; keyboard traversal between fields. (Phase 4 replaced the
+  manifest's `page`/`rect` with the field's node; see Phase 4 below.)
 
 **Phase 3a — inline field.** Shipped on PR #256.
 
@@ -624,7 +647,31 @@ this section says so rather than the proposal being quietly rewritten to match.
 - `getMarkdown()` threw on any document with a field; a field now writes as its
   caption, a text field as its text, a block field as its paragraphs.
 - A block field is a `fieldBlock` semantic unit.
-- Still to verify in real Word: *Sign* on a signature line inside a content
+- Deferred to after phase 5, by decision: every DOCX check against real Word
+  runs once all phases are in, so the live bugs it finds are fixed in one pass.
+  To verify then: *Sign* on a signature line inside a content
   control, whether Word needs `v:imagedata` for the line's preview, and Word
   2007's handling of `w14` without `mc:Ignorable`. A content control from a
   document Scrivr did not write keeps its text but is not a field.
+
+**Phase 4 — snapshot and hashes.** Shipped on PR #256.
+
+- `createSnapshot(doc, { assignedRoles })` → `{ ok: true, snapshot: { content,
+  contentHash, fields } }` or `{ ok: false, refusal }`, refusal one of
+  `pending-tracked-changes { count }`, `unassigned-roles { missing }`,
+  `unknown-roles { unknown }`. A result, not an exception: every refusal is an
+  expected answer the host shows to someone.
+- `content` is canonical JSON (keys in UTF-16 order, JavaScript's number form —
+  RFC 8785's rules for the values a document holds); `contentHash` is
+  `sha256:<hex>` over its UTF-8 bytes, by Web Crypto, so it runs in a browser
+  and in Node alike. `verifySnapshot(content, contentHash)` and
+  `hashArtifact(bytes)` complete it.
+- Pending suggestions are counted by id from `dataTracked` records on nodes and
+  marks, and from tracked marks, so both the plugin's records and a bare tracked
+  mark refuse. Tested against the real TrackChanges plugin.
+- `FieldCompletion` takes `snapshot.fields`, finds each field by id in the
+  current document, paints inside its box — clipped, over the empty field's
+  caption — and hit-tests a press against the same box through
+  `getNodeViewportRects` and `getPageScreenPosition`. `SealedField` with its
+  `page`/`rect` is gone.
+- `revisionId`, `epoch` and `sealedAt` belong to the seal itself — phase 5.

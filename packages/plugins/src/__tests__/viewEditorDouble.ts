@@ -93,7 +93,7 @@ export class ViewEditorDouble extends ServerEditor implements IEditor {
     return null;
   }
 
-  getNodeViewportRects(): DOMRect[] {
+  getNodeViewportRects(_docPos: number): DOMRect[] {
     return [];
   }
 
@@ -111,7 +111,7 @@ export class ViewEditorDouble extends ServerEditor implements IEditor {
 
   selectNode(): void {}
 
-  getPageScreenPosition(): { screenLeft: number; screenTop: number } | null {
+  getPageScreenPosition(_page: number): { screenLeft: number; screenTop: number } | null {
     return null;
   }
 

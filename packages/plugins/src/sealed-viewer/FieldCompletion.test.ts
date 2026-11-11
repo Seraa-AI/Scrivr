@@ -5,31 +5,58 @@
  * what was sealed.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { StarterKit, type PagePoint } from "@scrivr/core";
+import { Field, StarterKit, type PagePoint, type SignerFieldDescriptor } from "@scrivr/core";
 import { ViewEditorDouble } from "../__tests__/viewEditorDouble";
-import { FieldCompletion, setFieldValue, type FieldValue, type SealedField } from "../index";
+import { FieldCompletion, setFieldValue, type FieldValue } from "../index";
 
-const signHere: SealedField = {
-  id: "f-client",
-  role: "client-authorized-signatory",
-  kind: "signature",
-  required: true,
-  page: 2,
-  rect: { x: 100, y: 600, width: 200, height: 50 },
-};
-const witness: SealedField = {
-  id: "f-witness",
-  role: "witness",
-  kind: "signature",
-  required: true,
-  page: 2,
-  rect: { x: 400, y: 600, width: 200, height: 50 },
-};
+const signHere: SignerFieldDescriptor = { id: "f-client", role: "client-authorized-signatory", kind: "signature", required: true };
+const witness: SignerFieldDescriptor = { id: "f-witness", role: "witness", kind: "signature", required: true };
 
-const content = { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Terms" }] }] };
+const fieldNode = (field: SignerFieldDescriptor) => ({
+  type: "field",
+  attrs: { nodeId: field.id, kind: field.kind, fill: "signer", role: field.role, required: field.required },
+});
+const content = {
+  type: "doc",
+  content: [
+    { type: "paragraph", content: [{ type: "text", text: "Terms" }] },
+    { type: "paragraph", content: [fieldNode(signHere), { type: "text", text: " " }, fieldNode(witness)] },
+  ],
+};
 const signature: FieldValue = { kind: "text", text: "Ada Lovelace" };
 
-let editor: ViewEditorDouble | null = null;
+/** Where each field's box was laid out, as the mounted editor would report it. */
+const PAGE_ON_SCREEN = { screenLeft: 40, screenTop: 1000 };
+const BOXES: Record<string, { page: number; x: number; y: number; width: number; height: number }> = {
+  "f-client": { page: 2, x: 100, y: 600, width: 180, height: 44 },
+  "f-witness": { page: 2, x: 400, y: 600, width: 180, height: 44 },
+};
+
+/** A DOMRect's shape — the node test environment has no DOMRect. */
+const viewportRect = (x: number, y: number, width: number, height: number): DOMRect => ({
+  x,
+  y,
+  width,
+  height,
+  left: x,
+  top: y,
+  right: x + width,
+  bottom: y + height,
+  toJSON: () => ({}),
+});
+
+class LaidOutViewer extends ViewEditorDouble {
+  override getNodeViewportRects(docPos: number): DOMRect[] {
+    const id = this.getState().doc.nodeAt(docPos)?.attrs["nodeId"];
+    const box = typeof id === "string" ? BOXES[id] : undefined;
+    return box ? [viewportRect(PAGE_ON_SCREEN.screenLeft + box.x, PAGE_ON_SCREEN.screenTop + box.y, box.width, box.height)] : [];
+  }
+  override getPageScreenPosition(page: number) {
+    return page === 2 ? PAGE_ON_SCREEN : { screenLeft: 40, screenTop: 5000 };
+  }
+}
+
+let editor: LaidOutViewer | null = null;
 afterEach(() => {
   editor?.destroy();
   editor = null;
@@ -37,16 +64,12 @@ afterEach(() => {
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
-function viewer(onFieldRequest: (field: SealedField) => Promise<FieldValue | null>) {
-  editor = new ViewEditorDouble({
+function viewer(onFieldRequest: (field: SignerFieldDescriptor) => Promise<FieldValue | null>) {
+  editor = new LaidOutViewer({
     extensions: [
       StarterKit,
-      FieldCompletion.configure({
-        fields: [signHere, witness],
-        completable: [signHere.id],
-        values: {},
-        onFieldRequest,
-      }),
+      Field,
+      FieldCompletion.configure({ fields: [signHere, witness], completable: [signHere.id], values: {}, onFieldRequest }),
     ],
     content,
     sealed: true,
