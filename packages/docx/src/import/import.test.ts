@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { ServerEditor, StarterKit, SourcedBlockExtension } from "@scrivr/core";
+import { Extension, ServerEditor, StarterKit, SourcedBlockExtension } from "@scrivr/core";
 import type { Node as PmNode } from "@scrivr/core/pm";
 import { exportDocxBytes } from "../export/export";
 import { importDocx } from "./import";
@@ -763,6 +763,37 @@ describe("importDocx — sourced blocks", () => {
     expect(block.type.name).toBe("sourcedBlock");
     expect(block.attrs["resourceId"]).toBe("cl_1");
     expect(block.attrs["baseHash"]).toBeNull();
+  });
+});
+
+describe("importDocx — two extensions claiming one element", () => {
+  it("falls back to the earlier handler when the later one declines", async () => {
+    // Content controls are one OOXML element shared by every extension that
+    // stores something in one; each claims its own by tag.
+    const ClaimsOtherControls = Extension.create({
+      name: "claimsOtherControls",
+      addImports: () => ({ docx: { blocks: { sdt: () => null } } }),
+    });
+    const source = new ServerEditor({
+      extensions: [StarterKit, SourcedBlockExtension],
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "sourcedBlock",
+            attrs: { instanceId: "src_1", kind: "clause", resourceId: "cl_1", versionId: "v1" },
+            content: [{ type: "paragraph", content: [{ type: "text", text: "Clause" }] }],
+          },
+        ],
+      },
+    });
+
+    const { doc } = await importDocx(
+      new ServerEditor({ extensions: [StarterKit, SourcedBlockExtension, ClaimsOtherControls] }),
+      await exportDocxBytes(source),
+    );
+
+    expect(doc.child(0).type.name).toBe("sourcedBlock");
   });
 });
 

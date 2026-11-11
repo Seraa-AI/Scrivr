@@ -313,18 +313,20 @@ export type DocxNodeHandler = (
  * `DocxMarkHandler` contributes run properties — bold, colour, size — which is
  * all most marks need. A hyperlink is not one of them: OOXML expresses it as a
  * `<w:hyperlink>` element around the runs, carrying a relationship id, so no
- * amount of `<w:rPr>` can produce one. A wrapper receives the finished run and
- * returns whatever should stand in its place; returning the run unchanged
- * declines.
+ * amount of `<w:rPr>` can produce one.
  *
- * Wrappers run outermost-last, in the order the marks appear on the text, so
- * two wrapping marks nest predictably rather than by registration accident.
+ * A wrapper receives every consecutive run the mark covers — differently
+ * formatted text is several runs — and returns what stands in their place;
+ * returning `runs` unchanged declines. One element per stretch is what Word
+ * writes, and for a content control it is required: two `<w:sdt>` sharing an
+ * id make Word discard all but the last. Where wrapping marks overlap, the one
+ * covering the longest stretch is outermost.
  */
 export type DocxRunWrapper = (
-  run: XmlNode,
+  runs: readonly XmlNode[],
   mark: PmMark,
   ctx: DocxContext,
-) => XmlNode;
+) => XmlNode | readonly XmlNode[];
 
 export type DocxMarkHandler = (
   props: DocxRunProps,

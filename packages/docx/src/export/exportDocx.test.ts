@@ -527,6 +527,32 @@ describe("exportDocx — hyperlinks", () => {
     expect(rels).toContain('TargetMode="External"');
   });
 
+  it("puts a link over differently formatted text in one w:hyperlink, as Word does", async () => {
+    const editor = new ServerEditor({
+      extensions: [StarterKit],
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              { type: "text", text: "the ", marks: [{ type: "link", attrs: { href: "https://example.com" } }] },
+              {
+                type: "text",
+                text: "terms",
+                marks: [{ type: "bold" }, { type: "link", attrs: { href: "https://example.com" } }],
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const document = (await partsOf(editor))["word/document.xml"]!;
+
+    expect(document.match(/<w:hyperlink /g)).toHaveLength(1);
+    expect(document).toMatch(/<w:hyperlink [^>]*>.*?the .*?terms.*?<\/w:hyperlink>/);
+  });
+
   it("no longer warns that the link mark is unsupported", async () => {
     const { diagnostics } = await exportDocx(editorWithLink("https://example.com"));
     expect(
