@@ -9,6 +9,7 @@
     "serialization",
     "export",
     "fields",
+    "sealing",
     "plugins",
     "ai-features"
   ]

@@ -1,0 +1,114 @@
+---
+title: Sealing a revision
+description: Freeze a collaborative document so every client — live, late or offline — sees the same boundary, and prove what was agreed.
+---
+
+Sealing turns a document people are editing into one that no longer changes: the wording someone approved, signed or submitted. Scrivr gives you the pieces; **your server decides when to seal and enforces it**, because a seal a modified client could skip is not a seal.
+
+What Scrivr provides:
+
+- a **mutation gate** — a sealed editor refuses every change, from this client and from collaborators;
+- a **snapshot and hash** — the exact bytes that were agreed, and the SHA-256 that proves it;
+- a **revision stamp** written into the room, so every client learns of the seal on its next sync;
+- functions your HocusPocus server calls from its own hooks.
+
+What stays yours: who may seal, the record of it, locking, authentication, storage, and who signs.
+
+---
+
+## Sealing, on the server
+
+Seal inside whatever your server already uses to order a seal against a save — a row lock, a queue — after the room's latest edits are in.
+
+```ts
+import { ServerEditor, StarterKit, Field } from "@scrivr/core";
+import { snapshotFromYDoc, stampSeal } from "@scrivr/plugins";
+
+const { schema } = new ServerEditor({ extensions: [StarterKit, Field] });
+
+async function seal(document /* the room's Y.Doc */, revisionId: string, assignedRoles: string[]) {
+  const result = await snapshotFromYDoc(document, schema, { assignedRoles });
+  if (!result.ok) return result.refusal; // show it to whoever asked to seal
+
+  const { content, contentHash, fields } = result.snapshot;
+  await saveSealedRevision({ revisionId, content, contentHash, fields }); // yours
+
+  stampSeal(document, { revisionId, contentHash, sealedAt: new Date().toISOString() });
+  return null;
+}
+```
+
+A seal is refused, with a reason, while:
+
+| Refusal | Means |
+|---|---|
+| `pending-tracked-changes` | Suggestions are still open — accept or reject them first |
+| `unassigned-roles` | A required field's role has nobody assigned |
+| `unknown-roles` | You assigned a role no field carries — its field was removed |
+
+## Enforcing it, in your HocusPocus hooks
+
+```ts
+import { isSealed, matchesSnapshot, resetToSnapshot } from "@scrivr/plugins";
+
+const server = new Hocuspocus({
+  async onAuthenticate({ document, connectionConfig }) {
+    // Your own auth first. A sealed room is read-only for everyone.
+    if (document && isSealed(document)) connectionConfig.readOnly = true;
+  },
+
+  async onLoadDocument({ document, documentName }) {
+    // A cached room can hold edits that slipped in around the seal.
+    // Put it back to exactly what was sealed.
+    const sealed = await latestSealedRevision(documentName); // yours
+    if (sealed && !(await matchesSnapshot(document, schema, sealed.contentHash))) {
+      resetToSnapshot(document, schema, sealed.content);
+    }
+  },
+
+  async onStoreDocument({ document }) {
+    if (isSealed(document)) return; // a sealed revision is never rewritten
+    // …your usual store
+  },
+});
+```
+
+The stamp is in the room itself, so a client that is already connected learns of the seal on its next sync — it does not keep writing until your server next re-checks its connection.
+
+## On the client
+
+`Collaboration` follows the stamp. The moment it sees a seal the editor seals, so nothing more is typed into an approved revision. Then it tells you whether this client holds what was sealed:
+
+```ts
+Collaboration.configure({
+  url,
+  name: documentId,
+  onSealed: (stamp) => showSealedBanner(stamp.revisionId),
+  onStaleEdits: ({ stamp, content }) => {
+    // This client had work the server never received. It is not lost:
+    // keep it as a fork of the sealed revision, or let it go — then reload.
+    offerToKeepAsDraft({ parentRevisionId: stamp.revisionId, content });
+  },
+  onRevision: () => remountEditor(), // the room was unsealed into a new revision
+});
+```
+
+## Unsealing
+
+A sealed revision is never edited in place. Unsealing starts its successor, and the room says so:
+
+```ts
+import { stampEditable } from "@scrivr/plugins";
+
+stampEditable(document, { revisionId: newRevisionId, parentRevisionId: sealedRevisionId });
+```
+
+Clients holding the sealed revision get `onRevision` and mount a fresh editor. A client that simply opens an editable room is not told anything.
+
+## Proving what was agreed
+
+- `contentHash` is over the document as agreed — never over signers' values, which are not part of it.
+- `verifySnapshot(content, contentHash)` checks a stored snapshot is untouched.
+- `hashArtifact(pdfBytes)` hashes the executed PDF — what was displayed, with the signatures in it.
+
+Signing a sealed revision — fields, values, reading evidence — is in [Fields](/docs/guides/fields).

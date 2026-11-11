@@ -724,3 +724,19 @@ so Seraa can retire its own signature extension against a complete set.
   `getNodeViewportRects` and `getPageScreenPosition`. `SealedField` with its
   `page`/`rect` is gone.
 - `revisionId`, `epoch` and `sealedAt` belong to the seal itself — phase 5.
+
+**Phase 5 — the room's revision.** Shipped on PR #256.
+
+- 5a (`c6ec6fef`): `stampSeal`, `stampEditable`, `readRevisionStamp`,
+  `isSealed`, `docFromYDoc`, `snapshotFromYDoc`, `matchesSnapshot`,
+  `resetToSnapshot` in `@scrivr/plugins`, plus core's `contentHashOf`. The
+  stamp lives in its own Y.Map, `scrivr:revision`, guarded on read.
+- 5b: `watchRevision`, wired into `Collaboration` as `onSealed`,
+  `onStaleEdits`, `onRevision`. The editor seals the moment the stamp arrives;
+  whether it holds what was sealed is judged after the room has synced,
+  because doc attrs apply only then. `onRevision` fires only on leaving a seal
+  — firing it for a room a client simply opens would make a host that
+  remounts on it loop.
+- The design's "epoch" became the revision id: the stamp, not a counter, is
+  what a client compares, and a host's revision ids already order its history.
+- Guide: `apps/docs/content/docs/guides/sealing.mdx`, with the hook wiring.

@@ -17,3 +17,5 @@ export {
   stampSeal,
 } from "./revision";
 export type { RevisionStamp } from "./revision";
+export { watchRevision } from "./watchRevision";
+export type { RevisionCallbacks, RevisionWatcher } from "./watchRevision";
