@@ -94,12 +94,22 @@ export async function createSnapshot(doc: PmNode, { assignedRoles }: CreateSnaps
   const refusal = roleRefusal(fields, assignedRoles);
   if (refusal) return { ok: false, refusal };
   const content = canonicalJson(doc.toJSON());
-  return { ok: true, snapshot: { content, contentHash: await sha256(new TextEncoder().encode(content)), fields } };
+  return { ok: true, snapshot: { content, contentHash: await hashContent(content), fields } };
+}
+
+const hashContent = (content: string): Promise<string> => sha256(new TextEncoder().encode(content));
+
+/**
+ * The hash a snapshot of `doc` would carry, without the checks a seal makes —
+ * for telling whether a document still is what was sealed.
+ */
+export function contentHashOf(doc: PmNode): Promise<string> {
+  return hashContent(canonicalJson(doc.toJSON()));
 }
 
 /** Whether `content` is still the snapshot `contentHash` was taken of. */
 export async function verifySnapshot(content: string, contentHash: string): Promise<boolean> {
-  return (await sha256(new TextEncoder().encode(content))) === contentHash;
+  return (await hashContent(content)) === contentHash;
 }
 
 /** Hash exported bytes — the executed PDF, which records what was displayed. */

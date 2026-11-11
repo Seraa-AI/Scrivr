@@ -25,7 +25,7 @@ export * from "./input";
 export * from "./extensions";
 export type { DeferredEditOptions, DeferredEditAbandonment } from "./BaseEditor";
 export type { MutationDenied, MutationDenialReason, MutationOrigin } from "./mutationGate";
-export { createSnapshot, verifySnapshot, hashArtifact } from "./sealing/snapshot";
+export { createSnapshot, contentHashOf, verifySnapshot, hashArtifact } from "./sealing/snapshot";
 export type {
   CreateSnapshotOptions,
   SealRefusal,

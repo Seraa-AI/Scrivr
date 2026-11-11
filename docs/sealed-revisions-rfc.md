@@ -503,6 +503,26 @@ Revised 2026-11-11, before building:
 extension together. The largest phase, last, because it is the only one needing
 the collaboration extraction.
 
+Revised 2026-11-11, aligned to Seraa. Seraa already owns the seal decision
+and record, the lock that orders a seal against a store, a flush-before-seal
+message, room auth, per-connection read-only with a 30-second re-check, and
+revision storage. Its note bodies run on another editor; Scrivr documents had
+no seal at all. Its pattern leaves four gaps, which these close:
+
+| Gap in a host's pattern | Function | Called from |
+|---|---|---|
+| no hash of what was sealed | `snapshotFromYDoc(ydoc, schema, { assignedRoles })` | the seal, inside the host's lock, after its flush |
+| writers keep writing until the re-check | `stampSeal(ydoc, …)` — the seal lives *in the room*, every client sees it on the next sync | the same transaction |
+| | `isSealed(ydoc)`, `readRevisionStamp(ydoc)` | `onAuthenticate`, `onStoreDocument` |
+| a room's cached state drifts from the seal (post-seal edits reach the cache, then persist on unseal) | `matchesSnapshot(ydoc, schema, contentHash)` + `resetToSnapshot(ydoc, schema, content)` | `onLoadDocument` |
+| an unsynced tab's edits are refused and lost | client `Collaboration` seals on the stamp; a mismatch hands the stale document to `onStaleEdits` as a fork | provider wiring |
+| | `stampEditable(ydoc, { revisionId, parentRevisionId })` — unseal is a new revision descending from the sealed one | the host's unseal |
+
+Open questions 3 and 4 answered: the snapshot is canonical content alone —
+hosts reseed rooms from content, not Y state — and fork lineage lives outside
+the document, on the host's revision record, with the stamp carrying only
+`parentRevisionId` for clients to see.
+
 ## Open questions — answer before building
 
 0. **Decided 2026-11-11 — Scrivr ships functions, not a server extension.**
