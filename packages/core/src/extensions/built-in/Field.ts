@@ -6,14 +6,14 @@ import type { PdfNodeHandler } from "../../exports/pdf";
 import { compositeColor, parseCssColor, type Rgb } from "../../model/cssColor";
 import type { ResolvedTheme } from "../../model/theme";
 
-export type ContentControlKind = "signature" | "initials" | "date" | "text" | "checkbox";
+export type FieldKind = "signature" | "initials" | "date" | "text" | "checkbox";
 
 /** Who fills a control: the author while drafting, or a signer after the seal. */
-export type ContentControlFill = "author" | "signer";
+export type FieldFill = "author" | "signer";
 
-export interface InsertContentControlOptions {
-  kind: ContentControlKind;
-  fill: ContentControlFill;
+export interface InsertFieldOptions {
+  kind: FieldKind;
+  fill: FieldFill;
   /** Who completes a signer field, by role (`client-authorized-signatory`). Required for `fill: "signer"`. */
   role?: string;
   required?: boolean;
@@ -25,16 +25,16 @@ export interface InsertContentControlOptions {
 export interface SignerFieldDescriptor {
   id: string;
   role: string;
-  kind: ContentControlKind;
+  kind: FieldKind;
   required: boolean;
 }
 
-const KINDS: readonly ContentControlKind[] = ["signature", "initials", "date", "text", "checkbox"];
+const KINDS: readonly FieldKind[] = ["signature", "initials", "date", "text", "checkbox"];
 
-const isKind = (value: unknown): value is ContentControlKind =>
+const isKind = (value: unknown): value is FieldKind =>
   typeof value === "string" && KINDS.some((kind) => kind === value);
 
-const SIZES: Record<ContentControlKind, { width: number; height: number }> = {
+const SIZES: Record<FieldKind, { width: number; height: number }> = {
   signature: { width: 180, height: 44 },
   initials: { width: 64, height: 36 },
   date: { width: 110, height: 24 },
@@ -42,7 +42,7 @@ const SIZES: Record<ContentControlKind, { width: number; height: number }> = {
   checkbox: { width: 16, height: 16 },
 };
 
-const LABELS: Record<ContentControlKind, string> = {
+const LABELS: Record<FieldKind, string> = {
   signature: "Signature",
   initials: "Initials",
   date: "Date",
@@ -58,7 +58,7 @@ const LABELS: Record<ContentControlKind, string> = {
 export function listSignerFields(doc: PmNode): SignerFieldDescriptor[] {
   const fields: SignerFieldDescriptor[] = [];
   doc.descendants((node) => {
-    if (node.type.name !== "contentControl" || node.attrs["fill"] !== "signer") return true;
+    if (node.type.name !== "field" || node.attrs["fill"] !== "signer") return true;
     const { nodeId, role, kind, required } = node.attrs;
     if (typeof nodeId === "string" && typeof role === "string" && isKind(kind)) {
       fields.push({ id: nodeId, role, kind, required: required === true });
@@ -68,9 +68,9 @@ export function listSignerFields(doc: PmNode): SignerFieldDescriptor[] {
   return fields;
 }
 
-function insertContentControl(options: InsertContentControlOptions): Command {
+function insertField(options: InsertFieldOptions): Command {
   return (state, dispatch) => {
-    const type = state.schema.nodes["contentControl"];
+    const type = state.schema.nodes["field"];
     if (!type) return false;
     const { kind, fill, role, required = false } = options;
     // A signer field nobody is named for could never be completed; an author
@@ -92,11 +92,11 @@ function insertContentControl(options: InsertContentControlOptions): Command {
 }
 
 /** Check or uncheck the selected author checkbox. A signer's checkbox holds no state. */
-const toggleContentControlChecked: Command = (state, dispatch) => {
+const toggleFieldChecked: Command = (state, dispatch) => {
   const { selection } = state;
   if (!(selection instanceof NodeSelection)) return false;
   const { node, from } = selection;
-  if (node.type.name !== "contentControl") return false;
+  if (node.type.name !== "field") return false;
   if (node.attrs["kind"] !== "checkbox" || node.attrs["fill"] !== "author") return false;
   if (dispatch) {
     dispatch(state.tr.setNodeMarkup(from, undefined, { ...node.attrs, checked: node.attrs["checked"] !== true }));
@@ -112,7 +112,7 @@ function caption(node: PmNode): string {
   return typeof role === "string" && LABELS[kind] ? `${LABELS[kind]} · ${role}` : LABELS[kind];
 }
 
-const contentControlStrategy: InlineStrategy = {
+const fieldStrategy: InlineStrategy = {
   verticalAlign: "baseline",
   render(ctx, x, y, width, height, node, theme: ResolvedTheme) {
     ctx.save();
@@ -151,7 +151,7 @@ const pdfColor = (css: string): Rgb => {
 };
 
 /** The same box as on canvas; a PDF cannot dash, so a signer field is outlined solid. */
-const contentControlPdf: PdfNodeHandler = (block, ctx) => {
+const fieldPdf: PdfNodeHandler = (block, ctx) => {
   const { node, x, y, width, height } = block;
   const border = { color: pdfColor(ctx.theme.imagePlaceholderBorder), widthPx: 1 };
   if (node.attrs["kind"] === "checkbox") {
@@ -180,16 +180,18 @@ const contentControlPdf: PdfNodeHandler = (block, ctx) => {
 };
 
 /**
- * Content controls — Word's `<w:sdt>`. This is the inline control: a field a
- * signer completes after the seal, whose value the document never holds, or
- * an author's checkbox. Not in StarterKit; add it where documents carry fields.
+ * Fields, kept independent of any file format: DOCX maps a signature to a
+ * Word signature line and the other kinds to content controls. This is the
+ * inline field: one a signer completes after the seal, whose value the
+ * document never holds, or an author's checkbox. Not in StarterKit; add it
+ * where documents carry fields.
  */
-export const ContentControl = Extension.create({
-  name: "contentControl",
+export const Field = Extension.create({
+  name: "field",
 
   addNodes() {
     return {
-      contentControl: {
+      field: {
         inline: true,
         group: "inline",
         atom: true,
@@ -206,10 +208,10 @@ export const ContentControl = Extension.create({
         },
         parseDOM: [
           {
-            tag: "span[data-content-control]",
+            tag: "span[data-field]",
             getAttrs(dom) {
               if (!(dom instanceof Element)) return false;
-              const kind = dom.getAttribute("data-content-control");
+              const kind = dom.getAttribute("data-field");
               if (!isKind(kind)) return false;
               const fill = dom.getAttribute("data-fill") === "author" ? "author" : "signer";
               const role = dom.getAttribute("data-role");
@@ -231,7 +233,7 @@ export const ContentControl = Extension.create({
           return [
             "span",
             {
-              "data-content-control": String(kind),
+              "data-field": String(kind),
               "data-fill": String(fill),
               ...(typeof role === "string" ? { "data-role": role } : {}),
               ...(required === true ? { "data-required": "" } : {}),
@@ -247,27 +249,27 @@ export const ContentControl = Extension.create({
 
   addCommands() {
     return {
-      insertContentControl: (options: InsertContentControlOptions) => insertContentControl(options),
-      toggleContentControlChecked: () => toggleContentControlChecked,
+      insertField: (options: InsertFieldOptions) => insertField(options),
+      toggleFieldChecked: () => toggleFieldChecked,
     };
   },
 
   addInlineHandlers() {
-    return { contentControl: contentControlStrategy };
+    return { field: fieldStrategy };
   },
 
   addExports() {
-    return { pdf: { nodes: { contentControl: contentControlPdf } } };
+    return { pdf: { nodes: { field: fieldPdf } } };
   },
 });
 
 declare module "@scrivr/core" {
   interface Commands<ReturnType> {
-    contentControl: {
-      /** Insert an inline content control at the selection. */
-      insertContentControl: (options: InsertContentControlOptions) => ReturnType;
+    field: {
+      /** Insert an inline field at the selection. */
+      insertField: (options: InsertFieldOptions) => ReturnType;
       /** Check or uncheck the selected author checkbox. */
-      toggleContentControlChecked: () => ReturnType;
+      toggleFieldChecked: () => ReturnType;
     };
   }
 }

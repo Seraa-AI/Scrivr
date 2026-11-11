@@ -404,37 +404,74 @@ its own import/export handlers (`todo_extension_owned_format_paths`). Answer the
 controls serve forms *and* templating, and if signature fields are the same
 feature we should not build two.
 
-Decided 2026-11-11 for phase 3:
+Decided 2026-11-11 for phase 3, reoriented the same day:
 
-- **One content-control concept, not a signature node.** Signature fields are
-  content controls — Word's `<w:sdt>` — so forms and templating are the same
-  feature and nothing is built twice.
-- **Each control says who fills it: `fill: "author" | "signer"`.** An
+- **Fields are format-neutral.** The first decision made signatures content
+  controls — Word's `<w:sdt>`. They are not: Word's own signature is a signature
+  line, a VML shape holding `o:signatureline`. So the model names neither; the
+  DOCX mapping picks per kind.
+- **Each field says who fills it: `fill: "author" | "signer"`.** An
   author-filled value is document content and part of the hash. A signer-filled
-  control is always empty in the document; its value is lane C's overlay.
+  field is always empty in the document; its value is lane C's overlay. A
+  signed DOCX is not a goal — the executed artifact is the PDF (phase 4).
 - **Inline and block**, as Word allows both.
 - **Kinds:** signature, initials, date, text, checkbox. Dropdown later.
+- **A pending signature exported to DOCX is signable in Word *and* round-trips.**
 
-Model — three schema pieces, one extension, one `<w:sdt>` mapping. New, flagged:
+Model — three schema pieces, one extension. New, flagged:
 
 | Piece | For | Why this shape |
 |---|---|---|
-| `contentControl` — inline atom | every signer-filled control; author checkbox | a signer field holds nothing, so it is a box; a checkbox is a glyph |
-| `contentControlRange` — mark | author-filled text | Word's run-level `<w:sdt>` wraps runs, which is a mark over a range. An inline node *with* content would need LineBreaker, CharacterMap and caret work the engine has never needed — it flattens a textblock to text plus atoms |
-| `contentControlBlock` — block, `block+` | block-level `<w:sdt>` | the container path `SourcedBlock` already uses |
+| `field` — inline atom | every signer field; author checkbox | a signer field holds nothing, so it is a box; a checkbox is a glyph |
+| `fieldRange` — mark | author-filled text | Word's run-level `<w:sdt>` wraps runs, which is a mark over a range. An inline node *with* content would need LineBreaker, CharacterMap and caret work the engine has never needed — it flattens a textblock to text plus atoms |
+| `fieldBlock` — block, `block+` | block-level `<w:sdt>` | the container path `SourcedBlock` already uses |
 
 ProseMirror refuses a node and a mark sharing a name, hence three names.
+"Field" also names Word's field codes (`PAGE`, `NUMPAGES`); in this repo those
+are header/footer tokens, and the code says "field instruction" for them.
 
-A signer-filled control carries `role` and `required` and no value attr. The
-editor lists them — `getFields()` on `BaseEditor`, so a backend can validate a
-template on `ServerEditor` — as `{ id, role, kind, required }`. Geometry is added
-at seal time (phase 4).
+A signer field carries `role` and `required` and no value attr.
+`listSignerFields(doc)` gives `{ id, role, kind, required }`, so a backend can
+validate a template on `ServerEditor`. Geometry is added at seal time (phase 4).
+
+### DOCX mapping (3d)
+
+Every field exports as an `<w:sdt>` whose `w:tag` carries Scrivr's metadata —
+id, kind, fill, role, required — which is what round-trips. Inside it:
+
+| Kind | `sdtContent` | Word sees |
+|---|---|---|
+| signature | a run holding `w:pict` → `v:shape` → `o:signatureline` | a signature line it can sign |
+| initials | plain-text control with a placeholder | a text box; Word has no initials line |
+| date | `w:date` control | a date picker |
+| text | `w:text` control | a text control |
+| checkbox | `w14:checkbox` control | a checkbox |
+
+Checked against `[MS-OE376]` (Office's implementation notes, repo root):
+
+- Office's default for `issignatureline` is **false**, against the standard's
+  true (Part 4 §6.2.2.29) — write `issignatureline="t"` or Word sees a picture.
+  One `o:signatureline` per shape.
+- Word ties a signature to its line by GUID: the signature's `SetupID` matches
+  the line's `id`. The line's `id` is a braced GUID, stable for the field.
+- **Duplicate `w:id` on two SDTs: Word discards every SDT but the last, keeping
+  only its contents** (§2.5.2.18). The exported `w:id` must be unique per field,
+  or Word silently strips the metadata the round-trip depends on.
+- An inline `sdtContent` holds runs, and a run holds `w:pict`, so a signature
+  line inside a content control is schema-valid (§2.5.2.29, §2.5.2.35).
+- Word shows a control's placeholder only after the user clicks in and out of
+  it (§2.5.2.9) — relevant to 3b.
+
+Not settled by the spec, to verify in real Word before 3d ships: whether Word
+still offers *Sign* on a signature line inside a content control, and whether it
+needs the line's preview image (`v:imagedata`) or regenerates it.
+`w14:checkbox` is specified in [MS-DOCX], not [MS-OE376].
 
 Sub-phases, each its own commit:
-**3a** inline control — node, canvas, PDF parity, `getFields()`, commands.
-**3b** `contentControlRange` mark for author text, with Word's placeholder.
-**3c** `contentControlBlock`.
-**3d** DOCX `<w:sdt>` import and export, semantic, markdown.
+**3a** inline field — node, canvas, PDF parity, `listSignerFields`, commands.
+**3b** `fieldRange` mark for author text, with Word's placeholder.
+**3c** `fieldBlock`.
+**3d** DOCX import and export per the mapping above, semantic, markdown.
 
 **Phase 4 — canonical snapshot + hashing.** SHA-256 over canonical semantic
 content; sealed field geometry; `artifactHash` over exported bytes. Forces the
@@ -529,15 +566,16 @@ this section says so rather than the proposal being quietly rewritten to match.
   still in view.
 - Not yet: phases 3–5; keyboard traversal between fields.
 
-**Phase 3a — inline content control.** Shipped on PR #256.
+**Phase 3a — inline field.** Shipped on PR #256.
 
-- `ContentControl` in core, outside StarterKit. Field listing is the pure
+- `Field` in core, outside StarterKit (first landed as `ContentControl`,
+  renamed once the signature-line finding made the model format-neutral). Field listing is the pure
   `listSignerFields(doc)`, not a `BaseEditor` method: the editor would otherwise
   name a node only an opt-in extension defines.
 - A field's id is its `nodeId`. `UniqueId` now stamps inline atoms that declare
   `nodeId` as it does blocks, so a pasted field gets a fresh id. Images get ids
   too, as a consequence.
 - The insert command refuses a signer field without a role, and an author
-  control other than a checkbox. Author text comes in 3b.
+  field other than a checkbox. Author text comes in 3b.
 - PDF draws the same box as the canvas; the signer outline is solid in the PDF
   because the draw surface has no dash.

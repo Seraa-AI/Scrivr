@@ -1,22 +1,22 @@
 /**
- * A content control prints as the box the canvas paints: a signer field's
+ * A field prints as the box the canvas paints: a signer field's
  * outline and caption, an author checkbox's tick.
  */
 import { describe, expect, it } from "vitest";
-import { ContentControl, ServerEditor, StarterKit, type LayoutLine } from "@scrivr/core";
+import { Field, ServerEditor, StarterKit, type LayoutLine } from "@scrivr/core";
 import { buildPdf } from "../index";
 import { block, onePage, textLine } from "./fixtures";
 import { recordDrawOps, type DrawOp } from "./opLog";
 
-const editor = new ServerEditor({ extensions: [StarterKit, ContentControl] });
-const contentControl = editor.schema.nodes["contentControl"]!;
+const editor = new ServerEditor({ extensions: [StarterKit, Field] });
+const field = editor.schema.nodes["field"]!;
 
 async function printed(attrs: Record<string, unknown>): Promise<DrawOp[]> {
   const host = block("paragraph", [textLine("Signed:", { font: "16px Helvetica" })], { y: 100 });
   const line: LayoutLine = host.lines[0]!;
   line.spans.push({
     kind: "object",
-    node: contentControl.create(attrs),
+    node: field.create(attrs),
     docPos: 9,
     x: 80,
     width: 120,
@@ -28,7 +28,7 @@ async function printed(attrs: Record<string, unknown>): Promise<DrawOp[]> {
   return ops.filter((op) => op.op !== "state" && !(op.op === "text" && op["value"] === "Signed:"));
 }
 
-describe("content controls in the PDF", () => {
+describe("fields in the PDF", () => {
   it("prints a signer field as a box captioned with its kind and role", async () => {
     const ops = await printed({ kind: "signature", fill: "signer", role: "client" });
 
