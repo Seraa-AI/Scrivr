@@ -505,6 +505,14 @@ the collaboration extraction.
 
 ## Open questions — answer before building
 
+0. **Decided 2026-11-11 — Scrivr ships functions, not a server extension.**
+   The seal must still be enforced on the server, where a patched client
+   cannot skip it, but the host owns that server: Scrivr exports pure functions
+   — whether an update may land, the state a seal moves a revision to, a fork
+   of stale work — and the host calls them from its own HocusPocus hooks, as
+   Seraa already gates every body write in one service call. This answers 1
+   and 2: no package split is needed to carry a server extension, and there is
+   none to place.
 1. **Does `@scrivr/collaboration` get extracted?** Collaboration lives in
    `@scrivr/plugins` today. A revision protocol plus a server extension is a
    plausible reason to split it; that is a real cost and should be decided
