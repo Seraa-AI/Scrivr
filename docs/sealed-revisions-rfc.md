@@ -1,6 +1,6 @@
 # RFC: Sealed Revisions
 
-Status: draft (2026-09-28)
+Status: draft (2026-09-28); path locked 2026-11-11 after the design checks below
 
 ## Problem
 
@@ -11,14 +11,15 @@ executed artifact.
 
 Scrivr today cannot say it. Three gaps:
 
-**1. Read-only is not a mutation boundary.** `readOnly` gates two paths — the
-command wrapper (`BaseEditor.ts:581`, early-returns every command) and the input
-bridge (`Editor.ts:778`, `ib.setReadOnly` + cursor stop). It does *not* gate
-`applyTransaction` (`BaseEditor.ts:328`), whose own doc comment names its
-callers: "plugin metadata via `tr.setMeta()`, programmatic `deleteSelection`,
-custom transforms, or external sources (Y.js remote sync, AI suggestions)". A
-read-only Scrivr editor accepts remote Yjs updates and agent-generated
-transactions today. That is a live bug independent of this RFC.
+**1. Nothing is a mutation boundary.** `readOnly` gates the command wrapper
+(`buildCommands` in `BaseEditor.ts`), the input bridge (`Editor.setReadOnly`) and
+`deferEdit`. It does *not* gate `applyTransaction`, whose own doc comment names
+its callers: "plugin metadata via `tr.setMeta()`, programmatic `deleteSelection`,
+custom transforms, or external sources (Y.js remote sync, AI suggestions)". Nor
+does it gate `EditorSurface.dispatch`, which header/footer content goes through.
+A read-only editor accepting *remote* Yjs updates is correct — a viewer in a live
+room should watch others type. Accepting *local* programmatic edits is the live
+bug, and nothing at all can refuse every origin, which is what a seal needs.
 
 **2. The collaboration substrate has no revision identity.** `Collaboration`
 creates a `Y.Doc` and a `HocuspocusProvider` per editor
@@ -95,31 +96,61 @@ a `annotations: "allow"` exemption.
 
 ## 1. The mutation gate (core)
 
-One chokepoint. `applyState` — reached by `applyTransaction`, by
-`dispatchToActive`, and by the command wrapper — classifies and decides.
+Core answers one question: **may this transaction change the document?** The
+answer depends on two facts, and they are different facts with different owners:
+
+| Fact | Owner | Means | Local edits | Remote collab updates |
+|---|---|---|---|---|
+| `readOnly` | the host, per viewer | *this person* may not author | denied | **applied** |
+| `sealed` | the revision | *this document* may not change | denied | denied |
+
+The draft derived `readOnly` from a single policy. The checks below show why that
+is wrong: a read-only viewer in a live room must still receive remote edits, and
+a client in the `freezing` drain must still apply the ops the server accepted
+before the boundary, or its document will not equal the sealed snapshot. Both
+are "local denied, remote allowed" — that is `readOnly`, not `sealed`. Two
+owners of two facts is not the two-owners-of-one-fact papercut.
 
 ```ts
-type MutationPolicy = {
-  content: "allow" | "deny";
-  selection: "allow" | "deny";
-};
+type MutationOrigin = "local" | "remote";   // remote ⇔ tr.getMeta(COLLAB_SYNC_META)
+
+function admits(tr: Transaction, origin: MutationOrigin): boolean
+// sealed            → no docChanged transaction, from any origin
+// readOnly, local   → no docChanged transaction
+// otherwise         → everything
 ```
 
-Two axes, because `tr.docChanged` is the only honest discriminator ProseMirror
-gives us. A predicate form (`canApply(tr): boolean`) is rejected: arbitrary
-predicates are untestable, unpredictable when composed, and every extension will
-want to install one.
+Selection-only and meta-only transactions always pass: a sealed viewer still
+selects, copies and focuses fields. The draft's `selection: "deny"` axis had no
+consumer and is dropped.
 
-`readOnly` becomes a **derived read** of the policy, not a second flag. The repo
-already carries one recurring papercut from two owners of a single fact (the
-selection resolver, `docs/selection-rfc.md`); a `readOnly` boolean living beside
-a `MutationPolicy` would be the second.
+**One gate, two state owners.** The body's state lives in `BaseEditor`; each
+header/footer slot owns its own `EditorState` in `EditorSurface`. Both apply
+through the same `admits`. A gate only in `applyState` lets a surface keep an
+edit the root document will then refuse at commit — the surface shows text the
+document does not have.
 
-A denied transaction is dropped and reported — the host needs to know a seal
-rejected an edit, not discover it by the document silently not changing.
+**Judge the result, not the request.** `EditorState.apply` runs
+`appendTransaction`, so a selection-only transaction can come back with an
+appended `docChanged` one (normalizers, `UniqueId`, `TrailingNode`). The gate
+calls `state.applyTransaction(tr)` and inspects every transaction in the result;
+if any changed the document, the whole result is discarded. Nothing partial lands.
 
-**This lane is independently valuable.** It fixes the `applyTransaction` hole
-whether or not anything downstream ships.
+**A refusal is reported, never silent.**
+
+- `applyTransaction(tr)` returns `boolean` (was `void` — widening, not breaking).
+- Commands keep returning `false`.
+- `deferEdit` keeps abandoning with `"read-only"`; a sealed editor abandons with
+  `"sealed"`.
+- The editor emits `"mutationDenied"` with `{ reason: "read-only" | "sealed",
+  origin }` so a host learns a seal turned an edit away.
+
+A remote update refused by a sealed editor would leave the Y.Doc and the editor
+disagreeing. That cannot happen in lane C, which has no provider; in lane A a
+sealed client must stop its binding — phase 5's job, not the gate's.
+
+**This lane is independently valuable.** It closes the local
+`applyTransaction` / surface hole whether or not anything downstream ships.
 
 ## 2. Revision identity and fencing (collaboration)
 
@@ -171,7 +202,13 @@ Hashing the Yjs state is wrong: the same logical document yields different bytes
 depending on update history and client ids. The preimage must be canonical
 semantic content, which is what `@scrivr/export-semantic` already produces.
 
-Two consequences:
+Three consequences:
+
+**The preimage covers every part of the document a reader sees.** Header and
+footer content lives in `doc.attrs.headerFooter`, and `@scrivr/export-semantic`
+today walks only the body. A hash over body units alone would let a footer
+change after sealing without the hash noticing. The canonical serialization
+includes the doc attrs that render.
 
 **Semantic emission becomes a determinism contract**, not a best-effort lane. It
 has already bitten us once — `decision_deterministic_nodeid_read_path` exists
@@ -220,10 +257,22 @@ scroll listeners, no `IntersectionObserver` over paragraphs. "The signer scrolle
 to the end before signing" is a standard e-signature evidence item and is
 obtainable *only* if Scrivr emits it.
 
-Lane C therefore exposes a viewport telemetry surface — pages entered, dwell,
-furthest point reached — that the host subscribes to and writes into its own
-evidence store. This is a Scrivr responsibility falling directly out of the
-rendering architecture.
+Lane C therefore exposes a viewport telemetry surface that the host subscribes to
+and writes into its own evidence store. This is a Scrivr responsibility falling
+directly out of the rendering architecture.
+
+The granularity is **page-level and nothing finer**:
+
+- page entered / left, with timestamps
+- furthest page reached
+- `reachedEnd`
+
+No paragraph or line dwell. E-signature law (ESIGN/UETA, eIDAS) asks for intent,
+consent, attribution and retention; scroll evidence is a product convention, not
+a legal requirement, so the coarse default is the defensible one. Scrivr emits
+and never persists; whether to store the events, and whether to tell the signer,
+is the host's. A finer level is an opt-in if a real consumer ever asks — adding
+detail later is easy, taking it back is not.
 
 ---
 
@@ -247,13 +296,20 @@ template before anything exists.
 **Lane B — sealing.** A backend API.
 
 ```ts
-const sealed = await revisions.seal(documentName, { expectedEpoch });
+const sealed = await revisions.seal(documentName, { expectedEpoch, assignedRoles });
 // { revisionId, epoch, snapshot, contentHash, sealedAt, fields }
 ```
 
 - **`fields` returns *from* the seal.** Reading them in a separate prior call is
   a TOCTOU — a drafter adds a signature block between the read and the freeze and
   the ceremony is missing a signer. The manifest and the hash must be atomic.
+- **Every required role is assigned before the seal.** `assignedRoles` is the
+  role names the host has mapped to people — names only, never the people.
+  The seal fails with `UnassignedRoles { missing }` when a required field's role
+  is not in it, and with `UnknownRoles { unknown }` when the host assigned a role
+  no field carries (the field was removed after the host invited someone). The
+  check runs inside the seal, against the same document the hash is taken over;
+  a host checking first is the same TOCTOU as reading `fields` first.
 - **Idempotent by `revisionId`.** A backend will retry across a network blip;
   sealing an already-sealed revision returns the same result rather than throwing.
   An `expectedEpoch` mismatch is the only real failure, and it means "someone
@@ -296,9 +352,11 @@ plus a value-overlay pass over sealed field geometry.
 
 ## Phasing
 
-**Phase 1 — mutation gate.** Core only. One chokepoint in `applyState`,
-`readOnly` derived from the policy, `content`/`selection` axes, denied
-transactions reported. Ships alone, fixes a live bug, no dependents.
+**Phase 1 — mutation gate.** Core only. One `admits(tr, origin)` shared by
+`applyState` and `EditorSurface.dispatch`; `readOnly` (local denied) and `sealed`
+(all denied) as two facts; judged on the `applyTransaction` result including
+appended transactions; refusals reported through return values and
+`"mutationDenied"`. Ships alone, fixes a live bug, no dependents.
 
 **Phase 2 — sealed viewer (lane C).** A sealed editor over a static snapshot with
 an external value overlay and viewport telemetry. **Deliberately before lanes A
@@ -335,13 +393,45 @@ the collaboration extraction.
 4. **Fork lineage in the model** — does `parentRevisionId` live in doc attrs
    (collaborative via `prose_doc_attrs`, `Collaboration.ts`) or outside the
    document entirely?
-5. **Partial ceremonies.** Can a revision seal with unassigned roles? Probably
-   yes — assignment is the host's — but `required` then means nothing to Scrivr.
-6. **Telemetry granularity and privacy.** Page-level is defensible; paragraph
-   dwell is surveillance. Where is the line, and is it the host's to set?
-7. **Does `freezing` need a client-observable state at all,** or is the drain
-   short enough that `editable → sealed` with rejected-update feedback is the
-   whole story?
+5. ~~**Partial ceremonies.**~~ **Decided:** no. Every required role is assigned
+   before the seal, checked inside `seal()` — see Lane B.
+6. ~~**Telemetry granularity and privacy.**~~ **Decided:** page-level only,
+   emitted not persisted, storage the host's — see §4.
+7. ~~**Does `freezing` need a client-observable state?**~~ **Answered by the
+   checks:** yes, and it already has one — `readOnly`. During the drain the
+   client must apply remote ops the server accepted before the boundary while
+   refusing its own; that is exactly local-denied, remote-allowed.
+
+## Design checks (2026-11-11)
+
+Run against `main` before phase 1, to lock the path. Each finding has already
+been folded into the sections above.
+
+**Data flow.** Every document mutation reaches state through one of two
+owners: `BaseEditor.applyState` (commands via `dispatchToActive`, input, Yjs and
+plugins via `applyTransaction`, `deferEdit`) or `EditorSurface.dispatch`
+(header/footer slots, which plugins also call directly). The draft named only the
+first. → one `admits` shared by both.
+
+**Invariants.**
+
+| Invariant | Held by |
+|---|---|
+| A sealed document never changes, from any origin | `admits` at both state owners |
+| A read-only viewer still receives remote edits | origin from `COLLAB_SYNC_META`, which core already owns |
+| A refused transaction leaves no partial state | judge the full `applyTransaction` result, discard all of it |
+| The hash describes everything a reader sees | canonical form includes rendered doc attrs (§3) |
+| A field value never enters the document | lane C overlay; the gate makes a value-as-node impossible to write |
+| Sealed role assignment matches the sealed fields | `assignedRoles` checked inside `seal()` |
+
+**Error flow.** Every refusal surfaces through the channel its caller already
+reads: commands return `false`, `applyTransaction` returns `false`, `deferEdit`
+abandons with a reason, and the editor emits `"mutationDenied"`. The one refusal
+that would *diverge* state — a sealed client refusing a remote Yjs update while
+its Y.Doc keeps it — cannot arise in lane C (no provider) and is closed in lane A
+by phase 5 stopping the binding at the seal. Seal failures are typed:
+`EpochMismatch`, `UnassignedRoles`, `UnknownRoles`; a retry of a completed seal
+returns the original result.
 
 ## What shipped
 
