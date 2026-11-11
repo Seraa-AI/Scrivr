@@ -176,6 +176,7 @@ export class TileManager {
   private unsubscribe: (() => void) | null = null;
   private rafId: number | null = null;
   private readonly gap: number;
+  private pagesInView: { first: number; last: number; pageCount: number } | null = null;
   private readonly overscan: number;
   private readonly showMarginGuides: boolean;
   private readonly smallTileHeight: number;
@@ -343,6 +344,7 @@ export class TileManager {
     // unready, or the view freezes under the user.
     if (!this.hasPainted && this.editor.loadingState === "syncing") return;
     this.hasPainted = true;
+    this.reportPagesInView(layout, scrollTop, viewportH);
 
     /** Compute visible tile range */
     const total = this.totalTiles(layout);
@@ -412,6 +414,23 @@ export class TileManager {
       this.paintContent(tile, layout, layout.version);
       this.paintOverlay(tile, layout);
     }
+  }
+
+  /**
+   * Pages the viewport overlaps, without overscan, announced when the range
+   * changes. Only this class knows the scroll position, so reading telemetry
+   * starts here. Pageless has no pages and reports nothing.
+   */
+  private reportPagesInView(layout: DocumentLayout, scrollTop: number, viewportH: number): void {
+    if (this.editor.isPageless || layout.pages.length === 0) return;
+    const sh = this.slotHeight;
+    const first = Math.max(1, Math.floor((scrollTop - this.tileHeight) / sh) + 2);
+    const last = Math.min(layout.pages.length, Math.ceil((scrollTop + viewportH) / sh));
+    const pageCount = layout.pages.length;
+    const previous = this.pagesInView;
+    if (previous?.first === first && previous.last === last && previous.pageCount === pageCount) return;
+    this.pagesInView = { first, last, pageCount };
+    this.editor.emit("pagesInView", this.pagesInView);
   }
 
   /** Content painting */

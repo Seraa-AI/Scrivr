@@ -323,18 +323,23 @@ const sealed = await revisions.seal(documentName, { expectedEpoch, assignedRoles
 ```ts
 new Editor({
   content: snapshot,
-  revision: { id, contentHash },        // sealed → content: "deny"
+  sealed: true,
   extensions: [FieldCompletion.configure({
-    fields,                              // what THIS viewer may complete
-    values,                              // already completed by others, for display
-    onFieldComplete: (id, value) => Promise<void>,
+    fields,                              // sealed manifest: id, role, kind, required, page, rect
+    completable,                         // field ids THIS viewer may complete
+    values,                              // already completed, for display
+    onFieldRequest: (field) => Promise<FieldValue | null>,
   })],
 });
 ```
 
-`onFieldComplete` returning a promise is the seam: the host authenticates,
-captures consent, writes evidence, and resolves — or rejects, and Scrivr reverts
-the overlay. Scrivr persists nothing.
+`onFieldRequest` is the seam: the viewer presses a field it may complete, and
+the host opens its own capture — signature pad, consent text, authentication —
+writes its evidence, and resolves with the value to show, or `null` to leave the
+field empty. Scrivr persists nothing. The draft had Scrivr hand the host a value
+and revert on rejection; but Scrivr cannot capture a signature — consent UI is
+the host's — so the value has to come *from* the host, and there is nothing to
+revert.
 
 **Completion.**
 
@@ -367,6 +372,30 @@ and B**: an entire ceremony can be built and demoed against a hand-made snapshot
 with no collaboration involved. If "values are never nodes" survives that, every
 decision downstream is de-risked. If it does not, we learn it for the cost of a
 viewer.
+
+Locked design (2026-11-11). Three pieces; two new core concepts, flagged.
+
+1. **`sealed: true` constructor option** on `Editor` and `ServerEditor`, beside
+   `readOnly`. The content loads, then the editor seals. No new concept.
+2. **Reading telemetry.** *New core event* `pagesInView: { first, last }` from
+   `TileManager`, the only owner of the scroll position — fired when the range of
+   pages actually on screen (no overscan) changes. Paged mode only; a pageless
+   view has no pages to report, and a signing view is paged. `ReadingProgress`
+   in `@scrivr/plugins` turns it into the evidence shape: page entered / left
+   with timestamps, furthest page, `reachedEnd`. Core reports what is visible;
+   the evidence vocabulary stays out of core.
+3. **Field overlay.** `FieldCompletion` in `@scrivr/plugins`. Fields come from
+   the sealed manifest — page plus a page-local rect — never from layout, so
+   nothing is re-derived (§3). It paints values and the boxes this viewer may
+   complete through `addOverlayRenderHandler`. *New core event* `press:
+   { point: PagePoint, clickCount }`, emitted for every primary press before
+   body routing, read-only and sealed included — the press-side twin of `hover`,
+   which already carries a `PagePoint`. A field is not a document node, so the
+   semantic hit-target registry cannot claim it; an event is the smallest seam.
+
+Not in phase 2: `renderExecutedPdf` (phase 4, with `artifactHash` — the PDF value
+pass lands with the hash that covers it), field definitions as nodes (phase 3),
+keyboard traversal between fields.
 
 **Phase 3 — field definitions (lane A).** The authoring extension. Carries a
 format obligation from day one — canvas *and* PDF (`feedback_pdf_parity`), plus
@@ -441,7 +470,7 @@ returns the original result.
 Updated as each phase lands. Where the code and the proposal above disagree,
 this section says so rather than the proposal being quietly rewritten to match.
 
-**Phase 1 — mutation gate.** Shipped with this RFC (PR #202).
+**Phase 1 — mutation gate.** Shipped with this RFC (PR #256).
 
 - `mutationDenial(root, applied, locks)` in `packages/core/src/mutationGate.ts`
   is the one rule. `BaseEditor.applyState` and `EditorSurface.dispatch` both
@@ -453,4 +482,17 @@ this section says so rather than the proposal being quietly rewritten to match.
   it did not, so a read-only viewer would have refused a collaborator's
   header/footer change.
 - `deferEdit` abandons with `"sealed"`; commands return `false` when sealed.
-- Not yet: phases 2–5.
+**Phase 2 — sealed viewer (lane C).** Shipped on PR #256.
+
+- `sealed: true` on `Editor` and `ServerEditor`.
+- `pagesInView: { first, last, pageCount }` from `TileManager`. `pageCount` was
+  added to the design so `reachedEnd` needs no layout read.
+- `press: { point, clickCount }` from `PointerController`, primary button only,
+  emitted before routing.
+- `ReadingProgress` and `FieldCompletion` (+ `setFieldValue`) in
+  `@scrivr/plugins` under `sealed-viewer/`. The field manifest types
+  (`SealedField`, `FieldValue`) live there until lane B produces them.
+- A drawn signature is a raster image, gated by `safeImageUrl`.
+- Closing the viewer ends the reading record: `pageLeft` for every page
+  still in view.
+- Not yet: phases 3–5; keyboard traversal between fields.

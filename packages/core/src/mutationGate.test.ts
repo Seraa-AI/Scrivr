@@ -138,6 +138,25 @@ describe("a sealed editor", () => {
   });
 });
 
+describe("an editor constructed sealed", () => {
+  it("shows its content and refuses every change", () => {
+    const editor = new ServerEditor({ extensions: [StarterKit], content: hello, sealed: true });
+
+    expect(textOf(editor)).toBe("Hello");
+    expect(editor.sealed).toBe(true);
+    expect(editor.applyTransaction(fromCollaborator(typed(editor, "X")))).toBe(false);
+  });
+
+  it("is sealed in the browser editor too, with input and caret off", () => {
+    const editor = createTestEditor({ extensions: [StarterKit], content: hello, sealed: true });
+
+    expect(editor.sealed).toBe(true);
+    expect(editor.readOnly).toBe(true);
+    expect(editor.applyTransaction(editor.getState().tr.insertText("X", 1))).toBe(false);
+    editor.destroy();
+  });
+});
+
 describe("what the gate judges", () => {
   // A plugin that answers any caret move by writing to the document — the
   // shape normalizers and id stampers have.

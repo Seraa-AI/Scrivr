@@ -1,5 +1,6 @@
 import type { Mappable } from "prosemirror-transform";
 import type { HoverEvent } from "../hover/types";
+import type { PagePoint } from "../layout/pagePoint";
 import type { MutationDenied } from "../mutationGate";
 /**
  * augmentation.ts
@@ -131,6 +132,18 @@ export interface EditorEvents {
    * listeners should stick with `"update"` to avoid needless work on scroll.
    */
   viewport: void;
+  /**
+   * The range of pages on screen changed (paged mode; 1-based, inclusive, no
+   * overscan). Reading telemetry builds on this: the canvas has no DOM a host
+   * could observe instead.
+   */
+  pagesInView: { first: number; last: number; pageCount: number };
+  /**
+   * A primary press landed on the page — fired for every one, before routing,
+   * read-only and sealed included. For what is painted over a page without
+   * being a document node (a sealed field); nodes use the hit-target registry.
+   */
+  press: { point: PagePoint; clickCount: number };
   /** Fired when a click lands in a chrome band (header/footer area). */
   chromeClick: { page: number; x: number; y: number; band: "header" | "footer"; clickCount: number };
   /**

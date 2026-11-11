@@ -203,6 +203,12 @@ export interface EditorOptions {
 	 */
 	readOnly?: boolean;
 	/**
+	 * Start sealed: the content loads, then the document refuses every change,
+	 * from this client and collaborators alike. There is no unseal.
+	 * Defaults to false.
+	 */
+	sealed?: boolean;
+	/**
 	 * Diagnostic flags. Currently only `drag` — when true, PointerController
 	 * console.debugs structured drag events and DragDebugOverlay paints anchored
 	 * vs charMap rects on every page. Mutable at runtime via `editor.debug`;
@@ -540,6 +546,7 @@ export class Editor extends BaseEditor implements IEditor {
 		uploadPastedImage,
 		startReady = true,
 		readOnly = false,
+		sealed = false,
 		debug = {},
 		theme,
 		themeRoot,
@@ -734,6 +741,7 @@ export class Editor extends BaseEditor implements IEditor {
 
 		// Apply initial read-only state after infrastructure is ready.
 		if (readOnly) this.setReadOnly(true);
+		if (sealed) this.seal();
 
 		// Debug overlays — always installed; self-gate on the corresponding
 		// `this.debug.<flag>` at paint time so toggling at runtime requires no
