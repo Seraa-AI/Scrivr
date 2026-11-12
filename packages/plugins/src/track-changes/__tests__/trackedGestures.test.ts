@@ -3,6 +3,7 @@ import { ServerEditor, StarterKit, Table } from "@scrivr/core";
 import {
   Fragment,
   NodeSelection,
+  Selection,
   Slice,
   TextSelection,
   type EditorState,
@@ -94,6 +95,13 @@ const make = (content: DocNode[], userID: string, tracked: boolean) => new Edito
 // Gestures take the live editor, so positions come from what is there.
 const sel = (e: Editor, from: number, to = from) =>
   e.applyTransaction(e.getState().tr.setSelection(TextSelection.create(e.getState().doc, from, to)));
+/** Cells are selected by pointer; the other way to get one is to read a saved selection back. */
+function selectCells(e: Editor, anchor: number, head: number) {
+  const json = { type: "scrivr:cell", anchor: nodePos(e, "tableCell", anchor), head: nodePos(e, "tableCell", head) };
+  const selection = Selection.fromJSON(e.getState().doc, json);
+  if (selection.toJSON().type !== json.type) throw new Error(`no cell selection from ${JSON.stringify(json)}`);
+  e.applyTransaction(e.getState().tr.setSelection(selection));
+}
 const key = (e: Editor, name: string) => e.press(name);
 const tr = (e: Editor, f: (t: Transaction, s: EditorState) => Transaction) =>
   e.applyTransaction(f(e.getState().tr, e.getState()));
@@ -395,6 +403,14 @@ const scenarios: Scenario[] = [
   { name: "three lines mid-line", doc: hello, gesture: e => { sel(e, 3); pasteOpen(e, ["FOO", "MID", "BAR"]); } },
   { name: "two lines over a selection", doc: hello, gesture: e => { sel(e, 3, 8); pasteOpen(e, ["FOO", "BAR"]); } },
   { name: "one line mid-line", doc: hello, gesture: e => { sel(e, 3); pasteOpen(e, ["FOO"]); } },
+  // Over selected cells: each is emptied to a new paragraph, then what was typed
+  // or pasted is written into the first one, all in one transaction
+  { name: "type over selected cells", doc: [table("aa", "bb")], gesture: e => { selectCells(e, 0, 1); tr(e, t => t.insertText("Q")); } },
+  { name: "type over selected cells, the first empty", doc: [table("", "bb")], gesture: e => { selectCells(e, 0, 1); tr(e, t => t.insertText("Q")); } },
+  { name: "Delete selected cells", doc: [table("aa", "bb")], gesture: e => { selectCells(e, 0, 1); key(e, "Delete"); } },
+  { name: "cut selected cells", doc: [table("aa", "bb")], gesture: e => { selectCells(e, 0, 1); tr(e, t => t.deleteSelection().setMeta("uiEvent", "cut")); } },
+  { name: "paste a line over selected cells", doc: [table("aa", "bb")], gesture: e => { selectCells(e, 0, 1); pasteOpen(e, ["FOO"]); } },
+  { name: "paste two lines over selected cells", doc: [table("aa", "bb")], gesture: e => { selectCells(e, 0, 1); pasteOpen(e, ["FOO", "BAR"]); } },
 ];
 
 const isTracking = (name: string) => name.startsWith("tracked");

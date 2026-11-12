@@ -71,6 +71,31 @@ describe("an edit tracking cannot record is stopped, and the host is told why", 
     expect(trackChangesPluginKey.getState(next)!.changeSet.pending).toEqual([]);
   });
 
+  // A later step writing both inside the gesture's own insertion and past it is
+  // cut at the insertion's edge when the cut lands in text. These can't be cut
+  // there, so the whole gesture is stopped. No built-in command or agent edit
+  // builds them; only a host's own transaction can.
+  // In "hello" / "world": hello is 1–6, world 8–13.
+  it.each([
+    ["a deletion from an inserted paragraph into the next one", (s: EditorState) =>
+      s.tr.insert(7, p("new")).delete(9, 15)],
+    ["a replacement of text across the insertion's edge with paragraphs", (s: EditorState) =>
+      s.tr.insertText("abc", 3).replace(4, 8, new Slice(Fragment.from([p("X"), p("Y")]), 1, 1))],
+    ["a replacement of text across the insertion's edge and into the next paragraph", (s: EditorState) =>
+      s.tr.insertText("abc", 6).replaceWith(7, 12, s.schema.text("Z"))],
+  ])("stops %s, and says the steps overlap", (_, gesture) => {
+    const refused: TrackingRefusal[] = [];
+    const state = EditorState.create({
+      doc: doc(p("hello"), p("world")),
+      plugins: [trackChangesPlugin({ userID: "alice", onRefused: refusal => refused.push(refusal) })],
+    });
+    const next = state.apply(gesture(state));
+
+    expect(next.doc.eq(state.doc)).toBe(true);
+    expect(refused).toEqual([{ reason: "overlapping-steps" }]);
+    expect(trackChangesPluginKey.getState(next)!.changeSet.pending).toEqual([]);
+  });
+
   it("stops nothing while suggestions are off", () => {
     const refused: TrackingRefusal[] = [];
     const state = suggesting(refused, TrackChangesStatus.disabled);
