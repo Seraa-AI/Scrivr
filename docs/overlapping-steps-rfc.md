@@ -41,7 +41,8 @@ answered most of it:
 | The cut would fall between blocks: a gesture inserts a paragraph, then deletes from inside it into the next one | Cutting there would take an inserted block apart |
 | The straddling replacement carries blocks, or an open slice | Its content would have to land on both sides of the cut |
 | An inline replacement spans two blocks | The new text cannot stay where the original step put it once the range is cut |
-| The straddling step is not a `ReplaceStep`, e.g. a wrap or lift whose tokens fall on both sides of the edge | Only replace steps are cut; formatting steps and `setNodeMarkup` are composed instead |
+| The cut pieces don't fit: a deletion's ends sit at a different depth from the insertion's edges, as when text inserted in a list item is deleted through, from the paragraph before the list to the one after | ProseMirror rejects a piece that joins two depths, so the cut cannot apply |
+| The straddling step is not a `ReplaceStep`: a wrap or lift whose tokens fall on both sides of the edge | Only replace steps are cut. Formatting steps are composed into the insertion, and a `setNodeMarkup` is skipped or folded, so neither straddles |
 
 ## Who builds these
 
@@ -52,8 +53,8 @@ every refusal, while the plugins, `ai` and `react` suites ran. The suites
 include `trackedGestures.test.ts`, which runs real key bindings, commands,
 paste, cut and drag with tracking on and off.
 
-- 152 straddles. 148 came from six `trackedGestures` scenarios, and all six
-  build the transaction by hand (`insertText(…).delete(…)`, `insert(…).delete(…)`).
+- 152 straddles. 148 came from six existing `trackedGestures` scenarios, and
+  all six build the transaction by hand (`insertText(…).delete(…)`, `insert(…).delete(…)`).
   The other four came from the same kind of hand-built transaction in
   `reviewBoundaries.test.ts` and `trackingRefusal.test.ts`.
 - Every one was split and recorded. There were no `overlapping-steps` refusals.
@@ -68,8 +69,9 @@ paste, cut and drag with tracking on and off.
 | `Editor.moveNode` (drag) | Delete, then insert | The insertion is the last step |
 | `ClearFormatting` | Mark removal, block types, then lists flattened back to front | Each flattened list lands beside the next |
 | Paste placeholders | Attribute changes and deletions | No insertion |
-| `CellSelection.replace` (typing, Delete, cut, paste over cells) | Each cell emptied to a new paragraph, then the content written into the first | The write lands inside the new paragraph, so it is folded into the insertion |
-| `applyRichEdit`, `AiSuggestion` | Tracked marks built by hand, under `skipTracking` | Never reaches `composeGesture` |
+| `CellSelection.replace` (typing, Delete, cut, paste over cells) | Each cell not already one empty paragraph is emptied to a new one, then the content is written into the first cell | The write lands in the first cell's paragraph: a new one, so it is folded into that insertion, or an empty one left alone, so it is a plain insertion |
+| `applyRichEdit`, `AiSuggestion` direct and tracked apply | Tracked marks built by hand, under `skipTracking` | Never reaches `composeGesture` |
+| `AiSuggestion` keep-formatting apply, tracked | Mark steps only, under `trackAsSuggestion` | Reaches `composeGesture`, but mark steps are not insertions and never straddle |
 | `applySemanticEdits` structural batch | One tracked transaction | `overlapsBatch` and `insideMoved` refuse an op on what the batch already added or moved. A block the batch inserts has no id until after dispatch, so no later op can name it |
 | Image layout edits | `setNodeMarkup` | No insertion |
 | Collaborator edits, history, normalization | — | Not tracked |
@@ -95,9 +97,9 @@ the original document.
      no cut is possible, the tracked run would be stopped and these scenarios
      would fail. Checked: with every multi-step gesture forced to refuse, all
      six fail.
-   - `trackingRefusal` pins the three refused shapes a transaction can build:
-     the document is unchanged, `onRefused` reports `overlapping-steps`, and
-     nothing is pending. Checked: with gestures let through, all three fail.
+   - `trackingRefusal` pins all five refused shapes, one case each: the
+     document is unchanged, `onRefused` reports `overlapping-steps`, and
+     nothing is pending. Checked: with gestures let through, all five fail.
 
 ## Non-goals
 
@@ -139,4 +141,4 @@ differently.
 - `packages/plugins/src/track-changes/__tests__/trackedGestures.test.ts`: six
   gestures over selected cells, and `selectCells`
 - `packages/plugins/src/track-changes/__tests__/trackingRefusal.test.ts`: the
-  three refused shapes
+  five refused shapes
