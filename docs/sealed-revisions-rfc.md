@@ -777,6 +777,26 @@ the executed PDF with its hash. Driving it found:
 - Paint: values in the theme's text colour (they vanished on a dark page), a
   ticked checkbox keeps its box, no outline left at a completed field's edge.
 
+**Hardened by an outside review.** A second review, read against Microsoft's
+content-control and signing documentation, found, each fixed test first:
+
+- **Seals checked the body only.** Headers and footers are documents kept in
+  the doc's attributes; the hash covered them but no check did. The seal now
+  reads every embedded document: prompts and pending suggestions there refuse,
+  and signer fields there refuse with `fields-outside-body`.
+- **Word entries were lost on import.** A signer's text in a content control
+  came back as an empty field. `importDocx` now returns `fieldValues` beside
+  the document; drawings raise `field-drawing-not-imported`.
+- **The guide's seal raced incoming updates.** It now blocks writes before the
+  snapshot, with recovery, and says what a hash does and does not prove.
+- Custom kinds kept their control in the signing view (`kinds`), failed
+  requests reach the host (`onFieldRequestError`), and Tab leaves at either end.
+
+Still to do before claiming Word compatibility: open exported files in desktop
+Word — signature-line rendering and Sign, fill → save → reopen → re-import for
+every control, copied and multiline controls, and what re-export does to
+signatures and protection.
+
 **Hardened by the pre-ship review.** Seven reviewers read the whole branch; what
 they found, each fixed test first:
 
