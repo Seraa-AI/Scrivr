@@ -177,6 +177,32 @@ describe("FieldCompletion", () => {
     expect(request).toHaveBeenCalledTimes(2);
   });
 
+  it("tells the host when its request failed, so it can say so to the signer", async () => {
+    const failure = new Error("pad unavailable");
+    const onFieldRequestError = vi.fn();
+    editor = new LaidOutViewer({
+      extensions: [
+        StarterKit,
+        Field,
+        FieldCompletion.configure({
+          fields: [signHere, witness],
+          completable: [signHere.id],
+          values: {},
+          onFieldRequest: () => Promise.reject(failure),
+          onFieldRequestError,
+        }),
+      ],
+      content,
+      sealed: true,
+    });
+    editor.mountView();
+
+    press(editor, point(2, 150, 620));
+    await flush();
+
+    expect(onFieldRequestError).toHaveBeenCalledWith(signHere, failure);
+  });
+
   it("shows a value another participant completed, given by the host", () => {
     const request = vi.fn(async () => signature);
     const e = viewer(request);
@@ -211,13 +237,15 @@ describe("FieldCompletion — pointing and the keyboard", () => {
     expect(requestField(e, witness.id)).toBe(false);
   });
 
-  it("moves between the viewer's own fields, in reading order, with Tab and Shift+Tab", () => {
+  it("moves between the viewer's own fields, in reading order, with Tab and Shift+Tab, and lets focus go at either end", () => {
     const e = viewer(async () => null);
 
     expect(moveFieldFocus(e, 1)).toBe(signHere.id);
-    // The only one this viewer completes: Tab stays on it, never on the witness's.
-    expect(moveFieldFocus(e, 1)).toBe(signHere.id);
+    // Past the viewer's last field focus leaves the page, as Tab leaves a form —
+    // it never lands on the witness's field, and never traps the keyboard.
+    expect(moveFieldFocus(e, 1)).toBeNull();
     expect(moveFieldFocus(e, -1)).toBe(signHere.id);
+    expect(moveFieldFocus(e, -1)).toBeNull();
   });
 });
 
@@ -274,5 +302,31 @@ describe("FieldCompletion — a host's own look", () => {
 
     expect(drawn.length).toBeGreaterThan(0);
     expect(fieldRoleColor("client-authorized-signatory", { "client-authorized-signatory": "#ff0000" })).toBe("#ff0000");
+  });
+});
+
+describe("FieldCompletion — a host's own kinds", () => {
+  it("draws and completes a host's kind as the control it declares, as the author's editor does", () => {
+    const agree: SignerFieldDescriptor = { id: "f-agree", role: "client", kind: "agree", required: true, options: [] };
+    const kinds = { agree: { label: "I agree", size: { width: 16, height: 16 }, control: "checkbox" as const } };
+    editor = new LaidOutViewer({
+      extensions: [
+        StarterKit,
+        Field.configure({ kinds }),
+        FieldCompletion.configure({ fields: [agree], completable: [agree.id], values: {}, kinds, paint: (_ctx, field) => {
+          seen.push(field.control);
+          return true;
+        } }),
+      ],
+      content: { type: "doc", content: [{ type: "paragraph", content: [fieldNode(agree)] }] },
+      sealed: true,
+    });
+    const seen: string[] = [];
+    editor.mountView();
+    const map = new CharacterMap();
+    map.registerObjectRect({ docPos: 1, x: 100, y: 600, width: 16, height: 16, page: 2 });
+    editor.painters.at(-1)!(recordingContext([]), 2, defaultPageConfig, map, editor.getResolvedTheme());
+
+    expect(seen).toEqual(["checkbox"]);
   });
 });

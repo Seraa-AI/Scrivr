@@ -176,6 +176,46 @@ describe("fields in DOCX", () => {
   });
 });
 
+describe("a field filled in Word", () => {
+  /** A file with one signer field of `kind`, as exported, then filled in Word: its caption replaced by `typed`. */
+  const filledInWord = async (kind: string, typed: string, extra: Record<string, unknown> = {}) => {
+    const editor = new ServerEditor({
+      extensions,
+      content: {
+        type: "doc",
+        content: [{ type: "paragraph", content: [{ type: "field", attrs: { nodeId: "who", kind, fill: "signer", role: "client", width: 160, height: 24, ...extra } }] }],
+      },
+    });
+    const files = unzipSync(await exportDocxBytes(editor));
+    const document = strFromU8(files["word/document.xml"]!)
+      .replace("<w:showingPlcHdr/>", "")
+      .replace(/(<w:sdtContent>.*?<w:t[^>]*>)[^<]*(<\/w:t>)/s, `$1${typed}$2`);
+    return zipSync({ ...files, "word/document.xml": strToU8(document) });
+  };
+
+  it("keeps what a signer typed into its control — beside the document, never in it", async () => {
+    const { doc, fieldValues } = await importDocx(new ServerEditor({ extensions }), await filledInWord("name", "Alice Example"));
+
+    expect(fieldValues).toEqual({ who: { kind: "text", text: "Alice Example" } });
+    expect(doc.textContent).not.toContain("Alice");
+    expect(listSignerFields(doc).map((f) => f.id)).toEqual(["who"]);
+  });
+
+  it("keeps the choice a signer made in a dropdown", async () => {
+    const options = [{ id: "net-30", label: "Net 30" }, { id: "net-60", label: "Net 60" }];
+    const { fieldValues } = await importDocx(new ServerEditor({ extensions }), await filledInWord("dropdown", "Net 60", { options }));
+
+    expect(fieldValues).toEqual({ who: { kind: "text", text: "Net 60" } });
+  });
+
+  it("brings back nothing for a control still showing its caption", async () => {
+    const editor = new ServerEditor({ extensions, content: contract });
+    const { fieldValues } = await importDocx(new ServerEditor({ extensions }), await exportDocxBytes(editor));
+
+    expect(fieldValues).toEqual({});
+  });
+});
+
 describe("content controls Scrivr did not write", () => {
   /** A Word file whose body is `paragraph`, built on an exported package. */
   const wordFile = async (paragraph: string) => {

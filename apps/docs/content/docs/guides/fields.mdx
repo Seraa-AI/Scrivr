@@ -199,6 +199,12 @@ const editor = new Editor({
 
 When another participant completes a field, show it with `setFieldValue(editor, fieldId, value)`.
 
+### A host's own kinds, failures and the keyboard
+
+- Give `FieldCompletion` the same `kinds` you give `Field`, so a kind of your own draws and completes as the control it declares in the signing view too.
+- `onFieldRequestError(field, error)` is called when your `onFieldRequest` throws or rejects. The field stays as it was; tell the signer and let them try again. Resolving `null` is declining, not failing.
+- Tab and Shift+Tab move between the viewer's own fields; past the last or first, focus goes on to the page's next control. Enter opens the focused field.
+
 ## The executed document
 
 When everyone has signed, render the sealed snapshot with the values printed in their fields. Give `Field` the values on the editor that exports — a drawn signature keeps its proportions in its box, a typed one prints as text, a field nobody completed prints as the empty field, so the record shows it was left blank:
@@ -217,6 +223,17 @@ const artifactHash = await hashArtifact(pdf); // what was displayed, with the si
 ```
 
 The values are printed, never written: the snapshot, and its `contentHash`, are the same before and after.
+
+## Values entered in Word
+
+A field exported to Word is a content control a signer can fill there. Import the file and their entries come back **beside** the document, never in it, as `fieldValues`, by field id:
+
+```ts
+const { doc, fieldValues } = await importDocx(editor, bytes);
+// { "client-name-field": { kind: "text", text: "Alice Example" } }
+```
+
+Record them as the signer's, or pass them on to `Field.configure({ values })` or `FieldCompletion`. A drawing in a signature control is not brought back (the import warns `field-drawing-not-imported`): signatures are captured by your signing host.
 
 ## In other formats
 

@@ -221,6 +221,11 @@ function describeSealRefusal(refusal: SealRefusal): SuggestionRefusalText {
       };
     case "unknown-roles":
       return { message: `Can't seal: no field is left for ${roles(refusal.unknown)}.`, remedy: "Add a signer field for that party, then seal again." };
+    case "fields-outside-body":
+      return {
+        message: `Can't seal: ${refusal.count} signer field${refusal.count === 1 ? " is" : "s are"} in a header or footer.`,
+        remedy: "Move signer fields into the body of the agreement, then seal again.",
+      };
     case "host":
       return { message: `Can't seal: ${refusal.message}`, remedy: "This check is the host app's own." };
     case "unidentified-fields":

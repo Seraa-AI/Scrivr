@@ -20,7 +20,15 @@
  */
 
 import type { Node as PmNode } from "@scrivr/core/pm";
-import { applyPageFont, assignBlockIds, prepareDocumentFonts, type FontKey, type FontSynthesis } from "@scrivr/core";
+import {
+  applyPageFont,
+  assignBlockIds,
+  importedFieldValues,
+  prepareDocumentFonts,
+  type FieldValue,
+  type FontKey,
+  type FontSynthesis,
+} from "@scrivr/core";
 import type {
   DocxImports,
   IBaseEditor,
@@ -53,6 +61,12 @@ import { DocxImportError } from "./error";
 export interface DocxImportResult {
   doc: PmNode;
   diagnostics: DocxDiagnostic[];
+  /**
+   * What signers entered into fields' controls in Word, by field id — kept out
+   * of `doc`, as a signer's value always is. Pass on to `Field.configure({ values })`
+   * or `FieldCompletion`, or record it as the signer's.
+   */
+  fieldValues: Record<string, FieldValue>;
 }
 
 export interface DocxImportCallOptions extends DocxImportOptions {
@@ -259,7 +273,7 @@ export async function importDocx(
         throw new DocxImportError(fatal.message, finalDiagnostics);
       }
     }
-    return { doc, diagnostics: finalDiagnostics };
+    return { doc, diagnostics: finalDiagnostics, fieldValues: importedFieldValues(ctx) };
   } catch (err) {
     if (err instanceof DocxImportError) throw err;
     const message = err instanceof Error ? err.message : String(err);

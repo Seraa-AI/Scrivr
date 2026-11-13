@@ -4,7 +4,9 @@ import {
   DefaultContent,
   Editor,
   Field,
+  ServerEditor,
   hashArtifact,
+  listSignerFields,
   verifySnapshot,
   type FieldValue,
   type SealedSnapshot,
@@ -59,13 +61,23 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
   const [verified, setVerified] = useState<boolean | null>(null);
   const [executed, setExecuted] = useState<{ hash: string; url: string } | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
 
   // The editor reads these once, when it is created for a role.
   const valuesRef = useRef(values);
   valuesRef.current = values;
 
+  // Signing only goes ahead on the bytes that were sealed: their hash must
+  // match, and the fields offered must be the ones those bytes hold.
   useEffect(() => {
-    void verifySnapshot(snapshot.content, snapshot.contentHash).then(setVerified);
+    let current = true;
+    void verifySnapshot(snapshot.content, snapshot.contentHash).then((intact) => {
+      const held = listSignerFields(new ServerEditor({ extensions: [StarterKit, Field], content: JSON.parse(snapshot.content) }).getState().doc);
+      if (current) setVerified(intact && JSON.stringify(held) === JSON.stringify(snapshot.fields));
+    });
+    return () => {
+      current = false;
+    };
   }, [snapshot]);
 
   useEffect(() => () => {
@@ -88,7 +100,8 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
         DefaultContent.configure({ json: content }),
         FieldCompletion.configure({
           fields: snapshot.fields,
-          completable: mine.map((f) => f.id),
+          // Nothing is offered until the snapshot is proven intact.
+          completable: verified ? mine.map((f) => f.id) : [],
           values: valuesRef.current,
           onFieldRequest: (field, current) =>
             new Promise<FieldValue | null>((resolve) => {
@@ -98,9 +111,12 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
               }
               setRequest({ field, current, resolve });
             }).then((value) => {
+              setProblem(null);
               if (value) setValues((all) => ({ ...all, [field.id]: value }));
               return value;
             }),
+          onFieldRequestError: (field, error) =>
+            setProblem(`${KIND_LABEL[field.kind] ?? field.kind} could not be completed: ${error instanceof Error ? error.message : String(error)}. Try again.`),
         }),
         ReadingProgress.configure({
           onReading: (event: ReadingEvent) => {
@@ -116,7 +132,7 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
         }),
       ],
     },
-    [role],
+    [role, verified],
   );
 
   const pageCount = editor?.layout.pages.length ?? 0;
@@ -134,7 +150,9 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
   };
 
   const exportExecuted = async () => {
+    if (!verified) return;
     setExporting(true);
+    setProblem(null);
     // The executed document is the sealed snapshot with the values printed in
     // their fields — rendered by an editor of its own, never by editing this one.
     const printer = new Editor({
@@ -152,6 +170,8 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
       link.href = url;
       link.download = "services-agreement-executed.pdf";
       link.click();
+    } catch (error) {
+      setProblem(`The executed PDF could not be made: ${error instanceof Error ? error.message : String(error)}. Try again.`);
     } finally {
       printer.destroy();
       setExporting(false);
@@ -162,6 +182,16 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
     <div className="relative flex flex-1 overflow-hidden">
       {/* Keyed by role: each party opens the document at its start, as they would. */}
       <main key={role} className="min-w-0 flex-1 overflow-auto p-2 md:p-4">
+        {verified === false && (
+          <div role="alert" className="mx-auto mb-3 max-w-[794px] rounded-md border px-3 py-2 text-[13px]" style={{ borderColor: "#dc2626", color: "#dc2626" }}>
+            This copy is not what was sealed — its hash or its fields differ. Signing and the executed PDF are off.
+          </div>
+        )}
+        {problem && (
+          <div role="alert" className="mx-auto mb-3 max-w-[794px] rounded-md border px-3 py-2 text-[13px]" style={{ borderColor: "var(--app-border)", color: "var(--app-text)" }}>
+            {problem}
+          </div>
+        )}
         <div className="flex min-w-max justify-center">
           <div className="relative shrink-0" style={{ width: defaultPageConfig.pageWidth }}>
             <Scrivr
@@ -255,7 +285,7 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
         <Section title="Executed document">
           <button
             type="button"
-            disabled={missing.length > 0 || exporting}
+            disabled={!verified || missing.length > 0 || exporting}
             onClick={() => void exportExecuted()}
             className="h-8 w-full rounded-md border text-[12px] font-semibold disabled:opacity-50"
             style={{ background: "var(--app-accent)", borderColor: "var(--app-accent)", color: "var(--app-accent-fg)" }}

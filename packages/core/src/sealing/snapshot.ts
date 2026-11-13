@@ -26,6 +26,11 @@ export type SealRefusal =
    * be asked to complete them, or their values would land in each other.
    */
   | { reason: "unidentified-fields"; count: number }
+  /**
+   * Signer fields in a header, a footer or another part kept beside the body
+   * — the signing view completes fields in the body only.
+   */
+  | { reason: "fields-outside-body"; count: number }
   /** One of the host's own checks refused — a signing order, an approval, anything Scrivr cannot know. */
   | HostSealRefusal;
 
@@ -92,8 +97,28 @@ async function sha256(bytes: Uint8Array): Promise<string> {
 
 const TRACKED_MARKS = new Set(["trackedInsert", "trackedDelete"]);
 
+/**
+ * The parts of a document kept in its attributes — headers, footers — each a
+ * document of its own, read with the body's schema. A seal checks them as it
+ * does the body: the hash covers them, so what they hold is agreed too.
+ */
+function partsBesideBody(doc: PmNode): PmNode[] {
+  const parts: PmNode[] = [];
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) return value.forEach(visit);
+    if (value === null || typeof value !== "object") return;
+    if ("type" in value && value.type === "doc" && "content" in value) {
+      parts.push(doc.type.schema.nodeFromJSON(value));
+      return;
+    }
+    Object.values(value).forEach(visit);
+  };
+  visit(doc.attrs);
+  return parts;
+}
+
 /** Every open suggestion, by id — on a node's or mark's `dataTracked`, or a tracked mark. */
-function pendingChanges(doc: PmNode): number {
+function pendingChanges(docs: readonly PmNode[]): number {
   const ids = new Set<string>();
   const record = (tracked: unknown, fallback: string) => {
     for (const entry of [tracked].flat()) {
@@ -102,21 +127,21 @@ function pendingChanges(doc: PmNode): number {
       ids.add(id);
     }
   };
-  doc.descendants((node, pos) => {
-    record(node.attrs["dataTracked"], `node@${pos}`);
+  docs.forEach((doc, part) => doc.descendants((node, pos) => {
+    record(node.attrs["dataTracked"], `node@${part}:${pos}`);
     for (const mark of node.marks) {
-      record(mark.attrs["dataTracked"], `mark@${pos}`);
-      if (TRACKED_MARKS.has(mark.type.name) && !mark.attrs["dataTracked"]) ids.add(`mark@${pos}`);
+      record(mark.attrs["dataTracked"], `mark@${part}:${pos}`);
+      if (TRACKED_MARKS.has(mark.type.name) && !mark.attrs["dataTracked"]) ids.add(`mark@${part}:${pos}`);
     }
     return true;
-  });
+  }));
   return ids.size;
 }
 
 /** The prompts of author text fields still showing them, one per field. */
-function unfilledPrompts(doc: PmNode): string[] {
+function unfilledPrompts(docs: readonly PmNode[]): string[] {
   const prompts = new Map<string, string>();
-  doc.descendants((node) => {
+  for (const doc of docs) doc.descendants((node) => {
     for (const mark of node.marks) {
       const { nodeId, prompt, placeholder } = mark.attrs;
       if (mark.type.name === "fieldRange" && placeholder === true) prompts.set(String(nodeId), String(prompt));
@@ -159,10 +184,13 @@ export async function createSnapshot(doc: PmNode, { assignedRoles, checks }: Cre
   const subject: SealCheckSubject = { doc, fields, assignedRoles };
   const before = await hostRefusal(checks?.before, subject);
   if (before) return { ok: false, refusal: before };
-  const count = pendingChanges(doc);
+  const parts = partsBesideBody(doc);
+  const count = pendingChanges([doc, ...parts]);
   if (count > 0) return { ok: false, refusal: { reason: "pending-tracked-changes", count } };
-  const prompts = unfilledPrompts(doc);
+  const prompts = unfilledPrompts([doc, ...parts]);
   if (prompts.length > 0) return { ok: false, refusal: { reason: "unfilled-fields", prompts } };
+  const outside = parts.reduce((n, part) => n + listSignerFields(part).length + unidentifiedFields(part), 0);
+  if (outside > 0) return { ok: false, refusal: { reason: "fields-outside-body", count: outside } };
   const unidentified = unidentifiedFields(doc);
   if (unidentified > 0) return { ok: false, refusal: { reason: "unidentified-fields", count: unidentified } };
   const refusal = roleRefusal(fields, assignedRoles);

@@ -5,6 +5,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { ServerEditor } from "../ServerEditor";
+import { Extension } from "../extensions/Extension";
 import { StarterKit } from "../extensions/StarterKit";
 import { Field } from "../extensions/built-in/Field";
 import { createSnapshot, hashArtifact, verifySnapshot } from "./snapshot";
@@ -136,6 +137,49 @@ describe("createSnapshot", () => {
 
     expect(result.ok).toBe(false);
     expect(after).not.toHaveBeenCalled();
+  });
+
+  describe("over every part of the document, not only its body", () => {
+    // A header or footer lives in the document's attributes, as a document of its own.
+    const Chrome = Extension.create({ name: "chrome", addDocAttrs: () => ({ headerFooter: { default: null } }) });
+    const withHeader = (header: unknown[]) =>
+      new ServerEditor({
+        extensions: [StarterKit, Field, Chrome],
+        content: {
+          type: "doc",
+          attrs: { headerFooter: { enabled: true, defaultHeader: { content: { type: "doc", content: header } } } },
+          content: [para("Terms."), contract.child(1).toJSON()],
+        },
+      }).getState().doc;
+
+    it("refuses a prompt still showing in a header", async () => {
+      const header = [para("Client name", [{ type: "fieldRange", attrs: { nodeId: "h1", kind: "text", prompt: "Client name", placeholder: true } }])];
+
+      expect(await createSnapshot(withHeader(header), { assignedRoles: ["client"] })).toEqual({
+        ok: false,
+        refusal: { reason: "unfilled-fields", prompts: ["Client name"] },
+      });
+    });
+
+    it("refuses a suggestion still pending in a footer or header", async () => {
+      const header = [
+        { type: "paragraph", content: [{ type: "image", attrs: { src: "data:image/png;base64,AA==", dataTracked: [{ id: "c9", status: "pending" }] } }] },
+      ];
+
+      expect(await createSnapshot(withHeader(header), { assignedRoles: ["client"] })).toEqual({
+        ok: false,
+        refusal: { reason: "pending-tracked-changes", count: 1 },
+      });
+    });
+
+    it("refuses a signer field outside the body, which no signer could be shown to complete", async () => {
+      const header = [{ type: "paragraph", content: [signerField("witness", true)] }];
+
+      expect(await createSnapshot(withHeader(header), { assignedRoles: ["client", "witness"] })).toEqual({
+        ok: false,
+        refusal: { reason: "fields-outside-body", count: 1 },
+      });
+    });
   });
 
   it("refuses while text the author fills still shows its prompt", async () => {

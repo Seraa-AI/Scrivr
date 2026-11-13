@@ -40,8 +40,18 @@ export interface FieldCompletionOptions {
    * `completable`, once the viewer has finished.
    */
   onFieldRequest: (field: SignerFieldDescriptor, current?: FieldValue) => Promise<FieldValue | null>;
+  /**
+   * `onFieldRequest` failed — it threw or rejected. The field stays as it was;
+   * tell the signer, and let them try again.
+   */
+  onFieldRequestError?: (field: SignerFieldDescriptor, error: unknown) => void;
   /** Colour of the viewer's own fields. Defaults to their party's colour, as the author saw it. */
   accentColor?: string;
+  /**
+   * Kinds added to the built-ins, as given to `Field` — so a host's own kind
+   * draws and completes as the control it declares, here as in the author's editor.
+   */
+  kinds?: Readonly<Record<string, FieldKindSpec>>;
   /** A colour per role, as given to `Field` — so the signer sees the colours the author did. */
   roleColors?: Readonly<Record<string, string>>;
   /**
@@ -96,8 +106,9 @@ export function requestField(editor: IBaseEditor, id: string): boolean {
 
 /**
  * Move keyboard focus to the viewer's next (`1`) or previous (`-1`) field in
- * reading order, wrapping around, and scroll it into view: Tab and Shift+Tab.
- * Returns the focused field's id, or null when the viewer completes none.
+ * reading order and scroll it into view: Tab and Shift+Tab. Returns the
+ * focused field's id, or null once focus has left past either end — Tab then
+ * goes on to the page's next control.
  */
 export function moveFieldFocus(editor: IBaseEditor, direction: 1 | -1): string | null {
   return fieldStates.get(editor)?.moveFocus(direction) ?? null;
@@ -148,7 +159,8 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
   },
 
   onViewReady(editor: IEditor) {
-    const { fields, completable, onFieldRequest, accentColor, roleColors, paint } = this.options;
+    const { fields, completable, onFieldRequest, onFieldRequestError, accentColor, roleColors, paint } = this.options;
+    const kinds: Readonly<Record<string, FieldKindSpec>> = { ...BUILT_IN_KINDS, ...this.options.kinds };
     const mayComplete = new Set(completable);
     const mine = fields.filter((f) => mayComplete.has(f.id));
     const pending = new Set<string>();
@@ -195,9 +207,10 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
         .then((value) => {
           if (value) state.values.set(field.id, value);
         })
-        .catch(() => {
-          // The host's request failed; the field stays as it was. Declining
-          // is answering `null`, which leaves it as it was too.
+        .catch((error: unknown) => {
+          // The field stays as it was. Declining is answering `null`, which
+          // leaves it as it was too, and is no failure.
+          onFieldRequestError?.(field, error);
         })
         .finally(() => {
           pending.delete(field.id);
@@ -217,13 +230,14 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
         return true;
       },
       moveFocus: (direction) => {
-        if (mine.length === 0) return null;
-        const at = focused === null ? (direction > 0 ? -1 : 0) : mine.findIndex((f) => f.id === focused);
-        const next = mine[(at + direction + mine.length) % mine.length]!;
-        focused = next.id;
-        reveal(next.id);
+        const at = focused === null ? (direction > 0 ? -1 : mine.length) : mine.findIndex((f) => f.id === focused);
+        // Past either end focus leaves, as Tab leaves a form: the key goes on
+        // to the next control on the page instead of cycling here.
+        const next = mine[at + direction];
+        focused = next?.id ?? null;
+        if (next) reveal(next.id);
         editor.redraw();
-        return next.id;
+        return focused;
       },
       openFocused: () => focused !== null && state.request(focused),
     };
@@ -271,7 +285,7 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
         const color = (own ? accentColor : undefined) ?? fieldRoleColor(field.role, roleColors);
         const active = field.id === hovered || field.id === focused;
         const node = pos === undefined ? null : editor.getState().doc.nodeAt(pos);
-        const spec = BUILT_IN_KINDS[field.kind];
+        const spec = kinds[field.kind];
         if (node && paint) {
           const drawing: SigningFieldDrawing = {
             node,
@@ -291,7 +305,7 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
           };
           if (paint(ctx, drawing)) continue;
         }
-        paintField(ctx, box, { field, value, own, active, focused: field.id === focused, color, theme, imageFor });
+        paintField(ctx, box, { field, spec, value, own, active, focused: field.id === focused, color, theme, imageFor });
       }
     });
 
@@ -308,6 +322,7 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
 
 interface FieldPaint {
   field: SignerFieldDescriptor;
+  spec: FieldKindSpec | undefined;
   value: FieldValue | undefined;
   /** This viewer completes it. */
   own: boolean;
@@ -331,7 +346,7 @@ const baselineOf = (box: Box) => (box.baseline !== undefined ? { baselineY: box.
  */
 function paintField(ctx: CanvasRenderingContext2D, box: Box, f: FieldPaint): void {
   const { x, y, width, height } = box;
-  const spec = BUILT_IN_KINDS[f.field.kind];
+  const { spec } = f;
   const control = spec?.control ?? "text";
   ctx.save();
   // The author's ink goes: this view draws the field its own way.

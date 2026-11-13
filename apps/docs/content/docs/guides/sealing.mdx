@@ -18,7 +18,7 @@ What stays yours: who may seal, the record of it, locking, authentication, stora
 
 ## Sealing, on the server
 
-Seal inside whatever your server already uses to order a seal against a save — a row lock, a queue — after the room's latest edits are in.
+Stop writes to the room **before** you read it. A snapshot taken of a room still accepting updates can be outdated by the time it is stored, leaving the room different from what was sealed. So block writes first, on connections already open and on any that join meanwhile, then snapshot, persist and stamp, and open the room again only if the seal fails. Do this inside whatever your server already uses to order a seal against a save, such as a row lock or a queue.
 
 ```ts
 import { ServerEditor, StarterKit, Field } from "@scrivr/core";
@@ -27,18 +27,40 @@ import type { Document } from "@hocuspocus/server";
 
 const { schema } = new ServerEditor({ extensions: [StarterKit, Field] });
 
+/** Rooms being sealed right now: `onAuthenticate` makes anyone who joins one read-only. */
+const sealing = new Set<string>();
+
 // `document` is the room's HocusPocus Document — a Y.Doc — e.g. `server.documents.get(name)`.
 async function seal(document: Document, revisionId: string, assignedRoles: string[]) {
-  const result = await snapshotFromYDoc(document, schema, { assignedRoles });
-  if (!result.ok) return result.refusal; // show it to whoever asked to seal
+  // 1. The write barrier: nobody — already here or joining — changes the room
+  //    from now on. A read-only connection's updates are dropped by the server.
+  sealing.add(document.name);
+  const writable = document.getConnections().filter((connection) => !connection.readOnly);
+  for (const connection of writable) connection.readOnly = true;
+  const reopen = () => {
+    for (const connection of writable) connection.readOnly = false;
+  };
 
-  const { content, contentHash, fields } = result.snapshot;
-  await saveSealedRevision({ revisionId, content, contentHash, fields }); // yours
+  try {
+    // 2. Read the room only now that it can no longer move.
+    const result = await snapshotFromYDoc(document, schema, { assignedRoles });
+    if (!result.ok) {
+      reopen();
+      return result.refusal; // show it to whoever asked to seal
+    }
 
-  stampSeal(document, { revisionId, contentHash, sealedAt: new Date().toISOString() });
-  // Connections already open stop being able to write, not only new ones.
-  for (const connection of document.getConnections()) connection.readOnly = true;
-  return null;
+    const { content, contentHash, fields } = result.snapshot;
+    await saveSealedRevision({ revisionId, content, contentHash, fields }); // yours
+
+    // 3. Tell every client. The room stays read-only from here on.
+    stampSeal(document, { revisionId, contentHash, sealedAt: new Date().toISOString() });
+    return null;
+  } catch (error) {
+    reopen(); // nothing was sealed; let people carry on
+    throw error;
+  } finally {
+    sealing.delete(document.name);
+  }
 }
 ```
 
@@ -50,6 +72,7 @@ A seal is refused, with a reason, while:
 | `unfilled-fields` | Text the author fills still shows its prompt — fill it first |
 | `unassigned-roles` | A required field's role has nobody assigned |
 | `unknown-roles` | You assigned a role no field carries — its field was removed |
+| `fields-outside-body` | A signer field sits in a header or footer, where no signer could be shown to complete it |
 | `unidentified-fields` | A signer field has no id or role, or shares another's id — nobody could complete it, or two values would collide |
 
 ### Your own checks
@@ -84,8 +107,8 @@ import { isSealed, matchesSnapshot, resetToSnapshot } from "@scrivr/plugins";
 const server = new Hocuspocus({
   async onAuthenticate({ documentName, connection }) {
     // Your own auth first. The room is not loaded yet here, so ask your own
-    // record: a sealed room is read-only for everyone who joins it.
-    if (await latestRevisionIsSealed(documentName)) connection.readOnly = true; // yours
+    // record: a sealed room — or one being sealed — is read-only for everyone who joins it.
+    if (sealing.has(documentName) || (await latestRevisionIsSealed(documentName))) connection.readOnly = true; // yours
   },
 
   async onLoadDocument({ document, documentName }) {
@@ -143,5 +166,14 @@ Clients holding the sealed revision get `onRevision` and mount a fresh editor. A
 - `contentHash` is over the document as agreed — never over signers' values, which are not part of it.
 - `verifySnapshot(content, contentHash)` checks a stored snapshot is untouched.
 - `hashArtifact(pdfBytes)` hashes the executed PDF — what was displayed, with the signatures in it.
+
+What a hash proves, and what it does not:
+
+- **Integrity, against a hash you trust.** A matching hash shows these bytes are the ones recorded, as long as the recorded hash is itself kept where it cannot be changed. It says nothing about **who** signed, **whether they consented**, or **when**: keep those in your own trusted record, bound to the revision and to the final PDF's hash.
+- **The document, not everything it points at.** An image stored by URL is hashed as the URL; the bytes behind it can change. Embed images (Scrivr's `data:` URLs are hashed with the document) or keep immutable copies.
+- **Not the rendering.** Fonts and renderer versions can change how a document looks without changing its JSON. If the promise is "exactly what the signer saw", keep the executed PDF and its `hashArtifact` hash.
+- **Not a Word digital signature.** A DOCX export carries Word's signature line, which Word can sign with a certificate. Scrivr's seal and Word's certificate-backed signature are separate things.
+
+The whole flow, end to end: block writes → check every part of the document → snapshot and hash → store the seal → stamp the room → each viewer verifies the snapshot before signing → store each signer's values and evidence → export the executed PDF, and keep it with its hash.
 
 Signing a sealed revision — fields, values, reading evidence — is in [Fields](/docs/guides/fields).

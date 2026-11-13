@@ -1,11 +1,13 @@
 import type { Node as PmNode } from "prosemirror-model";
-import { fieldCaption, fieldChoices, type FieldChoice, type FieldControl, type FieldKinds } from "./fieldKinds";
+import { fieldCaption, fieldChoices, type FieldChoice, type FieldControl, type FieldKinds, type FieldValue } from "./fieldKinds";
 import {
   DOCX_TAG_MAX_LENGTH,
   xml,
   type DocxBlockTransform,
   type DocxContext,
+  type DocxImportContext,
   type DocxInlineTransform,
+  type DocxSdtInline,
   type DocxMarkTransform,
   type DocxNodeHandler,
   type DocxRunWrapper,
@@ -189,6 +191,24 @@ export const fieldBlockDocx: DocxNodeHandler = (node, children, ctx) => {
 const paramsOf = (tag: string | null, prefix: string): URLSearchParams | null =>
   tag?.startsWith(prefix) ? new URLSearchParams(tag.slice(prefix.length)) : null;
 
+const FIELD_VALUES_KEY = "scrivr:fieldValues";
+
+/**
+ * What signers entered into fields' controls in Word, by field id. A signer's
+ * value never enters the document, so the import hands these back beside it,
+ * in the shape `Field.configure({ values })` and `FieldCompletion` take.
+ */
+export const importedFieldValues = (ctx: DocxImportContext): Record<string, FieldValue> =>
+  ctx.shared.get<Record<string, FieldValue>>(FIELD_VALUES_KEY) ?? {};
+
+/** The value a signer left in a control, or null when it still shows its caption. */
+function controlValue(inline: DocxSdtInline, checkbox: boolean): FieldValue | null {
+  if (inline.placeholder) return null;
+  const text = inline.content.map((item) => (item.type === "text" ? item.text : "")).join("").trim();
+  if (checkbox) return text.includes("☒") || text.includes("☐") ? { kind: "checkbox", checked: text.includes("☒") } : null;
+  return text ? { kind: "text", text } : null;
+}
+
 export const fieldImport: DocxInlineTransform = (inline, _marks, ctx) => {
   if (inline.type !== "sdt") return null;
   const params = paramsOf(inline.tag, FIELD_TAG);
@@ -196,6 +216,15 @@ export const fieldImport: DocxInlineTransform = (inline, _marks, ctx) => {
   if (!params || !type) return null;
   const fill = params.get("fill") === "author" ? "author" : "signer";
   const checked = inline.content.some((item) => item.type === "text" && item.text.includes("☒"));
+  const id = params.get("id");
+  const value = fill === "signer" && id ? controlValue(inline, inline.content.some((item) => item.type === "text" && /[☒☐]/.test(item.text))) : null;
+  if (value && id) ctx.shared.getOrInit<Record<string, FieldValue>>(FIELD_VALUES_KEY, () => ({}))[id] = value;
+  if (fill === "signer" && !inline.placeholder && inline.content.some((item) => item.type === "image")) {
+    ctx.diagnostics.warn({
+      code: "field-drawing-not-imported",
+      message: `A drawing in signer field "${id ?? ""}" was not brought back; signatures are captured by the signing host`,
+    });
+  }
   return type.create({
     nodeId: params.get("id") || null,
     kind: params.get("kind") ?? "text",
