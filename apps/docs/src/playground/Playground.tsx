@@ -45,7 +45,7 @@ import {
 } from "@scrivr/react";
 import type { SuggestionRefusalText } from "@scrivr/react";
 import { createSnapshot, Field, type Editor, type SealedSnapshot, type SealRefusal, type ToolbarState } from "@scrivr/core";
-import { Selection } from "@scrivr/core/pm";
+import { Selection, TextSelection } from "@scrivr/core/pm";
 import { ChatPanel } from "./ChatPanel";
 import { DemoContent, demoDoc, startingDemo, type DemoKind } from "./demoContent";
 import { TrackChangesInspector } from "./TrackChangesInspector";
@@ -187,6 +187,22 @@ type SidebarTab = "ai" | "changes";
 /** The mode a demo is meant to be tried in. */
 const DEMO_MODE: Record<DemoKind, EditorMode> = { editing: "editing", "track-changes": "suggesting", signing: "editing" };
 
+/** Select the first author field still showing its prompt, so typing fills it. */
+function selectFirstPrompt(editor: Editor): void {
+  const { doc, tr } = editor.getState();
+  let prompt: { from: number; to: number } | null = null;
+  doc.descendants((node, pos) => {
+    if (prompt) return false;
+    const blank = node.isText && node.marks.some((m) => m.type.name === "fieldRange" && m.attrs["placeholder"] === true);
+    if (blank) prompt = { from: pos, to: pos + node.nodeSize };
+    return true;
+  });
+  if (!prompt) return;
+  const { from, to } = prompt;
+  editor.applyTransaction(tr.setSelection(TextSelection.create(doc, from, to)).scrollIntoView());
+  editor.focus();
+}
+
 /** Why the agreement could not be sealed, in the words the refusal toast shows. */
 function describeSealRefusal(refusal: SealRefusal): SuggestionRefusalText {
   const roles = (names: string[]) => names.map((name) => ROLE_LABEL[name] ?? name).join(", ");
@@ -199,7 +215,10 @@ function describeSealRefusal(refusal: SealRefusal): SuggestionRefusalText {
     case "unassigned-roles":
       return { message: `Can't seal: nobody is assigned to ${roles(refusal.missing)}.`, remedy: "This demo assigns the Provider and the Client only." };
     case "unfilled-fields":
-      return { message: `Can't seal: ${refusal.prompts.join(", ")} is still blank.`, remedy: "Click the grey prompt and type over it, then seal again." };
+      return {
+        message: `Can't seal: “${refusal.prompts.join("”, “")}” is still blank.`,
+        remedy: "It's selected in the document now — type to fill it, then seal again.",
+      };
     case "unknown-roles":
       return { message: `Can't seal: no field is left for ${roles(refusal.unknown)}.`, remedy: "Add a signer field for that party, then seal again." };
     case "unidentified-fields":
@@ -301,6 +320,7 @@ export function Playground() {
     const result = await createSnapshot(editor.getState().doc, { assignedRoles: SIGNING_ROLES });
     if (result.ok) setSealed(result.snapshot);
     else setRefusal(describeSealRefusal(result.refusal));
+    if (!result.ok && result.refusal.reason === "unfilled-fields") selectFirstPrompt(editor);
   };
 
   // An edit the editor stopped while suggesting: say why, and what to do instead.
