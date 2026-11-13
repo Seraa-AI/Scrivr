@@ -217,11 +217,10 @@ export const exitFieldRange: Command = (state, dispatch) => {
   return true;
 };
 
-/** Placeholder text paints in the placeholder colour; a colour the author chose still wins. */
 /**
  * A prompt still showing is a blank, drawn in quiet ink like every field: its
- * text faint, over a dotted rule in the colour of a field the author fills.
- * Filled, the text is the document's own.
+ * text faint (a colour the author chose still wins), over a dotted rule in the
+ * colour of a field the author fills. Filled, the text is the document's own.
  */
 export const fieldRangeDecorator: MarkDecorator = {
   decorateDefaultFill(rect, theme) {

@@ -22,8 +22,9 @@ import type { FontProvider } from "../fonts/types";
 /**
  * Named keybinding precedences. Higher wins first refusal for a key.
  *
- * The ladder is "most specific context first": a binding only applies inside a
- * table, then inside a code block, then inside a list, then anywhere. Each
+ * The ladder is "most specific context first": a binding only applies right
+ * beside an inline object, then inside a table, then inside a code block,
+ * then inside a list, then anywhere. Each
  * declines by returning `false`, delegating down the chain.
  *
  * Extensions may use any number; these names exist so built-ins read as intent
@@ -370,8 +371,12 @@ export interface IEditor extends IBaseEditor {
   scrollRangeIntoView(from: number, to?: number): boolean;
   /** Trigger a redraw without a state change (e.g. on awareness update). */
   redraw(): void;
-  /** Invalidate the layout cache and trigger a re-layout on next paint. */
-  invalidateLayout(): void;
+  /**
+   * Invalidate the layout cache and trigger a re-layout on next paint.
+   * `remeasure` measures every block again — what a strategy measures from
+   * changed outside the document.
+   */
+  invalidateLayout(options?: { remeasure?: boolean }): void;
   /**
    * Synchronously complete any streamed partial layout.
    * Serialization paths should call this before reading `layout.pages`.

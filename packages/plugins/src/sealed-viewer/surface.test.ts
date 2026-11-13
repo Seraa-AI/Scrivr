@@ -11,8 +11,9 @@ import {
   isSealed,
   matchesSnapshot,
   readRevisionStamp,
+  moveFieldFocus,
+  requestField,
   resetToSnapshot,
-  setFieldValue,
   snapshotFromYDoc,
   stampEditable,
   stampSeal,
@@ -26,6 +27,7 @@ import {
   type RevisionStamp,
   type RevisionWatcher,
   type SealedStamp,
+  type SigningFieldDrawing,
 } from "../index";
 
 describe("what a signing host builds on", () => {
@@ -38,14 +40,15 @@ describe("what a signing host builds on", () => {
     const callbacks: RevisionCallbacks = { onSealed: () => {}, onRevision: () => {} };
     const reading: ReadingProgressOptions = { onReading: (event: ReadingEvent) => void event };
     const value: FieldValue = { kind: "checkbox", checked: true };
-    const completion: Partial<FieldCompletionOptions> = { values: { agree: value } };
+    const completion: Partial<FieldCompletionOptions> = { onFieldRequest: async () => value };
+    const paint = (_ctx: CanvasRenderingContext2D, field: SigningFieldDrawing): boolean => field.own;
     const watcher: RevisionWatcher | null = null;
     stampEditable(room, editable);
 
     expect(stamp).toEqual(sealed);
     expect(isSealed(room)).toBe(false);
     expect(room.share.has(REVISION_MAP_NAME)).toBe(true);
-    expect([docFromYDoc, matchesSnapshot, resetToSnapshot, snapshotFromYDoc, watchRevision, setFieldValue].every((f) => typeof f === "function")).toBe(true);
+    expect([docFromYDoc, matchesSnapshot, resetToSnapshot, snapshotFromYDoc, watchRevision, moveFieldFocus, requestField, paint].every((f) => typeof f === "function")).toBe(true);
     expect([ReadingProgress.configure(reading).name, FieldCompletion.configure(completion).name, callbacks.onSealed !== undefined, watcher]).toEqual([
       "readingProgress",
       "fieldCompletion",

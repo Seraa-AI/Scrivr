@@ -1,10 +1,11 @@
-import { NodeSelection, Plugin, type Command } from "prosemirror-state";
+import { NodeSelection, Plugin, PluginKey, type Command, type EditorState } from "prosemirror-state";
+import { isHistoryTransaction } from "prosemirror-history";
 import { ReplaceStep } from "prosemirror-transform";
 import { lift, wrapIn } from "prosemirror-commands";
 import type { Node as PmNode } from "prosemirror-model";
 import { Extension } from "../Extension";
-import { KeymapPriority, type IEditor } from "../types";
-import type { InlineStrategy } from "../../layout/BlockRegistry";
+import { KeymapPriority, type IBaseEditor, type IEditor } from "../types";
+import type { InlineLine, InlineStrategy } from "../../layout/BlockRegistry";
 import type { PdfNodeHandler } from "../../exports/pdf";
 import { compositeColor, parseCssColor, type Rgb } from "../../model/cssColor";
 import type { ResolvedTheme } from "../../model/theme";
@@ -20,6 +21,7 @@ import {
   fieldChoices,
   fieldValueLayout,
   setsLike,
+  type FieldBox,
   type FieldChoice,
   type FieldControl,
   type FieldDrawing,
@@ -30,6 +32,7 @@ import {
 } from "./fieldKinds";
 import { safeImageUrl } from "../../model/safeUrl";
 import { COLLAB_SYNC_META } from "./UniqueId";
+import { getCachedImage, onImageLoad } from "./Image";
 import {
   fieldBlockDocx,
   fieldBlockImport,
@@ -191,7 +194,8 @@ const fieldBoxPlugin = new Plugin({
   filterTransaction(tr, state) {
     const { selection } = state;
     if (!(selection instanceof NodeSelection) || selection.node.type.name !== "field") return true;
-    if (tr.getMeta(COLLAB_SYNC_META)) return true;
+    // A collaborator's edit, or undo putting back what the field replaced.
+    if (tr.getMeta(COLLAB_SYNC_META) || isHistoryTransaction(tr)) return true;
     // Rewriting the field itself — toggling a checkbox — puts a field back.
     const typedOver = (step: unknown) =>
       step instanceof ReplaceStep &&
@@ -206,15 +210,87 @@ const fieldBoxPlugin = new Plugin({
 /** The built-in kinds, with the host's added over them. */
 const resolveKinds = (options: FieldOptions): FieldKinds => ({ ...BUILT_IN_FIELD_KINDS, ...options.kinds });
 
+type FieldValues = Readonly<Record<string, FieldValue>>;
+
+/**
+ * Completed values, held by the editor beside its document rather than in
+ * it: changing one is no edit, so a sealed document takes it and its hash
+ * holds. Undo never sees one.
+ */
+const fieldValuesKey = new PluginKey<FieldValues>("fieldValues");
+
+const fieldValuesPlugin = (initial: FieldValues) =>
+  new Plugin<FieldValues>({
+    key: fieldValuesKey,
+    state: {
+      init: () => initial,
+      apply(tr, values) {
+        const given: { id: string; value: FieldValue | null } | undefined = tr.getMeta(fieldValuesKey);
+        if (!given) return values;
+        const { [given.id]: _replaced, ...rest } = values;
+        return given.value ? { ...rest, [given.id]: given.value } : rest;
+      },
+    },
+  });
+
+/** The values fields hold in `state`, by field id. */
+export const fieldValues = (state: EditorState): FieldValues => fieldValuesKey.getState(state) ?? {};
+
+/**
+ * Give field `id` a value — `null` empties it. The field is laid out, drawn
+ * and printed with it; the document is untouched. Returns false when the
+ * editor has no `Field`.
+ */
+export function setFieldValue(editor: IBaseEditor, id: string, value: FieldValue | null): boolean {
+  const state = editor.getState();
+  if (!fieldValuesKey.get(state)) return false;
+  return editor.applyTransaction(state.tr.setMeta(fieldValuesKey, { id, value }).setMeta("addToHistory", false));
+}
+
+interface FieldSetup {
+  kinds: FieldKinds;
+  options: FieldOptions;
+  editor: IBaseEditor;
+}
+
+/**
+ * Each editor's `Field`, by the context its contributions were resolved in —
+ * how layout and export, which are handed no editor, read that editor's values.
+ */
+const setupByContext = new WeakMap<object, FieldSetup>();
+const setupByEditor = new WeakMap<IBaseEditor, FieldSetup>();
+
+/** The values a contribution resolved in `context` lays out and prints with. */
+const valuesIn = (context: object, options: FieldOptions): FieldValues => {
+  const setup = setupByContext.get(context);
+  return setup ? fieldValues(setup.editor.getState()) : options.values;
+};
+
+/**
+ * The field at `pos` as `editor`'s `Field` would hand it to a host's drawing —
+ * its kind, label, party colour and value — or null when there is none.
+ */
+export function fieldDrawingAt(
+  editor: IBaseEditor,
+  pos: number,
+  at: { box: FieldBox; baselineY: number; theme: ResolvedTheme },
+): FieldDrawing | null {
+  const setup = setupByEditor.get(editor);
+  const node = editor.getState().doc.nodeAt(pos);
+  if (!setup || node?.type.name !== "field") return null;
+  return drawingOf(setup.kinds, setup.options, fieldValues(editor.getState()), node, at);
+}
+
 /** A field as a host's own drawing is handed it. */
 const drawingOf = (
   kinds: FieldKinds,
   options: FieldOptions,
+  values: FieldValues,
   node: PmNode,
-  at: { box: FieldDrawing["box"]; baselineY: number; theme: ResolvedTheme },
+  at: { box: FieldBox; baselineY: number; theme: ResolvedTheme },
 ): FieldDrawing => {
   const role = isSigner(node) && typeof node.attrs["role"] === "string" ? node.attrs["role"] : null;
-  const value = valueOf(options.values, node);
+  const value = valueOf(values, node);
   return {
     node,
     ...at,
@@ -227,72 +303,121 @@ const drawingOf = (
   };
 };
 
-const fieldStrategy = (kinds: FieldKinds, options: FieldOptions): InlineStrategy => ({
+/**
+ * How wide a field set like text is. It fits what it holds, like a Word
+ * content control: its value, or else the widest choice a dropdown offers.
+ * Free text still to be given keeps the space its author left for it.
+ */
+function textFieldWidth(
+  kinds: FieldKinds,
+  field: PmNode,
+  value: FieldValue | undefined,
+  line: { font: string; height: number },
+  measurer: { measureWidth(text: string, font: string): number },
+): number {
+  if (value?.kind === "text") return Math.ceil(measurer.measureWidth(value.text, line.font)) + 4;
+  const authored = Number(field.attrs["width"]);
+  if (controlOf(kinds, field) !== "dropdown") return authored;
+  const ink = fieldInk({ x: 0, y: 0, width: authored, height: line.height });
+  const widest = Math.max(0, ...fieldChoices(field.attrs["options"]).map((c) => measurer.measureWidth(c.label, line.font)));
+  const label = measurer.measureWidth(fieldLabel(kinds, field), `${ink.labelSizePx}px sans-serif`) + ink.labelX + 2;
+  return Math.ceil(Math.max(widest + 4, label));
+}
+
+const fieldStrategy = (kinds: FieldKinds, options: FieldOptions, values: () => FieldValues): InlineStrategy => ({
   verticalAlign: "baseline",
   // A field that holds text is as tall as the text around it; one that holds
   // a drawing keeps its authored size, as an inline image does. Measuring
-  // also records the run's font on the span — the face a PDF prints a value in.
+  // also records the run's font on the span — the face its value is set in.
   measure: (node, font, measurer) => {
-    // Fits what it holds, like a Word content control: the value it is
-    // printed with, or else the widest choice a dropdown offers. Free text
-    // still to be given keeps the space its author left for it.
-    const textFieldWidth = (field: PmNode, authored: number, face: string, m: typeof measurer): number => {
-      const value = valueOf(options.values, field);
-      if (value?.kind === "text") return Math.ceil(m.measureWidth(value.text, face)) + 4;
-      if (controlOf(kinds, field) !== "dropdown") return authored;
-      const ink = fieldInk({ x: 0, y: 0, width: authored, height: 24 });
-      const widest = Math.max(0, ...fieldChoices(field.attrs["options"]).map((c) => m.measureWidth(c.label, face)));
-      const label = m.measureWidth(fieldLabel(kinds, field), `${ink.labelSizePx}px sans-serif`) + ink.labelX + 2;
-      return Math.ceil(Math.max(widest + 4, label));
-    };
-    const width = Number(node.attrs["width"]);
-    const height = Number(node.attrs["height"]);
+    const value = valueOf(values(), node);
     const { ascent, descent } = measurer.getFontMetrics(font);
-    switch (setsLike(String(node.attrs["kind"]), controlOf(kinds, node))) {
+    const height = Math.round(ascent + descent);
+    // Typed text is set as text, whatever the field: a typed signature too.
+    const like = value?.kind === "text" ? "text" : setsLike(String(node.attrs["kind"]), controlOf(kinds, node));
+    switch (like) {
       case "picture":
-        return { width, height };
+        return { width: Number(node.attrs["width"]), height: Number(node.attrs["height"]) };
       case "glyph": {
         const side = Math.round(ascent * 0.8);
         return { width: side, height: side };
       }
       case "text":
         // The whole text line, as a word fills it: above the baseline and below.
-        return {
-          width: textFieldWidth(node, width, font, measurer),
-          height: Math.round(ascent + descent),
-          verticalAlign: "text-bottom",
-        };
+        return { width: textFieldWidth(kinds, node, value, { font, height }, measurer), height, verticalAlign: "text-bottom" };
     }
   },
-  // Quiet ink: no box, just a dotted rule in its party's colour along the
-  // line, with what the field is standing faintly on it.
-  render(ctx, x, y, width, height, node, theme: ResolvedTheme, baselineY) {
-    const drawing = drawingOf(kinds, options, node, { box: { x, y, width, height }, baselineY, theme });
+  render(ctx, x, y, width, height, node, theme: ResolvedTheme, line: InlineLine) {
+    const box = { x, y, width, height };
+    const drawing = drawingOf(kinds, options, values(), node, { box, baselineY: line.baselineY, theme });
     if (options.paint?.(ctx, drawing)) return;
+    if (drawing.value && drawing.control !== "checkbox") {
+      paintFieldValue(ctx, box, drawing.value, { ...line, ink: theme.defaultText });
+      return;
+    }
+    if (drawing.control !== "checkbox") {
+      // Quiet ink: a dotted rule in its party's colour along the line, with
+      // what the field is standing faintly on it.
+      paintFieldInk(ctx, box, { control: drawing.control, label: drawing.label, color: drawing.color, baselineY: line.baselineY });
+      return;
+    }
     ctx.save();
-    const color = drawing.color;
-    ctx.strokeStyle = color;
+    ctx.strokeStyle = drawing.color;
     ctx.lineWidth = 1.5;
     ctx.setLineDash([2, 2]);
-    if (controlOf(kinds, node) === "checkbox") {
-      ctx.strokeRect(x + 0.75, y + 0.75, width - 1.5, height - 1.5);
-      ctx.setLineDash([]);
-      if (node.attrs["checked"] === true) {
-        ctx.strokeStyle = theme.defaultText;
-        ctx.lineWidth = 1.5;
-        const [a, b, c] = checkboxTick({ x, y, width, height });
-        ctx.beginPath();
-        ctx.moveTo(a.x, a.y);
-        ctx.lineTo(b.x, b.y);
-        ctx.lineTo(c.x, c.y);
-        ctx.stroke();
-      }
-    } else {
-      paintFieldInk(ctx, { x, y, width, height }, { control: controlOf(kinds, node), label: fieldLabel(kinds, node), color, baselineY });
-    }
+    ctx.strokeRect(x + 0.75, y + 0.75, width - 1.5, height - 1.5);
     ctx.restore();
+    if (isChecked(drawing)) paintCheckboxTick(ctx, box, theme.defaultText);
   },
 });
+
+/** A checkbox's tick: the signer's answer, or else the author's. */
+const isChecked = (field: FieldDrawing): boolean =>
+  field.value?.kind === "checkbox" ? field.value.checked : field.node.attrs["checked"] === true;
+
+/** The tick in a checked box. */
+export function paintCheckboxTick(ctx: CanvasRenderingContext2D, box: FieldBox, ink: string): void {
+  const [a, b, c] = checkboxTick(box);
+  ctx.save();
+  ctx.strokeStyle = ink;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(a.x, a.y);
+  ctx.lineTo(b.x, b.y);
+  ctx.lineTo(c.x, c.y);
+  ctx.stroke();
+  ctx.restore();
+}
+
+/**
+ * A completed value, as part of the document: text on the line in the font
+ * around it, or the drawn signature fitted to its box.
+ */
+function paintFieldValue(
+  ctx: CanvasRenderingContext2D,
+  box: FieldBox,
+  value: FieldValue,
+  line: InlineLine & { ink: string },
+): void {
+  ctx.save();
+  if (value.kind === "text") {
+    const set = fieldValueLayout(box, line.font, line.baselineY);
+    ctx.font = set.font;
+    ctx.fillStyle = line.ink;
+    ctx.textBaseline = "alphabetic";
+    ctx.fillText(value.text, set.x, set.baselineY);
+  } else if (value.kind === "image") {
+    const src = safeImageUrl(value.src);
+    const img = src ? getCachedImage(src) : null;
+    if (img) {
+      const scale = Math.min(box.width / img.naturalWidth, box.height / img.naturalHeight);
+      const w = img.naturalWidth * scale;
+      const h = img.naturalHeight * scale;
+      ctx.drawImage(img, box.x + (box.width - w) / 2, box.y + (box.height - h) / 2, w, h);
+    }
+  }
+  ctx.restore();
+}
 
 /**
  * An unfilled field in quiet ink: a rule along its line in `color` — dotted
@@ -364,20 +489,21 @@ const pdfColor = (css: string): Rgb => {
   return parsed ? compositeColor(parsed, WHITE) : BLACK;
 };
 
-const valueOf = (values: Readonly<Record<string, FieldValue>>, node: PmNode): FieldValue | undefined => {
+const valueOf = (values: FieldValues, node: PmNode): FieldValue | undefined => {
   const id = node.attrs["nodeId"];
   return typeof id === "string" ? values[id] : undefined;
 };
 
 /**
- * The same box as on canvas; a PDF cannot dash, so a signer field is outlined
- * solid. A field given a value prints the value instead — the executed document.
+ * The same blank as on canvas, but a PDF cannot dash, so its rule prints
+ * solid, and it names whose it is — a printed page may have no colour. A
+ * field with a value prints the value instead: the executed document.
  */
 const fieldPdf =
-  (kinds: FieldKinds, options: FieldOptions): PdfNodeHandler =>
+  (kinds: FieldKinds, options: FieldOptions, values: () => FieldValues): PdfNodeHandler =>
   (block, ctx) => {
     const { node, x, y, width, height } = block;
-    const drawing = drawingOf(kinds, options, node, { box: { x, y, width, height }, baselineY: ctx.baselineY ?? y + height, theme: ctx.theme });
+    const drawing = drawingOf(kinds, options, values(), node, { box: { x, y, width, height }, baselineY: ctx.baselineY ?? y + height, theme: ctx.theme });
     if (options.print?.(ctx, drawing)) return;
     const value = drawing.value;
     const roleColor = pdfColor(drawing.color);
@@ -385,8 +511,7 @@ const fieldPdf =
     const ink = pdfColor(ctx.theme.defaultText);
     if (controlOf(kinds, node) === "checkbox") {
       ctx.draw.rect({ x, y, width, height, border });
-      const checked = value?.kind === "checkbox" ? value.checked : node.attrs["checked"] === true;
-      if (checked) {
+      if (isChecked(drawing)) {
         const [a, b, c] = checkboxTick({ x, y, width, height });
         ctx.draw.line({ from: a, to: b, thicknessPx: 1.5, color: ink });
         ctx.draw.line({ from: b, to: c, thicknessPx: 1.5, color: ink });
@@ -400,7 +525,7 @@ const fieldPdf =
     }
     if (value?.kind === "text") {
       if (!ctx.font) return;
-      const set = fieldValueLayout(value.text, { x, y, width, height }, ctx.font.cssFont, ctx.baselineY);
+      const set = fieldValueLayout({ x, y, width, height }, ctx.font.cssFont, ctx.baselineY);
       ctx.draw.text({ text: value.text, x: set.x, baselineY: set.baselineY, sizePx: set.sizePx, font: ctx.font, color: ink });
       return;
     }
@@ -415,7 +540,7 @@ const fieldPdf =
     }
     if (!ctx.font) return;
     ctx.draw.text({
-      text: fieldLabel(kinds, node),
+      text: fieldCaption(kinds, node),
       x: strokes.length > 0 ? at.labelX : at.icon.x,
       baselineY: at.labelBaselineY,
       sizePx: at.labelSizePx,
@@ -575,7 +700,18 @@ export const Field = Extension.create<FieldOptions>({
 
   addProseMirrorPlugins() {
     const type = this.schema?.marks["fieldRange"];
-    return type ? [fieldBoxPlugin, fieldRangePlugin(type)] : [fieldBoxPlugin];
+    const plugins = [fieldBoxPlugin, fieldValuesPlugin(this.options.values)];
+    return type ? [...plugins, fieldRangePlugin(type)] : plugins;
+  },
+
+  onEditorReady(editor: IBaseEditor) {
+    const setup = { kinds: resolveKinds(this.options), options: this.options, editor };
+    setupByContext.set(this, setup);
+    setupByEditor.set(editor, setup);
+    return () => {
+      setupByContext.delete(this);
+      setupByEditor.delete(editor);
+    };
   },
 
   // Backspace beside a field selects it before any other binding acts.
@@ -586,6 +722,15 @@ export const Field = Extension.create<FieldOptions>({
   },
 
   onViewReady(editor: IEditor) {
+    // A field fits its value, so a new value is measured again.
+    let values = fieldValues(editor.getState());
+    const offValues = editor.on("update", () => {
+      const next = fieldValues(editor.getState());
+      if (next === values) return;
+      values = next;
+      editor.invalidateLayout({ remeasure: true });
+    });
+    const offImages = onImageLoad(() => editor.redraw());
     // A box a click selects and nothing types into: an arrow, not a move
     // cursor, while authoring. A read-only viewer's own extensions decide.
     const offCursor = editor.addPointerCursor(({ objectPos }) => {
@@ -601,6 +746,8 @@ export const Field = Extension.create<FieldOptions>({
       paintFieldTag(ctx, box, `${roleName(String(selection.node.attrs["role"] ?? ""))} fills this after sealing`, theme);
     });
     return () => {
+      offValues();
+      offImages();
       offCursor();
       offTag();
     };
@@ -622,19 +769,19 @@ export const Field = Extension.create<FieldOptions>({
   },
 
   addInlineHandlers() {
-    return { field: fieldStrategy(resolveKinds(this.options), this.options) };
+    return { field: fieldStrategy(resolveKinds(this.options), this.options, () => valuesIn(this, this.options)) };
   },
 
   addExports() {
     const kinds = resolveKinds(this.options);
     return {
       pdf: {
-        nodes: { field: fieldPdf(kinds, this.options) },
+        nodes: { field: fieldPdf(kinds, this.options, () => valuesIn(this, this.options)) },
         marks: { fieldRange: fieldRangePdf },
         // A drawn signature's bytes are fetched before the pages are written.
         embeds: {
           field: (node: PmNode) => {
-            const value = valueOf(this.options.values, node);
+            const value = valueOf(valuesIn(this, this.options), node);
             return value?.kind === "image" ? safeImageUrl(value.src) : null;
           },
         },
@@ -675,7 +822,7 @@ export const Field = Extension.create<FieldOptions>({
   addImports() {
     return {
       docx: {
-        inlines: { sdt: fieldImport },
+        inlines: { sdt: fieldImport(resolveKinds(this.options)) },
         marks: { sdt: fieldRangeImport },
         blocks: { sdt: fieldBlockImport },
       },

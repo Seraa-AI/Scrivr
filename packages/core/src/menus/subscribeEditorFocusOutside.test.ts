@@ -38,6 +38,20 @@ describe("subscribeEditorFocusOutside", () => {
     expect(onHide).toHaveBeenCalledTimes(1);
   });
 
+  it("does not fire onHide once unsubscribed, even for a blur already being judged", async () => {
+    editor = createTestEditor();
+    const onHide = vi.fn();
+    const off = subscribeEditorFocusOutside(editor, onHide);
+    const outside = document.createElement("button");
+    document.body.appendChild(outside);
+    outside.focus();
+
+    editor.emit("blur", undefined);
+    off();
+    await afterFocusMoves();
+    expect(onHide).not.toHaveBeenCalled();
+  });
+
   it("does not fire onHide when focus moves into a popover-marked element", async () => {
     editor = createTestEditor();
     const onHide = vi.fn();

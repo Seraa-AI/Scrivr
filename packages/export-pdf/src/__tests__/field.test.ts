@@ -1,6 +1,6 @@
 /**
- * A field prints as the box the canvas paints: a signer field's
- * outline and caption, an author checkbox's tick.
+ * A field prints as the canvas paints it: a signer field's rule and caption,
+ * an author checkbox's tick, and in the executed document the value it holds.
  */
 import { describe, expect, it } from "vitest";
 import { createCanvas } from "@napi-rs/canvas";
@@ -30,13 +30,14 @@ async function printed(attrs: Record<string, unknown>, by = editor): Promise<Dra
 }
 
 describe("fields in the PDF", () => {
-  it("prints a signer field as a blank on a form: its line, and what goes on it", async () => {
+  it("prints a signer field as a blank on a form: its line, and what goes on it and whose it is", async () => {
     const ops = await printed({ kind: "signature", fill: "signer", role: "client" });
 
     // No box around it — the page's own background is the only rect.
     expect(ops.filter((op) => op.op === "rect" && op["borderWidth"] !== undefined)).toEqual([]);
     expect(ops.filter((op) => op.op === "line").length).toBeGreaterThan(0);
-    expect(ops.filter((op) => op.op === "text").map((op) => op["value"])).toEqual(["Signature"]);
+    // A printed page may have no colour, so it names the party too.
+    expect(ops.filter((op) => op.op === "text").map((op) => op["value"])).toEqual(["Signature · client"]);
   });
 
   it("prints an author's checked checkbox with its tick", async () => {
@@ -104,9 +105,11 @@ describe("the executed document: values printed in their fields", () => {
   const signer = (nodeId: string, kind = "signature") => ({ nodeId, kind, fill: "signer", role: "client" });
 
   it("prints a typed value in place of the empty field's caption", async () => {
-    const texts = (await printed(signer("typed", "name"), executed)).filter((op) => op.op === "text").map((op) => op["value"]);
+    const texts = (await printed(signer("typed", "name"), executed)).filter((op) => op.op === "text");
 
-    expect(texts).toEqual(["Ada Lovelace"]);
+    expect(texts.map((op) => op["value"])).toEqual(["Ada Lovelace"]);
+    // In the size of the text around it: 16px is 12pt.
+    expect(Number(texts[0]!["size"])).toBeCloseTo(12, 5);
   });
 
   it("prints a drawn signature in its box, keeping its proportions", async () => {
@@ -126,6 +129,6 @@ describe("the executed document: values printed in their fields", () => {
   it("prints a field nobody completed as the empty field", async () => {
     const texts = (await printed(signer("unsigned"), executed)).filter((op) => op.op === "text").map((op) => op["value"]);
 
-    expect(texts).toEqual(["Signature"]);
+    expect(texts).toEqual(["Signature · client"]);
   });
 });

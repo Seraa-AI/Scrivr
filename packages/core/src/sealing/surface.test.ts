@@ -10,15 +10,22 @@ import {
   checkboxTick,
   contentHashOf,
   createSnapshot,
+  fieldDrawingAt,
+  fieldIconStrokes,
+  fieldInk,
   fieldValueLayout,
+  fieldValues,
   hashArtifact,
   listSignerFields,
+  paintCheckboxTick,
+  setFieldValue,
   verifySnapshot,
   type BuiltInFieldKind,
   type CreateSnapshotOptions,
   type HostSealRefusal,
   type SealCheck,
   type SealCheckSubject,
+  type FieldBox,
   type FieldChoice,
   type FieldControl,
   type FieldFill,
@@ -27,6 +34,7 @@ import {
   type FieldOptions,
   type FieldRangeKind,
   type FieldValue,
+  type InlineLine,
   type InsertFieldOptions,
   type InsertFieldRangeOptions,
   type MutationDenied,
@@ -66,7 +74,15 @@ describe("what a signing host builds on", () => {
     expect(snapshot?.contentHash).toBe(await contentHashOf(doc));
     expect(await hashArtifact(new Uint8Array([1]))).toMatch(/^sha256:/);
     expect(checkboxTick({ x: 0, y: 0, width: 10, height: 10 })).toHaveLength(3);
-    expect(fieldValueLayout(value.text, { x: 0, y: 0, width: 180, height: 24 }, "14px Inter").sizePx).toBe(14);
+    const box: FieldBox = { x: 0, y: 0, width: 180, height: 24 };
+    const line: InlineLine = { baselineY: 20, font: "14px Inter" };
+    expect(fieldValueLayout(box, line.font, line.baselineY).sizePx).toBe(14);
+    expect(fieldInk(box).labelSizePx).toBeGreaterThan(0);
+    expect(fieldIconStrokes("date", fieldInk(box).icon).length).toBeGreaterThan(0);
+    expect(setFieldValue(editor, "f", value)).toBe(true);
+    expect(fieldValues(editor.getState())).toEqual({ f: value });
+    expect(fieldDrawingAt(editor, 0, { box, baselineY: 20, theme: editor.getResolvedTheme() })).toBeNull();
+    expect(typeof paintCheckboxTick).toBe("function");
     expect([control, insert.kind, range.kind, denied.reason, typeof gate, fields, refusal]).toEqual([
       "signatureLine",
       "dropdown",

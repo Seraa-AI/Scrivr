@@ -95,7 +95,7 @@ await snapshotFromYDoc(document, schema, {
 });
 ```
 
-A refusal you return comes back as `{ reason: "host", code, message }`, next to Scrivr's own.
+A refusal you return comes back as `{ reason: "host", code, message }`, next to Scrivr's own. A check that throws rejects the seal instead of refusing it, as does a header or footer holding content your editor's schema cannot read: a seal nobody could check is no seal, so handle the rejection as a failure and reopen the room.
 
 The order people *sign* in is yours too: a viewer completes only the fields you list in `FieldCompletion`'s `completable`, so leave a party's fields out until it is their turn.
 

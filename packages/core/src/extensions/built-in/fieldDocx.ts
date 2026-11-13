@@ -7,7 +7,6 @@ import {
   type DocxContext,
   type DocxImportContext,
   type DocxInlineTransform,
-  type DocxSdtInline,
   type DocxMarkTransform,
   type DocxNodeHandler,
   type DocxRunWrapper,
@@ -196,47 +195,53 @@ const FIELD_VALUES_KEY = "scrivr:fieldValues";
 /**
  * What signers entered into fields' controls in Word, by field id. A signer's
  * value never enters the document, so the import hands these back beside it,
- * in the shape `Field.configure({ values })` and `FieldCompletion` take.
+ * in the shape `Field.configure({ values })` takes.
+ *
+ * @internal How `importDocx` collects them; read `fieldValues` on its result.
  */
 export const importedFieldValues = (ctx: DocxImportContext): Record<string, FieldValue> =>
   ctx.shared.get<Record<string, FieldValue>>(FIELD_VALUES_KEY) ?? {};
 
-/** The value a signer left in a control, or null when it still shows its caption. */
-function controlValue(inline: DocxSdtInline, checkbox: boolean): FieldValue | null {
-  if (inline.placeholder) return null;
-  const text = inline.content.map((item) => (item.type === "text" ? item.text : "")).join("").trim();
-  if (checkbox) return text.includes("☒") || text.includes("☐") ? { kind: "checkbox", checked: text.includes("☒") } : null;
+/**
+ * The value a signer left in a control, or null when they left none. An
+ * unticked box is how it was handed to them, so only a tick is an answer.
+ */
+function controlValue(text: string, control: FieldControl): FieldValue | null {
+  if (control === "checkbox") return text.includes("☒") ? { kind: "checkbox", checked: true } : null;
   return text ? { kind: "text", text } : null;
 }
 
-export const fieldImport: DocxInlineTransform = (inline, _marks, ctx) => {
-  if (inline.type !== "sdt") return null;
-  const params = paramsOf(inline.tag, FIELD_TAG);
-  const type = ctx.schema.nodes["field"];
-  if (!params || !type) return null;
-  const fill = params.get("fill") === "author" ? "author" : "signer";
-  const checked = inline.content.some((item) => item.type === "text" && item.text.includes("☒"));
-  const id = params.get("id");
-  const value = fill === "signer" && id ? controlValue(inline, inline.content.some((item) => item.type === "text" && /[☒☐]/.test(item.text))) : null;
-  if (value && id) ctx.shared.getOrInit<Record<string, FieldValue>>(FIELD_VALUES_KEY, () => ({}))[id] = value;
-  if (fill === "signer" && !inline.placeholder && inline.content.some((item) => item.type === "image")) {
-    ctx.diagnostics.warn({
-      code: "field-drawing-not-imported",
-      message: `A drawing in signer field "${id ?? ""}" was not brought back; signatures are captured by the signing host`,
+export const fieldImport =
+  (kinds: FieldKinds): DocxInlineTransform =>
+  (inline, _marks, ctx) => {
+    if (inline.type !== "sdt") return null;
+    const params = paramsOf(inline.tag, FIELD_TAG);
+    const type = ctx.schema.nodes["field"];
+    if (!params || !type) return null;
+    const fill = params.get("fill") === "author" ? "author" : "signer";
+    const kind = params.get("kind") ?? "text";
+    const text = inline.content.map((item) => (item.type === "text" ? item.text : "")).join("").trim();
+    const id = params.get("id") || null;
+    const value = fill === "signer" && id && !inline.placeholder ? controlValue(text, kinds[kind]?.control ?? "text") : null;
+    if (value && id) ctx.shared.getOrInit<Record<string, FieldValue>>(FIELD_VALUES_KEY, () => ({}))[id] = value;
+    if (fill === "signer" && !inline.placeholder && inline.content.some((item) => item.type === "image")) {
+      ctx.diagnostics.warn({
+        code: "field-drawing-not-imported",
+        message: `A drawing in signer field "${id ?? ""}" was not brought back; signatures are captured by the signing host`,
+      });
+    }
+    return type.create({
+      nodeId: id,
+      kind,
+      fill,
+      role: fill === "signer" ? params.get("role") : null,
+      required: params.get("required") === "1",
+      checked: fill === "author" && text.includes("☒"),
+      options: inline.listItems.map((item) => ({ id: item.value, label: item.displayText })),
+      ...(Number(params.get("width")) > 0 ? { width: Number(params.get("width")) } : {}),
+      ...(Number(params.get("height")) > 0 ? { height: Number(params.get("height")) } : {}),
     });
-  }
-  return type.create({
-    nodeId: params.get("id") || null,
-    kind: params.get("kind") ?? "text",
-    fill,
-    role: fill === "signer" ? params.get("role") : null,
-    required: params.get("required") === "1",
-    checked: fill === "author" && checked,
-    options: inline.listItems.map((item) => ({ id: item.value, label: item.displayText })),
-    ...(Number(params.get("width")) > 0 ? { width: Number(params.get("width")) } : {}),
-    ...(Number(params.get("height")) > 0 ? { height: Number(params.get("height")) } : {}),
-  });
-};
+  };
 
 export const fieldRangeImport: DocxMarkTransform = (mark, ctx) => {
   const tag = mark.attrs?.["tag"];

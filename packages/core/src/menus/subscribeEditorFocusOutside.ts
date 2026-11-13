@@ -25,11 +25,8 @@ export interface SubscribeEditorFocusOutsideOptions {
  * browser address bar leaves the ProseMirror selection untouched, so popovers
  * subscribed only to view updates would stay anchored to an invisible state.
  *
- * Timing: the check waits for the next task. A click *into* a popover blurs
- * the editor first and focuses the popover's input after, with nothing
- * focused in between — a microtask runs in that gap. Waiting a task lets
- * focus land before `document.activeElement` is read. The editor regaining
- * focus in the meantime cancels the hide.
+ * Timing: the check waits a task; the editor regaining focus meanwhile
+ * cancels the hide, and so does unsubscribing.
  *
  * Popover detection: in priority order,
  *   1. `options.getPopoverElement()` — used by internal controllers that own
@@ -47,9 +44,9 @@ export function subscribeEditorFocusOutside(
   onHide: () => void,
   options: SubscribeEditorFocusOutsideOptions = {},
 ): () => void {
-  // Tracks whether a deferred hide is already queued. Multiple blur events
-  // within one tick coalesce into a single onHide call.
-  let pendingCheck = false;
+  // The deferred hide, while one is queued. Multiple blur events within one
+  // tick coalesce into a single onHide call.
+  let pendingCheck: ReturnType<typeof setTimeout> | null = null;
   // Tracks whether the editor re-focused between the blur and the check —
   // happens whenever a click leaves the textarea and immediately returns
   // (e.g. clicking the editor body twice in rapid succession).
@@ -61,14 +58,13 @@ export function subscribeEditorFocusOutside(
 
   const offBlur = editor.on("blur", () => {
     if (pendingCheck) return;
-    pendingCheck = true;
     refocusedDuringPending = false;
     // The next task, not a microtask: a browser blurs the editor before it
     // focuses what was clicked, and in between nothing is focused — judged
     // then, a popover would close on a click into its own text box.
-    setTimeout(() => {
+    pendingCheck = setTimeout(() => {
       const refocused = refocusedDuringPending;
-      pendingCheck = false;
+      pendingCheck = null;
       refocusedDuringPending = false;
       if (refocused) return;
       if (typeof document === "undefined") return; // SSR / ServerEditor — no DOM
@@ -91,5 +87,6 @@ export function subscribeEditorFocusOutside(
   return () => {
     offFocus();
     offBlur();
+    if (pendingCheck) clearTimeout(pendingCheck);
   };
 }

@@ -13,6 +13,7 @@ import {
   type HoverTarget,
   type IEditor,
   type OverlayRenderHandler,
+  type PointerCursorResolver,
   type Selection,
   type ServerEditorOptions,
 } from "@scrivr/core";
@@ -120,6 +121,10 @@ export class ViewEditorDouble extends ServerEditor implements IEditor {
   }
 
   redraw(): void {}
+
+  addPointerCursor(_resolve: PointerCursorResolver): () => void {
+    return () => {};
+  }
 
   invalidateLayout(): void {}
 

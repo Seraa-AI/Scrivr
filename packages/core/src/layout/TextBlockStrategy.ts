@@ -59,7 +59,10 @@ export const TextBlockStrategy: BlockStrategy = {
           const strategy = inlineRegistry?.get(span.node.type.name);
           if (strategy) {
             paintInSpanStyle(ctx, atomStyle(span, spanX, objY, markDecorators, theme, ctx), () => {
-              strategy.render(ctx, spanX, objY, span.width, span.height, span.node, theme, baseline);
+              strategy.render(ctx, spanX, objY, span.width, span.height, span.node, theme, {
+                baselineY: baseline,
+                ...(span.font !== undefined ? { font: span.font } : {}),
+              });
             });
           }
           // Store the full visual rect so the overlay can draw resize handles.

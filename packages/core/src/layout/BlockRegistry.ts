@@ -47,9 +47,16 @@ export interface InlineStrategy {
     height: number,
     node: Node,
     theme: ResolvedTheme,
-    /** The baseline of the line the object stands in — its bottom, for one with no line. */
-    baselineY: number,
+    line: InlineLine,
   ): void;
+}
+
+/** The line an inline object is painted in. */
+export interface InlineLine {
+  /** Its baseline — the object's bottom, for one with no line. */
+  baselineY: number;
+  /** The CSS font of the run the object stands in, when it stands in text. */
+  font?: string;
 }
 
 // ── Inline render context ─────────────────────────────────────────────────────

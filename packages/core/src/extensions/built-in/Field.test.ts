@@ -8,7 +8,7 @@ import { NodeSelection, TextSelection } from "prosemirror-state";
 import { DOMParser, DOMSerializer, type Node as PmNode } from "prosemirror-model";
 import { ServerEditor } from "../../ServerEditor";
 import { StarterKit } from "../StarterKit";
-import { Field, listSignerFields } from "./Field";
+import { Field, fieldValues, listSignerFields, setFieldValue } from "./Field";
 import { fieldIconStrokes, fieldInk, fieldRoleColor, fieldValueLayout, fieldVerb } from "./fieldKinds";
 import { createTestEditor, measureTextWidth } from "../../test-utils";
 import { DefaultFontProvider } from "../../fonts/DefaultFontProvider";
@@ -116,6 +116,22 @@ describe("a signer field", () => {
       editor.destroy();
       container.remove();
     }
+  });
+
+  it("lets undo put back the text it replaced while it is selected", () => {
+    const editor = new ServerEditor({
+      extensions: [StarterKit, Field],
+      content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Signed: Client" }] }] },
+    });
+    editor.applyTransaction(editor.getState().tr.setSelection(TextSelection.create(editor.getState().doc, 9, 15)));
+    editor.commands.insertField({ kind: "signature", fill: "signer", role: "client" });
+    const [field] = fields(editor);
+    editor.applyTransaction(editor.getState().tr.setSelection(NodeSelection.create(editor.getState().doc, field!.pos)));
+
+    editor.commands.undo();
+
+    expect(editor.getState().doc.textContent).toBe("Signed: Client");
+    expect(fields(editor)).toHaveLength(0);
   });
 
   it("gets a fresh id when copied, so one signature never fills two boxes", () => {
@@ -479,20 +495,15 @@ describe("a value typed into a field", () => {
   const box = { x: 100, y: 200, width: 180, height: 24 };
 
   it("sits on the line like a filled-in blank: on the baseline, in the size of the text around it", () => {
-    const set = fieldValueLayout("Net 30", box, "14px Inter", 220);
+    const set = fieldValueLayout(box, "14px Inter", 220);
 
     expect(set.baselineY).toBe(220);
     expect(set.sizePx).toBe(14);
+    expect(set.font).toBe("14px Inter");
     // Part of the document once filled: no rule, no tag — just the text.
     expect(set).not.toHaveProperty("rule");
   });
 
-  it("is set smaller when it is too long to fit across its box", () => {
-    const long = "Northwind Studio International Holdings";
-
-    expect(fieldValueLayout(long, box, "14px Inter").sizePx).toBeLessThan(14);
-    expect(fieldValueLayout(`${long} Limited`, box, "14px Inter").sizePx).toBeLessThan(fieldValueLayout(long, box, "14px Inter").sizePx);
-  });
 });
 
 describe("a field's ink — how an unfilled field is drawn", () => {
@@ -531,7 +542,7 @@ describe("a host's own look for fields", () => {
     const node = editor.schema.nodes["field"]!.create(signer);
     const ctx = document.createElement("canvas").getContext("2d")!;
     const fillText = vi.spyOn(ctx, "fillText");
-    editor.inlineRegistry.get("field")!.render(ctx, 10, 20, 180, 44, node, editor.getResolvedTheme(), 64);
+    editor.inlineRegistry.get("field")!.render(ctx, 10, 20, 180, 44, node, editor.getResolvedTheme(), { baselineY: 64 });
     return fillText.mock.calls.length;
   };
 
@@ -616,6 +627,42 @@ describe("a field's box on the page", () => {
     expect(blank.width).toBe(300);
     expect(signed.width).toBeLessThan(blank.width);
     expect(signed.width).toBeGreaterThanOrEqual(measureTextWidth("Ada", signed.font));
+  });
+
+  it("fits a value given once it is laid out, and the line closes up around it", () => {
+    const editor = createTestEditor({
+      extensions: [StarterKit, Field],
+      content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Terms: " }, { type: "field", attrs: { nodeId: "who", kind: "name", fill: "signer", role: "client", width: 300, height: 24 } }] }] },
+      sealed: true,
+    });
+    const width = () => {
+      editor.ensureFullLayout();
+      const span = editor.layout.pages[0]!.blocks[0]!.lines[0]!.spans.find((s) => s.kind === "object");
+      return { width: span?.width ?? 0, font: span?.kind === "object" ? (span.font ?? "") : "" };
+    };
+    const doc = editor.getState().doc;
+    expect(width().width).toBe(300);
+
+    // A sealed document takes the value: it is held beside the document, not in it.
+    expect(setFieldValue(editor, "who", { kind: "text", text: "Ada" })).toBe(true);
+    const filled = width();
+
+    expect(editor.getState().doc).toBe(doc);
+    expect(fieldValues(editor.getState())).toEqual({ who: { kind: "text", text: "Ada" } });
+    expect(filled.width).toBeLessThan(300);
+    expect(filled.width).toBeGreaterThanOrEqual(measureTextWidth("Ada", filled.font));
+
+    setFieldValue(editor, "who", null);
+    expect(width().width).toBe(300);
+    editor.destroy();
+  });
+
+  it("sets a typed signature as text, fitted to it, rather than in the signature's box", () => {
+    const attrs = { nodeId: "sig", kind: "signature", fill: "signer", role: "client", width: 180, height: 44 };
+    const typed = laidOutField(attrs, Field.configure({ values: { sig: { kind: "text", text: "Ada Lovelace" } } }));
+
+    expect(typed.width).toBeGreaterThanOrEqual(measureTextWidth("Ada Lovelace", typed.font));
+    expect(typed.width).toBeLessThan(measureTextWidth("Ada Lovelace", typed.font) + 6);
   });
 
   it("takes formatting like the text it sits in — a bold field prints its value bold", () => {

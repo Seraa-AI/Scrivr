@@ -1761,10 +1761,12 @@ export class Editor extends BaseEditor implements IEditor {
 	/**
 	 * Invalidate the layout cache so the next paint triggers a full re-layout.
 	 * Use when external factors change chrome heights (e.g. live surface editing
-	 * grows the header band).
+	 * grows the header band). `remeasure` measures every block again too — for
+	 * a change to what a strategy measures that the document doesn't show.
 	 */
-	invalidateLayout(): void {
-		this.lc.invalidate();
+	invalidateLayout(options: { remeasure?: boolean } = {}): void {
+		if (options.remeasure) this.lc.remeasure();
+		else this.lc.invalidate();
 		this.redraw();
 	}
 

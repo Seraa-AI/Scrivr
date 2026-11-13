@@ -96,13 +96,13 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
       themeRoot: typeof document !== "undefined" ? document.documentElement : undefined,
       extensions: [
         StarterKit.configure({ table: true }),
-        Field,
+        // Opens with what every party has given so far: the room's record.
+        Field.configure({ values: valuesRef.current }),
         DefaultContent.configure({ json: content }),
         FieldCompletion.configure({
           fields: snapshot.fields,
           // Nothing is offered until the snapshot is proven intact.
           completable: verified ? mine.map((f) => f.id) : [],
-          values: valuesRef.current,
           onFieldRequest: (field, current) =>
             new Promise<FieldValue | null>((resolve) => {
               // A click ticks the box, and a second click clears it.

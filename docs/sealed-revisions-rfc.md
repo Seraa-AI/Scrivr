@@ -789,8 +789,31 @@ content-control and signing documentation, found, each fixed test first:
   the document; drawings raise `field-drawing-not-imported`.
 - **The guide's seal raced incoming updates.** It now blocks writes before the
   snapshot, with recovery, and says what a hash does and does not prove.
-- Custom kinds kept their control in the signing view (`kinds`), failed
-  requests reach the host (`onFieldRequestError`), and Tab leaves at either end.
+- Custom kinds kept their control in the signing view, failed requests reach
+  the host (`onFieldRequestError`), and Tab leaves at either end.
+
+**Hardened by a second pre-ship review.** Seven reviewers read everything
+since the first; what they found, each fixed test first:
+
+- **The executed PDF was laid out unlike what the signers saw.** Values had
+  two owners: the signing view painted its own over boxes of the authored
+  width, while the PDF's editor fitted each field to its value, so lines
+  re-wrapped. Decided: a field fits its value everywhere, as a Word content
+  control does. Values now live in `Field`, beside the document — plugin
+  state, so a sealed document takes them — and layout, canvas and PDF all read
+  them there; a new value measures the document again
+  (`invalidateLayout({ remeasure: true })`). `FieldCompletion` hands what it
+  captures to `Field` and takes kinds and party colours from it, instead of
+  its own copies.
+- **Typed values printed at about half size.** The box was measured to the
+  value, then the print size was guessed again at 0.55em a letter. A value is
+  now set in the size of the text around it, which the box already fits.
+- **Undo did nothing while a field was selected,** when inserting the field
+  had replaced text: undo's step looked like typing over the field. History
+  transactions pass.
+- **An untouched Word checkbox came back answered.** Export writes an unticked
+  box as content, so import reported `checked: false` as the signer's. Only a
+  tick is an answer now, and a value takes the type its field's kind declares.
 
 Still to do before claiming Word compatibility: open exported files in desktop
 Word — signature-line rendering and Sign, fill → save → reopen → re-import for

@@ -208,6 +208,21 @@ describe("a field filled in Word", () => {
     expect(fieldValues).toEqual({ who: { kind: "text", text: "Net 60" } });
   });
 
+  it("brings back a box the signer ticked, and nothing for one left as it was handed to them", async () => {
+    const box = { width: 16, height: 16 };
+    const untouched = await importDocx(new ServerEditor({ extensions }), await filledInWord("checkbox", "☐", box));
+    const ticked = await importDocx(new ServerEditor({ extensions }), await filledInWord("checkbox", "☒", box));
+
+    expect(untouched.fieldValues).toEqual({});
+    expect(ticked.fieldValues).toEqual({ who: { kind: "checkbox", checked: true } });
+  });
+
+  it("reads a value as the field's kind says — a text field holding a box glyph is text", async () => {
+    const { fieldValues } = await importDocx(new ServerEditor({ extensions }), await filledInWord("name", "☒ Yes"));
+
+    expect(fieldValues).toEqual({ who: { kind: "text", text: "☒ Yes" } });
+  });
+
   it("brings back nothing for a control still showing its caption", async () => {
     const editor = new ServerEditor({ extensions, content: contract });
     const { fieldValues } = await importDocx(new ServerEditor({ extensions }), await exportDocxBytes(editor));

@@ -58,9 +58,10 @@ export interface FieldOptions {
   /** Kinds added to — or replacing — the built-ins, by name. */
   kinds: Record<string, FieldKindSpec>;
   /**
-   * Completed values by field id, printed in their fields when this editor
-   * exports a PDF — the executed document a signing ends with. They never
-   * enter the document. On screen, `FieldCompletion` shows values instead.
+   * Completed values by field id that the editor opens with; `setFieldValue`
+   * gives one later. A field is laid out, drawn and printed with its value —
+   * the executed document a signing ends with — yet values never enter the
+   * document, so its seal holds.
    */
   values: Record<string, FieldValue>;
   /** A colour per role, by role name. A role left out takes one from Scrivr's palette. */
@@ -78,7 +79,7 @@ export interface FieldOptions {
 export interface FieldDrawing {
   node: PmNode;
   /** The box the layout reserved for it. */
-  box: { x: number; y: number; width: number; height: number };
+  box: FieldBox;
   /** The baseline of the line it stands in. */
   baselineY: number;
   kind: string;
@@ -90,7 +91,7 @@ export interface FieldDrawing {
   /** Its party's colour. */
   color: string;
   theme: ResolvedTheme;
-  /** The value it is printed with, in the executed document. */
+  /** The value it holds. */
   value?: FieldValue;
 }
 
@@ -99,18 +100,19 @@ export type FieldKinds = Readonly<Record<string, FieldKindSpec>>;
 export const controlOf = (kinds: FieldKinds, node: PmNode): FieldControl =>
   kinds[String(node.attrs["kind"])]?.control ?? "text";
 
-/** What an empty field shows: its kind's label, and whose it is. */
 /** What a field is, as its label says it: "Signature". */
 export const fieldLabel = (kinds: FieldKinds, node: PmNode): string =>
   kinds[String(node.attrs["kind"])]?.label ?? String(node.attrs["kind"]);
 
+/** What an empty field shows in print: its kind's label, and whose it is. */
 export function fieldCaption(kinds: FieldKinds, node: PmNode): string {
-  const label = kinds[String(node.attrs["kind"])]?.label ?? String(node.attrs["kind"]);
+  const label = fieldLabel(kinds, node);
   const role = node.attrs["role"];
   return typeof role === "string" && label ? `${label} · ${role}` : label;
 }
 
-interface FieldBox {
+/** A field's box, in layout pixels. */
+export interface FieldBox {
   x: number;
   y: number;
   width: number;
@@ -125,8 +127,6 @@ export const checkboxTick = ({ x, y, width, height }: FieldBox) =>
     { x: x + width * 0.8, y: y + height * 0.25 },
   ] as const;
 
-/** A sans-serif glyph's average advance, in ems — enough to size a value to its box. */
-const AVERAGE_ADVANCE_EM = 0.55;
 /** The size a value is set at when the text around it gives none. */
 const DEFAULT_VALUE_PX = 14;
 
@@ -138,13 +138,12 @@ const fontSizePx = (font: string | undefined): number | null => {
 /**
  * Where a value typed into a field is set, on screen and in the PDF alike.
  * Once filled, a field reads as part of the document: on the line's baseline,
- * where a field's box stands, in the size of the text around it (`textFont`,
- * a CSS font) — smaller only when too long to fit across the box.
+ * in the font of the text around it (`textFont`, a CSS font). Layout made the
+ * box as wide as the value, so it fits as it is.
  */
-export function fieldValueLayout(text: string, box: FieldBox, textFont?: string, baselineY = box.y + box.height) {
-  const across = (box.width - 4) / (Math.max(1, text.length) * AVERAGE_ADVANCE_EM);
-  const sizePx = Math.min(fontSizePx(textFont) ?? DEFAULT_VALUE_PX, across);
-  return { x: box.x + 2, baselineY, sizePx };
+export function fieldValueLayout(box: FieldBox, textFont?: string, baselineY = box.y + box.height) {
+  const sizePx = fontSizePx(textFont) ?? DEFAULT_VALUE_PX;
+  return { x: box.x + 2, baselineY, sizePx, font: textFont ?? `${sizePx}px sans-serif` };
 }
 
 /**
@@ -168,8 +167,8 @@ export function fieldRoleColor(role: string | null | undefined, overrides?: Read
 /**
  * Whether a field is set like text — as tall as the words around it, so its
  * line keeps its height, as a Word content control does — or like a picture,
- * at its own size on the baseline, as an inline image and a signature line
- * are. A field filled with a drawing is a picture; a checkbox is a glyph.
+ * at its own size on the baseline, as an inline image is: signatures and
+ * initials, which are drawn. A checkbox is a glyph.
  */
 export const setsLike = (kind: string, control: FieldControl): "text" | "picture" | "glyph" =>
   control === "checkbox" ? "glyph" : control === "signatureLine" || kind === "initials" ? "picture" : "text";
@@ -192,8 +191,6 @@ const CAP_HEIGHT_EM = 0.72;
  * and the label saying what the field is, over a rule like an underline.
  */
 export function fieldInk(box: FieldBox, baselineY = box.y + box.height) {
-  // A field stands on the text's baseline: its label sits on it like a word,
-  // its rule just under it like an underline.
   const labelBaselineY = baselineY;
   const ruleY = labelBaselineY + 2;
   const labelSizePx = Math.min(LABEL_PX, (baselineY - box.y) * 0.85);

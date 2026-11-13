@@ -151,6 +151,16 @@ function unfilledPrompts(docs: readonly PmNode[]): string[] {
   return [...prompts.values()];
 }
 
+/** Every field a signer fills in `doc`, identified or not. */
+function signerFields(doc: PmNode): number {
+  let count = 0;
+  doc.descendants((node) => {
+    if (node.type.name === "field" && node.attrs["fill"] === "signer") count++;
+    return true;
+  });
+  return count;
+}
+
 /** Signer fields that lack an id or a role, or repeat an earlier field's id. */
 function unidentifiedFields(doc: PmNode): number {
   const ids = new Set<string>();
@@ -178,6 +188,10 @@ function roleRefusal(fields: readonly SignerFieldDescriptor[], assigned: readonl
  * Freeze a document into a snapshot and its hash. The manifest of fields and
  * the hash come from one reading of one document: checked separately, a field
  * added between the check and the freeze would leave a signer out.
+ *
+ * Rejects, rather than refusing, when a host check throws or a header or
+ * footer holds content this editor's schema cannot read: a seal no one could
+ * check is no seal.
  */
 export async function createSnapshot(doc: PmNode, { assignedRoles, checks }: CreateSnapshotOptions): Promise<SnapshotResult> {
   const fields = listSignerFields(doc);
@@ -189,7 +203,7 @@ export async function createSnapshot(doc: PmNode, { assignedRoles, checks }: Cre
   if (count > 0) return { ok: false, refusal: { reason: "pending-tracked-changes", count } };
   const prompts = unfilledPrompts([doc, ...parts]);
   if (prompts.length > 0) return { ok: false, refusal: { reason: "unfilled-fields", prompts } };
-  const outside = parts.reduce((n, part) => n + listSignerFields(part).length + unidentifiedFields(part), 0);
+  const outside = parts.reduce((n, part) => n + signerFields(part), 0);
   if (outside > 0) return { ok: false, refusal: { reason: "fields-outside-body", count: outside } };
   const unidentified = unidentifiedFields(doc);
   if (unidentified > 0) return { ok: false, refusal: { reason: "unidentified-fields", count: unidentified } };

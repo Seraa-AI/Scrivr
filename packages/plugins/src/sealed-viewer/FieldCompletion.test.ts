@@ -1,13 +1,23 @@
 /**
  * Completing fields on a sealed revision. A field's value never enters the
  * document: the host captures it — signature pad, consent, authentication —
- * and hands it back to be shown over the page. The document stays exactly
- * what was sealed.
+ * and hands it back for `Field` to hold beside the document. The document
+ * stays exactly what was sealed.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CharacterMap, Field, StarterKit, defaultPageConfig, fieldRoleColor, type PagePoint, type SignerFieldDescriptor } from "@scrivr/core";
+import {
+  CharacterMap,
+  Field,
+  StarterKit,
+  defaultPageConfig,
+  fieldRoleColor,
+  fieldValues,
+  setFieldValue,
+  type PagePoint,
+  type SignerFieldDescriptor,
+} from "@scrivr/core";
 import { ViewEditorDouble } from "../__tests__/viewEditorDouble";
-import { FieldCompletion, moveFieldFocus, requestField, setFieldValue, type FieldValue } from "../index";
+import { FieldCompletion, moveFieldFocus, requestField, type FieldValue, type SigningFieldDrawing } from "../index";
 
 const signHere: SignerFieldDescriptor = { id: "f-client", role: "client-authorized-signatory", kind: "signature", required: true, options: [] };
 const witness: SignerFieldDescriptor = { id: "f-witness", role: "witness", kind: "signature", required: true, options: [] };
@@ -69,7 +79,7 @@ function viewer(onFieldRequest: (field: SignerFieldDescriptor) => Promise<FieldV
     extensions: [
       StarterKit,
       Field,
-      FieldCompletion.configure({ fields: [signHere, witness], completable: [signHere.id], values: {}, onFieldRequest }),
+      FieldCompletion.configure({ fields: [signHere, witness], completable: [signHere.id], onFieldRequest }),
     ],
     content,
     sealed: true,
@@ -106,15 +116,14 @@ describe("FieldCompletion", () => {
     expect(request).not.toHaveBeenCalled();
   });
 
-  it("shows the value the host returns, without touching the sealed document", async () => {
+  it("gives the field the value the host returns, without touching the sealed document", async () => {
     const e = viewer(async () => signature);
-    const redraw = vi.spyOn(e, "redraw");
     const before = e.getState().doc;
 
     press(e, point(2, 150, 620));
     await flush();
 
-    expect(redraw).toHaveBeenCalled();
+    expect(fieldValues(e.getState())[signHere.id]).toEqual(signature);
     expect(e.getState().doc).toBe(before);
   });
 
@@ -187,7 +196,6 @@ describe("FieldCompletion", () => {
         FieldCompletion.configure({
           fields: [signHere, witness],
           completable: [signHere.id],
-          values: {},
           onFieldRequest: () => Promise.reject(failure),
           onFieldRequestError,
         }),
@@ -206,12 +214,10 @@ describe("FieldCompletion", () => {
   it("shows a value another participant completed, given by the host", () => {
     const request = vi.fn(async () => signature);
     const e = viewer(request);
-    const redraw = vi.spyOn(e, "redraw");
 
-    setFieldValue(e, signHere.id, signature);
+    expect(setFieldValue(e, signHere.id, signature)).toBe(true);
     press(e, point(2, 150, 620));
 
-    expect(redraw).toHaveBeenCalled();
     // Still this viewer's to change: pressing it hands the host what is there.
     expect(request).toHaveBeenCalledWith(signHere, signature);
   });
@@ -247,6 +253,16 @@ describe("FieldCompletion — pointing and the keyboard", () => {
     expect(moveFieldFocus(e, -1)).toBe(signHere.id);
     expect(moveFieldFocus(e, -1)).toBeNull();
   });
+
+  it("lets keyboard focus go when the viewer presses elsewhere on the page", () => {
+    const e = viewer(async () => null);
+    moveFieldFocus(e, 1);
+
+    press(e, point(2, 20, 20));
+
+    // Focus starts over: the next Tab lands on the viewer's first field again.
+    expect(moveFieldFocus(e, 1)).toBe(signHere.id);
+  });
 });
 
 /** A context that records the text drawn on it and accepts every other call. */
@@ -272,9 +288,14 @@ function recordingContext(drawn: string[]): CanvasRenderingContext2D {
 }
 
 describe("FieldCompletion — a host's own look", () => {
-  const paintPage = (options: { paint?: (ctx: CanvasRenderingContext2D, field: { role: string | null; color: string; own: boolean }) => boolean; roleColors?: Record<string, string> }) => {
+  const paintPage = (options: { paint?: (ctx: CanvasRenderingContext2D, field: SigningFieldDrawing) => boolean; roleColors?: Record<string, string> }) => {
+    const { roleColors, ...completion } = options;
     editor = new LaidOutViewer({
-      extensions: [StarterKit, Field, FieldCompletion.configure({ fields: [signHere, witness], completable: [signHere.id], values: {}, ...options })],
+      extensions: [
+        StarterKit,
+        Field.configure(roleColors ? { roleColors } : {}),
+        FieldCompletion.configure({ fields: [signHere, witness], completable: [signHere.id], ...completion }),
+      ],
       content,
       sealed: true,
     });
@@ -286,7 +307,7 @@ describe("FieldCompletion — a host's own look", () => {
     return drawn;
   };
 
-  it("lets the host draw a field itself, told whose it is and whether this viewer completes it", () => {
+  it("lets the host draw a field itself, told whose it is and whether this viewer completes it — in the colours given to Field", () => {
     const paint = vi.fn(() => true);
     const drawn = paintPage({ paint, roleColors: { "client-authorized-signatory": "#ff0000" } });
 
@@ -306,14 +327,14 @@ describe("FieldCompletion — a host's own look", () => {
 });
 
 describe("FieldCompletion — a host's own kinds", () => {
-  it("draws and completes a host's kind as the control it declares, as the author's editor does", () => {
+  it("draws and completes a host's kind as the control it declares — the kinds given to Field", () => {
     const agree: SignerFieldDescriptor = { id: "f-agree", role: "client", kind: "agree", required: true, options: [] };
     const kinds = { agree: { label: "I agree", size: { width: 16, height: 16 }, control: "checkbox" as const } };
     editor = new LaidOutViewer({
       extensions: [
         StarterKit,
         Field.configure({ kinds }),
-        FieldCompletion.configure({ fields: [agree], completable: [agree.id], values: {}, kinds, paint: (_ctx, field) => {
+        FieldCompletion.configure({ fields: [agree], completable: [agree.id], paint: (_ctx, field) => {
           seen.push(field.control);
           return true;
         } }),
