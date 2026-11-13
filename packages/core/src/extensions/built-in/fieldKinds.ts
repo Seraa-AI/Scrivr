@@ -1,5 +1,7 @@
 import type { Node as PmNode } from "prosemirror-model";
 import { z } from "zod";
+import type { ResolvedTheme } from "../../model/theme";
+import type { PdfNodeContext } from "../../exports/pdf";
 
 /** The control a field is: how it draws, whether it toggles, and what Word gets. */
 export type FieldControl = "signatureLine" | "checkbox" | "date" | "dropdown" | "text";
@@ -61,6 +63,35 @@ export interface FieldOptions {
    * enter the document. On screen, `FieldCompletion` shows values instead.
    */
   values: Record<string, FieldValue>;
+  /** A colour per role, by role name. A role left out takes one from Scrivr's palette. */
+  roleColors?: Readonly<Record<string, string>>;
+  /**
+   * Draw a field yourself, on screen. Return `true` when you drew it; `false`
+   * leaves Scrivr's look for that field.
+   */
+  paint?: (ctx: CanvasRenderingContext2D, field: FieldDrawing) => boolean;
+  /** Draw a field yourself in the PDF, as `paint` does on screen. */
+  print?: (pdf: PdfNodeContext, field: FieldDrawing) => boolean;
+}
+
+/** Everything Scrivr knows about a field it is about to draw — what a host's own drawing gets. */
+export interface FieldDrawing {
+  node: PmNode;
+  /** The box the layout reserved for it. */
+  box: { x: number; y: number; width: number; height: number };
+  /** The baseline of the line it stands in. */
+  baselineY: number;
+  kind: string;
+  control: FieldControl;
+  /** What the field is, as its kind names it: "Signature". */
+  label: string;
+  /** Who fills it; `null` for a field the author fills. */
+  role: string | null;
+  /** Its party's colour. */
+  color: string;
+  theme: ResolvedTheme;
+  /** The value it is printed with, in the executed document. */
+  value?: FieldValue;
 }
 
 export type FieldKinds = Readonly<Record<string, FieldKindSpec>>;
@@ -125,8 +156,10 @@ export function fieldValueLayout(text: string, box: FieldBox, textFont?: string,
 const ROLE_COLORS = ["#0e93b0", "#d6457f", "#c47a14", "#13946b", "#7a4fd6", "#3a6fd8"] as const;
 const NO_ROLE_COLOR = "#8a8f98";
 
-export function fieldRoleColor(role: string | null | undefined): string {
+export function fieldRoleColor(role: string | null | undefined, overrides?: Readonly<Record<string, string>>): string {
   if (!role) return NO_ROLE_COLOR;
+  const chosen = overrides?.[role];
+  if (chosen) return chosen;
   let hash = 0;
   for (const char of role) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
   return ROLE_COLORS[hash % ROLE_COLORS.length]!;

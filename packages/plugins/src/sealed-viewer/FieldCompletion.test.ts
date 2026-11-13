@@ -5,7 +5,7 @@
  * what was sealed.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Field, StarterKit, type PagePoint, type SignerFieldDescriptor } from "@scrivr/core";
+import { CharacterMap, Field, StarterKit, defaultPageConfig, fieldRoleColor, type PagePoint, type SignerFieldDescriptor } from "@scrivr/core";
 import { ViewEditorDouble } from "../__tests__/viewEditorDouble";
 import { FieldCompletion, moveFieldFocus, requestField, setFieldValue, type FieldValue } from "../index";
 
@@ -218,5 +218,61 @@ describe("FieldCompletion — pointing and the keyboard", () => {
     // The only one this viewer completes: Tab stays on it, never on the witness's.
     expect(moveFieldFocus(e, 1)).toBe(signHere.id);
     expect(moveFieldFocus(e, -1)).toBe(signHere.id);
+  });
+});
+
+/** A context that records the text drawn on it and accepts every other call. */
+function recordingContext(drawn: string[]): CanvasRenderingContext2D {
+  const state: Record<string, unknown> = {};
+  const isContext = (value: unknown): value is CanvasRenderingContext2D => typeof value === "object" && value !== null;
+  const context: unknown = new Proxy(state, {
+    get(target, key) {
+      if (typeof key !== "string") return undefined;
+      if (key in target) return target[key];
+      if (key === "measureText") return () => ({ width: 20 });
+      return (...args: unknown[]) => {
+        if (key === "fillText") drawn.push(String(args[0]));
+      };
+    },
+    set(target, key, value) {
+      if (typeof key === "string") target[key] = value;
+      return true;
+    },
+  });
+  if (!isContext(context)) throw new Error("no context");
+  return context;
+}
+
+describe("FieldCompletion — a host's own look", () => {
+  const paintPage = (options: { paint?: (ctx: CanvasRenderingContext2D, field: { role: string | null; color: string; own: boolean }) => boolean; roleColors?: Record<string, string> }) => {
+    editor = new LaidOutViewer({
+      extensions: [StarterKit, Field, FieldCompletion.configure({ fields: [signHere, witness], completable: [signHere.id], values: {}, ...options })],
+      content,
+      sealed: true,
+    });
+    editor.mountView();
+    const map = new CharacterMap();
+    map.registerObjectRect({ docPos: 8, x: 100, y: 600, width: 180, height: 44, page: 2, baseline: 644 });
+    const drawn: string[] = [];
+    editor.painters.at(-1)!(recordingContext(drawn), 2, defaultPageConfig, map, editor.getResolvedTheme());
+    return drawn;
+  };
+
+  it("lets the host draw a field itself, told whose it is and whether this viewer completes it", () => {
+    const paint = vi.fn(() => true);
+    const drawn = paintPage({ paint, roleColors: { "client-authorized-signatory": "#ff0000" } });
+
+    expect(paint).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ role: "client-authorized-signatory", color: "#ff0000", own: true, baselineY: 644 }),
+    );
+    expect(drawn).toEqual([]);
+  });
+
+  it("draws Scrivr's own look when the host declines, in the party's colour", () => {
+    const drawn = paintPage({ paint: () => false });
+
+    expect(drawn.length).toBeGreaterThan(0);
+    expect(fieldRoleColor("client-authorized-signatory", { "client-authorized-signatory": "#ff0000" })).toBe("#ff0000");
   });
 });

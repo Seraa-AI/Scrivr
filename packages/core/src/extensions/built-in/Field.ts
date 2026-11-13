@@ -22,6 +22,7 @@ import {
   setsLike,
   type FieldChoice,
   type FieldControl,
+  type FieldDrawing,
   type FieldKind,
   type FieldKinds,
   type FieldOptions,
@@ -205,7 +206,28 @@ const fieldBoxPlugin = new Plugin({
 /** The built-in kinds, with the host's added over them. */
 const resolveKinds = (options: FieldOptions): FieldKinds => ({ ...BUILT_IN_FIELD_KINDS, ...options.kinds });
 
-const fieldStrategy = (kinds: FieldKinds, values: Readonly<Record<string, FieldValue>>): InlineStrategy => ({
+/** A field as a host's own drawing is handed it. */
+const drawingOf = (
+  kinds: FieldKinds,
+  options: FieldOptions,
+  node: PmNode,
+  at: { box: FieldDrawing["box"]; baselineY: number; theme: ResolvedTheme },
+): FieldDrawing => {
+  const role = isSigner(node) && typeof node.attrs["role"] === "string" ? node.attrs["role"] : null;
+  const value = valueOf(options.values, node);
+  return {
+    node,
+    ...at,
+    kind: String(node.attrs["kind"]),
+    control: controlOf(kinds, node),
+    label: fieldLabel(kinds, node),
+    role,
+    color: fieldRoleColor(role, options.roleColors),
+    ...(value ? { value } : {}),
+  };
+};
+
+const fieldStrategy = (kinds: FieldKinds, options: FieldOptions): InlineStrategy => ({
   verticalAlign: "baseline",
   // A field that holds text is as tall as the text around it; one that holds
   // a drawing keeps its authored size, as an inline image does. Measuring
@@ -215,7 +237,7 @@ const fieldStrategy = (kinds: FieldKinds, values: Readonly<Record<string, FieldV
     // printed with, or else the widest choice a dropdown offers. Free text
     // still to be given keeps the space its author left for it.
     const textFieldWidth = (field: PmNode, authored: number, face: string, m: typeof measurer): number => {
-      const value = valueOf(values, field);
+      const value = valueOf(options.values, field);
       if (value?.kind === "text") return Math.ceil(m.measureWidth(value.text, face)) + 4;
       if (controlOf(kinds, field) !== "dropdown") return authored;
       const ink = fieldInk({ x: 0, y: 0, width: authored, height: 24 });
@@ -245,8 +267,10 @@ const fieldStrategy = (kinds: FieldKinds, values: Readonly<Record<string, FieldV
   // Quiet ink: no box, just a dotted rule in its party's colour along the
   // line, with what the field is standing faintly on it.
   render(ctx, x, y, width, height, node, theme: ResolvedTheme, baselineY) {
+    const drawing = drawingOf(kinds, options, node, { box: { x, y, width, height }, baselineY, theme });
+    if (options.paint?.(ctx, drawing)) return;
     ctx.save();
-    const color = fieldRoleColor(isSigner(node) ? String(node.attrs["role"] ?? "") : null);
+    const color = drawing.color;
     ctx.strokeStyle = color;
     ctx.lineWidth = 1.5;
     ctx.setLineDash([2, 2]);
@@ -350,11 +374,13 @@ const valueOf = (values: Readonly<Record<string, FieldValue>>, node: PmNode): Fi
  * solid. A field given a value prints the value instead — the executed document.
  */
 const fieldPdf =
-  (kinds: FieldKinds, values: Readonly<Record<string, FieldValue>>): PdfNodeHandler =>
+  (kinds: FieldKinds, options: FieldOptions): PdfNodeHandler =>
   (block, ctx) => {
     const { node, x, y, width, height } = block;
-    const value = valueOf(values, node);
-    const roleColor = pdfColor(fieldRoleColor(isSigner(node) ? String(node.attrs["role"] ?? "") : null));
+    const drawing = drawingOf(kinds, options, node, { box: { x, y, width, height }, baselineY: ctx.baselineY ?? y + height, theme: ctx.theme });
+    if (options.print?.(ctx, drawing)) return;
+    const value = drawing.value;
+    const roleColor = pdfColor(drawing.color);
     const border = { color: roleColor, widthPx: 1 };
     const ink = pdfColor(ctx.theme.defaultText);
     if (controlOf(kinds, node) === "checkbox") {
@@ -596,14 +622,14 @@ export const Field = Extension.create<FieldOptions>({
   },
 
   addInlineHandlers() {
-    return { field: fieldStrategy(resolveKinds(this.options), this.options.values) };
+    return { field: fieldStrategy(resolveKinds(this.options), this.options) };
   },
 
   addExports() {
     const kinds = resolveKinds(this.options);
     return {
       pdf: {
-        nodes: { field: fieldPdf(kinds, this.options.values) },
+        nodes: { field: fieldPdf(kinds, this.options) },
         marks: { fieldRange: fieldRangePdf },
         // A drawn signature's bytes are fetched before the pages are written.
         embeds: {

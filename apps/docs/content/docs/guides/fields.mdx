@@ -117,6 +117,32 @@ A kind you register behaves as the control it declares everywhere at once: `agre
 The box size is fixed when the field is inserted, from the kind's `size` or the `width` / `height` you pass. Layout reserves that box whether the field is empty or completed, which is why a value never moves the text around it.
 </Callout>
 
+## Your own look
+
+Each party has a colour, the same wherever its fields are, and each field is drawn as a dotted rule in that colour with its label on it. Pick the colours yourself, and give the same map to `FieldCompletion`, so a signer sees what the author saw:
+
+```ts
+const roleColors = { provider: "#0e7490", client: "#be185d" };
+
+Field.configure({ roleColors });
+FieldCompletion.configure({ fields, completable, roleColors, onFieldRequest });
+```
+
+Or draw fields yourself. `paint` is called for every field on screen, and `print` for every field in the PDF. Each is handed everything Scrivr knows: the box, the line's baseline, the kind, control, label, role, colour and theme. Return `true` when you drew the field; return `false` and Scrivr draws it:
+
+```ts
+Field.configure({
+  paint(ctx, field) {
+    if (field.kind !== "signature") return false;
+    ctx.strokeStyle = field.color;
+    ctx.strokeRect(field.box.x, field.box.y, field.box.width, field.box.height);
+    return true;
+  },
+});
+```
+
+`FieldCompletion` takes a `paint` of its own for the signing view. It is also told whether the field is this viewer's (`own`), whether it is under the pointer or keyboard focus (`active`, `focused`), and whether its value is being captured (`pending`).
+
 ## Reading the fields in a document
 
 `listSignerFields` gives you every signer field, in reading order, with its id. It works on any document — including on the server, so a backend can check a template before anything is sent:

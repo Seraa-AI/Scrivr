@@ -3,7 +3,7 @@
  * document never holds a value for, or an author's checkbox, whose state is
  * content like any other.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { NodeSelection, TextSelection } from "prosemirror-state";
 import { DOMParser, DOMSerializer, type Node as PmNode } from "prosemirror-model";
 import { ServerEditor } from "../../ServerEditor";
@@ -518,6 +518,38 @@ describe("a field's ink — how an unfilled field is drawn", () => {
     expect(fieldVerb("dropdown", "dropdown")).toBe("Choose");
     expect(fieldIconStrokes("signatureLine", { x: 0, y: 0, size: 12 }).length).toBeGreaterThan(0);
     expect(fieldIconStrokes("text", { x: 0, y: 0, size: 12 })).toEqual([]);
+  });
+});
+
+describe("a host's own look for fields", () => {
+  const signer = { nodeId: "s", kind: "signature", fill: "signer", role: "client", width: 180, height: 44 };
+  const paintWith = (extension: ReturnType<typeof Field.configure>) => {
+    const editor = new ServerEditor({ extensions: [StarterKit, extension] });
+    const node = editor.schema.nodes["field"]!.create(signer);
+    const ctx = document.createElement("canvas").getContext("2d")!;
+    const fillText = vi.spyOn(ctx, "fillText");
+    editor.inlineRegistry.get("field")!.render(ctx, 10, 20, 180, 44, node, editor.getResolvedTheme(), 64);
+    return fillText.mock.calls.length;
+  };
+
+  it("lets the host draw a field itself, handed what Scrivr knows about it", () => {
+    const paint = vi.fn(() => true);
+    const drawnByScrivr = paintWith(Field.configure({ paint }));
+
+    expect(paint).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ kind: "signature", control: "signatureLine", label: "Signature", role: "client", baselineY: 64, box: { x: 10, y: 20, width: 180, height: 44 } }),
+    );
+    expect(drawnByScrivr).toBe(0);
+  });
+
+  it("draws Scrivr's own look when the host declines", () => {
+    expect(paintWith(Field.configure({ paint: () => false }))).toBeGreaterThan(0);
+  });
+
+  it("colours a party as the host says, everywhere it is drawn", () => {
+    expect(fieldRoleColor("client", { client: "#ff0000" })).toBe("#ff0000");
+    expect(fieldRoleColor("provider", { client: "#ff0000" })).toBe(fieldRoleColor("provider"));
   });
 });
 

@@ -13,6 +13,7 @@ export type {
   BuiltInFieldKind,
   FieldChoice,
   FieldControl,
+  FieldDrawing,
   FieldKind,
   FieldKindSpec,
   FieldOptions,

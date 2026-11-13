@@ -11,6 +11,7 @@ import {
   safeImageUrl,
 } from "@scrivr/core";
 import type {
+  FieldDrawing,
   FieldKindSpec,
   FieldValue,
   IBaseEditor,
@@ -41,6 +42,24 @@ export interface FieldCompletionOptions {
   onFieldRequest: (field: SignerFieldDescriptor, current?: FieldValue) => Promise<FieldValue | null>;
   /** Colour of the viewer's own fields. Defaults to their party's colour, as the author saw it. */
   accentColor?: string;
+  /** A colour per role, as given to `Field` — so the signer sees the colours the author did. */
+  roleColors?: Readonly<Record<string, string>>;
+  /**
+   * Draw a field yourself, as a signer sees it. Return `true` when you drew
+   * it; `false` leaves Scrivr's look for that field.
+   */
+  paint?: (ctx: CanvasRenderingContext2D, field: SigningFieldDrawing) => boolean;
+}
+
+/** A field as a signer sees it — what a host's own drawing gets. */
+export interface SigningFieldDrawing extends FieldDrawing {
+  /** This viewer completes it. */
+  own: boolean;
+  /** Under the pointer, or keyboard focus. */
+  active: boolean;
+  focused: boolean;
+  /** The host is capturing its value. */
+  pending: boolean;
 }
 
 interface FieldState {
@@ -129,7 +148,7 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
   },
 
   onViewReady(editor: IEditor) {
-    const { fields, completable, onFieldRequest, accentColor } = this.options;
+    const { fields, completable, onFieldRequest, accentColor, roleColors, paint } = this.options;
     const mayComplete = new Set(completable);
     const mine = fields.filter((f) => mayComplete.has(f.id));
     const pending = new Set<string>();
@@ -247,16 +266,32 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
         const pos = positionOf(field.id);
         const box = pos === undefined ? undefined : charMap.getObjectRect(pos);
         if (!box || box.page !== pageNumber) continue;
-        paintField(ctx, box, {
-          field,
-          value: state.values.get(field.id),
-          own: mayComplete.has(field.id),
-          active: field.id === hovered || field.id === focused,
-          focused: field.id === focused,
-          color: accentColor ?? fieldRoleColor(field.role),
-          theme,
-          imageFor,
-        });
+        const value = state.values.get(field.id);
+        const own = mayComplete.has(field.id);
+        const color = (own ? accentColor : undefined) ?? fieldRoleColor(field.role, roleColors);
+        const active = field.id === hovered || field.id === focused;
+        const node = pos === undefined ? null : editor.getState().doc.nodeAt(pos);
+        const spec = BUILT_IN_KINDS[field.kind];
+        if (node && paint) {
+          const drawing: SigningFieldDrawing = {
+            node,
+            box: { x: box.x, y: box.y, width: box.width, height: box.height },
+            baselineY: box.baseline ?? box.y + box.height,
+            kind: field.kind,
+            control: spec?.control ?? "text",
+            label: spec?.label ?? field.kind,
+            role: field.role,
+            color,
+            theme,
+            ...(value ? { value } : {}),
+            own,
+            active,
+            focused: field.id === focused,
+            pending: pending.has(field.id),
+          };
+          if (paint(ctx, drawing)) continue;
+        }
+        paintField(ctx, box, { field, value, own, active, focused: field.id === focused, color, theme, imageFor });
       }
     });
 
