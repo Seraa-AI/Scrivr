@@ -10,7 +10,7 @@ import { ServerEditor } from "../../ServerEditor";
 import { StarterKit } from "../StarterKit";
 import { Field, listSignerFields } from "./Field";
 import { fieldIconStrokes, fieldInk, fieldRoleColor, fieldValueLayout, fieldVerb } from "./fieldKinds";
-import { createTestEditor } from "../../test-utils";
+import { createTestEditor, measureTextWidth } from "../../test-utils";
 import { DefaultFontProvider } from "../../fonts/DefaultFontProvider";
 
 const terms = {
@@ -532,7 +532,7 @@ describe("a field's box on the page", () => {
             type: "paragraph",
             content: [
               { type: "text", text: "Payable on terms of " },
-              { type: "field", attrs: { nodeId: "terms", kind: "dropdown", fill: "signer", role: "client", width: 140, height: 24 } },
+              { type: "field", attrs: { nodeId: "terms", kind: "name", fill: "signer", role: "client", width: 140, height: 24 } },
               { type: "text", text: " from the date of invoice." },
             ],
           },
@@ -546,6 +546,52 @@ describe("a field's box on the page", () => {
 
     expect(field?.width).toBe(140);
     expect(withField!.lineHeight).toBe(plain!.lineHeight);
+    editor.destroy();
+  });
+
+  const laidOutField = (field: Record<string, unknown>, extension: typeof Field | ReturnType<typeof Field.configure> = Field) => {
+    const editor = createTestEditor({
+      extensions: [StarterKit, extension],
+      content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Terms: " }, { type: "field", attrs: field }] }] },
+    });
+    editor.ensureFullLayout();
+    const span = editor.layout.pages[0]!.blocks[0]!.lines[0]!.spans.find((s) => s.kind === "object");
+    const font = span?.kind === "object" ? span.font : undefined;
+    editor.destroy();
+    return { width: span?.width ?? 0, font: font ?? "" };
+  };
+
+  it("is as wide as a dropdown's widest choice, so whichever is chosen fills it", () => {
+    const options = [{ id: "net-15", label: "Net 15" }, { id: "net-60", label: "Net 60 days" }];
+    const { width, font } = laidOutField({ nodeId: "t", kind: "dropdown", fill: "signer", role: "client", options, width: 300, height: 24 });
+
+    expect(width).toBeLessThan(300);
+    expect(width).toBeGreaterThanOrEqual(measureTextWidth("Net 60 days", font));
+  });
+
+  it("fits a value it is printed with — the executed document has no gaps", () => {
+    const attrs = { nodeId: "who", kind: "name", fill: "signer", role: "client", width: 300, height: 24 };
+    const blank = laidOutField(attrs);
+    const signed = laidOutField(attrs, Field.configure({ values: { who: { kind: "text", text: "Ada" } } }));
+
+    expect(blank.width).toBe(300);
+    expect(signed.width).toBeLessThan(blank.width);
+    expect(signed.width).toBeGreaterThanOrEqual(measureTextWidth("Ada", signed.font));
+  });
+
+  it("takes formatting like the text it sits in — a bold field prints its value bold", () => {
+    const editor = createTestEditor({
+      extensions: [StarterKit, Field],
+      content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Terms: " }, { type: "field", attrs: { nodeId: "t", kind: "name", fill: "signer", role: "client", width: 140, height: 24 } }] }] },
+    });
+    editor.applyTransaction(editor.getState().tr.setSelection(NodeSelection.create(editor.getState().doc, 8)));
+
+    editor.commands.toggleBold();
+    editor.ensureFullLayout();
+
+    expect(editor.getState().doc.nodeAt(8)?.marks.map((m) => m.type.name)).toEqual(["bold"]);
+    const span = editor.layout.pages[0]!.blocks[0]!.lines[0]!.spans.find((s) => s.kind === "object");
+    expect(span?.kind === "object" && span.font).toMatch(/bold|700/);
     editor.destroy();
   });
 

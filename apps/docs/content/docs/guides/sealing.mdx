@@ -52,6 +52,30 @@ A seal is refused, with a reason, while:
 | `unknown-roles` | You assigned a role no field carries — its field was removed |
 | `unidentified-fields` | A signer field has no id or role, or shares another's id — nobody could complete it, or two values would collide |
 
+### Your own checks
+
+Scrivr's checks cover what it can see in the document. Add your own, such as an approved template, a signing order, or a required counter-signature, and they refuse a seal the same way. `before` checks run ahead of Scrivr's; `after` checks run only once Scrivr's have passed. The first refusal stops the seal, and each check sees the same reading of the document the snapshot is taken from:
+
+```ts
+import type { SealCheck } from "@scrivr/core";
+
+const inSigningOrder: SealCheck = ({ fields }) => {
+  const unordered = [...new Set(fields.map((f) => f.role))].filter((role) => !signingOrder.includes(role)); // yours
+  return unordered.length
+    ? { reason: "host", code: "signing-order", message: `No place in the signing order for ${unordered.join(", ")}.` }
+    : null;
+};
+
+await snapshotFromYDoc(document, schema, {
+  assignedRoles,
+  checks: { before: [templateIsApproved], after: [inSigningOrder] },
+});
+```
+
+A refusal you return comes back as `{ reason: "host", code, message }`, next to Scrivr's own.
+
+The order people *sign* in is yours too: a viewer completes only the fields you list in `FieldCompletion`'s `completable`, so leave a party's fields out until it is their turn.
+
 ## Enforcing it, in your HocusPocus hooks
 
 ```ts

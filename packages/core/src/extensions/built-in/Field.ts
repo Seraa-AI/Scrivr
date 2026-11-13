@@ -205,12 +205,24 @@ const fieldBoxPlugin = new Plugin({
 /** The built-in kinds, with the host's added over them. */
 const resolveKinds = (options: FieldOptions): FieldKinds => ({ ...BUILT_IN_FIELD_KINDS, ...options.kinds });
 
-const fieldStrategy = (kinds: FieldKinds): InlineStrategy => ({
+const fieldStrategy = (kinds: FieldKinds, values: Readonly<Record<string, FieldValue>>): InlineStrategy => ({
   verticalAlign: "baseline",
   // A field that holds text is as tall as the text around it; one that holds
   // a drawing keeps its authored size, as an inline image does. Measuring
   // also records the run's font on the span — the face a PDF prints a value in.
   measure: (node, font, measurer) => {
+    // Fits what it holds, like a Word content control: the value it is
+    // printed with, or else the widest choice a dropdown offers. Free text
+    // still to be given keeps the space its author left for it.
+    const textFieldWidth = (field: PmNode, authored: number, face: string, m: typeof measurer): number => {
+      const value = valueOf(values, field);
+      if (value?.kind === "text") return Math.ceil(m.measureWidth(value.text, face)) + 4;
+      if (controlOf(kinds, field) !== "dropdown") return authored;
+      const ink = fieldInk({ x: 0, y: 0, width: authored, height: 24 });
+      const widest = Math.max(0, ...fieldChoices(field.attrs["options"]).map((c) => m.measureWidth(c.label, face)));
+      const label = m.measureWidth(fieldLabel(kinds, field), `${ink.labelSizePx}px sans-serif`) + ink.labelX + 2;
+      return Math.ceil(Math.max(widest + 4, label));
+    };
     const width = Number(node.attrs["width"]);
     const height = Number(node.attrs["height"]);
     const { ascent } = measurer.getFontMetrics(font);
@@ -222,7 +234,7 @@ const fieldStrategy = (kinds: FieldKinds): InlineStrategy => ({
         return { width: side, height: side };
       }
       case "text":
-        return { width, height: Math.round(ascent) };
+        return { width: textFieldWidth(node, width, font, measurer), height: Math.round(ascent) };
     }
   },
   // Quiet ink: no box, just a dotted rule in its party's colour along the
@@ -577,7 +589,7 @@ export const Field = Extension.create<FieldOptions>({
   },
 
   addInlineHandlers() {
-    return { field: fieldStrategy(resolveKinds(this.options)) };
+    return { field: fieldStrategy(resolveKinds(this.options), this.options.values) };
   },
 
   addExports() {

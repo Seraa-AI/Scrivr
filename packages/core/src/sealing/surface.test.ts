@@ -16,6 +16,9 @@ import {
   verifySnapshot,
   type BuiltInFieldKind,
   type CreateSnapshotOptions,
+  type HostSealRefusal,
+  type SealCheck,
+  type SealCheckSubject,
   type FieldChoice,
   type FieldControl,
   type FieldFill,
@@ -52,7 +55,9 @@ describe("what a signing host builds on", () => {
     const editor = new ServerEditor({ extensions: [StarterKit, Field.configure(options)] });
     const doc = editor.getState().doc;
     const fields: SignerFieldDescriptor[] = listSignerFields(doc);
-    const snapshotOptions: CreateSnapshotOptions = { assignedRoles: [] };
+    const signingOrder: SealCheck = ({ fields: sealed }: SealCheckSubject): HostSealRefusal | null =>
+      sealed.length > 99 ? { reason: "host", code: "too-many", message: "Too many signers." } : null;
+    const snapshotOptions: CreateSnapshotOptions = { assignedRoles: [], checks: { after: [signingOrder] } };
     const result: SnapshotResult = await createSnapshot(doc, snapshotOptions);
     const snapshot: SealedSnapshot | null = result.ok ? result.snapshot : null;
     const refusal: SealRefusal | null = result.ok ? null : result.refusal;

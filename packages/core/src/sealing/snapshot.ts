@@ -25,13 +25,46 @@ export type SealRefusal =
    * Signer fields with no id, no role, or another field's id — nobody could
    * be asked to complete them, or their values would land in each other.
    */
-  | { reason: "unidentified-fields"; count: number };
+  | { reason: "unidentified-fields"; count: number }
+  /** One of the host's own checks refused — a signing order, an approval, anything Scrivr cannot know. */
+  | HostSealRefusal;
+
+/** A refusal from a check the host runs; `code` is the host's own. */
+export interface HostSealRefusal {
+  reason: "host";
+  code: string;
+  message: string;
+}
+
+/** What a host's check is shown: the document, and the signer fields it would seal. */
+export interface SealCheckSubject {
+  doc: PmNode;
+  fields: readonly SignerFieldDescriptor[];
+  assignedRoles: readonly string[];
+}
+
+/** A host's check on a seal: a refusal, or `null` to let it through. */
+export type SealCheck = (subject: SealCheckSubject) => HostSealRefusal | null | Promise<HostSealRefusal | null>;
 
 export type SnapshotResult = { ok: true; snapshot: SealedSnapshot } | { ok: false; refusal: SealRefusal };
 
 export interface CreateSnapshotOptions {
   /** Role names the host has mapped to people — never the people. */
   assignedRoles: readonly string[];
+  /**
+   * The host's own checks. `before` run ahead of Scrivr's, `after` only once
+   * Scrivr's have passed; the first refusal stops the seal. Each sees the
+   * same reading of the document the snapshot is taken from.
+   */
+  checks?: { before?: readonly SealCheck[]; after?: readonly SealCheck[] };
+}
+
+async function hostRefusal(checks: readonly SealCheck[] | undefined, subject: SealCheckSubject): Promise<HostSealRefusal | null> {
+  for (const check of checks ?? []) {
+    const refusal = await check(subject);
+    if (refusal) return refusal;
+  }
+  return null;
 }
 
 /**
@@ -121,16 +154,21 @@ function roleRefusal(fields: readonly SignerFieldDescriptor[], assigned: readonl
  * the hash come from one reading of one document: checked separately, a field
  * added between the check and the freeze would leave a signer out.
  */
-export async function createSnapshot(doc: PmNode, { assignedRoles }: CreateSnapshotOptions): Promise<SnapshotResult> {
+export async function createSnapshot(doc: PmNode, { assignedRoles, checks }: CreateSnapshotOptions): Promise<SnapshotResult> {
+  const fields = listSignerFields(doc);
+  const subject: SealCheckSubject = { doc, fields, assignedRoles };
+  const before = await hostRefusal(checks?.before, subject);
+  if (before) return { ok: false, refusal: before };
   const count = pendingChanges(doc);
   if (count > 0) return { ok: false, refusal: { reason: "pending-tracked-changes", count } };
   const prompts = unfilledPrompts(doc);
   if (prompts.length > 0) return { ok: false, refusal: { reason: "unfilled-fields", prompts } };
   const unidentified = unidentifiedFields(doc);
   if (unidentified > 0) return { ok: false, refusal: { reason: "unidentified-fields", count: unidentified } };
-  const fields = listSignerFields(doc);
   const refusal = roleRefusal(fields, assignedRoles);
   if (refusal) return { ok: false, refusal };
+  const after = await hostRefusal(checks?.after, subject);
+  if (after) return { ok: false, refusal: after };
   const content = canonicalJson(doc.toJSON());
   return { ok: true, snapshot: { content, contentHash: await hashContent(content), fields } };
 }

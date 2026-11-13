@@ -28,6 +28,9 @@ export type { MutationDenied, MutationDenialReason, MutationGate, MutationOrigin
 export { createSnapshot, contentHashOf, verifySnapshot, hashArtifact } from "./sealing/snapshot";
 export type {
   CreateSnapshotOptions,
+  HostSealRefusal,
+  SealCheck,
+  SealCheckSubject,
   SealRefusal,
   SealedSnapshot,
   SnapshotResult,

@@ -3,7 +3,7 @@
  * the hash that proves it. The hash is over the snapshot as stored, so
  * verifying it later never depends on how a later Scrivr would serialize.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ServerEditor } from "../ServerEditor";
 import { StarterKit } from "../extensions/StarterKit";
 import { Field } from "../extensions/built-in/Field";
@@ -109,6 +109,33 @@ describe("createSnapshot", () => {
     for (const fields of [[unnamed], [roleless], [signerField("client", true), signerField("client", true)]]) {
       expect(await refused(fields)).toEqual({ ok: false, refusal: { reason: "unidentified-fields", count: 1 } });
     }
+  });
+
+  it("runs a host's own checks — before Scrivr's and after them — and refuses with theirs", async () => {
+    const ran: string[] = [];
+    const approvedTemplate = () => {
+      ran.push("before");
+      return null;
+    };
+    const signingOrder = async ({ fields }: { fields: readonly { role: string }[] }) => {
+      ran.push("after");
+      return fields.some((f) => f.role === "client")
+        ? { reason: "host" as const, code: "no-signing-order", message: "Put the client in the signing order." }
+        : null;
+    };
+
+    const result = await createSnapshot(contract, { assignedRoles: ["client"], checks: { before: [approvedTemplate], after: [signingOrder] } });
+
+    expect(result).toEqual({ ok: false, refusal: { reason: "host", code: "no-signing-order", message: "Put the client in the signing order." } });
+    expect(ran).toEqual(["before", "after"]);
+  });
+
+  it("does not run a host's after-checks once its own checks have refused", async () => {
+    const after = vi.fn(() => null);
+    const result = await createSnapshot(contract, { assignedRoles: [], checks: { after: [after] } });
+
+    expect(result.ok).toBe(false);
+    expect(after).not.toHaveBeenCalled();
   });
 
   it("refuses while text the author fills still shows its prompt", async () => {
