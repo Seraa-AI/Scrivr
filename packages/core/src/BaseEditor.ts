@@ -761,6 +761,8 @@ export class BaseEditor implements IBaseEditor {
     } finally {
       this.holdingStill = false;
     }
+    // A plugin's filter turned it away: nothing was applied.
+    if (result.transactions.length === 0) return null;
     const denied = mutationDenial(tr, result.transactions, locks);
     if (denied) this.emit("mutationDenied", denied);
     return denied ? null : result.state;

@@ -1,4 +1,5 @@
-import { NodeSelection, type Command } from "prosemirror-state";
+import { NodeSelection, Plugin, type Command } from "prosemirror-state";
+import { ReplaceStep } from "prosemirror-transform";
 import { lift, wrapIn } from "prosemirror-commands";
 import type { Node as PmNode } from "prosemirror-model";
 import { Extension } from "../Extension";
@@ -20,6 +21,7 @@ import {
   type FieldValue,
 } from "./fieldKinds";
 import { safeImageUrl } from "../../model/safeUrl";
+import { COLLAB_SYNC_META } from "./UniqueId";
 import {
   fieldBlockDocx,
   fieldBlockImport,
@@ -154,6 +156,27 @@ const unwrapFieldBlock: Command = (state, dispatch) => {
 };
 
 const isSigner = (node: PmNode) => node.attrs["fill"] === "signer";
+
+/**
+ * A selected field is not typed or pasted over, as a Word content control
+ * whose contents are locked is not: a signer fills it, and typing over it
+ * would silently delete it. Delete and Backspace still remove it.
+ */
+const fieldBoxPlugin = new Plugin({
+  filterTransaction(tr, state) {
+    const { selection } = state;
+    if (!(selection instanceof NodeSelection) || selection.node.type.name !== "field") return true;
+    if (tr.getMeta(COLLAB_SYNC_META)) return true;
+    // Rewriting the field itself — toggling a checkbox — puts a field back.
+    const typedOver = (step: unknown) =>
+      step instanceof ReplaceStep &&
+      step.from === selection.from &&
+      step.to === selection.to &&
+      step.slice.size > 0 &&
+      step.slice.content.firstChild?.type !== selection.node.type;
+    return !tr.steps.some(typedOver);
+  },
+});
 
 /** The built-in kinds, with the host's added over them. */
 const resolveKinds = (options: FieldOptions): FieldKinds => ({ ...BUILT_IN_FIELD_KINDS, ...options.kinds });
@@ -400,7 +423,7 @@ export const Field = Extension.create<FieldOptions>({
 
   addProseMirrorPlugins() {
     const type = this.schema?.marks["fieldRange"];
-    return type ? [fieldRangePlugin(type)] : [];
+    return type ? [fieldBoxPlugin, fieldRangePlugin(type)] : [fieldBoxPlugin];
   },
 
   addKeymap() {

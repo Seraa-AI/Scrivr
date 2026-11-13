@@ -73,6 +73,24 @@ describe("a signer field", () => {
     expect(fields(editor)[0]!.attrs["checked"]).toBe(false);
   });
 
+  it("is not typed over when selected — a signer fills it, not the author — but can be deleted", () => {
+    const editor = drafter();
+    editor.commands.insertField({ kind: "dropdown", fill: "signer", role: "client", options: [{ id: "net-30", label: "Net 30" }] });
+    const select = () => {
+      const [box] = fields(editor);
+      editor.applyTransaction(editor.getState().tr.setSelection(NodeSelection.create(editor.getState().doc, box!.pos)));
+    };
+    select();
+
+    expect(editor.applyTransaction(editor.getState().tr.insertText("Net 30"))).toBe(false);
+    expect(fields(editor)).toHaveLength(1);
+    expect(editor.getState().doc.textContent).not.toContain("Net 30");
+
+    select();
+    editor.applyTransaction(editor.getState().tr.deleteSelection());
+    expect(fields(editor)).toEqual([]);
+  });
+
   it("gets a fresh id when copied, so one signature never fills two boxes", () => {
     const editor = drafter();
     editor.commands.insertField({ kind: "signature", fill: "signer", role: "client" });
