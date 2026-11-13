@@ -2,6 +2,7 @@ import { Plugin, PluginKey, TextSelection, type Command, type Transaction } from
 import type { Mark, MarkType, Node as PmNode } from "prosemirror-model";
 import { Mapping } from "prosemirror-transform";
 import { COLLAB_SYNC_META } from "./UniqueId";
+import { fieldRoleColor } from "./fieldKinds";
 import type { MarkDecorator } from "../types";
 import type { PdfMarkHandler } from "../../exports/pdf";
 
@@ -217,11 +218,30 @@ export const exitFieldRange: Command = (state, dispatch) => {
 };
 
 /** Placeholder text paints in the placeholder colour; a colour the author chose still wins. */
+/**
+ * A prompt still showing is a blank, drawn in quiet ink like every field: its
+ * text faint, over a dotted rule in the colour of a field the author fills.
+ * Filled, the text is the document's own.
+ */
 export const fieldRangeDecorator: MarkDecorator = {
   decorateDefaultFill(rect, theme) {
     return rect.markAttrs["placeholder"] === true ? theme.imagePlaceholderText : undefined;
   },
+  decoratePost(ctx, rect) {
+    if (rect.markAttrs["placeholder"] !== true) return;
+    ctx.save();
+    ctx.strokeStyle = fieldRoleColor(null);
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([2, 2]);
+    ctx.beginPath();
+    ctx.moveTo(rect.x, rect.y + 2);
+    ctx.lineTo(rect.x + rect.width, rect.y + 2);
+    ctx.stroke();
+    ctx.restore();
+  },
 };
 
 export const fieldRangePdf: PdfMarkHandler = (mark, ctx) =>
-  mark.attrs["placeholder"] === true ? { defaultColor: ctx.theme.imagePlaceholderText } : {};
+  mark.attrs["placeholder"] === true
+    ? { defaultColor: ctx.theme.imagePlaceholderText, underline: true, underlineColor: fieldRoleColor(null) }
+    : {};

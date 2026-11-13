@@ -70,6 +70,20 @@ describe("an author's text field in the PDF", () => {
     expect(placeholder).toBeDefined();
     expect(placeholder).not.toEqual(filled);
   });
+
+  it("prints its prompt on a rule like every other blank, and filled text without one", async () => {
+    const rules = async (placeholder: boolean) => {
+      const line = textLine("Client name", {
+        font: "16px Helvetica",
+        marks: [{ name: "fieldRange", attrs: { nodeId: "f1", kind: "text", prompt: "Client name", placeholder } }],
+      });
+      const ops = await recordDrawOps(() => buildPdf(onePage([block("paragraph", [line], { y: 100 })]), editor));
+      return ops.filter((op) => op.op === "line").length;
+    };
+
+    expect(await rules(true)).toBeGreaterThan(0);
+    expect(await rules(false)).toBe(0);
+  });
 });
 
 describe("the executed document: values printed in their fields", () => {
