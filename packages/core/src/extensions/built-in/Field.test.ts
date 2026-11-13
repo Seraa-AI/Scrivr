@@ -511,6 +511,9 @@ describe("a field's ink — how an unfilled field is drawn", () => {
     expect(ink.labelBaselineY).toBe(240);
     expect(ink.rule).toEqual({ from: { x: 100, y: 242 }, to: { x: 280, y: 242 } });
     expect(ink.icon.x + ink.icon.size).toBeLessThan(ink.labelX);
+    // Set like a capital letter: standing on the baseline, as tall as the label's capitals.
+    expect(ink.icon.y + ink.icon.size).toBe(ink.labelBaselineY);
+    expect(ink.icon.size).toBeCloseTo(ink.labelSizePx * 0.72, 0);
   });
 
   it("names what a signer does, and draws an icon for it", () => {

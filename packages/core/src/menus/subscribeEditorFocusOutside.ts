@@ -25,10 +25,11 @@ export interface SubscribeEditorFocusOutsideOptions {
  * browser address bar leaves the ProseMirror selection untouched, so popovers
  * subscribed only to view updates would stay anchored to an invisible state.
  *
- * Timing: the check is deferred one microtask so a click *into* a popover
- * (which blurs the editor then focuses an input inside the popover, all in
- * the same tick) settles before we inspect `document.activeElement`. A
- * focus event that arrives during the same tick cancels the hide.
+ * Timing: the check waits for the next task. A click *into* a popover blurs
+ * the editor first and focuses the popover's input after, with nothing
+ * focused in between — a microtask runs in that gap. Waiting a task lets
+ * focus land before `document.activeElement` is read. The editor regaining
+ * focus in the meantime cancels the hide.
  *
  * Popover detection: in priority order,
  *   1. `options.getPopoverElement()` — used by internal controllers that own
@@ -62,7 +63,10 @@ export function subscribeEditorFocusOutside(
     if (pendingCheck) return;
     pendingCheck = true;
     refocusedDuringPending = false;
-    queueMicrotask(() => {
+    // The next task, not a microtask: a browser blurs the editor before it
+    // focuses what was clicked, and in between nothing is focused — judged
+    // then, a popover would close on a click into its own text box.
+    setTimeout(() => {
       const refocused = refocusedDuringPending;
       pendingCheck = false;
       refocusedDuringPending = false;
@@ -81,7 +85,7 @@ export function subscribeEditorFocusOutside(
       // don't thread a ref through the controller.
       if (active.closest(`[${POPOVER_MARKER}]`)) return;
       onHide();
-    });
+    }, 0);
   });
 
   return () => {

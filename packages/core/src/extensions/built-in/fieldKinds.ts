@@ -183,7 +183,8 @@ export function fieldVerb(kind: string, control: FieldControl): string {
 
 /** The size of a field's label text. */
 const LABEL_PX = 12;
-const ICON_PX = 11;
+/** A sans-serif capital's height, in ems. */
+const CAP_HEIGHT_EM = 0.72;
 
 /**
  * Where an unfilled field's ink goes: standing on the text's baseline (the
@@ -196,7 +197,9 @@ export function fieldInk(box: FieldBox, baselineY = box.y + box.height) {
   const labelBaselineY = baselineY;
   const ruleY = labelBaselineY + 2;
   const labelSizePx = Math.min(LABEL_PX, (baselineY - box.y) * 0.85);
-  const iconSize = Math.min(ICON_PX, labelSizePx);
+  // An icon in a line of text is set like a capital letter — as tall as the
+  // label's capitals, standing on its baseline — so its middle is the text's.
+  const iconSize = labelSizePx * CAP_HEIGHT_EM;
   const icon = { x: box.x + 2, y: labelBaselineY - iconSize, size: iconSize };
   return {
     rule: { from: { x: box.x, y: ruleY }, to: { x: box.x + box.width, y: ruleY } },
