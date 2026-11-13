@@ -479,9 +479,9 @@ describe("a value typed into a field", () => {
   const box = { x: 100, y: 200, width: 180, height: 24 };
 
   it("sits on the line like a filled-in blank: on the baseline, in the size of the text around it", () => {
-    const set = fieldValueLayout("Net 30", box, "14px Inter");
+    const set = fieldValueLayout("Net 30", box, "14px Inter", 220);
 
-    expect(set.baselineY).toBe(box.y + box.height);
+    expect(set.baselineY).toBe(220);
     expect(set.sizePx).toBe(14);
     // Part of the document once filled: no rule, no tag — just the text.
     expect(set).not.toHaveProperty("rule");
@@ -505,11 +505,11 @@ describe("a field's ink — how an unfilled field is drawn", () => {
   });
 
   it("sets the label and its icon on the field's line, which runs the box's width", () => {
-    const ink = fieldInk(box);
+    const ink = fieldInk(box, 240);
 
     // The label stands on the text's baseline, the rule just under it, like an underline.
-    expect(ink.labelBaselineY).toBe(244);
-    expect(ink.rule).toEqual({ from: { x: 100, y: 246 }, to: { x: 280, y: 246 } });
+    expect(ink.labelBaselineY).toBe(240);
+    expect(ink.rule).toEqual({ from: { x: 100, y: 242 }, to: { x: 280, y: 242 } });
     expect(ink.icon.x + ink.icon.size).toBeLessThan(ink.labelX);
   });
 
@@ -546,6 +546,10 @@ describe("a field's box on the page", () => {
 
     expect(field?.width).toBe(140);
     expect(withField!.lineHeight).toBe(plain!.lineHeight);
+    // It fills the line as a word does — above the baseline and below it — so
+    // its descenders and rule sit inside its own box.
+    expect(field?.kind === "object" && field.verticalAlign).toBe("text-bottom");
+    expect(field?.height).toBeGreaterThan(withField!.textAscent);
     editor.destroy();
   });
 

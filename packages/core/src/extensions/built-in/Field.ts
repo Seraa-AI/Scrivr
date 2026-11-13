@@ -225,7 +225,7 @@ const fieldStrategy = (kinds: FieldKinds, values: Readonly<Record<string, FieldV
     };
     const width = Number(node.attrs["width"]);
     const height = Number(node.attrs["height"]);
-    const { ascent } = measurer.getFontMetrics(font);
+    const { ascent, descent } = measurer.getFontMetrics(font);
     switch (setsLike(String(node.attrs["kind"]), controlOf(kinds, node))) {
       case "picture":
         return { width, height };
@@ -234,12 +234,17 @@ const fieldStrategy = (kinds: FieldKinds, values: Readonly<Record<string, FieldV
         return { width: side, height: side };
       }
       case "text":
-        return { width: textFieldWidth(node, width, font, measurer), height: Math.round(ascent) };
+        // The whole text line, as a word fills it: above the baseline and below.
+        return {
+          width: textFieldWidth(node, width, font, measurer),
+          height: Math.round(ascent + descent),
+          verticalAlign: "text-bottom",
+        };
     }
   },
   // Quiet ink: no box, just a dotted rule in its party's colour along the
   // line, with what the field is standing faintly on it.
-  render(ctx, x, y, width, height, node, theme: ResolvedTheme) {
+  render(ctx, x, y, width, height, node, theme: ResolvedTheme, baselineY) {
     ctx.save();
     const color = fieldRoleColor(isSigner(node) ? String(node.attrs["role"] ?? "") : null);
     ctx.strokeStyle = color;
@@ -259,7 +264,7 @@ const fieldStrategy = (kinds: FieldKinds, values: Readonly<Record<string, FieldV
         ctx.stroke();
       }
     } else {
-      paintFieldInk(ctx, { x, y, width, height }, { control: controlOf(kinds, node), label: fieldLabel(kinds, node), color });
+      paintFieldInk(ctx, { x, y, width, height }, { control: controlOf(kinds, node), label: fieldLabel(kinds, node), color, baselineY });
     }
     ctx.restore();
   },
@@ -272,9 +277,9 @@ const fieldStrategy = (kinds: FieldKinds, values: Readonly<Record<string, FieldV
 export function paintFieldInk(
   ctx: CanvasRenderingContext2D,
   box: { x: number; y: number; width: number; height: number },
-  ink: { control: FieldControl; label: string; color: string; solid?: boolean; faint?: number },
+  ink: { control: FieldControl; label: string; color: string; solid?: boolean; faint?: number; baselineY?: number },
 ): void {
-  const at = fieldInk(box);
+  const at = fieldInk(box, ink.baselineY);
   ctx.save();
   ctx.strokeStyle = ink.color;
   ctx.lineWidth = ink.solid ? 2.5 : 1.5;
@@ -314,13 +319,15 @@ export function paintFieldTag(ctx: CanvasRenderingContext2D, box: { x: number; y
   const height = 18;
   const x = box.x;
   const y = box.y - height - 4;
-  ctx.fillStyle = theme.defaultText;
-  ctx.globalAlpha = 0.85;
-  ctx.beginPath();
-  ctx.roundRect(x, y, width, height, 4);
-  ctx.fill();
-  ctx.globalAlpha = 1;
+  // The page's own colours, light or dark: a note on the page, not a chip over it.
   ctx.fillStyle = theme.pageBg;
+  ctx.strokeStyle = theme.imagePlaceholderBorder;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.roundRect(x + 0.5, y + 0.5, width, height, 4);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = theme.imagePlaceholderText;
   ctx.textBaseline = "middle";
   ctx.fillText(text, x + 6, y + height / 2);
   ctx.restore();
@@ -367,12 +374,12 @@ const fieldPdf =
     }
     if (value?.kind === "text") {
       if (!ctx.font) return;
-      const set = fieldValueLayout(value.text, { x, y, width, height }, ctx.font.cssFont);
+      const set = fieldValueLayout(value.text, { x, y, width, height }, ctx.font.cssFont, ctx.baselineY);
       ctx.draw.text({ text: value.text, x: set.x, baselineY: set.baselineY, sizePx: set.sizePx, font: ctx.font, color: ink });
       return;
     }
     // A blank on a printed form: its line, and what goes on it.
-    const at = fieldInk({ x, y, width, height });
+    const at = fieldInk({ x, y, width, height }, ctx.baselineY);
     ctx.draw.line({ ...at.rule, thicknessPx: 1, color: roleColor });
     const strokes = fieldIconStrokes(controlOf(kinds, node), at.icon);
     for (const stroke of strokes) {

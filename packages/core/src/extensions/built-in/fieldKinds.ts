@@ -110,10 +110,10 @@ const fontSizePx = (font: string | undefined): number | null => {
  * where a field's box stands, in the size of the text around it (`textFont`,
  * a CSS font) — smaller only when too long to fit across the box.
  */
-export function fieldValueLayout(text: string, box: FieldBox, textFont?: string) {
+export function fieldValueLayout(text: string, box: FieldBox, textFont?: string, baselineY = box.y + box.height) {
   const across = (box.width - 4) / (Math.max(1, text.length) * AVERAGE_ADVANCE_EM);
   const sizePx = Math.min(fontSizePx(textFont) ?? DEFAULT_VALUE_PX, across);
-  return { x: box.x + 2, baselineY: box.y + box.height, sizePx };
+  return { x: box.x + 2, baselineY, sizePx };
 }
 
 /**
@@ -153,16 +153,16 @@ const LABEL_PX = 12;
 const ICON_PX = 11;
 
 /**
- * Where an unfilled field's ink goes: a rule along its line — the bottom of
- * its box, where the text's baseline is — and, standing on it, a small icon
- * and the label saying what the field is.
+ * Where an unfilled field's ink goes: standing on the text's baseline (the
+ * bottom of a box that stands on it, unless told otherwise), a small icon
+ * and the label saying what the field is, over a rule like an underline.
  */
-export function fieldInk(box: FieldBox) {
+export function fieldInk(box: FieldBox, baselineY = box.y + box.height) {
   // A field stands on the text's baseline: its label sits on it like a word,
   // its rule just under it like an underline.
-  const labelBaselineY = box.y + box.height;
+  const labelBaselineY = baselineY;
   const ruleY = labelBaselineY + 2;
-  const labelSizePx = Math.min(LABEL_PX, box.height * 0.85);
+  const labelSizePx = Math.min(LABEL_PX, (baselineY - box.y) * 0.85);
   const iconSize = Math.min(ICON_PX, labelSizePx);
   const icon = { x: box.x + 2, y: labelBaselineY - iconSize, size: iconSize };
   return {

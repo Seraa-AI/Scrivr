@@ -59,7 +59,7 @@ export const TextBlockStrategy: BlockStrategy = {
           const strategy = inlineRegistry?.get(span.node.type.name);
           if (strategy) {
             paintInSpanStyle(ctx, atomStyle(span, spanX, objY, markDecorators, theme, ctx), () => {
-              strategy.render(ctx, spanX, objY, span.width, span.height, span.node, theme);
+              strategy.render(ctx, spanX, objY, span.width, span.height, span.node, theme, baseline);
             });
           }
           // Store the full visual rect so the overlay can draw resize handles.
@@ -70,6 +70,7 @@ export const TextBlockStrategy: BlockStrategy = {
             width: span.width,
             height: span.height,
             page: pageNumber,
+            baseline,
             ...(span.font !== undefined ? { font: span.font } : {}),
           });
           // y = textY so cursor draws at the text baseline, not the image top.

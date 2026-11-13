@@ -480,6 +480,7 @@ export function createDrawHelpers(
               x: spanAbsX,
               y: objY,
               width: span.width,
+              baselineY: lineY + line.ascent,
               ...(span.font !== undefined
                 ? {
                     font: {

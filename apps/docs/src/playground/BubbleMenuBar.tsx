@@ -71,13 +71,13 @@ export function BubbleMenuBar({ editor }: BubbleMenuBarProps) {
       {field && editor ? (
         <FieldPanel key={field.from} editor={editor} pos={field.from} node={field.node} activeMarks={activeMarks} />
       ) : prompt !== null ? (
-        <div className="flex items-center gap-2 bg-[#18181b] border border-white/8 rounded-[9px] px-2.5 py-1.5 text-[12px] text-zinc-300 shadow-[0_8px_24px_rgba(0,0,0,0.3),0_2px_8px_rgba(0,0,0,0.2)]">
+        <div className="flex items-center gap-2 bg-[var(--app-surface)] text-[var(--app-text)] border border-[var(--app-border)] rounded-[9px] px-2.5 py-1.5 text-[12px] text-[var(--app-text)] shadow-[0_8px_24px_rgba(0,0,0,0.12),0_2px_8px_rgba(0,0,0,0.08)]">
           <span className="inline-block w-3" style={{ borderBottom: `2px dotted ${fieldRoleColor(null)}` }} />
-          <span className="font-semibold text-white">{prompt}</span>
-          <span className="text-zinc-500">Type to fill it in — the author fills this before sealing</span>
+          <span className="font-semibold text-[var(--app-text)]">{prompt}</span>
+          <span className="text-[var(--app-text-muted)]">Type to fill it in — the author fills this before sealing</span>
         </div>
       ) : (
-      <div className="flex items-center gap-0.5 bg-[#18181b] border border-white/8 rounded-[9px] px-1.5 py-1 shadow-[0_8px_24px_rgba(0,0,0,0.3),0_2px_8px_rgba(0,0,0,0.2)]">
+      <div className="flex items-center gap-0.5 bg-[var(--app-surface)] text-[var(--app-text)] border border-[var(--app-border)] rounded-[9px] px-1.5 py-1 shadow-[0_8px_24px_rgba(0,0,0,0.12),0_2px_8px_rgba(0,0,0,0.08)]">
         {BUTTONS.map(({ label, title, mark, action }) => (
           <button
             key={mark}
@@ -89,8 +89,8 @@ export function BubbleMenuBar({ editor }: BubbleMenuBarProps) {
             className={[
               "px-2 py-1 rounded-md border-none text-[13px] leading-none cursor-pointer transition-colors duration-100",
               activeMarks.includes(mark)
-                ? "bg-indigo-500 text-white"
-                : "bg-transparent text-zinc-400 hover:bg-white/10 hover:text-white",
+                ? "bg-[var(--app-accent-soft-bg)] text-[var(--app-accent-soft-fg)]"
+                : "bg-transparent text-[var(--app-text-muted)] hover:bg-[var(--app-surface-hover)] hover:text-[var(--app-text)]",
               label === "B" ? "font-bold" : "",
               label === "I" ? "italic" : "",
             ].join(" ")}
@@ -99,7 +99,7 @@ export function BubbleMenuBar({ editor }: BubbleMenuBarProps) {
           </button>
         ))}
 
-        <div className="w-px h-4 bg-white/10 mx-1" />
+        <div className="w-px h-4 bg-[var(--app-border)] mx-1" />
 
         <button
           title={hasLink ? "Edit link" : "Insert link"}
@@ -110,8 +110,8 @@ export function BubbleMenuBar({ editor }: BubbleMenuBarProps) {
           className={[
             "px-2 py-1 rounded-md border-none text-[13px] leading-none cursor-pointer transition-colors duration-100",
             hasLink
-              ? "bg-indigo-500 text-white"
-              : "bg-transparent text-zinc-400 hover:bg-white/10 hover:text-white",
+              ? "bg-[var(--app-accent-soft-bg)] text-[var(--app-accent-soft-fg)]"
+              : "bg-transparent text-[var(--app-text-muted)] hover:bg-[var(--app-surface-hover)] hover:text-[var(--app-text)]",
           ].join(" ")}
         >
           🔗
@@ -124,7 +124,7 @@ export function BubbleMenuBar({ editor }: BubbleMenuBarProps) {
               e.preventDefault();
               editor?.commands.unsetLink?.();
             }}
-            className="px-2 py-1 rounded-md border-none text-[13px] leading-none cursor-pointer bg-transparent text-zinc-400 hover:bg-white/10 hover:text-white transition-colors duration-100"
+            className="px-2 py-1 rounded-md border-none text-[13px] leading-none cursor-pointer bg-transparent text-[var(--app-text-muted)] hover:bg-[var(--app-surface-hover)] hover:text-[var(--app-text)] transition-colors duration-100"
           >
             ⛓‍💥
           </button>
@@ -136,7 +136,7 @@ export function BubbleMenuBar({ editor }: BubbleMenuBarProps) {
             e.preventDefault();
             editor?.commands.clearFormatting();
           }}
-          className="px-2 py-1 rounded-md border-none text-[13px] leading-none cursor-pointer bg-transparent text-zinc-400 hover:bg-white/10 hover:text-white transition-colors duration-100"
+          className="px-2 py-1 rounded-md border-none text-[13px] leading-none cursor-pointer bg-transparent text-[var(--app-text-muted)] hover:bg-[var(--app-surface-hover)] hover:text-[var(--app-text)] transition-colors duration-100"
         >
           <RemoveFormatting className="w-4 h-4" />
         </button>
@@ -151,7 +151,7 @@ const KINDS: Readonly<Record<string, FieldKindSpec>> = BUILT_IN_FIELD_KINDS;
 const chip = (on: boolean) =>
   [
     "px-2 py-1 rounded-md border-none text-[12px] leading-none cursor-pointer transition-colors duration-100",
-    on ? "bg-indigo-500 text-white" : "bg-transparent text-zinc-400 hover:bg-white/10 hover:text-white",
+    on ? "bg-[var(--app-accent-soft-bg)] text-[var(--app-accent-soft-fg)]" : "bg-transparent text-[var(--app-text-muted)] hover:bg-[var(--app-surface-hover)] hover:text-[var(--app-text)]",
   ].join(" ");
 
 /**
@@ -180,26 +180,26 @@ function FieldPanel({ editor, pos, node, activeMarks }: { editor: Editor; pos: n
   const hold = (e: { preventDefault(): void }) => e.preventDefault();
 
   return (
-    <div className="flex flex-col gap-1.5 bg-[#18181b] border border-white/8 rounded-[9px] px-2.5 py-2 text-[12px] text-zinc-300 shadow-[0_8px_24px_rgba(0,0,0,0.3),0_2px_8px_rgba(0,0,0,0.2)]">
+    <div className="flex flex-col gap-1.5 bg-[var(--app-surface)] text-[var(--app-text)] border border-[var(--app-border)] rounded-[9px] px-2.5 py-2 text-[12px] text-[var(--app-text)] shadow-[0_8px_24px_rgba(0,0,0,0.12),0_2px_8px_rgba(0,0,0,0.08)]">
       <div className="flex items-center gap-2">
         <span className="inline-block w-3" style={{ borderBottom: `2px dotted ${fieldRoleColor(signer ? role : null)}` }} />
-        <span className="font-semibold text-white">{KINDS[kind]?.label || kind}</span>
-        <span className="text-zinc-500">{signer ? `${roleName(role)} fills this after sealing` : "The author fills this"}</span>
+        <span className="font-semibold text-[var(--app-text)]">{KINDS[kind]?.label || kind}</span>
+        <span className="text-[var(--app-text-muted)]">{signer ? `${roleName(role)} fills this after sealing` : "The author fills this"}</span>
       </div>
       <div className="flex items-center gap-1">
         {signer && (
           <>
-            <span className="mr-1 text-zinc-500">Filled by</span>
+            <span className="mr-1 text-[var(--app-text-muted)]">Filled by</span>
             {SIGNING_ROLES.map((r) => (
               <button key={r} onMouseDown={(e) => { hold(e); set({ role: r }); }} className={chip(role === r)}>
                 {ROLE_LABEL[r]}
               </button>
             ))}
-            <div className="w-px h-4 bg-white/10 mx-1" />
+            <div className="w-px h-4 bg-[var(--app-border)] mx-1" />
             <button onMouseDown={(e) => { hold(e); set({ required: node.attrs["required"] !== true }); }} className={chip(node.attrs["required"] === true)}>
               Required
             </button>
-            <div className="w-px h-4 bg-white/10 mx-1" />
+            <div className="w-px h-4 bg-[var(--app-border)] mx-1" />
           </>
         )}
         <button title="Bold value" onMouseDown={(e) => { hold(e); editor.commands.toggleBold(); }} className={`${chip(activeMarks.includes("bold"))} font-bold`}>
@@ -208,7 +208,7 @@ function FieldPanel({ editor, pos, node, activeMarks }: { editor: Editor; pos: n
         <button title="Italic value" onMouseDown={(e) => { hold(e); editor.commands.toggleItalic(); }} className={`${chip(activeMarks.includes("italic"))} italic`}>
           I
         </button>
-        <div className="w-px h-4 bg-white/10 mx-1" />
+        <div className="w-px h-4 bg-[var(--app-border)] mx-1" />
         <button
           title="Remove field"
           onMouseDown={(e) => {
@@ -227,7 +227,7 @@ function FieldPanel({ editor, pos, node, activeMarks }: { editor: Editor; pos: n
           onBlur={saveChoices}
           onKeyDown={(e) => e.key === "Enter" && saveChoices()}
           placeholder="Choices, separated by commas"
-          className="h-7 rounded-md border border-white/10 bg-white/5 px-2 text-[12px] text-white outline-none"
+          className="h-7 rounded-md border border-[var(--app-border)] bg-[var(--app-surface-2)] px-2 text-[12px] text-[var(--app-text)] outline-none focus:border-[var(--app-accent)]"
         />
       )}
     </div>

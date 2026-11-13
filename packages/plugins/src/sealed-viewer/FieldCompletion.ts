@@ -284,7 +284,9 @@ interface FieldPaint {
   imageFor: (src: string) => HTMLImageElement | null;
 }
 
-type Box = { x: number; y: number; width: number; height: number; font?: string };
+type Box = { x: number; y: number; width: number; height: number; font?: string; baseline?: number };
+
+const baselineOf = (box: Box) => (box.baseline !== undefined ? { baselineY: box.baseline } : {});
 
 /**
  * One field as a signer sees it, over the author's ink. The viewer's own
@@ -321,19 +323,20 @@ function paintField(ctx: CanvasRenderingContext2D, box: Box, f: FieldPaint): voi
       ctx.strokeStyle = f.color;
       ctx.lineWidth = 1;
       ctx.setLineDash([2, 2]);
+      const ruleY = (box.baseline ?? y + height) + 2;
       ctx.beginPath();
-      ctx.moveTo(x, y + height - 0.5);
-      ctx.lineTo(x + width, y + height - 0.5);
+      ctx.moveTo(x, ruleY);
+      ctx.lineTo(x + width, ruleY);
       ctx.stroke();
     }
   } else if (f.own) {
     const label = spec?.label ?? f.field.kind;
     const verb = fieldVerb(f.field.kind, control);
-    paintFieldInk(ctx, box, { control, label, color: f.color, solid: true, faint: 1 });
+    paintFieldInk(ctx, box, { control, label, color: f.color, solid: true, faint: 1, ...baselineOf(box) });
     // Said once: a label that is already the verb needs no badge repeating it.
     if (verb !== label) paintBadge(ctx, box, verb, f.color, f.theme.pageBg);
   } else {
-    paintFieldInk(ctx, box, { control, label: roleName(f.field.role), color: f.theme.imagePlaceholderBorder, faint: 0.8 });
+    paintFieldInk(ctx, box, { control, label: roleName(f.field.role), color: f.theme.imagePlaceholderBorder, faint: 0.8, ...baselineOf(box) });
   }
 
   if (f.focused) {
@@ -382,7 +385,7 @@ function paintValue(
 ): void {
   const { x, y, width, height } = box;
   if (value.kind === "text") {
-    const set = fieldValueLayout(value.text, box, box.font);
+    const set = fieldValueLayout(value.text, box, box.font, box.baseline);
     const font = box.font ?? "sans-serif";
     ctx.font = /\d+(\.\d+)?px/.test(font) ? font.replace(/\d+(\.\d+)?px/, `${set.sizePx}px`) : `${set.sizePx}px ${font}`;
     ctx.fillStyle = ink;

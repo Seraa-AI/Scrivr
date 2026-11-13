@@ -799,9 +799,10 @@ function extractSpans(
           return;
         }
 
-        // Option B: node attr takes precedence; fall back to "baseline".
+        // How it sits in its line: the node's own attr first, then what
+        // measuring this node decided, then its strategy's default.
         const rawAlign = child.attrs["verticalAlign"];
-        const verticalAlign: InlineObjectVerticalAlign =
+        const attrAlign: InlineObjectVerticalAlign | undefined =
           rawAlign === "baseline" ||
           rawAlign === "middle" ||
           rawAlign === "top" ||
@@ -809,7 +810,8 @@ function extractSpans(
           rawAlign === "text-top" ||
           rawAlign === "text-bottom"
             ? rawAlign
-            : "baseline";
+            : undefined;
+        let measuredAlign: InlineObjectVerticalAlign | undefined;
         // A node that declares its placement is the size it declares there.
         let objWidth = placement ? placement.width : typeof w === "number" ? w : 200;
         let objHeight = placement ? placement.height : typeof h === "number" ? h : 200;
@@ -834,7 +836,9 @@ function extractSpans(
           const measured = strategy.measure(child, atomFont, measurer);
           objWidth = measured.width;
           objHeight = measured.height;
+          measuredAlign = measured.verticalAlign;
         }
+        const verticalAlign = attrAlign ?? measuredAlign ?? strategy?.verticalAlign ?? "baseline";
 
         spans.push({
           kind: "object",

@@ -77,6 +77,8 @@ export interface ObjectRectEntry {
   page: number;
   /** The face the text around an inline atom is set in, when the layout gave it one. */
   font?: string;
+  /** The baseline of the line an inline atom stands in. */
+  baseline?: number;
 }
 
 /** One line's part of a range: what `Range.getClientRects()` gives a DOM editor. */

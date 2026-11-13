@@ -3,6 +3,7 @@ import type { FontResolutionId } from "../fonts/layoutResolver";
 import type { FontResolution } from "../fonts/types";
 import type { CharacterMap } from "./CharacterMap";
 import type { TextMeasurerLike } from "./TextMeasurer";
+import type { InlineObjectVerticalAlign } from "./LineBreaker";
 import type { LayoutBlock } from "./BlockLayout";
 import type { MarkDecorator } from "../extensions/types";
 import type { ResolvedTheme } from "../model/theme";
@@ -24,7 +25,7 @@ export interface InlineStrategy {
    *
    * "baseline" (default) matches Google Docs: object bottom on text baseline.
    */
-  verticalAlign?: "baseline" | "middle" | "top";
+  verticalAlign?: InlineObjectVerticalAlign;
 
   /**
    * Optional dynamic measurement. Called during layout to compute the actual
@@ -32,7 +33,11 @@ export interface InlineStrategy {
    * node's width/height attrs. This lets tokens (page number, date) size
    * themselves based on the current font instead of using fixed placeholders.
    */
-  measure?(node: Node, font: string, measurer: TextMeasurerLike): { width: number; height: number };
+  measure?(
+    node: Node,
+    font: string,
+    measurer: TextMeasurerLike,
+  ): { width: number; height: number; /** How this node sits in its line, when it differs by node. */ verticalAlign?: InlineObjectVerticalAlign };
 
   render(
     ctx: CanvasRenderingContext2D,
@@ -42,6 +47,8 @@ export interface InlineStrategy {
     height: number,
     node: Node,
     theme: ResolvedTheme,
+    /** The baseline of the line the object stands in — its bottom, for one with no line. */
+    baselineY: number,
   ): void;
 }
 
