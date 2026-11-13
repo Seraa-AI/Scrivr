@@ -7,7 +7,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Field, StarterKit, type PagePoint, type SignerFieldDescriptor } from "@scrivr/core";
 import { ViewEditorDouble } from "../__tests__/viewEditorDouble";
-import { FieldCompletion, setFieldValue, type FieldValue } from "../index";
+import { FieldCompletion, moveFieldFocus, requestField, setFieldValue, type FieldValue } from "../index";
 
 const signHere: SignerFieldDescriptor = { id: "f-client", role: "client-authorized-signatory", kind: "signature", required: true, options: [] };
 const witness: SignerFieldDescriptor = { id: "f-witness", role: "witness", kind: "signature", required: true, options: [] };
@@ -83,7 +83,8 @@ const press = (e: ViewEditorDouble, at: PagePoint) => e.emit("press", { point: a
 
 describe("FieldCompletion", () => {
   it("paints over the page", () => {
-    expect(viewer(async () => null).painters).toHaveLength(1);
+    // Field's own painter, and the viewer's.
+    expect(viewer(async () => null).painters).toHaveLength(2);
   });
 
   it("asks the host for a value when the viewer presses a field they may complete", () => {
@@ -92,7 +93,7 @@ describe("FieldCompletion", () => {
 
     press(e, point(2, 150, 620));
 
-    expect(request).toHaveBeenCalledWith(signHere);
+    expect(request).toHaveBeenCalledWith(signHere, undefined);
   });
 
   it("ignores a press on someone else's field, or on the same spot of another page", () => {
@@ -117,15 +118,22 @@ describe("FieldCompletion", () => {
     expect(e.getState().doc).toBe(before);
   });
 
-  it("treats a completed field as done", async () => {
-    const request = vi.fn(async () => signature);
+  it("reopens a completed field with its value, and keeps that value when the viewer cancels", async () => {
+    let answer: FieldValue | null = signature;
+    const request = vi.fn(async (_field: SignerFieldDescriptor, _current?: FieldValue) => answer);
     const e = viewer(request);
 
     press(e, point(2, 150, 620));
     await flush();
+    answer = null;
+    press(e, point(2, 150, 620));
+    await flush();
     press(e, point(2, 150, 620));
 
-    expect(request).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenCalledTimes(3);
+    expect(request.mock.calls[1]![1]).toEqual(signature);
+    // Cancelling the second request kept the value the third is handed.
+    expect(request.mock.calls[2]![1]).toEqual(signature);
   });
 
   it("asks once while the host is still capturing", () => {
@@ -178,6 +186,37 @@ describe("FieldCompletion", () => {
     press(e, point(2, 150, 620));
 
     expect(redraw).toHaveBeenCalled();
-    expect(request).not.toHaveBeenCalled();
+    // Still this viewer's to change: pressing it hands the host what is there.
+    expect(request).toHaveBeenCalledWith(signHere, signature);
+  });
+});
+
+// Positions in `content`: the viewer's field at 8, the witness's at 10.
+describe("FieldCompletion — pointing and the keyboard", () => {
+  it("shows a hand over a field the viewer may complete, and an arrow over someone else's", () => {
+    const e = viewer(async () => null);
+
+    expect(e.cursorAt(8)).toBe("pointer");
+    expect(e.cursorAt(10)).toBe("default");
+    expect(e.cursorAt(null)).toBeNull();
+  });
+
+  it("opens a field a host asks for — from a list of fields, or a Next button — scrolled into view", () => {
+    const request = vi.fn(async () => signature);
+    const e = viewer(request);
+
+    expect(requestField(e, signHere.id)).toBe(true);
+    expect(request).toHaveBeenCalledWith(signHere, undefined);
+    expect(e.scrolledTo).toEqual([{ from: 8, to: 9 }]);
+    expect(requestField(e, witness.id)).toBe(false);
+  });
+
+  it("moves between the viewer's own fields, in reading order, with Tab and Shift+Tab", () => {
+    const e = viewer(async () => null);
+
+    expect(moveFieldFocus(e, 1)).toBe(signHere.id);
+    // The only one this viewer completes: Tab stays on it, never on the witness's.
+    expect(moveFieldFocus(e, 1)).toBe(signHere.id);
+    expect(moveFieldFocus(e, -1)).toBe(signHere.id);
   });
 });

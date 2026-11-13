@@ -6,9 +6,9 @@ export { KeymapPriority, DEFAULT_SLASH_ORDER } from "./types";
 // Built-in extensions — individually importable
 export { Document } from "./built-in/Document";
 export { HardBreak } from "./built-in/HardBreak";
-export { Field, listSignerFields } from "./built-in/Field";
+export { Field, listSignerFields, paintFieldInk, paintFieldTag, roleName } from "./built-in/Field";
 export type { FieldFill, InsertFieldOptions, SignerFieldDescriptor } from "./built-in/Field";
-export { BUILT_IN_FIELD_KINDS, FieldChoiceSchema, checkboxTick, fieldValueSizePx } from "./built-in/fieldKinds";
+export { BUILT_IN_FIELD_KINDS, FieldChoiceSchema, checkboxTick, fieldIconStrokes, fieldInk, fieldRoleColor, fieldValueLayout, fieldVerb } from "./built-in/fieldKinds";
 export type {
   BuiltInFieldKind,
   FieldChoice,
@@ -96,6 +96,7 @@ export type {
   SlashCommandContribution,
   SlashCommandResolver,
   OverlayRenderHandler,
+  PointerCursorResolver,
   CloneHandler,
   CloneHandlerContext,
 } from "./types";

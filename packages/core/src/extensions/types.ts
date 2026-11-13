@@ -31,6 +31,8 @@ import type { FontProvider } from "../fonts/types";
  * them (e.g. `KeymapPriority.list + 10`).
  */
 export const KeymapPriority = {
+  /** Bindings that only apply right beside an inline object, wherever it sits. */
+  inlineObject: 500,
   /** Bindings that only apply inside a table cell. */
   table: 400,
   /** Bindings that only apply inside a code block. */
@@ -48,6 +50,7 @@ import type { EditorEvents, SafeFlatCommands } from "../types/augmentation";
 import type { DeferredEditOptions } from "../BaseEditor";
 import type { InputRule } from "prosemirror-inputrules";
 import type { CharacterMap } from "../layout/CharacterMap";
+import type { PagePoint } from "../layout/pagePoint";
 import type { PageConfig, DocumentLayout } from "../layout/PageLayout";
 import type { BlockStrategy, InlineStrategy, NodeLayout } from "../layout/BlockRegistry";
 import type { AnchoredSpec } from "../layout/AnchoredObjects";
@@ -284,6 +287,12 @@ export interface IEditor extends IBaseEditor {
   readonly surfaces: SurfaceRegistry;
   /** Register a canvas draw function for the overlay layer. Returns unregister. */
   addOverlayRenderHandler(handler: OverlayRenderHandler): () => void;
+  /**
+   * Say what the pointer looks like at a point — over something an extension
+   * paints or owns, such as a field a viewer can complete. The first resolver
+   * to answer wins; answer `null` to defer. Returns unregister.
+   */
+  addPointerCursor(resolve: PointerCursorResolver): () => void;
   /**
    * The kind-tagged, capability-carrying view of the active selection. UI reads
    * this instead of `instanceof`-ing the ProseMirror selection.
@@ -759,6 +768,12 @@ export interface EditorNavigator {
  * Return true when handled — the caller will preventDefault().
  */
 export type InputHandler = (nav: EditorNavigator, e: KeyboardEvent) => boolean;
+
+/**
+ * A CSS cursor for a point on a page, or `null` to defer. `objectPos` is the
+ * document position of the inline object under the point, if any.
+ */
+export type PointerCursorResolver = (at: { point: PagePoint; objectPos: number | null }) => string | null;
 
 // ── Extension context ─────────────────────────────────────────────────────────
 

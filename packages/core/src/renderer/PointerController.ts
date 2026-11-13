@@ -376,6 +376,8 @@ export class PointerController {
   private hoverCursorFor(hit: PagePoint): string {
     const resizeHit = this.hitHandleAt(hit.x, hit.y, hit.page);
     if (resizeHit) return resizeHit.cursor;
+    const asked = this.deps.editor.pointerCursorAt(hit);
+    if (asked !== null) return asked;
 
     return this.ownerAt(hit.x, hit.y, hit.page).kind === "text" ? "text" : "move";
   }

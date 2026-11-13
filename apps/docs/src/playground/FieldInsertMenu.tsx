@@ -1,4 +1,4 @@
-import type { Editor } from "@scrivr/core";
+import { fieldRoleColor, type Editor } from "@scrivr/core";
 import { ROLE_LABEL, SIGNING_ROLES } from "./signingDemo";
 
 const SIGNER_KINDS = ["signature", "initials", "date", "name", "title", "email", "checkbox", "dropdown"] as const;
@@ -63,5 +63,19 @@ export function FieldInsertMenu({ editor }: { editor: Editor | null }) {
         </option>
       ))}
     </select>
+  );
+}
+
+/** Which colour is which party — the key to who signs where on the page. */
+export function RoleLegend() {
+  return (
+    <div className="hidden shrink-0 items-center gap-3 text-[11px] lg:flex" style={{ color: "var(--app-text-muted)" }}>
+      {SIGNING_ROLES.map((role) => (
+        <span key={role} className="flex items-center gap-1.5 whitespace-nowrap">
+          <span className="inline-block w-4" style={{ borderBottom: `2px dotted ${fieldRoleColor(role)}` }} />
+          {ROLE_LABEL[role]}
+        </span>
+      ))}
+    </div>
   );
 }

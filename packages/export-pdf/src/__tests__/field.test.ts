@@ -30,13 +30,13 @@ async function printed(attrs: Record<string, unknown>, by = editor): Promise<Dra
 }
 
 describe("fields in the PDF", () => {
-  it("prints a signer field as a box captioned with its kind and role", async () => {
+  it("prints a signer field as a blank on a form: its line, and what goes on it", async () => {
     const ops = await printed({ kind: "signature", fill: "signer", role: "client" });
 
-    expect(ops.filter((op) => op.op === "rect")).toEqual(
-      expect.arrayContaining([expect.objectContaining({ op: "rect", borderWidth: expect.any(Number) })]),
-    );
-    expect(ops.filter((op) => op.op === "text").map((op) => op["value"])).toEqual(["Signature · client"]);
+    // No box around it — the page's own background is the only rect.
+    expect(ops.filter((op) => op.op === "rect" && op["borderWidth"] !== undefined)).toEqual([]);
+    expect(ops.filter((op) => op.op === "line").length).toBeGreaterThan(0);
+    expect(ops.filter((op) => op.op === "text").map((op) => op["value"])).toEqual(["Signature"]);
   });
 
   it("prints an author's checked checkbox with its tick", async () => {
@@ -112,6 +112,6 @@ describe("the executed document: values printed in their fields", () => {
   it("prints a field nobody completed as the empty field", async () => {
     const texts = (await printed(signer("unsigned"), executed)).filter((op) => op.op === "text").map((op) => op["value"]);
 
-    expect(texts).toEqual(["Signature · client"]);
+    expect(texts).toEqual(["Signature"]);
   });
 });

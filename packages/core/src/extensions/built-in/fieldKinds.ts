@@ -69,6 +69,10 @@ export const controlOf = (kinds: FieldKinds, node: PmNode): FieldControl =>
   kinds[String(node.attrs["kind"])]?.control ?? "text";
 
 /** What an empty field shows: its kind's label, and whose it is. */
+/** What a field is, as its label says it: "Signature". */
+export const fieldLabel = (kinds: FieldKinds, node: PmNode): string =>
+  kinds[String(node.attrs["kind"])]?.label ?? String(node.attrs["kind"]);
+
 export function fieldCaption(kinds: FieldKinds, node: PmNode): string {
   const label = kinds[String(node.attrs["kind"])]?.label ?? String(node.attrs["kind"]);
   const role = node.attrs["role"];
@@ -92,13 +96,110 @@ export const checkboxTick = ({ x, y, width, height }: FieldBox) =>
 
 /** A sans-serif glyph's average advance, in ems — enough to size a value to its box. */
 const AVERAGE_ADVANCE_EM = 0.55;
+/** The size a value is set at when the text around it gives none. */
+const DEFAULT_VALUE_PX = 14;
+
+const fontSizePx = (font: string | undefined): number | null => {
+  const size = Number(/(\d+(?:\.\d+)?)px/.exec(font ?? "")?.[1]);
+  return size > 0 ? size : null;
+};
 
 /**
- * The size a value typed into a field is set at, on screen and in the PDF
- * alike: as large as the box's height allows, smaller when the value is too
- * long to fit across it at that size.
+ * Where a value typed into a field is set, on screen and in the PDF alike.
+ * Once filled, a field reads as part of the document: on the line's baseline,
+ * where a field's box stands, in the size of the text around it (`textFont`,
+ * a CSS font) — smaller only when too long to fit across the box.
  */
-export function fieldValueSizePx(text: string, box: Pick<FieldBox, "width" | "height">): number {
-  const across = (box.width - 8) / (Math.max(1, text.length) * AVERAGE_ADVANCE_EM);
-  return Math.min(16, box.height * 0.6, across);
+export function fieldValueLayout(text: string, box: FieldBox, textFont?: string) {
+  const across = (box.width - 4) / (Math.max(1, text.length) * AVERAGE_ADVANCE_EM);
+  const sizePx = Math.min(fontSizePx(textFont) ?? DEFAULT_VALUE_PX, across);
+  return { x: box.x + 2, baselineY: box.y + box.height, sizePx };
+}
+
+/**
+ * One colour per party, the same wherever their fields are — how a reader
+ * sees who signs where. Chosen from the role's name, so every client, the
+ * PDF and the next session agree without a table. A field the author fills
+ * belongs to no party, and takes the neutral grey.
+ */
+const ROLE_COLORS = ["#0e93b0", "#d6457f", "#c47a14", "#13946b", "#7a4fd6", "#3a6fd8"] as const;
+const NO_ROLE_COLOR = "#8a8f98";
+
+export function fieldRoleColor(role: string | null | undefined): string {
+  if (!role) return NO_ROLE_COLOR;
+  let hash = 0;
+  for (const char of role) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  return ROLE_COLORS[hash % ROLE_COLORS.length]!;
+}
+
+/**
+ * Whether a field is set like text — as tall as the words around it, so its
+ * line keeps its height, as a Word content control does — or like a picture,
+ * at its own size on the baseline, as an inline image and a signature line
+ * are. A field filled with a drawing is a picture; a checkbox is a glyph.
+ */
+export const setsLike = (kind: string, control: FieldControl): "text" | "picture" | "glyph" =>
+  control === "checkbox" ? "glyph" : control === "signatureLine" || kind === "initials" ? "picture" : "text";
+
+/** What a signer does to complete a field — the word on its badge. */
+export function fieldVerb(kind: string, control: FieldControl): string {
+  if (kind === "initials") return "Initial";
+  const verbs: Record<FieldControl, string> = { signatureLine: "Sign", date: "Date", dropdown: "Choose", checkbox: "Tick", text: "Fill" };
+  return verbs[control];
+}
+
+/** The size of a field's label text. */
+const LABEL_PX = 12;
+const ICON_PX = 11;
+
+/**
+ * Where an unfilled field's ink goes: a rule along its line — the bottom of
+ * its box, where the text's baseline is — and, standing on it, a small icon
+ * and the label saying what the field is.
+ */
+export function fieldInk(box: FieldBox) {
+  // A field stands on the text's baseline: its label sits on it like a word,
+  // its rule just under it like an underline.
+  const labelBaselineY = box.y + box.height;
+  const ruleY = labelBaselineY + 2;
+  const labelSizePx = Math.min(LABEL_PX, box.height * 0.85);
+  const iconSize = Math.min(ICON_PX, labelSizePx);
+  const icon = { x: box.x + 2, y: labelBaselineY - iconSize, size: iconSize };
+  return {
+    rule: { from: { x: box.x, y: ruleY }, to: { x: box.x + box.width, y: ruleY } },
+    icon,
+    labelX: icon.x + iconSize + 4,
+    labelBaselineY,
+    labelSizePx,
+  };
+}
+
+type Point = { x: number; y: number };
+
+/**
+ * A field's icon as strokes inside a square — a pen to sign, a calendar to
+ * date, a chevron to choose — drawn alike by canvas and the PDF. A text
+ * field has none: its label says enough.
+ */
+export function fieldIconStrokes(control: FieldControl, at: { x: number; y: number; size: number }): Point[][] {
+  const p = (u: number, v: number): Point => ({ x: at.x + u * at.size, y: at.y + v * at.size });
+  switch (control) {
+    case "signatureLine":
+      return [
+        [p(0.65, 0.1), p(0.9, 0.35), p(0.35, 0.9), p(0.1, 0.9), p(0.1, 0.65), p(0.65, 0.1)],
+        [p(0.55, 0.2), p(0.8, 0.45)],
+      ];
+    case "date":
+      return [
+        [p(0.1, 0.2), p(0.9, 0.2), p(0.9, 0.95), p(0.1, 0.95), p(0.1, 0.2)],
+        [p(0.1, 0.42), p(0.9, 0.42)],
+        [p(0.32, 0.05), p(0.32, 0.3)],
+        [p(0.68, 0.05), p(0.68, 0.3)],
+      ];
+    case "dropdown":
+      return [[p(0.2, 0.38), p(0.5, 0.68), p(0.8, 0.38)]];
+    case "checkbox":
+    case "text":
+      return [];
+  }
 }

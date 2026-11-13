@@ -10,15 +10,18 @@ import {
   type SealedSnapshot,
   type SignerFieldDescriptor,
 } from "@scrivr/core";
-import { FieldCompletion, ReadingProgress, type ReadingEvent } from "@scrivr/plugins";
+import { FieldCompletion, ReadingProgress, requestField, type ReadingEvent } from "@scrivr/plugins";
 import { exportToPdf } from "@scrivr/export-pdf";
 import { playgroundFonts } from "./fonts";
 import { PLAYGROUND_THEME } from "./theme";
 import { ROLE_LABEL, SIGNING_ROLES, type SigningRole } from "./signingDemo";
+import { RoleLegend } from "./FieldInsertMenu";
 
 /** A field the signer pressed, waiting for the value they give. */
 interface FieldRequest {
   field: SignerFieldDescriptor;
+  /** What the field holds now, when the signer is changing it. */
+  current: FieldValue | undefined;
   resolve: (value: FieldValue | null) => void;
 }
 
@@ -87,10 +90,13 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
           fields: snapshot.fields,
           completable: mine.map((f) => f.id),
           values: valuesRef.current,
-          onFieldRequest: (field) =>
+          onFieldRequest: (field, current) =>
             new Promise<FieldValue | null>((resolve) => {
-              if (field.kind === "checkbox") return resolve({ kind: "checkbox", checked: true });
-              setRequest({ field, resolve });
+              // A click ticks the box, and a second click clears it.
+              if (field.kind === "checkbox") {
+                return resolve({ kind: "checkbox", checked: !(current?.kind === "checkbox" && current.checked) });
+              }
+              setRequest({ field, current, resolve });
             }).then((value) => {
               if (value) setValues((all) => ({ ...all, [field.id]: value }));
               return value;
@@ -115,10 +121,16 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
 
   const pageCount = editor?.layout.pages.length ?? 0;
   const missing = snapshot.fields.filter((f) => f.required && !values[f.id]);
+  const nextOpen = mine.find((f) => !values[f.id]);
 
   const answer = (value: FieldValue | null) => {
     request?.resolve(value);
     setRequest(null);
+    // Back to the page, so Tab carries on from this field.
+    editor?.focus();
+  };
+  const open = (id: string) => {
+    if (editor) requestField(editor, id);
   };
 
   const exportExecuted = async () => {
@@ -169,6 +181,7 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
         className="hidden shrink-0 flex-col gap-4 overflow-y-auto border-l p-4 text-[12px] md:flex"
         style={{ width: 340, borderColor: "var(--app-border)", background: "var(--app-surface)" }}
       >
+        <RoleLegend />
         <Section title="Signing as">
           <div className="grid grid-cols-2 gap-1 rounded-lg border p-1" style={{ borderColor: "var(--app-border)" }}>
             {SIGNING_ROLES.map((r) => (
@@ -188,21 +201,37 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
             ))}
           </div>
           <p className="mt-2 leading-snug" style={{ color: "var(--app-text-muted)" }}>
-            Fields outlined in blue are yours. Click one to complete it.
+            Fields drawn solid in your colour are yours. Click one to complete it, or press Tab to move between them and
+            Enter to open one. Click a completed field to change it.
           </p>
+          <button
+            type="button"
+            disabled={!nextOpen}
+            onClick={() => nextOpen && open(nextOpen.id)}
+            className="mt-2 h-8 w-full rounded-md border text-[12px] font-semibold disabled:opacity-50"
+            style={{ background: "var(--app-accent)", borderColor: "var(--app-accent)", color: "var(--app-accent-fg)" }}
+          >
+            {nextOpen ? `Next field: ${KIND_LABEL[nextOpen.kind] ?? nextOpen.kind}` : "All your fields are complete"}
+          </button>
         </Section>
 
         <Section title={`${ROLE_LABEL[role]}'s fields`}>
           <ul className="flex flex-col gap-1">
             {mine.map((f) => (
-              <li key={f.id} className="flex items-center justify-between gap-2">
-                <span>
-                  {KIND_LABEL[f.kind] ?? f.kind}
-                  {!f.required && <span style={{ color: "var(--app-text-muted)" }}> (optional)</span>}
-                </span>
-                <span style={{ color: values[f.id] ? "var(--app-accent)" : "var(--app-text-muted)" }}>
-                  {values[f.id] ? describe(values[f.id]!) : "Open"}
-                </span>
+              <li key={f.id}>
+                <button
+                  type="button"
+                  onClick={() => open(f.id)}
+                  className="flex w-full items-center justify-between gap-2 rounded px-1 py-0.5 text-left hover:bg-[var(--app-accent-soft-bg)]"
+                >
+                  <span>
+                    {KIND_LABEL[f.kind] ?? f.kind}
+                    {!f.required && <span style={{ color: "var(--app-text-muted)" }}> (optional)</span>}
+                  </span>
+                  <span style={{ color: values[f.id] ? "var(--app-accent)" : "var(--app-text-muted)" }}>
+                    {values[f.id] ? describe(values[f.id]!) : "Open"}
+                  </span>
+                </button>
               </li>
             ))}
           </ul>
@@ -257,7 +286,7 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
         </button>
       </aside>
 
-      {request && <ValueDialog field={request.field} onAnswer={answer} />}
+      {request && <ValueDialog field={request.field} current={request.current} onAnswer={answer} />}
     </div>
   );
 }
@@ -289,11 +318,21 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
 }
 
 /** What a host shows when a signer presses a field: capture the value, or cancel. */
-function ValueDialog({ field, onAnswer }: { field: SignerFieldDescriptor; onAnswer: (value: FieldValue | null) => void }) {
+function ValueDialog({
+  field,
+  current,
+  onAnswer,
+}: {
+  field: SignerFieldDescriptor;
+  current: FieldValue | undefined;
+  onAnswer: (value: FieldValue | null) => void;
+}) {
   const drawn = field.kind === "signature" || field.kind === "initials";
-  const [typed, setTyped] = useState(() =>
-    field.kind === "date" ? new Date().toISOString().slice(0, 10) : field.kind === "dropdown" ? (field.options[0]?.label ?? "") : "",
-  );
+  const [typed, setTyped] = useState(() => {
+    if (current?.kind === "text") return current.text;
+    if (field.kind === "date") return new Date().toISOString().slice(0, 10);
+    return field.kind === "dropdown" ? (field.options[0]?.label ?? "") : "";
+  });
   const pad = useRef<HTMLCanvasElement>(null);
   const [inked, setInked] = useState(false);
 
@@ -301,6 +340,22 @@ function ValueDialog({ field, onAnswer }: { field: SignerFieldDescriptor; onAnsw
     if (drawn && inked && pad.current) return onAnswer({ kind: "image", src: pad.current.toDataURL("image/png") });
     if (typed.trim()) onAnswer({ kind: "text", text: typed.trim() });
   };
+
+  // Esc cancels and Enter applies, wherever focus is in the dialog.
+  const keys = useRef({ submit, onAnswer });
+  keys.current = { submit, onAnswer };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") keys.current.onAnswer(null);
+      else if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        keys.current.submit();
+      } else return;
+      e.stopPropagation();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.35)" }}>
@@ -314,6 +369,11 @@ function ValueDialog({ field, onAnswer }: { field: SignerFieldDescriptor; onAnsw
           {KIND_LABEL[field.kind] ?? field.kind} — {ROLE_LABEL[field.role] ?? field.role}
         </div>
 
+        {drawn && current?.kind === "image" && !inked && (
+          <p className="mb-2" style={{ color: "var(--app-text-muted)" }}>
+            Signed already — draw again to replace it.
+          </p>
+        )}
         {drawn && <SignaturePad canvas={pad} onInk={() => setInked(true)} />}
 
         {field.kind === "dropdown" ? (
@@ -336,7 +396,6 @@ function ValueDialog({ field, onAnswer }: { field: SignerFieldDescriptor; onAnsw
             placeholder={drawn ? "…or type it" : KIND_LABEL[field.kind] ?? field.kind}
             value={typed}
             onChange={(e) => setTyped(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && submit()}
             className="mt-2 h-9 w-full rounded-md border px-2"
             style={{ background: "var(--app-surface)", borderColor: "var(--app-border)" }}
           />

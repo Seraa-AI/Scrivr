@@ -9,7 +9,7 @@ import { DOMParser, DOMSerializer, type Node as PmNode } from "prosemirror-model
 import { ServerEditor } from "../../ServerEditor";
 import { StarterKit } from "../StarterKit";
 import { Field, listSignerFields } from "./Field";
-import { fieldValueSizePx } from "./fieldKinds";
+import { fieldIconStrokes, fieldInk, fieldRoleColor, fieldValueLayout, fieldVerb } from "./fieldKinds";
 import { createTestEditor } from "../../test-utils";
 import { DefaultFontProvider } from "../../fonts/DefaultFontProvider";
 
@@ -89,6 +89,33 @@ describe("a signer field", () => {
     select();
     editor.applyTransaction(editor.getState().tr.deleteSelection());
     expect(fields(editor)).toEqual([]);
+  });
+
+  it("is selected by the first Backspace or Delete beside it, and removed by the second", () => {
+    for (const [key, side] of [["Backspace", 1], ["Delete", 0]] as const) {
+      const container = document.createElement("div");
+      document.body.appendChild(container);
+      const editor = createTestEditor({ extensions: [StarterKit, Field], content: terms });
+      editor.mount(container);
+      editor.commands.insertField({ kind: "signature", fill: "signer", role: "client" });
+      let at = -1;
+      editor.getState().doc.descendants((node, pos) => {
+        if (node.type.name === "field") at = pos;
+      });
+      editor.applyTransaction(editor.getState().tr.setSelection(TextSelection.create(editor.getState().doc, at + side)));
+      const press = () =>
+        container.querySelector("textarea")!.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+      const boxes = () => editor.getState().doc.textBetween(0, editor.getState().doc.content.size, "", "□").split("□").length - 1;
+
+      press();
+      expect(boxes()).toBe(1);
+      expect(editor.getState().selection).toBeInstanceOf(NodeSelection);
+
+      press();
+      expect(boxes()).toBe(0);
+      editor.destroy();
+      container.remove();
+    }
   });
 
   it("gets a fresh id when copied, so one signature never fills two boxes", () => {
@@ -449,17 +476,79 @@ describe("kinds of field", () => {
 });
 
 describe("a value typed into a field", () => {
-  it("is set as large as its box allows, and smaller when it is too long to fit across", () => {
-    const box = { width: 180, height: 44 };
+  const box = { x: 100, y: 200, width: 180, height: 24 };
 
+  it("sits on the line like a filled-in blank: on the baseline, in the size of the text around it", () => {
+    const set = fieldValueLayout("Net 30", box, "14px Inter");
+
+    expect(set.baselineY).toBe(box.y + box.height);
+    expect(set.sizePx).toBe(14);
+    // Part of the document once filled: no rule, no tag — just the text.
+    expect(set).not.toHaveProperty("rule");
+  });
+
+  it("is set smaller when it is too long to fit across its box", () => {
     const long = "Northwind Studio International Holdings";
-    expect(fieldValueSizePx("Ada", box)).toBe(16);
-    expect(fieldValueSizePx(long, box)).toBeLessThan(16);
-    expect(fieldValueSizePx(`${long} Limited`, box)).toBeLessThan(fieldValueSizePx(long, box));
+
+    expect(fieldValueLayout(long, box, "14px Inter").sizePx).toBeLessThan(14);
+    expect(fieldValueLayout(`${long} Limited`, box, "14px Inter").sizePx).toBeLessThan(fieldValueLayout(long, box, "14px Inter").sizePx);
+  });
+});
+
+describe("a field's ink — how an unfilled field is drawn", () => {
+  const box = { x: 100, y: 200, width: 180, height: 44 };
+
+  it("gives each party one colour everywhere, and a field the author fills none of theirs", () => {
+    expect(fieldRoleColor("client")).toBe(fieldRoleColor("client"));
+    expect(fieldRoleColor("client")).not.toBe(fieldRoleColor("provider"));
+    expect(fieldRoleColor(null)).toBe(fieldRoleColor(undefined));
+  });
+
+  it("sets the label and its icon on the field's line, which runs the box's width", () => {
+    const ink = fieldInk(box);
+
+    // The label stands on the text's baseline, the rule just under it, like an underline.
+    expect(ink.labelBaselineY).toBe(244);
+    expect(ink.rule).toEqual({ from: { x: 100, y: 246 }, to: { x: 280, y: 246 } });
+    expect(ink.icon.x + ink.icon.size).toBeLessThan(ink.labelX);
+  });
+
+  it("names what a signer does, and draws an icon for it", () => {
+    expect([fieldVerb("signature", "signatureLine"), fieldVerb("initials", "text"), fieldVerb("date", "date")]).toEqual(["Sign", "Initial", "Date"]);
+    expect(fieldVerb("dropdown", "dropdown")).toBe("Choose");
+    expect(fieldIconStrokes("signatureLine", { x: 0, y: 0, size: 12 }).length).toBeGreaterThan(0);
+    expect(fieldIconStrokes("text", { x: 0, y: 0, size: 12 })).toEqual([]);
   });
 });
 
 describe("a field's box on the page", () => {
+  it("is as tall as the text when it holds text, so a line keeps its height, as a Word content control does", () => {
+    const editor = createTestEditor({
+      extensions: [StarterKit, Field],
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              { type: "text", text: "Payable on terms of " },
+              { type: "field", attrs: { nodeId: "terms", kind: "dropdown", fill: "signer", role: "client", width: 140, height: 24 } },
+              { type: "text", text: " from the date of invoice." },
+            ],
+          },
+          { type: "paragraph", content: [{ type: "text", text: "Payable on terms of Net 30 from the date of invoice." }] },
+        ],
+      },
+    });
+    editor.ensureFullLayout();
+    const [withField, plain] = editor.layout.pages[0]!.blocks.map((block) => block.lines[0]!);
+    const field = withField!.spans.find((span) => span.kind === "object");
+
+    expect(field?.width).toBe(140);
+    expect(withField!.lineHeight).toBe(plain!.lineHeight);
+    editor.destroy();
+  });
+
   it("keeps its fixed size, set in the face of the text around it", () => {
     // A field draws text — its caption, and in the executed PDF its value —
     // so it needs the run's face the way a page number does, or an export

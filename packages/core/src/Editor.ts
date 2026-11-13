@@ -16,6 +16,7 @@ import type {
 	ToolbarItemSpec,
 	ToolbarState,
 	OverlayRenderHandler,
+	PointerCursorResolver,
 	IEditor,
 } from "./extensions/types";
 import type { Mark, Node as PmNode, Schema } from "prosemirror-model";
@@ -525,6 +526,7 @@ export class Editor extends BaseEditor implements IEditor {
 	 * Called by TileManager.paintOverlay() for each visible page.
 	 */
 	private readonly overlayRenderHandlers = new Set<OverlayRenderHandler>();
+	private readonly pointerCursors = new Set<PointerCursorResolver>();
 
 	/**
 	 * Diagnostic flags. Mutable — flip `editor.debug.drag = true; editor.redraw()`
@@ -1563,6 +1565,27 @@ export class Editor extends BaseEditor implements IEditor {
 	addOverlayRenderHandler(handler: OverlayRenderHandler): () => void {
 		this.overlayRenderHandlers.add(handler);
 		return () => this.overlayRenderHandlers.delete(handler);
+	}
+
+	addPointerCursor(resolve: PointerCursorResolver): () => void {
+		this.pointerCursors.add(resolve);
+		return () => this.pointerCursors.delete(resolve);
+	}
+
+	/**
+	 * The cursor an extension asked for at `point`, or null.
+	 *
+	 * @internal — the pointer controller's.
+	 */
+	pointerCursorAt(point: PagePoint): string | null {
+		if (this.pointerCursors.size === 0) return null;
+		const owner = this.pointOwnerAt(point.x, point.y, point.page);
+		const objectPos = owner.kind === "inlineObject" ? owner.rect.docPos : null;
+		for (const resolve of this.pointerCursors) {
+			const cursor = resolve({ point, objectPos });
+			if (cursor !== null) return cursor;
+		}
+		return null;
 	}
 
 	/**

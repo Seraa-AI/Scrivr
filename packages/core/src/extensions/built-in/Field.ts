@@ -3,6 +3,7 @@ import { ReplaceStep } from "prosemirror-transform";
 import { lift, wrapIn } from "prosemirror-commands";
 import type { Node as PmNode } from "prosemirror-model";
 import { Extension } from "../Extension";
+import { KeymapPriority, type IEditor } from "../types";
 import type { InlineStrategy } from "../../layout/BlockRegistry";
 import type { PdfNodeHandler } from "../../exports/pdf";
 import { compositeColor, parseCssColor, type Rgb } from "../../model/cssColor";
@@ -12,9 +13,15 @@ import {
   checkboxTick,
   controlOf,
   fieldCaption,
+  fieldIconStrokes,
+  fieldInk,
+  fieldLabel,
+  fieldRoleColor,
   fieldChoices,
-  fieldValueSizePx,
+  fieldValueLayout,
+  setsLike,
   type FieldChoice,
+  type FieldControl,
   type FieldKind,
   type FieldKinds,
   type FieldOptions,
@@ -158,6 +165,23 @@ const unwrapFieldBlock: Command = (state, dispatch) => {
 const isSigner = (node: PmNode) => node.attrs["fill"] === "signer";
 
 /**
+ * Backspace (`-1`) or Delete (`1`) beside a field selects it first, as Word
+ * does a content control; the next press removes it. A signer's box is never
+ * lost to one keystroke meant for the letter beside it.
+ */
+const selectFieldBeside =
+  (side: -1 | 1): Command =>
+  (state, dispatch) => {
+    const { selection } = state;
+    if (!selection.empty) return false;
+    const $pos = selection.$from;
+    const node = side < 0 ? $pos.nodeBefore : $pos.nodeAfter;
+    if (node?.type.name !== "field") return false;
+    if (dispatch) dispatch(state.tr.setSelection(NodeSelection.create(state.doc, side < 0 ? $pos.pos - node.nodeSize : $pos.pos)));
+    return true;
+  };
+
+/**
  * A selected field is not typed or pasted over, as a Word content control
  * whose contents are locked is not: a signer fills it, and typing over it
  * would silently delete it. Delete and Backspace still remove it.
@@ -183,15 +207,35 @@ const resolveKinds = (options: FieldOptions): FieldKinds => ({ ...BUILT_IN_FIELD
 
 const fieldStrategy = (kinds: FieldKinds): InlineStrategy => ({
   verticalAlign: "baseline",
-  // The box is the size it was authored at. Defining `measure` anyway records
-  // the run's font on the span — the face a PDF prints the value in.
-  measure: (node) => ({ width: Number(node.attrs["width"]), height: Number(node.attrs["height"]) }),
+  // A field that holds text is as tall as the text around it; one that holds
+  // a drawing keeps its authored size, as an inline image does. Measuring
+  // also records the run's font on the span — the face a PDF prints a value in.
+  measure: (node, font, measurer) => {
+    const width = Number(node.attrs["width"]);
+    const height = Number(node.attrs["height"]);
+    const { ascent } = measurer.getFontMetrics(font);
+    switch (setsLike(String(node.attrs["kind"]), controlOf(kinds, node))) {
+      case "picture":
+        return { width, height };
+      case "glyph": {
+        const side = Math.round(ascent * 0.8);
+        return { width: side, height: side };
+      }
+      case "text":
+        return { width, height: Math.round(ascent) };
+    }
+  },
+  // Quiet ink: no box, just a dotted rule in its party's colour along the
+  // line, with what the field is standing faintly on it.
   render(ctx, x, y, width, height, node, theme: ResolvedTheme) {
     ctx.save();
-    ctx.strokeStyle = theme.imagePlaceholderBorder;
-    ctx.lineWidth = 1;
+    const color = fieldRoleColor(isSigner(node) ? String(node.attrs["role"] ?? "") : null);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([2, 2]);
     if (controlOf(kinds, node) === "checkbox") {
-      ctx.strokeRect(x + 0.5, y + 0.5, width - 1, height - 1);
+      ctx.strokeRect(x + 0.75, y + 0.75, width - 1.5, height - 1.5);
+      ctx.setLineDash([]);
       if (node.attrs["checked"] === true) {
         ctx.strokeStyle = theme.defaultText;
         ctx.lineWidth = 1.5;
@@ -203,18 +247,72 @@ const fieldStrategy = (kinds: FieldKinds): InlineStrategy => ({
         ctx.stroke();
       }
     } else {
-      ctx.fillStyle = theme.imagePlaceholderBg;
-      ctx.fillRect(x, y, width, height);
-      if (isSigner(node)) ctx.setLineDash([4, 3]);
-      ctx.strokeRect(x + 0.5, y + 0.5, width - 1, height - 1);
-      ctx.fillStyle = theme.imagePlaceholderText;
-      ctx.font = `${Math.min(12, height * 0.5)}px sans-serif`;
-      ctx.textBaseline = "middle";
-      ctx.fillText(fieldCaption(kinds, node), x + 4, y + height / 2, width - 8);
+      paintFieldInk(ctx, { x, y, width, height }, { control: controlOf(kinds, node), label: fieldLabel(kinds, node), color });
     }
     ctx.restore();
   },
 });
+
+/**
+ * An unfilled field in quiet ink: a rule along its line in `color` — dotted
+ * unless `solid` — and its icon and label standing faintly on it.
+ */
+export function paintFieldInk(
+  ctx: CanvasRenderingContext2D,
+  box: { x: number; y: number; width: number; height: number },
+  ink: { control: FieldControl; label: string; color: string; solid?: boolean; faint?: number },
+): void {
+  const at = fieldInk(box);
+  ctx.save();
+  ctx.strokeStyle = ink.color;
+  ctx.lineWidth = ink.solid ? 2.5 : 1.5;
+  ctx.setLineDash(ink.solid ? [] : [2, 2]);
+  ctx.beginPath();
+  ctx.moveTo(at.rule.from.x, at.rule.from.y - ctx.lineWidth / 2);
+  ctx.lineTo(at.rule.to.x, at.rule.to.y - ctx.lineWidth / 2);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.globalAlpha = ink.faint ?? 0.75;
+  ctx.lineWidth = 1.2;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  const strokes = fieldIconStrokes(ink.control, at.icon);
+  for (const stroke of strokes) {
+    ctx.beginPath();
+    stroke.forEach((pt, i) => (i === 0 ? ctx.moveTo(pt.x, pt.y) : ctx.lineTo(pt.x, pt.y)));
+    ctx.stroke();
+  }
+  ctx.fillStyle = ink.color;
+  ctx.font = `${at.labelSizePx}px sans-serif`;
+  ctx.textBaseline = "alphabetic";
+  const labelX = strokes.length > 0 ? at.labelX : at.icon.x;
+  ctx.fillText(ink.label, labelX, at.labelBaselineY, Math.max(0, box.x + box.width - labelX - 2));
+  ctx.restore();
+}
+
+/** A role as a reader names it: "client" → "Client". */
+export const roleName = (role: string | null | undefined): string =>
+  role ? role.charAt(0).toUpperCase() + role.slice(1).replace(/[-_]/g, " ") : "A signer";
+
+/** A small label above a field's box — who fills it, on screen only. */
+export function paintFieldTag(ctx: CanvasRenderingContext2D, box: { x: number; y: number }, text: string, theme: ResolvedTheme): void {
+  ctx.save();
+  ctx.font = "11px sans-serif";
+  const width = ctx.measureText(text).width + 12;
+  const height = 18;
+  const x = box.x;
+  const y = box.y - height - 4;
+  ctx.fillStyle = theme.defaultText;
+  ctx.globalAlpha = 0.85;
+  ctx.beginPath();
+  ctx.roundRect(x, y, width, height, 4);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = theme.pageBg;
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, x + 6, y + height / 2);
+  ctx.restore();
+}
 
 const WHITE: Rgb = { r: 255, g: 255, b: 255 };
 const BLACK: Rgb = { r: 0, g: 0, b: 0 };
@@ -237,7 +335,8 @@ const fieldPdf =
   (block, ctx) => {
     const { node, x, y, width, height } = block;
     const value = valueOf(values, node);
-    const border = { color: pdfColor(ctx.theme.imagePlaceholderBorder), widthPx: 1 };
+    const roleColor = pdfColor(fieldRoleColor(isSigner(node) ? String(node.attrs["role"] ?? "") : null));
+    const border = { color: roleColor, widthPx: 1 };
     const ink = pdfColor(ctx.theme.defaultText);
     if (controlOf(kinds, node) === "checkbox") {
       ctx.draw.rect({ x, y, width, height, border });
@@ -256,20 +355,28 @@ const fieldPdf =
     }
     if (value?.kind === "text") {
       if (!ctx.font) return;
-      const sizePx = fieldValueSizePx(value.text, { width, height });
-      ctx.draw.text({ text: value.text, x: x + 4, baselineY: y + height / 2 + sizePx * 0.35, sizePx, font: ctx.font, color: ink });
+      const set = fieldValueLayout(value.text, { x, y, width, height }, ctx.font.cssFont);
+      ctx.draw.text({ text: value.text, x: set.x, baselineY: set.baselineY, sizePx: set.sizePx, font: ctx.font, color: ink });
       return;
     }
-    ctx.draw.rect({ x, y, width, height, color: pdfColor(ctx.theme.imagePlaceholderBg), border });
+    // A blank on a printed form: its line, and what goes on it.
+    const at = fieldInk({ x, y, width, height });
+    ctx.draw.line({ ...at.rule, thicknessPx: 1, color: roleColor });
+    const strokes = fieldIconStrokes(controlOf(kinds, node), at.icon);
+    for (const stroke of strokes) {
+      for (let i = 1; i < stroke.length; i++) {
+        ctx.draw.line({ from: stroke[i - 1]!, to: stroke[i]!, thicknessPx: 1, color: roleColor, opacity: 0.75 });
+      }
+    }
     if (!ctx.font) return;
-    const sizePx = Math.min(12, height * 0.5);
     ctx.draw.text({
-      text: fieldCaption(kinds, node),
-      x: x + 4,
-      baselineY: y + height / 2 + sizePx * 0.35,
-      sizePx,
+      text: fieldLabel(kinds, node),
+      x: strokes.length > 0 ? at.labelX : at.icon.x,
+      baselineY: at.labelBaselineY,
+      sizePx: at.labelSizePx,
       font: ctx.font,
-      color: pdfColor(ctx.theme.imagePlaceholderText),
+      color: roleColor,
+      opacity: 0.75,
     });
   };
 
@@ -426,8 +533,32 @@ export const Field = Extension.create<FieldOptions>({
     return type ? [fieldBoxPlugin, fieldRangePlugin(type)] : [fieldBoxPlugin];
   },
 
+  // Backspace beside a field selects it before any other binding acts.
+  keymapPriority: KeymapPriority.inlineObject,
+
   addKeymap() {
-    return { ArrowRight: exitFieldRange };
+    return { ArrowRight: exitFieldRange, Backspace: selectFieldBeside(-1), Delete: selectFieldBeside(1) };
+  },
+
+  onViewReady(editor: IEditor) {
+    // A box a click selects and nothing types into: an arrow, not a move
+    // cursor, while authoring. A read-only viewer's own extensions decide.
+    const offCursor = editor.addPointerCursor(({ objectPos }) => {
+      if (editor.readOnly || objectPos === null) return null;
+      return editor.getState().doc.nodeAt(objectPos)?.type.name === "field" ? "default" : null;
+    });
+    // A selected signer box says who fills it, so the author does not try to.
+    const offTag = editor.addOverlayRenderHandler((ctx, pageNumber, _pageConfig, charMap, theme) => {
+      const { selection } = editor.getState();
+      if (editor.readOnly || !(selection instanceof NodeSelection) || !isSigner(selection.node)) return;
+      const box = charMap.getObjectRect(selection.from);
+      if (!box || box.page !== pageNumber) return;
+      paintFieldTag(ctx, box, `${roleName(String(selection.node.attrs["role"] ?? ""))} fills this after sealing`, theme);
+    });
+    return () => {
+      offCursor();
+      offTag();
+    };
   },
 
   addMarkDecorators() {

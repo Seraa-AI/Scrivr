@@ -696,8 +696,9 @@ export class TileManager {
       ? `cell:${descriptor.rows.from},${descriptor.rows.to},` +
         `${descriptor.columns.from},${descriptor.columns.to}:${descriptor.selectedCellCount}`
       : `${descriptor.kind}:${descriptor.head}:${descriptor.from}:${descriptor.to}`;
+    // A document nobody here may type into shows no caret; selecting still works.
     const blinkOn =
-      this.editor.isFocused && this.editor.cursorManager.isVisible;
+      this.editor.isFocused && !this.editor.readOnly && this.editor.cursorManager.isVisible;
 
     // ── Blink gate ────────────────────────────────────────────────────────
     const pmState = this.editor.getState();

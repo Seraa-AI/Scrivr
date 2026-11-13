@@ -10,7 +10,7 @@ import {
   checkboxTick,
   contentHashOf,
   createSnapshot,
-  fieldValueSizePx,
+  fieldValueLayout,
   hashArtifact,
   listSignerFields,
   verifySnapshot,
@@ -61,7 +61,7 @@ describe("what a signing host builds on", () => {
     expect(snapshot?.contentHash).toBe(await contentHashOf(doc));
     expect(await hashArtifact(new Uint8Array([1]))).toMatch(/^sha256:/);
     expect(checkboxTick({ x: 0, y: 0, width: 10, height: 10 })).toHaveLength(3);
-    expect(fieldValueSizePx(value.text, { width: 180, height: 44 })).toBe(16);
+    expect(fieldValueLayout(value.text, { x: 0, y: 0, width: 180, height: 24 }, "14px Inter").sizePx).toBe(14);
     expect([control, insert.kind, range.kind, denied.reason, typeof gate, fields, refusal]).toEqual([
       "signatureLine",
       "dropdown",

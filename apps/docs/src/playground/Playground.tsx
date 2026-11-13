@@ -50,7 +50,7 @@ import { ChatPanel } from "./ChatPanel";
 import { DemoContent, demoDoc, startingDemo, type DemoKind } from "./demoContent";
 import { TrackChangesInspector } from "./TrackChangesInspector";
 import { SigningRoom } from "./SigningRoom";
-import { FieldInsertMenu } from "./FieldInsertMenu";
+import { FieldInsertMenu, RoleLegend } from "./FieldInsertMenu";
 import { ROLE_LABEL, SIGNING_ROLES } from "./signingDemo";
 import { env } from "../lib/env";
 import {
@@ -399,6 +399,7 @@ export function Playground() {
           {!USE_COLLAB && <ContentSwitcher demo={demo} onChange={switchDemo} />}
           {demo === "signing" && !sealed && (
             <>
+              <RoleLegend />
               <FieldInsertMenu editor={editor} />
               <button
                 type="button"
