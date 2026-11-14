@@ -103,7 +103,7 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
       extensions: [
         StarterKit.configure({ table: true }),
         // Opens with what every party has given so far: the room's record.
-        Field.configure({ values: valuesRef.current }),
+        Field.configure({ values: valuesRef.current, formatSignedDate: localSignedDate }),
         DefaultContent.configure({ json: content }),
         FieldCompletion.configure({
           fields: snapshot.fields,
@@ -118,7 +118,7 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
               setRequest({ field, current, resolve });
             }).then((answer) => {
               setProblem(null);
-              // The room records when each value was given; a signature's moment dates its party.
+              // The room stamps each value it records with when it was given; on a signature, that dates its party.
               const value = answer && recordedNow(answer);
               if (value) setValues((all) => ({ ...all, [field.id]: value }));
               return value;
@@ -148,8 +148,8 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
   const pageCount = editor?.layout.pages.length ?? 0;
   // The kinds this room's Field knows, read as the signing view reads them.
   const kinds = editor ? fieldKindsOf(editor) : BUILT_IN_FIELD_KINDS;
-  // The room's values as the record shows them — a date only beside its signature.
-  const shown = valuesOnRecord(snapshot.fields, values, kinds);
+  // The room's values as the record shows them — each date signed derived from its party's signature.
+  const shown = valuesOnRecord(snapshot.fields, values, kinds, localSignedDate);
   const missing = snapshot.fields.filter((f) => f.required && !isFieldAnswered(f, shown[f.id], kinds));
   // What a signer owes before signing comes first, as the signing view asks for it.
   const nextOpen =
@@ -174,7 +174,7 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
     // printed in their fields, laid out with the setup the signers used.
     try {
       const result = await exportExecutedPdf(snapshot, values, {
-        editorOptions: { pageConfig: defaultPageConfig, fonts: playgroundFonts, extensions: [StarterKit.configure({ table: true }), Field] },
+        editorOptions: { pageConfig: defaultPageConfig, fonts: playgroundFonts, extensions: [StarterKit.configure({ table: true }), Field.configure({ formatSignedDate: localSignedDate })] },
       });
       if (!result.ok) {
         setProblem(
@@ -345,6 +345,11 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
 }
 
 /** A value as the room records it: words and drawings stamped with the moment they were given. */
+/** The room shows a date signed in the signer's own zone and words, as DocuSign shows a recipient's. */
+function localSignedDate(signedAt: string): string {
+  return new Date(signedAt).toLocaleDateString(undefined, { dateStyle: "long" });
+}
+
 function recordedNow(value: FieldValue): FieldValue {
   return value.kind === "text" || value.kind === "image" ? { ...value, signedAt: new Date().toISOString() } : value;
 }

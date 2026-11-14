@@ -46,7 +46,7 @@ function decodeDataUrl(src: string): ImageBytes | null {
   try {
     binary = atob(body);
   } catch {
-    return null; // not base64 at all: no image, as an unreadable one is
+    return null; // atob throws on malformed base64: no image, as for unreadable bytes
   }
   if (binary.length > MAX_BYTES) return null;
   const bytes = new Uint8Array(binary.length);
@@ -164,5 +164,17 @@ export function createDefaultImageResolver(
 
     onRefused?.(src, `more than ${MAX_REDIRECTS} redirects`);
     return null;
+  };
+}
+
+/** A resolver that fetches each `src` once, however often it is asked — so a check and the print see the same bytes. */
+export function resolveOnce(resolve: ImageResolver): ImageResolver {
+  const seen = new Map<string, ReturnType<ImageResolver>>();
+  return (src) => {
+    const known = seen.get(src);
+    if (known) return known;
+    const pending = resolve(src);
+    seen.set(src, pending);
+    return pending;
   };
 }

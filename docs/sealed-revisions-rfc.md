@@ -906,7 +906,22 @@ moves the date when a signer finishes on a later day. So in Scrivr:
   (`dates-without-signature`).
 - **What a kind is, it declares.** `drawn` (a kind completed by drawing) and
   `verb` (its badge) replace the last checks of the name "initials"; a
-  host's kind under a built-in name refines it rather than replacing it.
+  host's kind under a built-in name refines it rather than replacing it,
+  and one that changes the control drops `drawn`, `verb` and
+  `datedWhenSigned`, which belonged to the old one. A date signed only
+  shows on a date or text control.
+- **The record is the strict reader of a drawing.** A drawing is checked
+  where it is given and shown by its form (`safeDrawingUrl`: an inline PNG or
+  JPEG whose base64 decodes and opens as one), but only decoding proves its
+  pixels, and core holds no decoder: the executed PDF embeds each drawing
+  and counts it only then. A drawing well-formed but corrupt inside may show
+  as given on screen and is refused in the record; a host checks one with
+  `safeDrawingUrl` and its own decoder before handing it over.
+- **A date signed reads the same everywhere.** `signedAt` must carry its zone
+  (`Z` or an offset) or be a bare day (`parseSignedAt`); a zoneless time
+  would be read in whatever zone a machine is in. The signing view refuses a
+  signature without one when its party has a date signed, and the record
+  checks the date it prints in `Field`'s own format (`valuesOnRecordOf`).
 - **A record never shows a blank signature.** `safeDrawingUrl` gives a
   drawing a canonical prefix and caps its size (`MAX_DRAWING_BYTES`), and
   `exportExecutedPdf` counts a drawing only once it embeds as the PDF will

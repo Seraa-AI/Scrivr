@@ -128,6 +128,29 @@ describe("exportExecutedPdf", () => {
     expect(await texts({ sig: { kind: "image", src: "data:image/png;base64,iVBORw0KGgoAAAAAAAA", signedAt } })).not.toContain("14 November 2026");
   });
 
+  it("checks the date it prints, in the host's format: one that gives nothing, or throws, leaves a required date unanswered", async () => {
+    const author = new ServerEditor({
+      extensions: [StarterKit, Field],
+      content: { type: "doc", content: [{ type: "paragraph", content: [signer("sig", "signature", "client"), signer("dated", "dateSigned", "client")] }] },
+    });
+    const made = await createSnapshot(author.getState().doc, { assignedRoles: ["client"], kinds: BUILT_IN_FIELD_KINDS });
+    if (!made.ok) throw new Error(made.refusal.reason);
+    const signedBy = { sig: { kind: "text", text: "Ada", signedAt: "2026-11-14T09:30:00Z" } } satisfies Record<string, FieldValue>;
+    const formatting = (formatSignedDate: (signedAt: string) => string): ExecutedPdfOptions => ({
+      editorOptions: { extensions: [StarterKit, Field.configure({ formatSignedDate })], textMeasurer: measurer() },
+    });
+    const missing = (result: ExecutedPdfResult) => (!result.ok && result.refusal.reason === "unanswered-fields" ? result.refusal.missing.map((f) => f.id) : []);
+
+    expect(missing(await exportExecutedPdf(made.snapshot, signedBy, formatting(() => "")))).toEqual(["dated"]);
+    expect(
+      missing(
+        await exportExecutedPdf(made.snapshot, signedBy, formatting(() => {
+          throw new RangeError("bad time zone");
+        })),
+      ),
+    ).toEqual(["dated"]);
+  });
+
   it("refuses a drawing whose bytes cannot even be decoded, rather than fail", async () => {
     const result = await exportExecutedPdf(await sealed(), { sig: { kind: "image", src: "data:image/png;base64,iVBORw0KGgoA1" } }, options);
 

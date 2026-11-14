@@ -60,9 +60,10 @@ export type FieldKind = BuiltInFieldKind | (string & {});
 /**
  * What fills a field. `image` is a drawing for a drawn field — a signature,
  * initials — as an inline PNG or JPEG (`safeDrawingUrl`): printable, and
- * fixed once given. `choice` names a
- * dropdown's choice by its `id`, so a renamed label still answers the same
- * choice.
+ * fixed once given. `choice` names a dropdown's choice by its `id`, so a
+ * renamed label still answers the same choice. `signedAt` on a signature is
+ * when it was given — an ISO timestamp with `Z` or an offset, from the host's
+ * own record (`parseSignedAt`) — and is what its party's date signed shows.
  */
 export type FieldValue =
   | { kind: "text"; text: string; signedAt?: string }
@@ -79,7 +80,8 @@ const MONTHS = ["January", "February", "March", "April", "May", "June", "July", 
  */
 export function defaultSignedDate(signedAt: string): string {
   const at = new Date(signedAt);
-  return `${at.getUTCDate()} ${MONTHS[at.getUTCMonth()]} ${at.getUTCFullYear()}`;
+  const month = MONTHS[at.getUTCMonth()];
+  return month === undefined ? "" : `${at.getUTCDate()} ${month} ${at.getUTCFullYear()}`;
 }
 
 /** One choice a dropdown offers: `id` is what is stored and exported, `label` what a person reads. */
@@ -114,16 +116,20 @@ export function valueText(value: FieldValue | undefined, choices: readonly Field
 }
 
 export interface FieldOptions {
-  /** Kinds added to the built-ins, by name; one under a built-in name refines it (`resolveKinds`). */
+  /**
+   * Kinds added to the built-ins, by name. One under a built-in name refines
+   * it: what it gives replaces what the built-in declares, the rest stays;
+   * give it another control and it drops what belonged to the old one —
+   * `drawn`, `verb`, `datedWhenSigned`.
+   */
   kinds: Record<string, FieldKindSpec>;
   /**
    * Completed values by field id that the editor opens with; `setFieldValue`
    * gives one later. A signer's field is laid out, drawn and printed with a
    * value it can show — a tick on a checkbox, a choice on a dropdown, words,
-   * a drawing on a drawn field as an inline PNG or JPEG — and a
-   * date signed only beside its party's answered signature: the executed
-   * document a signing ends with. Values never enter the document, so its
-   * seal holds.
+   * a drawing on a drawn field as an inline PNG or JPEG; a date signed takes
+   * none, and shows when its party signed. This is the executed document a
+   * signing ends with. Values never enter the document, so its seal holds.
    */
   values: Record<string, FieldValue>;
   /**
@@ -170,8 +176,15 @@ export type FieldKinds = Readonly<Record<string, FieldKindSpec>>;
 /** Whether completing a field of `kind` is its party signing: its control is a signature line. */
 export const isSigningKind = (kinds: FieldKinds, kind: string): boolean => kinds[kind]?.control === "signatureLine";
 
-/** Whether a field of `kind` is dated the moment its party signs, never filled by hand. */
-export const isDatedWhenSigned = (kinds: FieldKinds, kind: string): boolean => kinds[kind]?.datedWhenSigned === true;
+/**
+ * Whether a field of `kind` shows the date its party signed: a date or text
+ * control that declares `datedWhenSigned`. A checkbox or a dropdown shows a
+ * tick or a choice, whatever it declares.
+ */
+export function isDatedWhenSigned(kinds: FieldKinds, kind: string): boolean {
+  const control = controlOfKind(kinds, kind);
+  return (control === "date" || control === "text") && kinds[kind]?.datedWhenSigned === true;
+}
 
 /** The control a kind declares; `"text"` when it declares none. */
 export const controlOfKind = (kinds: FieldKinds, kind: string): FieldControl => kinds[kind]?.control ?? "text";

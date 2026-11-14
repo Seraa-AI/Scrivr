@@ -8,8 +8,8 @@ import { NodeSelection, TextSelection } from "prosemirror-state";
 import { DOMParser, DOMSerializer, type Node as PmNode } from "prosemirror-model";
 import { ServerEditor } from "../../ServerEditor";
 import { StarterKit } from "../StarterKit";
-import { Field, fieldDrawingAt, fieldKindsOf, fieldValues, isFieldAnswered, listSignerFields, paintCheckbox, setFieldValue, unansweredBeforeSigning, valuesOnRecord, type SignerFieldDescriptor } from "./Field";
-import { BUILT_IN_FIELD_KINDS, isDrawnKind, fieldIconStrokes, fieldInk, fieldRoleColor, fieldValueLayout, fieldVerb, type FieldKinds, type FieldValue } from "./fieldKinds";
+import { Field, fieldDrawingAt, fieldKindsOf, fieldValues, isFieldAnswered, listSignerFields, paintCheckbox, parseSignedAt, setFieldValue, unansweredBeforeSigning, valuesOnRecord, valuesOnRecordOf, type SignerFieldDescriptor } from "./Field";
+import { BUILT_IN_FIELD_KINDS, defaultSignedDate, isDatedWhenSigned, isDrawnKind, fieldIconStrokes, fieldInk, fieldRoleColor, fieldValueLayout, fieldVerb, type FieldKinds, type FieldValue } from "./fieldKinds";
 import { createMeasurer, createTestEditor, measureTextWidth } from "../../test-utils";
 import { DefaultFontProvider } from "../../fonts/DefaultFontProvider";
 
@@ -891,6 +891,17 @@ describe("what a party completes before they sign", () => {
     expect(isDrawnKind(kinds, "initials")).toBe(false);
   });
 
+  it("dates only a field that shows words — never a checkbox or a dropdown, whatever it declares", () => {
+    const kinds = {
+      ...BUILT_IN_FIELD_KINDS,
+      tickedOn: { label: "Ticked on", size: { width: 16, height: 16 }, control: "checkbox", datedWhenSigned: true },
+    } satisfies FieldKinds;
+    const moved = new ServerEditor({ extensions: [StarterKit, Field.configure({ kinds: { dateSigned: { label: "Signed?", size: { width: 16, height: 16 }, control: "checkbox" } } })] });
+
+    expect(isDatedWhenSigned(kinds, "tickedOn")).toBe(false);
+    expect(isDatedWhenSigned(fieldKindsOf(moved), "dateSigned")).toBe(false);
+  });
+
   it("draws only on a field that can hold a drawing — never a date or a dropdown, whatever it declares", () => {
     const kinds = {
       ...BUILT_IN_FIELD_KINDS,
@@ -940,6 +951,31 @@ describe("the values a record shows", () => {
     expect(record["dated"]).toEqual({ kind: "text", text: "16 November 2026" });
   });
 
+  it("takes only an unambiguous moment — an offset, or a day — so every machine reads the same date", () => {
+    const at = (signedAt: string) => valuesOnRecord(fields, { a: { kind: "text", text: "Ada", signedAt } }, BUILT_IN_FIELD_KINDS)["dated"];
+
+    expect(at("2026-11-14T23:30:00-05:00")).toEqual({ kind: "text", text: "15 November 2026" });
+    expect(at("2026-11-14")).toEqual({ kind: "text", text: "14 November 2026" });
+    // Read in whatever zone the machine is in, so no moment at all.
+    expect(at("2026-11-14T23:30:00")).toBeUndefined();
+    expect(at("11/14/2026")).toBeUndefined();
+    expect([parseSignedAt("2026-11-14T09:30:00Z"), parseSignedAt("14 November 2026")]).toEqual([Date.parse("2026-11-14T09:30:00Z"), null]);
+  });
+
+  it("shows no date when the host's format fails — throws, or gives nothing to show", () => {
+    const signed = { a: { kind: "text", text: "Ada", signedAt: "2026-11-14T09:30:00Z" } } satisfies Record<string, FieldValue>;
+    const throwing = () => {
+      throw new RangeError("bad time zone");
+    };
+
+    expect(valuesOnRecord(fields, signed, BUILT_IN_FIELD_KINDS, throwing)).not.toHaveProperty("dated");
+    expect(valuesOnRecord(fields, signed, BUILT_IN_FIELD_KINDS, () => "  ")).not.toHaveProperty("dated");
+  });
+
+  it("formats no date from what is no moment, called directly", () => {
+    expect(defaultSignedDate("nope")).toBe("");
+  });
+
   it("formats the moment as the host asks, and ignores one that is no moment", () => {
     const signedAt = "2026-11-14T09:30:00Z";
     expect(valuesOnRecord(fields, { a: { kind: "text", text: "Ada", signedAt } }, BUILT_IN_FIELD_KINDS, (at) => at.slice(0, 10))["dated"]).toEqual({
@@ -966,6 +1002,15 @@ describe("a date signed, as Field shows it", () => {
     expect(dateShown({ a: signed, b: { kind: "text", text: "  " } })).toEqual({ kind: "text", text: "14 November 2026" });
     expect(dateShown({ a: { kind: "text", text: "  " } })).toBeUndefined();
     expect(dateShown({ d: { kind: "text", text: "14 November 2026" } })).toBeUndefined();
+  });
+
+  it("is the record valuesOnRecordOf gives — the one Field shows and prints", () => {
+    const editor = new ServerEditor({
+      extensions: [StarterKit, Field.configure({ values: { a: signed }, formatSignedDate: (at) => `on ${at.slice(0, 10)}` })],
+      content: { type: "doc", content: [{ type: "paragraph", content: [signerField("a", "signature"), signerField("d", "dateSigned")] }] },
+    });
+
+    expect(valuesOnRecordOf(editor)["d"]).toEqual({ kind: "text", text: "on 2026-11-14" });
   });
 
   it("in the format Field is given", () => {

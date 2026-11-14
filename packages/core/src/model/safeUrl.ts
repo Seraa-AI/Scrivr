@@ -98,9 +98,9 @@ const FORMATS: Record<DrawingFormat, { mime: string; opening: string }> = {
   jpg: { mime: "image/jpeg", opening: "/9j/" },
 };
 
-const isDrawingFormat = (format: string): format is DrawingFormat => format === "png" || format === "jpeg" || format === "jpg";
+const isDrawingFormat = (format: string): format is DrawingFormat => Object.hasOwn(FORMATS, format);
 
-/** Whether base64 decodes: padded to a whole number of quads, or unpadded short of one by more than a character. */
+/** Whether base64 decodes: padded to a whole number of quads, or unpadded and never one character past a whole quad. */
 const wholeBase64 = (bytes: string): boolean => (bytes.endsWith("=") ? bytes.length % 4 === 0 : bytes.length % 4 !== 1);
 
 /** The largest drawing a drawn field takes, decoded — a pad's PNG is far smaller; a PDF embeds it whole. */

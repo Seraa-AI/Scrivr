@@ -228,7 +228,7 @@ export const fieldImport =
     const text = inline.content.map((item) => (item.type === "text" ? item.text : "")).join("").trim();
     const id = params.get("id") || null;
     const options = inline.listItems.map((item) => ({ id: item.value, label: item.displayText }));
-    // A date signed is dated by the signing host, never answered in Word.
+    // A date signed shows when its party signed, never what was typed in Word.
     const answerable = fill === "signer" && id && !inline.placeholder && !isDatedWhenSigned(kinds, kind);
     const value = answerable ? controlValue(text, kinds[kind]?.control ?? "text", options) : null;
     if (value && id) ctx.shared.getOrInit<Record<string, FieldValue>>(FIELD_VALUES_KEY, () => ({}))[id] = value;

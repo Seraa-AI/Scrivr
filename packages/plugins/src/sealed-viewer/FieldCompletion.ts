@@ -8,6 +8,7 @@ import {
   isFieldAnswered,
   isSigningKind,
   paintCheckbox,
+  parseSignedAt,
   paintFieldInk,
   paintFieldTag,
   roleName,
@@ -46,8 +47,9 @@ export interface FieldCompletionOptions {
    */
   onFieldRequest: (field: SignerFieldDescriptor, current?: FieldValue) => Promise<FieldValue | null>;
   /**
-   * `onFieldRequest` failed — it threw or rejected. The field stays as it was;
-   * tell the signer, and let them try again.
+   * `onFieldRequest` failed — it threw or rejected, or answered a signature
+   * with no `signedAt` its party's date signed could show. The field stays as
+   * it was; tell the signer, and let them try again.
    */
   onFieldRequestError?: (field: SignerFieldDescriptor, error: unknown) => void;
   /**
@@ -170,6 +172,13 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
     const isDated = (f: SignerFieldDescriptor): boolean => isDatedWhenSigned(kinds, f.kind);
     // What the signer fills, by pressing or with Tab; a date signed shows when they signed.
     const mine = fields.filter((f) => mayComplete.has(f.id) && !isDated(f));
+    // A signature is what dates its party; for a party with a date signed it must say when.
+    const datedRoles = new Set(fields.filter(isDated).map((f) => f.role));
+    const undatable = (field: SignerFieldDescriptor, value: FieldValue): boolean =>
+      isSigningKind(kinds, field.kind) &&
+      datedRoles.has(field.role) &&
+      isFieldAnswered(field, value, kinds) &&
+      !("signedAt" in value && value.signedAt !== undefined && parseSignedAt(value.signedAt) !== null);
     const pending = new Set<string>();
     let hovered: string | null = null;
     let focused: string | null = null;
@@ -205,7 +214,13 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
       const current = fieldValues(editor.getState())[field.id];
       new Promise<FieldValue | null>((resolve) => resolve(onFieldRequest(field, current)))
         .then((value) => {
-          if (value) setFieldValue(editor, field.id, value);
+          if (!value) return;
+          if (undatable(field, value)) {
+            throw new Error(
+              `The signature for "${field.id}" has no signedAt its party's date signed can show: give an ISO timestamp with Z or an offset`,
+            );
+          }
+          setFieldValue(editor, field.id, value);
         })
         .catch((error: unknown) => {
           // The field stays as it was. Declining is answering `null`, which

@@ -141,11 +141,26 @@ export function unansweredBeforeSigning(
 }
 
 /**
+ * When a signature was given, from its `signedAt`: an ISO timestamp with `Z`
+ * or an offset, or an ISO day. Anything else — a time with no zone, a date in
+ * some locale's words — would be read in whatever zone the machine is in, and
+ * a record must read the same everywhere, so it is no moment: `null`.
+ */
+export function parseSignedAt(signedAt: string): number | null {
+  if (!SIGNED_AT.test(signedAt)) return null;
+  const at = Date.parse(signedAt);
+  return Number.isNaN(at) ? null : at;
+}
+
+const SIGNED_AT = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2}))?$/;
+
+/**
  * The values as a signed record shows them. A date signed is never a value of
  * its own: it shows the moment its party signed — the latest `signedAt` among
  * their answered signatures — through `formatSignedDate`, and nothing while
- * none answers. `Field` shows values by this on screen and in print; a host's
- * server reads its record by it too.
+ * none answers, or when the format gives nothing to show. `Field` shows values
+ * by this on screen and in print (`valuesOnRecordOf` gives exactly that
+ * record); a host's server reads its record by it too.
  */
 export function valuesOnRecord(
   fields: readonly SignerFieldDescriptor[],
@@ -153,20 +168,30 @@ export function valuesOnRecord(
   kinds: FieldKinds,
   formatSignedDate: (signedAt: string) => string = defaultSignedDate,
 ): Record<string, FieldValue> {
-  const signedAt = new Map<string, number>();
+  const latestSigning = new Map<string, number>();
   for (const f of fields) {
     const value = values[f.id];
     if (!isSigningKind(kinds, f.kind) || !isFieldAnswered(f, value, kinds)) continue;
-    const at = value && "signedAt" in value && value.signedAt !== undefined ? Date.parse(value.signedAt) : Number.NaN;
-    if (!Number.isNaN(at)) signedAt.set(f.role, Math.max(at, signedAt.get(f.role) ?? at));
+    const at = value && "signedAt" in value && value.signedAt !== undefined ? parseSignedAt(value.signedAt) : null;
+    if (at !== null) latestSigning.set(f.role, Math.max(at, latestSigning.get(f.role) ?? at));
   }
   const dated = fields.filter((f) => isDatedWhenSigned(kinds, f.kind));
   const record = Object.fromEntries(Object.entries(values).filter(([id]) => !dated.some((f) => f.id === id)));
   for (const f of dated) {
-    const at = signedAt.get(f.role);
-    if (at !== undefined) record[f.id] = { kind: "text", text: formatSignedDate(new Date(at).toISOString()) };
+    const at = latestSigning.get(f.role);
+    const text = at === undefined ? "" : formatted(formatSignedDate, new Date(at).toISOString());
+    if (text.trim() !== "") record[f.id] = { kind: "text", text };
   }
   return record;
+}
+
+/** A host's format of a moment, or nothing when it fails: a record shows no date rather than break. */
+function formatted(formatSignedDate: (signedAt: string) => string, signedAt: string): string {
+  try {
+    return formatSignedDate(signedAt);
+  } catch {
+    return "";
+  }
 }
 
 /**
@@ -292,7 +317,8 @@ const fieldBoxPlugin = new Plugin({
  * The built-in kinds and the host's own. A host's kind under a built-in name
  * refines it: what it gives replaces what the built-in declares, and the rest
  * stays — relabel initials and they are still drawn. One that changes the
- * control takes nothing that belonged to the old one: not `drawn`, not `verb`.
+ * control drops what belonged to the old one: `drawn`, `verb`,
+ * `datedWhenSigned`.
  */
 const resolveKinds = (options: FieldOptions): FieldKinds => {
   const builtIn: FieldKinds = BUILT_IN_FIELD_KINDS;
@@ -302,7 +328,7 @@ const resolveKinds = (options: FieldOptions): FieldKinds => {
 function refine(base: FieldKindSpec | undefined, spec: FieldKindSpec): FieldKindSpec {
   if (!base) return spec;
   if (spec.control === undefined || spec.control === base.control) return { ...base, ...spec };
-  const { drawn: _drawn, verb: _verb, ...kept } = base;
+  const { drawn: _drawn, verb: _verb, datedWhenSigned: _dated, ...kept } = base;
   return { ...kept, ...spec };
 }
 
@@ -335,9 +361,10 @@ export const fieldValues = (state: EditorState): FieldValues => fieldValuesKey.g
 /**
  * Give field `id` a value — `null` empties it; the document is untouched. A
  * signer's field is laid out, drawn and printed with it when it can show it
- * (`isFieldAnswered`) — a date signed only beside its party's answered
- * signature (`valuesOnRecord`); otherwise it is held but shows nothing. Returns false when the editor has no `Field`, or a plugin
- * refuses the change.
+ * (`isFieldAnswered`); a date signed never shows one — it shows when its
+ * party signed (`valuesOnRecord`). Otherwise the value is held but shows
+ * nothing. Returns false when the editor has no `Field`, or a plugin refuses
+ * the change.
  */
 export function setFieldValue(editor: IBaseEditor, id: string, value: FieldValue | null): boolean {
   const state = editor.getState();
@@ -372,6 +399,12 @@ function valuesOnRecordIn(setup: FieldSetup, state: EditorState): FieldValues {
   const record = valuesOnRecord(listSignerFields(state.doc), values, setup.kinds, setup.options.formatSignedDate);
   recordCache.set(values, { doc: state.doc, record });
   return record;
+}
+
+/** The values `editor`'s fields show — the record `Field` lays out, draws and prints — or those held, without a `Field`. */
+export function valuesOnRecordOf(editor: IBaseEditor): FieldValues {
+  const setup = setupByEditor.get(editor);
+  return setup ? valuesOnRecordIn(setup, editor.getState()) : fieldValues(editor.getState());
 }
 
 /** Whether two sets of shown values are the same, field by field — a derived date by its words. */
@@ -897,13 +930,12 @@ export const Field = Extension.create<FieldOptions>({
     // A field fits the value it shows, so a change in what any field shows is
     // measured again — a new value, or a date whose signature came or went
     // elsewhere in the document.
-    const setup = setupByEditor.get(editor);
-    let shown = setup ? valuesOnRecordIn(setup, editor.getState()) : {};
+    let shown = valuesOnRecordOf(editor);
     // The first layout runs while the editor is built, before Field is set up,
-    // so it measured the configured values; a date they sign is measured now.
+    // so it measured the configured values as given; the dates derived from them are measured now.
     if (!sameValues(shown, this.options.values)) editor.invalidateLayout({ remeasure: true });
     const offValues = editor.on("update", () => {
-      const next = setup ? valuesOnRecordIn(setup, editor.getState()) : {};
+      const next = valuesOnRecordOf(editor);
       if (sameValues(next, shown)) return;
       shown = next;
       editor.invalidateLayout({ remeasure: true });

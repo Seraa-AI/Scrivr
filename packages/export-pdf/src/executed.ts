@@ -3,13 +3,12 @@ import {
   Field,
   fieldKindsOf,
   flattenExtensions,
-  fieldValues,
   hashArtifact,
   isFieldAnswered,
   listSignerFields,
   safeDrawingUrl,
   setFieldValue,
-  valuesOnRecord,
+  valuesOnRecordOf,
   verifySnapshot,
   type EditorOptions,
   type FieldValue,
@@ -17,8 +16,8 @@ import {
   type SignerFieldDescriptor,
 } from "@scrivr/core";
 import { PDFDocument } from "pdf-lib";
-import { embedImage, resolveOnce } from "./embedImage";
-import { createDefaultImageResolver, type ImageResolver } from "./fetchImage";
+import { embedImage } from "./embedImage";
+import { createDefaultImageResolver, resolveOnce, type ImageResolver } from "./fetchImage";
 import { exportToPdf, type PdfExportOptions } from "./index";
 
 export interface ExecutedPdfOptions extends PdfExportOptions {
@@ -70,7 +69,7 @@ export async function exportExecutedPdf(
   }
   const editor = new Editor({ ...editorOptions, content: documentJson(snapshot.content), sealed: true });
   try {
-    // One resolver, fetching each drawing once, for the check below and the print alike.
+    // So the drawing checked is the drawing printed.
     const resolveImage = resolveOnce(pdfOptions.resolveImage ?? createDefaultImageResolver(pdfOptions.onImageRefused));
     const scratch = await PDFDocument.create();
     for (const [id, value] of Object.entries(values)) {
@@ -81,8 +80,8 @@ export async function exportExecutedPdf(
     }
     const kinds = fieldKindsOf(editor);
     const fields = listSignerFields(editor.getState().doc);
-    // What Field prints: the values held, each date signed derived from its party's signature.
-    const onRecord = valuesOnRecord(fields, fieldValues(editor.getState()), kinds);
+    // The record Field prints — its kinds, its date format — so what is checked is what prints.
+    const onRecord = valuesOnRecordOf(editor);
     const missing = fields.filter((f) => f.required && !isFieldAnswered(f, onRecord[f.id], kinds));
     if (missing.length > 0) return { ok: false, refusal: { reason: "unanswered-fields", missing } };
     const pdf = await exportToPdf(editor, { ...pdfOptions, resolveImage });

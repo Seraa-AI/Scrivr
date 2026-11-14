@@ -454,6 +454,31 @@ describe("FieldCompletion — the date a party signed", () => {
     expect(dateAt(e)).toBeUndefined();
   });
 
+  it("refuses a signature with no moment its party's date could show, and tells the host", async () => {
+    const failed = vi.fn();
+    editor = new LaidOutViewer({
+      extensions: [
+        StarterKit,
+        Field,
+        FieldCompletion.configure({
+          fields: [initials, signHere, signed],
+          completable: [signHere.id],
+          onFieldRequest: async () => ({ ...signature, signedAt: "2026-11-14T09:30:00" }),
+          onFieldRequestError: failed,
+        }),
+      ],
+      content: { type: "doc", content: [{ type: "paragraph", content: [initials, signHere, signed].map(fieldNode) }] },
+      sealed: true,
+    });
+    editor.mountView();
+
+    requestField(editor, signHere.id);
+    await flush();
+
+    expect(fieldValues(editor.getState())).toEqual({});
+    expect(failed).toHaveBeenCalledWith(signHere, expect.objectContaining({ message: expect.stringMatching(/signedAt/) }));
+  });
+
   it("is not dated by initials given on the way to signing", async () => {
     const e = signingWithDates(async () => ({ kind: "text", text: "AL", signedAt }));
 
