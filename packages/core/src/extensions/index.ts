@@ -9,6 +9,7 @@ export { HardBreak } from "./built-in/HardBreak";
 export {
   Field,
   fieldDrawingAt,
+  fieldKindsOf,
   fieldValues,
   isFieldAnswered,
   listSignerFields,
@@ -21,7 +22,18 @@ export {
 } from "./built-in/Field";
 export { importedFieldValues } from "./built-in/fieldDocx";
 export type { FieldFill, InsertFieldOptions, SignerFieldDescriptor } from "./built-in/Field";
-export { BUILT_IN_FIELD_KINDS, FieldChoiceSchema, checkboxTick, fieldIconStrokes, fieldInk, fieldRoleColor, fieldValueLayout, fieldVerb } from "./built-in/fieldKinds";
+export {
+  BUILT_IN_FIELD_KINDS,
+  FieldChoiceSchema,
+  checkboxTick,
+  fieldIconStrokes,
+  fieldInk,
+  fieldRoleColor,
+  fieldValueLayout,
+  fieldVerb,
+  isDatedWhenSigned,
+  isSigningKind,
+} from "./built-in/fieldKinds";
 export type {
   BuiltInFieldKind,
   FieldBox,
@@ -30,6 +42,7 @@ export type {
   FieldDrawing,
   FieldKind,
   FieldKindSpec,
+  FieldKinds,
   FieldOptions,
   FieldValue,
 } from "./built-in/fieldKinds";

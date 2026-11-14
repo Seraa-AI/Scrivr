@@ -5,9 +5,12 @@ import {
   Editor,
   Field,
   ServerEditor,
+  BUILT_IN_FIELD_KINDS,
   hashArtifact,
+  isDatedWhenSigned,
   isFieldAnswered,
   listSignerFields,
+  unansweredBeforeSigning,
   verifySnapshot,
   type FieldValue,
   type SealedSnapshot,
@@ -112,7 +115,7 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
                 return resolve({ kind: "checkbox", checked: !(current?.kind === "checkbox" && current.checked) });
               }
               // Dated as the party signs: a real host takes the date from its own record of the signature.
-              if (field.kind === "dateSigned") {
+              if (isDatedWhenSigned(BUILT_IN_FIELD_KINDS, field.kind)) {
                 return resolve({ kind: "text", text: new Date().toLocaleDateString(undefined, { dateStyle: "long" }) });
               }
               setRequest({ field, current, resolve });
@@ -145,7 +148,10 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
 
   const pageCount = editor?.layout.pages.length ?? 0;
   const missing = snapshot.fields.filter((f) => f.required && !isFieldAnswered(f, values[f.id]));
-  const nextOpen = mine.find((f) => f.kind !== "dateSigned" && !isFieldAnswered(f, values[f.id]));
+  // What a signer is owed before they sign comes first, as the signing view asks for it.
+  const nextOpen =
+    unansweredBeforeSigning(mine, values, role, BUILT_IN_FIELD_KINDS)[0] ??
+    mine.find((f) => !isDatedWhenSigned(BUILT_IN_FIELD_KINDS, f.kind) && !isFieldAnswered(f, values[f.id]));
 
   const answer = (value: FieldValue | null) => {
     request?.resolve(value);
@@ -255,23 +261,26 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
 
         <Section title={`${ROLE_LABEL[role]}'s fields`}>
           <ul className="flex flex-col gap-1">
-            {mine.map((f) => (
-              <li key={f.id}>
-                <button
-                  type="button"
-                  onClick={() => open(f.id)}
-                  className="flex w-full items-center justify-between gap-2 rounded px-1 py-0.5 text-left hover:bg-[var(--app-accent-soft-bg)]"
-                >
-                  <span>
-                    {KIND_LABEL[f.kind] ?? f.kind}
-                    {!f.required && <span style={{ color: "var(--app-text-muted)" }}> (optional)</span>}
-                  </span>
-                  <span style={{ color: values[f.id] ? "var(--app-accent)" : "var(--app-text-muted)" }}>
-                    {values[f.id] ? describe(values[f.id]!, f) : f.kind === "dateSigned" ? "When you sign" : "Open"}
-                  </span>
-                </button>
-              </li>
-            ))}
+            {mine.map((f) => {
+              const value = values[f.id];
+              return (
+                <li key={f.id}>
+                  <button
+                    type="button"
+                    onClick={() => open(f.id)}
+                    className="flex w-full items-center justify-between gap-2 rounded px-1 py-0.5 text-left hover:bg-[var(--app-accent-soft-bg)]"
+                  >
+                    <span>
+                      {KIND_LABEL[f.kind] ?? f.kind}
+                      {!f.required && <span style={{ color: "var(--app-text-muted)" }}> (optional)</span>}
+                    </span>
+                    <span style={{ color: value ? "var(--app-accent)" : "var(--app-text-muted)" }}>
+                      {value ? describe(value, f) : isDatedWhenSigned(BUILT_IN_FIELD_KINDS, f.kind) ? "When you sign" : "Open"}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         </Section>
 

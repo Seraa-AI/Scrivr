@@ -13,10 +13,13 @@ import {
   fieldDrawingAt,
   fieldIconStrokes,
   fieldInk,
+  fieldKindsOf,
   fieldValueLayout,
   fieldValues,
   hashArtifact,
+  isDatedWhenSigned,
   isFieldAnswered,
+  isSigningKind,
   listSignerFields,
   paintCheckbox,
   setFieldValue,
@@ -30,6 +33,7 @@ import {
   type FieldBox,
   type FieldChoice,
   type FieldControl,
+  type FieldKinds,
   type FieldFill,
   type FieldKind,
   type FieldKindSpec,
@@ -87,7 +91,9 @@ describe("what a signing host builds on", () => {
     expect(typeof paintCheckbox).toBe("function");
     const terms: SignerFieldDescriptor = { id: "t", role: "client", kind: "dropdown", required: true, options: [] };
     expect(isFieldAnswered(terms, undefined)).toBe(false);
-    expect(unansweredBeforeSigning([terms], {}, "client")).toEqual([terms]);
+    const kinds: FieldKinds = fieldKindsOf(editor);
+    expect(unansweredBeforeSigning([terms], {}, "client", kinds)).toEqual([terms]);
+    expect(isSigningKind(BUILT_IN_FIELD_KINDS, "signature") && isDatedWhenSigned(BUILT_IN_FIELD_KINDS, "dateSigned")).toBe(true);
     expect([control, insert.kind, range.kind, denied.reason, typeof gate, fields, refusal]).toEqual([
       "signatureLine",
       "dropdown",

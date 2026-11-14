@@ -28,6 +28,21 @@ const idOf = (mark: Mark): string | null => {
   return typeof id === "string" && id.length > 0 ? id : null;
 };
 
+/** The fields' contiguous runs of inline content in one textblock whose content starts at `start`, in order. */
+function fieldRuns(block: PmNode, start: number, type: MarkType): FieldSpan[] {
+  const runs: FieldSpan[] = [];
+  block.forEach((child, offset) => {
+    const mark = type.isInSet(child.marks);
+    const id = mark ? idOf(mark) : null;
+    if (!mark || id === null) return;
+    const from = start + offset;
+    const last = runs.at(-1);
+    if (last?.id === id && last.to === from) last.to = from + child.nodeSize;
+    else runs.push({ id, from, to: from + child.nodeSize, mark });
+  });
+  return runs;
+}
+
 /**
  * Each field's contiguous runs of inline content — text and the line breaks
  * inside it — by id. Two runs under one id are a copy.
@@ -35,16 +50,9 @@ const idOf = (mark: Mark): string | null => {
 function fieldSpans(doc: PmNode, type: MarkType): Map<string, FieldSpan[]> {
   const spans = new Map<string, FieldSpan[]>();
   doc.descendants((node, pos) => {
-    if (!node.isInline) return true;
-    const mark = type.isInSet(node.marks);
-    const id = mark ? idOf(mark) : null;
-    if (!mark || id === null) return true;
-    const runs = spans.get(id) ?? [];
-    const last = runs.at(-1);
-    if (last && last.to === pos) last.to = pos + node.nodeSize;
-    else runs.push({ id, from: pos, to: pos + node.nodeSize, mark });
-    spans.set(id, runs);
-    return true;
+    if (!node.inlineContent) return true;
+    for (const run of fieldRuns(node, pos + 1, type)) spans.set(run.id, [...(spans.get(run.id) ?? []), run]);
+    return false;
   });
   return spans;
 }
@@ -52,17 +60,7 @@ function fieldSpans(doc: PmNode, type: MarkType): Map<string, FieldSpan[]> {
 /** The run of one field's text the character at `pos` is in, or null when it is in none. */
 export function fieldRangeAt(doc: PmNode, pos: number, type: MarkType): { from: number; to: number } | null {
   const $pos = doc.resolve(pos);
-  const runs: Array<{ id: string; from: number; to: number }> = [];
-  $pos.parent.forEach((child, offset) => {
-    const mark = type.isInSet(child.marks);
-    const id = mark ? idOf(mark) : null;
-    if (id === null) return;
-    const from = $pos.start() + offset;
-    const last = runs.at(-1);
-    if (last?.id === id && last.to === from) last.to = from + child.nodeSize;
-    else runs.push({ id, from, to: from + child.nodeSize });
-  });
-  const run = runs.find((r) => pos >= r.from && pos < r.to);
+  const run = fieldRuns($pos.parent, $pos.start(), type).find((r) => pos >= r.from && pos < r.to);
   return run ? { from: run.from, to: run.to } : null;
 }
 

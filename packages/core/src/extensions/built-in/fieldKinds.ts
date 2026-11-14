@@ -12,15 +12,17 @@ export interface FieldKindSpec {
   label: string;
   /** The box an inserted field reserves, in CSS pixels. */
   size: { width: number; height: number };
-  /** Defaults to `"text"`. */
+  /** Defaults to `"text"`. A `"signatureLine"` field is its party signing. */
   control?: FieldControl;
+  /** Filled with the date its party signs, never by hand. */
+  datedWhenSigned?: boolean;
 }
 
 export const BUILT_IN_FIELD_KINDS = {
   signature: { label: "Signature", size: { width: 180, height: 44 }, control: "signatureLine" },
   initials: { label: "Initials", size: { width: 64, height: 36 } },
   date: { label: "Date", size: { width: 110, height: 24 }, control: "date" },
-  dateSigned: { label: "Date signed", size: { width: 110, height: 24 }, control: "date" },
+  dateSigned: { label: "Date signed", size: { width: 110, height: 24 }, control: "date", datedWhenSigned: true },
   text: { label: "Text", size: { width: 160, height: 24 } },
   checkbox: { label: "", size: { width: 16, height: 16 }, control: "checkbox" },
   name: { label: "Name", size: { width: 160, height: 24 } },
@@ -60,11 +62,22 @@ export const fieldChoices = (options: unknown): FieldChoice[] =>
       })
     : [];
 
-/** The words a value is set in: its text, or the label of the choice it names while the field still offers it. */
-export function valueText(value: FieldValue | undefined, field: PmNode): string | null {
-  if (value?.kind === "text") return value.text;
-  if (value?.kind === "choice") return fieldChoices(field.attrs["options"]).find((choice) => choice.id === value.id)?.label ?? null;
-  return null;
+/**
+ * The words a value is set in: its text, or the label of a choice the field
+ * still offers. Null when it holds none — blank text, or a choice since
+ * withdrawn, leaves the field as empty as no value at all.
+ */
+export function valueText(value: FieldValue | undefined, choices: readonly FieldChoice[]): string | null {
+  switch (value?.kind) {
+    case "text":
+      return value.text.trim() === "" ? null : value.text;
+    case "choice":
+      return choices.find((choice) => choice.id === value.id)?.label ?? null;
+    case "image":
+    case "checkbox":
+    case undefined:
+      return null;
+  }
 }
 
 export interface FieldOptions {
@@ -109,6 +122,12 @@ export interface FieldDrawing {
 }
 
 export type FieldKinds = Readonly<Record<string, FieldKindSpec>>;
+
+/** Whether completing a field of `kind` is its party signing: its control is a signature line. */
+export const isSigningKind = (kinds: FieldKinds, kind: string): boolean => kinds[kind]?.control === "signatureLine";
+
+/** Whether a field of `kind` is dated the moment its party signs, never filled by hand. */
+export const isDatedWhenSigned = (kinds: FieldKinds, kind: string): boolean => kinds[kind]?.datedWhenSigned === true;
 
 export const controlOf = (kinds: FieldKinds, node: PmNode): FieldControl =>
   kinds[String(node.attrs["kind"])]?.control ?? "text";

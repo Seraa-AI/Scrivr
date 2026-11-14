@@ -818,23 +818,31 @@ since the first; what they found, each fixed test first:
 **Decided after that review (2026-11-14).**
 
 - **A dropdown is answered by its choice's id** (`{ kind: "choice", id }`),
-  not its label. Word stores the id as the control's value; a label fixed or
-  translated in a later template would otherwise orphan every stored answer.
-  `Field` sets the label; a choice no longer offered leaves the field empty.
+  not its label: a label fixed or translated in a later template would
+  otherwise orphan every stored answer. `Field` sets the label; a choice since
+  withdrawn, like blank text, answers nothing and leaves the field empty.
+  Word gives each choice an id (`w:value`) beside its label but keeps only the
+  label as the control's text, so an import names the choice by that label.
 - **Date signed** is its own kind, `dateSigned`, beside a plain `date` that
-  may be any date. It is never pressed: when its party gives a signature or
-  initials, `FieldCompletion` asks the host for it through `onFieldRequest`,
-  so the date is the host's — its clock, its format, its record — on the one
-  path every value already takes.
+  may be any date; a kind declares it with `datedWhenSigned`. It is never
+  pressed: when its party's signature is given — not initials on the way —
+  `FieldCompletion` asks the host for it through `onFieldRequest`, so the
+  date is the host's — its clock, its format, its record — on the one path
+  every value already takes. In Word its control is locked, and an import
+  never takes a date found there as the signer's.
 - **Filled author text frames itself under the pointer** with its prompt, as
   Word frames a content control, so a signer can tell the words filled in for
   this document from the template's own. It reaches the signing view as a
   `fieldRange` hover target.
 - **A signature comes last.** Until a party's other required fields are
-  answered, going to sign opens the first of them instead — DocuSign's and
-  Adobe Sign's rule. A required box is an "I agree", so only a tick answers
-  it. The rule is one function, `unansweredBeforeSigning`, which the signing
-  view uses and a host's server runs again when it records a signature: the
+  answered, going to sign moves focus to the first of them — DocuSign's and
+  Adobe Sign's rule. Focus, never an answer: pressing a checkbox ticks it, so
+  answering on the signer's behalf would record consent they never gave. A
+  required box is an "I agree", so only a tick answers it. The rule is one
+  function, `unansweredBeforeSigning`, keyed on what each kind declares — a
+  signature is a `signatureLine` control — so a host's own kinds follow it.
+  The signing view applies it to the fields its viewer completes; a host's
+  server runs it again over the whole role when it records a signature: the
   view only guides, the server enforces.
 - **A checkbox draws as a native control:** rounded, filled with its colour
   and a white tick when checked. The PDF keeps the printed form's box and tick.

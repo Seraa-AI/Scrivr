@@ -396,59 +396,86 @@ describe("FieldCompletion — text the author filled", () => {
 
 describe("FieldCompletion — the date a party signed", () => {
   const signed: SignerFieldDescriptor = { id: "f-signed", role: signHere.role, kind: "dateSigned", required: true, options: [] };
+  const initials: SignerFieldDescriptor = { id: "f-initials", role: signHere.role, kind: "initials", required: false, options: [] };
   const witnessSigned: SignerFieldDescriptor = { id: "f-witness-signed", role: witness.role, kind: "dateSigned", required: true, options: [] };
   const today: FieldValue = { kind: "text", text: "14 November 2026" };
 
-  const signingWithDates = (onFieldRequest: (field: SignerFieldDescriptor) => Promise<FieldValue | null>) => {
+  const signingWithDates = (onFieldRequest: (field: SignerFieldDescriptor) => Promise<FieldValue | null>, paint?: (field: SigningFieldDrawing) => void) => {
+    const all = [initials, signHere, signed, witness, witnessSigned];
     editor = new LaidOutViewer({
       extensions: [
         StarterKit,
         Field,
         FieldCompletion.configure({
-          fields: [signHere, signed, witness, witnessSigned],
-          completable: [signHere.id, signed.id],
+          fields: all,
+          completable: [initials.id, signHere.id, signed.id],
           onFieldRequest,
+          ...(paint ? { paint: (_ctx: CanvasRenderingContext2D, field: SigningFieldDrawing) => (paint(field), true) } : {}),
         }),
       ],
-      content: {
-        type: "doc",
-        content: [{ type: "paragraph", content: [signHere, signed, witness, witnessSigned].map(fieldNode) }],
-      },
+      content: { type: "doc", content: [{ type: "paragraph", content: all.map(fieldNode) }] },
       sealed: true,
     });
     editor.mountView();
     return editor;
   };
+  const answer = vi.fn(async (field: SignerFieldDescriptor): Promise<FieldValue | null> => (field.kind === "dateSigned" ? today : signature));
 
   it("is dated through the host the moment its party signs — never the signer's to fill", async () => {
-    const request = vi.fn(async (field: SignerFieldDescriptor) => (field.kind === "dateSigned" ? today : signature));
-    const e = signingWithDates(request);
+    answer.mockClear();
+    const e = signingWithDates(answer);
 
     expect(requestField(e, signed.id)).toBe(false);
     requestField(e, signHere.id);
     await flush();
     await flush();
 
-    expect(request.mock.calls.map(([field]) => field.id)).toEqual([signHere.id, signed.id]);
+    expect(answer.mock.calls.map(([field]) => field.id)).toEqual([signHere.id, signed.id]);
     expect(fieldValues(e.getState())).toEqual({ [signHere.id]: signature, [signed.id]: today });
   });
 
-  it("is not dated when the signer declines to sign", async () => {
-    const request = vi.fn(async () => null);
+  it("is not dated by initials given on the way to signing", async () => {
+    answer.mockClear();
+    const e = signingWithDates(answer);
+
+    requestField(e, initials.id);
+    await flush();
+    await flush();
+
+    expect(answer.mock.calls.map(([field]) => field.id)).toEqual([initials.id]);
+  });
+
+  it("is asked for once while the host is still dating it, however often the party signs", async () => {
+    let date: (value: FieldValue) => void = () => {};
+    const request = vi.fn((field: SignerFieldDescriptor) =>
+      field.kind === "dateSigned" ? new Promise<FieldValue | null>((resolve) => (date = resolve)) : Promise.resolve(signature),
+    );
     const e = signingWithDates(request);
 
     requestField(e, signHere.id);
     await flush();
+    requestField(e, signHere.id);
+    await flush();
+    date(today);
     await flush();
 
-    expect(request).toHaveBeenCalledTimes(1);
+    expect(request.mock.calls.map(([field]) => field.id)).toEqual([signHere.id, signed.id, signHere.id]);
   });
 
-  it("is passed over by Tab, which goes only to fields a signer fills", () => {
-    const e = signingWithDates(async () => null);
+  it("is passed over by Tab, and never lights up under the pointer as if it could be pressed", () => {
+    const seen: SigningFieldDrawing[] = [];
+    const e = signingWithDates(async () => null, (field) => seen.push(field));
 
+    expect(moveFieldFocus(e, 1)).toBe(initials.id);
     expect(moveFieldFocus(e, 1)).toBe(signHere.id);
     expect(moveFieldFocus(e, 1)).toBeNull();
+
+    const map = new CharacterMap();
+    map.registerObjectRect({ docPos: 3, x: 100, y: 600, width: 110, height: 24, page: 2, baseline: 620 });
+    e.emit("hover", { targets: [], point: point(2, 120, 610) });
+    e.painters.at(-1)!(recordingContext([]), 2, defaultPageConfig, map, e.getResolvedTheme());
+
+    expect(seen.find((f) => f.kind === "dateSigned")?.active).toBe(false);
   });
 });
 
@@ -460,46 +487,92 @@ describe("FieldCompletion — signing last", () => {
     required: true,
     options: [{ id: "net-30", label: "Net 30" }],
   };
+  const agree: SignerFieldDescriptor = { id: "f-agree", role: signHere.role, kind: "checkbox", required: true, options: [] };
 
-  const signingAfterTerms = (onFieldRequest: (field: SignerFieldDescriptor) => Promise<FieldValue | null>) => {
+  const signingAfter = (
+    owed: SignerFieldDescriptor[],
+    onFieldRequest: (field: SignerFieldDescriptor) => Promise<FieldValue | null>,
+    completable = [...owed, signHere].map((f) => f.id),
+  ) => {
     const blocked: Array<{ signature: string; missing: string[] }> = [];
+    const node = (f: SignerFieldDescriptor) => ({ ...fieldNode(f), attrs: { ...fieldNode(f).attrs, options: f.options } });
     editor = new LaidOutViewer({
       extensions: [
         StarterKit,
         Field,
         FieldCompletion.configure({
-          fields: [terms, signHere],
-          completable: [terms.id, signHere.id],
+          fields: [...owed, signHere],
+          completable,
           onFieldRequest,
           onSignatureBlocked: (signature, missing) => blocked.push({ signature: signature.id, missing: missing.map((f) => f.id) }),
         }),
       ],
-      content: {
-        type: "doc",
-        content: [{ type: "paragraph", content: [{ ...fieldNode(terms), attrs: { ...fieldNode(terms).attrs, options: terms.options } }, fieldNode(signHere)] }],
-      },
+      content: { type: "doc", content: [{ type: "paragraph", content: [...owed, signHere].map(node) }] },
       sealed: true,
     });
     editor.mountView();
     return { e: editor, blocked };
   };
 
-  it("holds a signature back until the party's other required fields are answered, opening the first of them instead", async () => {
+  it("holds a signature back while the viewer owes a required field, and moves focus to it to answer", async () => {
     const request = vi.fn(async (field: SignerFieldDescriptor): Promise<FieldValue | null> =>
       field.id === terms.id ? { kind: "choice", id: "net-30" } : signature,
     );
-    const { e, blocked } = signingAfterTerms(request);
+    const { e, blocked } = signingAfter([terms], request);
 
-    requestField(e, signHere.id);
-    await flush();
-
-    expect(request.mock.calls.map(([field]) => field.id)).toEqual([terms.id]);
+    expect(requestField(e, signHere.id)).toBe(false);
+    expect(request).not.toHaveBeenCalled();
     expect(blocked).toEqual([{ signature: signHere.id, missing: [terms.id] }]);
+    expect(e.scrolledTo.at(-1)).toEqual({ from: 1, to: 2 });
 
-    requestField(e, signHere.id);
+    // Focus is on the owed field: Tab goes on from it to the signature.
+    expect(moveFieldFocus(e, 1)).toBe(signHere.id);
+    requestField(e, terms.id);
+    await flush();
+    expect(requestField(e, signHere.id)).toBe(true);
     await flush();
 
     expect(request.mock.calls.map(([field]) => field.id)).toEqual([terms.id, signHere.id]);
     expect(fieldValues(e.getState())[signHere.id]).toEqual(signature);
+  });
+
+  it("never ticks a required box for the signer on the way to signing", () => {
+    const request = vi.fn(async (): Promise<FieldValue | null> => ({ kind: "checkbox", checked: true }));
+    const { e } = signingAfter([agree], request);
+
+    requestField(e, signHere.id);
+
+    expect(request).not.toHaveBeenCalled();
+    expect(fieldValues(e.getState())).toEqual({});
+  });
+
+  it("leaves a field someone else in the role completes to the server, so the signature still opens", () => {
+    const request = vi.fn(async () => signature);
+    const { e, blocked } = signingAfter([terms], request, [signHere.id]);
+
+    expect(requestField(e, signHere.id)).toBe(true);
+    expect(blocked).toEqual([]);
+  });
+});
+
+describe("FieldCompletion — an answer that answers nothing", () => {
+  it("leaves a choice since withdrawn showing what to do, as an empty field does", () => {
+    const terms: SignerFieldDescriptor = { id: "f-terms", role: "client", kind: "dropdown", required: true, options: [{ id: "net-30", label: "Net 30" }] };
+    editor = new LaidOutViewer({
+      extensions: [
+        StarterKit,
+        Field.configure({ values: { [terms.id]: { kind: "choice", id: "net-90" } } }),
+        FieldCompletion.configure({ fields: [terms], completable: [terms.id], onFieldRequest: async () => null }),
+      ],
+      content: { type: "doc", content: [{ type: "paragraph", content: [{ ...fieldNode(terms), attrs: { ...fieldNode(terms).attrs, options: terms.options } }] }] },
+      sealed: true,
+    });
+    editor.mountView();
+    const map = new CharacterMap();
+    map.registerObjectRect({ docPos: 1, x: 100, y: 600, width: 140, height: 24, page: 2, baseline: 620 });
+    const drawn: string[] = [];
+    editor.painters.at(-1)!(recordingContext(drawn), 2, defaultPageConfig, map, editor.getResolvedTheme());
+
+    expect(drawn).toContain("Choose");
   });
 });

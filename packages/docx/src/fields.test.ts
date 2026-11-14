@@ -211,6 +211,25 @@ describe("a field filled in Word", () => {
     expect(unknown.fieldValues).toEqual({});
   });
 
+  it("matches a chosen label Word gives back without the spaces around it", async () => {
+    const options = [{ id: "net-30", label: " Net 30 " }];
+    const { fieldValues } = await importDocx(new ServerEditor({ extensions }), await filledInWord("dropdown", "Net 30", { options }));
+
+    expect(fieldValues).toEqual({ who: { kind: "choice", id: "net-30" } });
+  });
+
+  it("locks a date signed in Word, and never takes a date typed there as the signer's", async () => {
+    const editor = new ServerEditor({
+      extensions,
+      content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "field", attrs: { nodeId: "who", kind: "dateSigned", fill: "signer", role: "client", width: 110, height: 24 } }] }] },
+    });
+    const xml = strFromU8(unzipSync(await exportDocxBytes(editor))["word/document.xml"]!);
+    const { fieldValues } = await importDocx(new ServerEditor({ extensions }), await filledInWord("dateSigned", "2020-01-01"));
+
+    expect(xml).toMatch(/<w:lock w:val="contentLocked"\/>.*<w:date>/);
+    expect(fieldValues).toEqual({});
+  });
+
   it("brings back a box the signer ticked, and nothing for one left as it was handed to them", async () => {
     const box = { width: 16, height: 16 };
     const untouched = await importDocx(new ServerEditor({ extensions }), await filledInWord("checkbox", "☐", box));

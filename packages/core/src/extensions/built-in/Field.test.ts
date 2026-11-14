@@ -8,8 +8,8 @@ import { NodeSelection, TextSelection } from "prosemirror-state";
 import { DOMParser, DOMSerializer, type Node as PmNode } from "prosemirror-model";
 import { ServerEditor } from "../../ServerEditor";
 import { StarterKit } from "../StarterKit";
-import { Field, fieldValues, isFieldAnswered, listSignerFields, setFieldValue, unansweredBeforeSigning, type SignerFieldDescriptor } from "./Field";
-import { fieldIconStrokes, fieldInk, fieldRoleColor, fieldValueLayout, fieldVerb } from "./fieldKinds";
+import { Field, fieldValues, isFieldAnswered, listSignerFields, paintCheckbox, setFieldValue, unansweredBeforeSigning, type SignerFieldDescriptor } from "./Field";
+import { BUILT_IN_FIELD_KINDS, fieldIconStrokes, fieldInk, fieldRoleColor, fieldValueLayout, fieldVerb } from "./fieldKinds";
 import { createTestEditor, measureTextWidth } from "../../test-utils";
 import { DefaultFontProvider } from "../../fonts/DefaultFontProvider";
 
@@ -657,6 +657,20 @@ describe("a field's box on the page", () => {
     editor.destroy();
   });
 
+  it("keeps the space its author left while its value is blank", () => {
+    const attrs = { nodeId: "who", kind: "name", fill: "signer", role: "client", width: 300, height: 24 };
+
+    expect(laidOutField(attrs, Field.configure({ values: { who: { kind: "text", text: "   " } } })).width).toBe(300);
+  });
+
+  it("is a checkbox about as tall as the text's capitals and ascenders, as a native one sits by its label", () => {
+    const { width, font } = laidOutField({ nodeId: "ok", kind: "checkbox", fill: "signer", role: "client", width: 16, height: 16 });
+    const fontPx = Number(/(\d+(?:\.\d+)?)px/.exec(font)?.[1]);
+
+    expect(width).toBeGreaterThanOrEqual(fontPx * 0.85);
+    expect(width).toBeLessThanOrEqual(fontPx);
+  });
+
   it("keeps a dropdown's choice by its id, and sets the label a person reads", () => {
     const options = [{ id: "net-15", label: "Net 15" }, { id: "net-60", label: "Net 60 days" }];
     const attrs = { nodeId: "t", kind: "dropdown", fill: "signer", role: "client", options, width: 300, height: 24 };
@@ -790,7 +804,7 @@ describe("what a party completes before they sign", () => {
   ];
 
   it("is every required field of theirs but the signature and the date it is signed", () => {
-    expect(unansweredBeforeSigning(fields, {}, "client").map((f) => f.id)).toEqual(["terms", "agree", "name", "initials"]);
+    expect(unansweredBeforeSigning(fields, {}, "client", BUILT_IN_FIELD_KINDS).map((f) => f.id)).toEqual(["terms", "agree", "name", "initials"]);
     expect(
       unansweredBeforeSigning(
         fields,
@@ -801,8 +815,19 @@ describe("what a party completes before they sign", () => {
           initials: { kind: "text", text: "AL" },
         },
         "client",
+        BUILT_IN_FIELD_KINDS,
       ),
     ).toEqual([]);
+  });
+
+  it("knows a host's own signature, and its own dated kind, by what they declare", () => {
+    const kinds = {
+      ...BUILT_IN_FIELD_KINDS,
+      witness: { label: "Witness", size: { width: 180, height: 44 }, control: "signatureLine" as const },
+      stamped: { label: "Stamped on", size: { width: 110, height: 24 }, control: "date" as const, datedWhenSigned: true },
+    };
+
+    expect(unansweredBeforeSigning([field("w", "witness"), field("s", "stamped"), name], {}, "client", kinds)).toEqual([name]);
   });
 
   it("counts an unticked box, a choice no longer offered, or blank text as unanswered", () => {
@@ -811,5 +836,45 @@ describe("what a party completes before they sign", () => {
     expect(isFieldAnswered(name, { kind: "text", text: "  " })).toBe(false);
     expect(isFieldAnswered(name, undefined)).toBe(false);
     expect(isFieldAnswered(field("sig", "signature"), { kind: "image", src: "data:image/png;base64,AA==" })).toBe(true);
+  });
+});
+
+describe("a checkbox, drawn as a native one", () => {
+  /** What was filled and stroked, in which colour and at what opacity. */
+  const drawing = (look: Parameters<typeof paintCheckbox>[2]) => {
+    const marks: string[] = [];
+    const state: Record<string, unknown> = { globalAlpha: 1 };
+    const isContext = (value: unknown): value is CanvasRenderingContext2D => typeof value === "object" && value !== null;
+    const ctx: unknown = new Proxy(state, {
+      get: (target, key) =>
+        typeof key !== "string"
+          ? undefined
+          : key in target
+            ? target[key]
+            : (..._args: unknown[]) => {
+                if (key === "fill") marks.push(`fill ${String(target["fillStyle"])} @${String(target["globalAlpha"])}`);
+                if (key === "stroke") marks.push(`stroke ${String(target["strokeStyle"])}`);
+              },
+      set: (target, key, value) => {
+        if (typeof key === "string") target[key] = value;
+        return true;
+      },
+    });
+    if (!isContext(ctx)) throw new Error("no context");
+    paintCheckbox(ctx, { x: 0, y: 0, width: 15, height: 15 }, look);
+    return marks;
+  };
+
+  it("is an outlined box on the page until checked, then filled in its colour with a white tick", () => {
+    expect(drawing({ checked: false, color: "#0e7490", pageBg: "#fff" })).toEqual(["fill #fff @1", "stroke #0e7490"]);
+    expect(drawing({ checked: true, color: "#0e7490", pageBg: "#fff" })).toEqual(["fill #0e7490 @1", "stroke #ffffff"]);
+  });
+
+  it("tints an empty box under the pointer", () => {
+    expect(drawing({ checked: false, color: "#0e7490", pageBg: "#fff", hover: true })).toEqual([
+      "fill #fff @1",
+      "fill #0e7490 @0.12",
+      "stroke #0e7490",
+    ]);
   });
 });

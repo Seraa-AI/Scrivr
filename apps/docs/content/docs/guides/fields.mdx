@@ -68,7 +68,7 @@ editor.commands.unwrapFieldBlock();
 | `signature` | Signature | signature line |
 | `initials` | Initials | text |
 | `date` | Date | date |
-| `dateSigned` | Date signed | date — dated when its party signs |
+| `dateSigned` | Date signed | date — dated when its party signs (`datedWhenSigned`) |
 | `text` | Text | text |
 | `checkbox` | — | checkbox |
 | `name` | Name | text |
@@ -202,14 +202,17 @@ Values live in `Field`, beside the document and never in it, so a sealed documen
 
 - The signing view draws your own kinds and colours as `Field` was given them, so a kind of your own completes as the control it declares there too.
 - `onFieldRequestError(field, error)` is called when your `onFieldRequest` throws or rejects. The field stays as it was; tell the signer and let them try again. Resolving `null` is declining, not failing.
-- A signature comes last, as on DocuSign or Adobe Sign. Until the party's other required fields are answered (a box ticked, a choice made, text given), going to sign opens the first of them instead, and `onSignatureBlocked(signature, missing)` tells you which, so you can say "Choose payment terms before you sign". Optional fields never hold a signature back. The view only guides the signer: check the same rule on your server when you record a signature, with the function the view uses:
+- A signature comes last, as on DocuSign or Adobe Sign. Until the viewer's other required fields are answered (a box ticked, a choice made, text given), going to sign moves focus to the first of them — it never answers one for them — and `onSignatureBlocked(signature, missing)` tells you which, so you can say "Choose payment terms before you sign". Optional fields never hold a signature back, and a kind of your own whose control is `"signatureLine"` is held back like the built-in signature. The view only guides the signer: check the same rule on your server, over the whole role, when you record a signature, with the function the view uses and your editor's kinds:
 
   ```ts
-  import { unansweredBeforeSigning } from "@scrivr/core";
+  import { fieldKindsOf, unansweredBeforeSigning } from "@scrivr/core";
 
-  if (unansweredBeforeSigning(fields, values, role).length > 0) throw new Error("Complete every required field first");
+  // `server` is the ServerEditor with your `Field.configure({ kinds })`.
+  if (unansweredBeforeSigning(fields, values, role, fieldKindsOf(server)).length > 0) {
+    throw new Error("Complete every required field first");
+  }
   ```
-- A `dateSigned` field is never pressed. The moment its party gives a signature or initials, `onFieldRequest` is called for it with no press: answer with the date by your own clock and in your own format, and record it with the signature.
+- A `dateSigned` field is never pressed. The moment its party's signature is given (initials on the way do not count), `onFieldRequest` is called for it with no press: answer with the date by your own clock and in your own format, and record it with the signature.
 
   ```ts
   onFieldRequest: async (field) =>
@@ -246,7 +249,7 @@ const { doc, fieldValues } = await importDocx(editor, bytes);
 // { "client-name-field": { kind: "text", text: "Alice Example" } }
 ```
 
-Record them as the signer's, or pass them on to `Field.configure({ values })`. Only a ticked box counts as an answer: an unticked one is how it was handed to the signer. A dropdown comes back as the choice its text names, by id; text that is none of its choices is no answer. A drawing in a signature control is not brought back (the import warns `field-drawing-not-imported`): signatures are captured by your signing host.
+Record them as the signer's, or pass them on to `Field.configure({ values })`. Only a ticked box counts as an answer: an unticked one is how it was handed to the signer. A dropdown comes back as the choice its text names, by id; text that is none of its choices is no answer. A date signed is locked in Word and never comes back as an answer: it is your signing host's to give. A drawing in a signature control is not brought back (the import warns `field-drawing-not-imported`): signatures are captured by your signing host.
 
 ## In other formats
 

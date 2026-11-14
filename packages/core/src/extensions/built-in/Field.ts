@@ -21,6 +21,8 @@ import {
   fieldRoleColor,
   fieldChoices,
   fieldValueLayout,
+  isDatedWhenSigned,
+  isSigningKind,
   setsLike,
   valueText,
   type FieldBox,
@@ -91,35 +93,43 @@ export interface SignerFieldDescriptor {
   options: FieldChoice[];
 }
 
-/** Whether a value answers its field: a box ticked, a choice it still offers, text that is not blank. */
+/**
+ * Whether a value answers its field: a box ticked, a drawing, or words — text
+ * that is not blank, or a choice the field still offers.
+ */
 export function isFieldAnswered(field: SignerFieldDescriptor, value: FieldValue | undefined): boolean {
   switch (value?.kind) {
-    case undefined:
-      return false;
     case "checkbox":
       return value.checked;
-    case "choice":
-      return field.options.some((choice) => choice.id === value.id);
-    case "text":
-      return value.text.trim() !== "";
     case "image":
       return true;
+    case "text":
+    case "choice":
+    case undefined:
+      return valueText(value, field.options) !== null;
   }
 }
 
 /**
- * A party's required fields still unanswered, which they complete before they
- * sign: all but their signature, and the date it is signed. The signing view
- * holds a signature back until this is empty; check it again on the server
- * when a signature is recorded.
+ * A party's required fields still unanswered — every one but its signatures
+ * and the dates they are signed, which come last. The signing view holds a
+ * signature back until this is empty; a server checks it again when it
+ * records one. `kinds` are the editor's own (`fieldKindsOf`), so a host's
+ * signature kind counts as one.
  */
 export function unansweredBeforeSigning(
   fields: readonly SignerFieldDescriptor[],
   values: Readonly<Record<string, FieldValue>>,
   role: string,
+  kinds: FieldKinds,
 ): SignerFieldDescriptor[] {
   return fields.filter(
-    (f) => f.role === role && f.required && f.kind !== "signature" && f.kind !== "dateSigned" && !isFieldAnswered(f, values[f.id]),
+    (f) =>
+      f.role === role &&
+      f.required &&
+      !isSigningKind(kinds, f.kind) &&
+      !isDatedWhenSigned(kinds, f.kind) &&
+      !isFieldAnswered(f, values[f.id]),
   );
 }
 
@@ -295,6 +305,9 @@ interface FieldSetup {
 const setupByContext = new WeakMap<object, FieldSetup>();
 const setupByEditor = new WeakMap<IBaseEditor, FieldSetup>();
 
+/** The kinds `editor`'s `Field` knows — the built-ins and the host's own — or the built-ins alone without one. */
+export const fieldKindsOf = (editor: IBaseEditor): FieldKinds => setupByEditor.get(editor)?.kinds ?? BUILT_IN_FIELD_KINDS;
+
 /** The values a contribution resolved in `context` lays out and prints with. */
 const valuesIn = (context: object, options: FieldOptions): FieldValues => {
   const setup = setupByContext.get(context);
@@ -365,7 +378,7 @@ const fieldStrategy = (kinds: FieldKinds, options: FieldOptions, values: () => F
   // a drawing keeps its authored size, as an inline image does. Measuring
   // also records the run's font on the span — the face its value is set in.
   measure: (node, font, measurer) => {
-    const text = valueText(valueOf(values(), node), node);
+    const text = valueText(valueOf(values(), node), fieldChoices(node.attrs["options"]));
     const { ascent, descent } = measurer.getFontMetrics(font);
     const height = Math.round(ascent + descent);
     // Typed text is set as text, whatever the field: a typed signature too.
@@ -387,7 +400,7 @@ const fieldStrategy = (kinds: FieldKinds, options: FieldOptions, values: () => F
     const box = { x, y, width, height };
     const drawing = drawingOf(kinds, options, values(), node, { box, baselineY: line.baselineY, theme });
     if (options.paint?.(ctx, drawing)) return;
-    const text = valueText(drawing.value, node);
+    const text = valueText(drawing.value, fieldChoices(node.attrs["options"]));
     if (drawing.control !== "checkbox" && (text !== null || drawing.value?.kind === "image")) {
       paintFieldValue(ctx, box, { text, value: drawing.value }, { ...line, ink: theme.defaultText });
       return;
@@ -407,7 +420,7 @@ const isChecked = (field: FieldDrawing): boolean =>
   field.value?.kind === "checkbox" ? field.value.checked : field.node.attrs["checked"] === true;
 
 /**
- * A checkbox as a native control draws one: a rounded box in its colour,
+ * Draws a checkbox as a native control does: a rounded box in its colour,
  * filled with it and a white tick once checked. `hover` tints an empty box
  * that can be ticked.
  */
@@ -581,7 +594,7 @@ const fieldPdf =
       if (src) ctx.draw.image({ x, y, width, height, image: { src }, fit: "contain" });
       return;
     }
-    const text = valueText(value, node);
+    const text = valueText(value, fieldChoices(node.attrs["options"]));
     if (text !== null) {
       if (!ctx.font) return;
       const set = fieldValueLayout({ x, y, width, height }, ctx.font.cssFont, ctx.baselineY);

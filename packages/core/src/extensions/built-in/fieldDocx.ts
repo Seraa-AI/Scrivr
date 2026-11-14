@@ -1,5 +1,5 @@
 import type { Node as PmNode } from "prosemirror-model";
-import { fieldCaption, fieldChoices, type FieldChoice, type FieldControl, type FieldKinds, type FieldValue } from "./fieldKinds";
+import { fieldCaption, fieldChoices, isDatedWhenSigned, type FieldChoice, type FieldControl, type FieldKinds, type FieldValue } from "./fieldKinds";
 import {
   DOCX_TAG_MAX_LENGTH,
   xml,
@@ -147,7 +147,11 @@ export const fieldDocx = (kinds: FieldKinds): DocxNodeHandler => (node, _childre
   const shapes: Record<FieldControl, () => { props: XmlNode[]; content: XmlNode }> = {
     signatureLine: () => ({ props: [], content: signatureLine(node, id) }),
     checkbox: () => ({ props: [checkbox(checked)], content: glyphRun(checked ? "☒" : "☐") }),
-    date: () => ({ props: [xml("w:showingPlcHdr"), dateControl()], content: plainRun(caption) }),
+    // A date signed is the signing host's to fill, so Word locks what it holds.
+    date: () => ({
+      props: [...(isDatedWhenSigned(kinds, kind) ? [xml("w:lock", { "w:val": "contentLocked" })] : []), xml("w:showingPlcHdr"), dateControl()],
+      content: plainRun(caption),
+    }),
     dropdown: () => ({ props: [xml("w:showingPlcHdr"), dropdown(fieldChoices(node.attrs["options"]))], content: plainRun(caption) }),
     text: () => ({ props: [xml("w:showingPlcHdr"), xml("w:text")], content: plainRun(caption) }),
   };
@@ -210,7 +214,7 @@ export const importedFieldValues = (ctx: DocxImportContext): Record<string, Fiel
 function controlValue(text: string, control: FieldControl, choices: readonly FieldChoice[]): FieldValue | null {
   if (control === "checkbox") return text.includes("☒") ? { kind: "checkbox", checked: true } : null;
   if (control === "dropdown") {
-    const chosen = choices.find((choice) => choice.label === text);
+    const chosen = choices.find((choice) => choice.label.trim() === text);
     return chosen ? { kind: "choice", id: chosen.id } : null;
   }
   return text ? { kind: "text", text } : null;
@@ -228,7 +232,9 @@ export const fieldImport =
     const text = inline.content.map((item) => (item.type === "text" ? item.text : "")).join("").trim();
     const id = params.get("id") || null;
     const options = inline.listItems.map((item) => ({ id: item.value, label: item.displayText }));
-    const value = fill === "signer" && id && !inline.placeholder ? controlValue(text, kinds[kind]?.control ?? "text", options) : null;
+    // A date signed is dated by the signing host, never answered in Word.
+    const answerable = fill === "signer" && id && !inline.placeholder && !isDatedWhenSigned(kinds, kind);
+    const value = answerable ? controlValue(text, kinds[kind]?.control ?? "text", options) : null;
     if (value && id) ctx.shared.getOrInit<Record<string, FieldValue>>(FIELD_VALUES_KEY, () => ({}))[id] = value;
     if (fill === "signer" && !inline.placeholder && inline.content.some((item) => item.type === "image")) {
       ctx.diagnostics.warn({
