@@ -9,6 +9,7 @@ import type { InlineLine, InlineStrategy } from "../../layout/BlockRegistry";
 import type { PdfNodeHandler } from "../../exports/pdf";
 import { compositeColor, parseCssColor, type Rgb } from "../../model/cssColor";
 import type { ResolvedTheme } from "../../model/theme";
+import type { HoverResolver } from "../../hover/types";
 import {
   BUILT_IN_FIELD_KINDS,
   checkboxTick,
@@ -21,6 +22,7 @@ import {
   fieldChoices,
   fieldValueLayout,
   setsLike,
+  valueText,
   type FieldBox,
   type FieldChoice,
   type FieldControl,
@@ -43,6 +45,7 @@ import {
 } from "./fieldDocx";
 import {
   exitFieldRange,
+  fieldRangeAt,
   fieldRangeDecorator,
   fieldRangePdf,
   fieldRangePlugin,
@@ -311,11 +314,11 @@ const drawingOf = (
 function textFieldWidth(
   kinds: FieldKinds,
   field: PmNode,
-  value: FieldValue | undefined,
+  text: string | null,
   line: { font: string; height: number },
   measurer: { measureWidth(text: string, font: string): number },
 ): number {
-  if (value?.kind === "text") return Math.ceil(measurer.measureWidth(value.text, line.font)) + 4;
+  if (text !== null) return Math.ceil(measurer.measureWidth(text, line.font)) + 4;
   const authored = Number(field.attrs["width"]);
   if (controlOf(kinds, field) !== "dropdown") return authored;
   const ink = fieldInk({ x: 0, y: 0, width: authored, height: line.height });
@@ -330,11 +333,11 @@ const fieldStrategy = (kinds: FieldKinds, options: FieldOptions, values: () => F
   // a drawing keeps its authored size, as an inline image does. Measuring
   // also records the run's font on the span — the face its value is set in.
   measure: (node, font, measurer) => {
-    const value = valueOf(values(), node);
+    const text = valueText(valueOf(values(), node), node);
     const { ascent, descent } = measurer.getFontMetrics(font);
     const height = Math.round(ascent + descent);
     // Typed text is set as text, whatever the field: a typed signature too.
-    const like = value?.kind === "text" ? "text" : setsLike(String(node.attrs["kind"]), controlOf(kinds, node));
+    const like = text !== null ? "text" : setsLike(String(node.attrs["kind"]), controlOf(kinds, node));
     switch (like) {
       case "picture":
         return { width: Number(node.attrs["width"]), height: Number(node.attrs["height"]) };
@@ -344,15 +347,16 @@ const fieldStrategy = (kinds: FieldKinds, options: FieldOptions, values: () => F
       }
       case "text":
         // The whole text line, as a word fills it: above the baseline and below.
-        return { width: textFieldWidth(kinds, node, value, { font, height }, measurer), height, verticalAlign: "text-bottom" };
+        return { width: textFieldWidth(kinds, node, text, { font, height }, measurer), height, verticalAlign: "text-bottom" };
     }
   },
   render(ctx, x, y, width, height, node, theme: ResolvedTheme, line: InlineLine) {
     const box = { x, y, width, height };
     const drawing = drawingOf(kinds, options, values(), node, { box, baselineY: line.baselineY, theme });
     if (options.paint?.(ctx, drawing)) return;
-    if (drawing.value && drawing.control !== "checkbox") {
-      paintFieldValue(ctx, box, drawing.value, { ...line, ink: theme.defaultText });
+    const text = valueText(drawing.value, node);
+    if (drawing.control !== "checkbox" && (text !== null || drawing.value?.kind === "image")) {
+      paintFieldValue(ctx, box, { text, value: drawing.value }, { ...line, ink: theme.defaultText });
       return;
     }
     if (drawing.control !== "checkbox") {
@@ -361,13 +365,7 @@ const fieldStrategy = (kinds: FieldKinds, options: FieldOptions, values: () => F
       paintFieldInk(ctx, box, { control: drawing.control, label: drawing.label, color: drawing.color, baselineY: line.baselineY });
       return;
     }
-    ctx.save();
-    ctx.strokeStyle = drawing.color;
-    ctx.lineWidth = 1.5;
-    ctx.setLineDash([2, 2]);
-    ctx.strokeRect(x + 0.75, y + 0.75, width - 1.5, height - 1.5);
-    ctx.restore();
-    if (isChecked(drawing)) paintCheckboxTick(ctx, box, theme.defaultText);
+    paintCheckbox(ctx, box, { checked: isChecked(drawing), color: drawing.color, pageBg: theme.pageBg });
   },
 });
 
@@ -375,17 +373,44 @@ const fieldStrategy = (kinds: FieldKinds, options: FieldOptions, values: () => F
 const isChecked = (field: FieldDrawing): boolean =>
   field.value?.kind === "checkbox" ? field.value.checked : field.node.attrs["checked"] === true;
 
-/** The tick in a checked box. */
-export function paintCheckboxTick(ctx: CanvasRenderingContext2D, box: FieldBox, ink: string): void {
-  const [a, b, c] = checkboxTick(box);
+/**
+ * A checkbox as a native control draws one: a rounded box in its colour,
+ * filled with it and a white tick once checked. `hover` tints an empty box
+ * that can be ticked.
+ */
+export function paintCheckbox(
+  ctx: CanvasRenderingContext2D,
+  box: FieldBox,
+  look: { checked: boolean; color: string; pageBg: string; hover?: boolean },
+): void {
+  const { x, y, width, height } = box;
   ctx.save();
-  ctx.strokeStyle = ink;
-  ctx.lineWidth = 1.5;
   ctx.beginPath();
-  ctx.moveTo(a.x, a.y);
-  ctx.lineTo(b.x, b.y);
-  ctx.lineTo(c.x, c.y);
-  ctx.stroke();
+  ctx.roundRect(x + 0.75, y + 0.75, width - 1.5, height - 1.5, Math.min(3, width / 5));
+  ctx.fillStyle = look.checked ? look.color : look.pageBg;
+  ctx.fill();
+  if (!look.checked) {
+    if (look.hover) {
+      ctx.globalAlpha = 0.12;
+      ctx.fillStyle = look.color;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    ctx.strokeStyle = look.color;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  } else {
+    const [a, b, c] = checkboxTick(box);
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = Math.max(1.5, width * 0.13);
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.lineTo(c.x, c.y);
+    ctx.stroke();
+  }
   ctx.restore();
 }
 
@@ -396,17 +421,17 @@ export function paintCheckboxTick(ctx: CanvasRenderingContext2D, box: FieldBox, 
 function paintFieldValue(
   ctx: CanvasRenderingContext2D,
   box: FieldBox,
-  value: FieldValue,
+  { text, value }: { text: string | null; value: FieldValue | undefined },
   line: InlineLine & { ink: string },
 ): void {
   ctx.save();
-  if (value.kind === "text") {
+  if (text !== null) {
     const set = fieldValueLayout(box, line.font, line.baselineY);
     ctx.font = set.font;
     ctx.fillStyle = line.ink;
     ctx.textBaseline = "alphabetic";
-    ctx.fillText(value.text, set.x, set.baselineY);
-  } else if (value.kind === "image") {
+    ctx.fillText(text, set.x, set.baselineY);
+  } else if (value?.kind === "image") {
     const src = safeImageUrl(value.src);
     const img = src ? getCachedImage(src) : null;
     if (img) {
@@ -523,10 +548,11 @@ const fieldPdf =
       if (src) ctx.draw.image({ x, y, width, height, image: { src }, fit: "contain" });
       return;
     }
-    if (value?.kind === "text") {
+    const text = valueText(value, node);
+    if (text !== null) {
       if (!ctx.font) return;
       const set = fieldValueLayout({ x, y, width, height }, ctx.font.cssFont, ctx.baselineY);
-      ctx.draw.text({ text: value.text, x: set.x, baselineY: set.baselineY, sizePx: set.sizePx, font: ctx.font, color: ink });
+      ctx.draw.text({ text, x: set.x, baselineY: set.baselineY, sizePx: set.sizePx, font: ctx.font, color: ink });
       return;
     }
     // A blank on a printed form: its line, and what goes on it.
@@ -655,6 +681,20 @@ export const Field = Extension.create<FieldOptions>({
         },
       },
     };
+  },
+
+  addHoverResolvers(): HoverResolver[] {
+    // An author's filled text reads as the document's own; under the pointer
+    // it can show which words were filled in, as Word frames a content control.
+    return [
+      {
+        mark: "fieldRange",
+        range: (doc, pos) => {
+          const type = doc.type.schema.marks["fieldRange"];
+          return type ? fieldRangeAt(doc, pos, type) : null;
+        },
+      },
+    ];
   },
 
   addMarks() {

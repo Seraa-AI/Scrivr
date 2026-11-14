@@ -815,6 +815,24 @@ since the first; what they found, each fixed test first:
   box as content, so import reported `checked: false` as the signer's. Only a
   tick is an answer now, and a value takes the type its field's kind declares.
 
+**Decided after that review (2026-11-14).**
+
+- **A dropdown is answered by its choice's id** (`{ kind: "choice", id }`),
+  not its label. Word stores the id as the control's value; a label fixed or
+  translated in a later template would otherwise orphan every stored answer.
+  `Field` sets the label; a choice no longer offered leaves the field empty.
+- **Date signed** is its own kind, `dateSigned`, beside a plain `date` that
+  may be any date. It is never pressed: when its party gives a signature or
+  initials, `FieldCompletion` asks the host for it through `onFieldRequest`,
+  so the date is the host's — its clock, its format, its record — on the one
+  path every value already takes.
+- **Filled author text frames itself under the pointer** with its prompt, as
+  Word frames a content control, so a signer can tell the words filled in for
+  this document from the template's own. It reaches the signing view as a
+  `fieldRange` hover target.
+- **A checkbox draws as a native control:** rounded, filled with its colour
+  and a white tick when checked. The PDF keeps the printed form's box and tick.
+
 Still to do before claiming Word compatibility: open exported files in desktop
 Word — signature-line rendering and Sign, fill → save → reopen → re-import for
 every control, copied and multiline controls, and what re-export does to

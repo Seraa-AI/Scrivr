@@ -49,6 +49,23 @@ function fieldSpans(doc: PmNode, type: MarkType): Map<string, FieldSpan[]> {
   return spans;
 }
 
+/** The run of one field's text the character at `pos` is in, or null when it is in none. */
+export function fieldRangeAt(doc: PmNode, pos: number, type: MarkType): { from: number; to: number } | null {
+  const $pos = doc.resolve(pos);
+  const runs: Array<{ id: string; from: number; to: number }> = [];
+  $pos.parent.forEach((child, offset) => {
+    const mark = type.isInSet(child.marks);
+    const id = mark ? idOf(mark) : null;
+    if (id === null) return;
+    const from = $pos.start() + offset;
+    const last = runs.at(-1);
+    if (last?.id === id && last.to === from) last.to = from + child.nodeSize;
+    else runs.push({ id, from, to: from + child.nodeSize });
+  });
+  const run = runs.find((r) => pos >= r.from && pos < r.to);
+  return run ? { from: run.from, to: run.to } : null;
+}
+
 /** Whether any step touched text carrying a field, before or after. */
 function touchesField(transactions: readonly Transaction[], type: MarkType): boolean {
   return transactions.some((tr) =>

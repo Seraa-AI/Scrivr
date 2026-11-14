@@ -20,6 +20,7 @@ export const BUILT_IN_FIELD_KINDS = {
   signature: { label: "Signature", size: { width: 180, height: 44 }, control: "signatureLine" },
   initials: { label: "Initials", size: { width: 64, height: 36 } },
   date: { label: "Date", size: { width: 110, height: 24 }, control: "date" },
+  dateSigned: { label: "Date signed", size: { width: 110, height: 24 }, control: "date" },
   text: { label: "Text", size: { width: 160, height: 24 } },
   checkbox: { label: "", size: { width: 16, height: 16 }, control: "checkbox" },
   name: { label: "Name", size: { width: 160, height: 24 } },
@@ -35,9 +36,14 @@ export type BuiltInFieldKind = keyof typeof BUILT_IN_FIELD_KINDS;
 /** A built-in kind's name, or the name a host registered a kind under. */
 export type FieldKind = BuiltInFieldKind | (string & {});
 
-/** What fills a field. `image` is a raster drawn signature; `data:` URLs allowed, SVG not. */
+/**
+ * What fills a field. `image` is a raster drawn signature; `data:` URLs
+ * allowed, SVG not. `choice` names a dropdown's choice by its `id`, so a
+ * renamed label still answers the same choice.
+ */
 export type FieldValue =
   | { kind: "text"; text: string }
+  | { kind: "choice"; id: string }
   | { kind: "image"; src: string }
   | { kind: "checkbox"; checked: boolean };
 
@@ -53,6 +59,13 @@ export const fieldChoices = (options: unknown): FieldChoice[] =>
         return parsed.success ? [parsed.data] : [];
       })
     : [];
+
+/** The words a value is set in: its text, or the label of the choice it names while the field still offers it. */
+export function valueText(value: FieldValue | undefined, field: PmNode): string | null {
+  if (value?.kind === "text") return value.text;
+  if (value?.kind === "choice") return fieldChoices(field.attrs["options"]).find((choice) => choice.id === value.id)?.label ?? null;
+  return null;
+}
 
 export interface FieldOptions {
   /** Kinds added to — or replacing — the built-ins, by name. */

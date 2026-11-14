@@ -98,6 +98,7 @@ describe("the executed document: values printed in their fields", () => {
           typed: { kind: "text", text: "Ada Lovelace" },
           drawn: { kind: "image", src: signaturePng },
           ticked: { kind: "checkbox", checked: true },
+          chosen: { kind: "choice", id: "net-60" },
         },
       }),
     ],
@@ -110,6 +111,13 @@ describe("the executed document: values printed in their fields", () => {
     expect(texts.map((op) => op["value"])).toEqual(["Ada Lovelace"]);
     // In the size of the text around it: 16px is 12pt.
     expect(Number(texts[0]!["size"])).toBeCloseTo(12, 5);
+  });
+
+  it("prints the label of the choice a signer made", async () => {
+    const options = [{ id: "net-30", label: "Net 30" }, { id: "net-60", label: "Net 60" }];
+    const texts = (await printed({ ...signer("chosen", "dropdown"), options }, executed)).filter((op) => op.op === "text");
+
+    expect(texts.map((op) => op["value"])).toEqual(["Net 60"]);
   });
 
   it("prints a drawn signature in its box, keeping its proportions", async () => {

@@ -11,7 +11,7 @@ export {
   fieldDrawingAt,
   fieldValues,
   listSignerFields,
-  paintCheckboxTick,
+  paintCheckbox,
   paintFieldInk,
   paintFieldTag,
   roleName,

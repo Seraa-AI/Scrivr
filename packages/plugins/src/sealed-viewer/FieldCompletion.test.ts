@@ -351,3 +351,103 @@ describe("FieldCompletion — a host's own kinds", () => {
     expect(seen).toEqual(["checkbox"]);
   });
 });
+
+describe("FieldCompletion — text the author filled", () => {
+  const filled = {
+    type: "doc",
+    content: [
+      {
+        type: "paragraph",
+        content: [
+          { type: "text", text: "Between " },
+          { type: "text", text: "Acme Ltd", marks: [{ type: "fieldRange", attrs: { nodeId: "client-name", kind: "text", prompt: "Client name" } }] },
+        ],
+      },
+    ],
+  };
+  const from = 1 + "Between ".length;
+  const to = from + "Acme Ltd".length;
+
+  const paintPage = (e: LaidOutViewer) => {
+    const map = new CharacterMap();
+    map.registerLine({ page: 1, lineIndex: 0, y: 100, height: 20, x: 50, contentWidth: 500, startDocPos: 1, endDocPos: to });
+    for (let pos = 1; pos < to; pos++) map.registerGlyph({ docPos: pos, x: 50 + pos * 8, y: 100, lineY: 100, width: 8, height: 20, page: 1, lineIndex: 0 });
+    const drawn: string[] = [];
+    e.painters.at(-1)!(recordingContext(drawn), 1, defaultPageConfig, map, e.getResolvedTheme());
+    return drawn;
+  };
+
+  it("names the field under the pointer, as Word frames a content control, and shows nothing otherwise", () => {
+    editor = new LaidOutViewer({
+      extensions: [StarterKit, Field, FieldCompletion.configure({ fields: [], completable: [] })],
+      content: filled,
+      sealed: true,
+    });
+    editor.mountView();
+    expect(paintPage(editor)).toEqual([]);
+
+    editor.emit("hover", { targets: [{ kind: "fieldRange", surfaceId: "body", pos: from, end: to, at: from + 2 }], point: point(1, 90, 110) });
+    expect(paintPage(editor)).toEqual(["Client name"]);
+
+    editor.emit("hover", { targets: [], point: null });
+    expect(paintPage(editor)).toEqual([]);
+  });
+});
+
+describe("FieldCompletion — the date a party signed", () => {
+  const signed: SignerFieldDescriptor = { id: "f-signed", role: signHere.role, kind: "dateSigned", required: true, options: [] };
+  const witnessSigned: SignerFieldDescriptor = { id: "f-witness-signed", role: witness.role, kind: "dateSigned", required: true, options: [] };
+  const today: FieldValue = { kind: "text", text: "14 November 2026" };
+
+  const signingWithDates = (onFieldRequest: (field: SignerFieldDescriptor) => Promise<FieldValue | null>) => {
+    editor = new LaidOutViewer({
+      extensions: [
+        StarterKit,
+        Field,
+        FieldCompletion.configure({
+          fields: [signHere, signed, witness, witnessSigned],
+          completable: [signHere.id, signed.id],
+          onFieldRequest,
+        }),
+      ],
+      content: {
+        type: "doc",
+        content: [{ type: "paragraph", content: [signHere, signed, witness, witnessSigned].map(fieldNode) }],
+      },
+      sealed: true,
+    });
+    editor.mountView();
+    return editor;
+  };
+
+  it("is dated through the host the moment its party signs — never the signer's to fill", async () => {
+    const request = vi.fn(async (field: SignerFieldDescriptor) => (field.kind === "dateSigned" ? today : signature));
+    const e = signingWithDates(request);
+
+    expect(requestField(e, signed.id)).toBe(false);
+    requestField(e, signHere.id);
+    await flush();
+    await flush();
+
+    expect(request.mock.calls.map(([field]) => field.id)).toEqual([signHere.id, signed.id]);
+    expect(fieldValues(e.getState())).toEqual({ [signHere.id]: signature, [signed.id]: today });
+  });
+
+  it("is not dated when the signer declines to sign", async () => {
+    const request = vi.fn(async () => null);
+    const e = signingWithDates(request);
+
+    requestField(e, signHere.id);
+    await flush();
+    await flush();
+
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("is passed over by Tab, which goes only to fields a signer fills", () => {
+    const e = signingWithDates(async () => null);
+
+    expect(moveFieldFocus(e, 1)).toBe(signHere.id);
+    expect(moveFieldFocus(e, 1)).toBeNull();
+  });
+});

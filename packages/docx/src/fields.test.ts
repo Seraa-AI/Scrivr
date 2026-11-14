@@ -201,11 +201,14 @@ describe("a field filled in Word", () => {
     expect(listSignerFields(doc).map((f) => f.id)).toEqual(["who"]);
   });
 
-  it("keeps the choice a signer made in a dropdown", async () => {
+  it("keeps the choice a signer made in a dropdown, by its id", async () => {
     const options = [{ id: "net-30", label: "Net 30" }, { id: "net-60", label: "Net 60" }];
-    const { fieldValues } = await importDocx(new ServerEditor({ extensions }), await filledInWord("dropdown", "Net 60", { options }));
+    const chosen = await importDocx(new ServerEditor({ extensions }), await filledInWord("dropdown", "Net 60", { options }));
+    const unknown = await importDocx(new ServerEditor({ extensions }), await filledInWord("dropdown", "Net 90", { options }));
 
-    expect(fieldValues).toEqual({ who: { kind: "text", text: "Net 60" } });
+    expect(chosen.fieldValues).toEqual({ who: { kind: "choice", id: "net-60" } });
+    // Text that is none of the choices answers nothing it offered.
+    expect(unknown.fieldValues).toEqual({});
   });
 
   it("brings back a box the signer ticked, and nothing for one left as it was handed to them", async () => {

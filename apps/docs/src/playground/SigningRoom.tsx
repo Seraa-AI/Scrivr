@@ -36,6 +36,7 @@ const KIND_LABEL: Record<string, string> = {
   signature: "Signature",
   initials: "Initials",
   date: "Date",
+  dateSigned: "Date signed",
   name: "Name",
   title: "Title",
   email: "Email",
@@ -109,6 +110,10 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
               if (field.kind === "checkbox") {
                 return resolve({ kind: "checkbox", checked: !(current?.kind === "checkbox" && current.checked) });
               }
+              // Dated as the party signs: a real host takes the date from its own record of the signature.
+              if (field.kind === "dateSigned") {
+                return resolve({ kind: "text", text: new Date().toLocaleDateString(undefined, { dateStyle: "long" }) });
+              }
               setRequest({ field, current, resolve });
             }).then((value) => {
               setProblem(null);
@@ -137,7 +142,7 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
 
   const pageCount = editor?.layout.pages.length ?? 0;
   const missing = snapshot.fields.filter((f) => f.required && !values[f.id]);
-  const nextOpen = mine.find((f) => !values[f.id]);
+  const nextOpen = mine.find((f) => !values[f.id] && f.kind !== "dateSigned");
 
   const answer = (value: FieldValue | null) => {
     request?.resolve(value);
@@ -259,7 +264,7 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
                     {!f.required && <span style={{ color: "var(--app-text-muted)" }}> (optional)</span>}
                   </span>
                   <span style={{ color: values[f.id] ? "var(--app-accent)" : "var(--app-text-muted)" }}>
-                    {values[f.id] ? describe(values[f.id]!) : "Open"}
+                    {values[f.id] ? describe(values[f.id]!, f) : f.kind === "dateSigned" ? "When you sign" : "Open"}
                   </span>
                 </button>
               </li>
@@ -321,8 +326,9 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
   );
 }
 
-function describe(value: FieldValue): string {
+function describe(value: FieldValue, field: SignerFieldDescriptor): string {
   if (value.kind === "text") return value.text;
+  if (value.kind === "choice") return field.options.find((choice) => choice.id === value.id)?.label ?? value.id;
   if (value.kind === "image") return "Drawn";
   return value.checked ? "Ticked" : "Unticked";
 }
@@ -360,15 +366,17 @@ function ValueDialog({
   const drawn = field.kind === "signature" || field.kind === "initials";
   const [typed, setTyped] = useState(() => {
     if (current?.kind === "text") return current.text;
+    if (current?.kind === "choice") return current.id;
     if (field.kind === "date") return new Date().toISOString().slice(0, 10);
-    return field.kind === "dropdown" ? (field.options[0]?.label ?? "") : "";
+    return field.kind === "dropdown" ? (field.options[0]?.id ?? "") : "";
   });
   const pad = useRef<HTMLCanvasElement>(null);
   const [inked, setInked] = useState(false);
 
   const submit = () => {
     if (drawn && inked && pad.current) return onAnswer({ kind: "image", src: pad.current.toDataURL("image/png") });
-    if (typed.trim()) onAnswer({ kind: "text", text: typed.trim() });
+    if (field.kind === "dropdown") onAnswer({ kind: "choice", id: typed });
+    else if (typed.trim()) onAnswer({ kind: "text", text: typed.trim() });
   };
 
   // Esc cancels and Enter applies, wherever focus is in the dialog.
@@ -414,7 +422,7 @@ function ValueDialog({
             style={{ background: "var(--app-surface)", borderColor: "var(--app-border)" }}
           >
             {field.options.map((choice) => (
-              <option key={choice.id} value={choice.label}>
+              <option key={choice.id} value={choice.id}>
                 {choice.label}
               </option>
             ))}

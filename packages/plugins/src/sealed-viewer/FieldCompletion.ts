@@ -1,9 +1,10 @@
 import {
   Extension,
   fieldDrawingAt,
+  fieldRoleColor,
   fieldValues,
   fieldVerb,
-  paintCheckboxTick,
+  paintCheckbox,
   paintFieldInk,
   paintFieldTag,
   roleName,
@@ -13,6 +14,7 @@ import type {
   FieldBox,
   FieldDrawing,
   FieldValue,
+  HoverTarget,
   IBaseEditor,
   IEditor,
   PagePoint,
@@ -32,6 +34,10 @@ export interface FieldCompletionOptions {
    * signature pad, consent, authentication — records its evidence, and
    * resolves with the value the field takes, or `null` to leave it as it was.
    * Scrivr keeps the value only beside the document, as `setFieldValue` does.
+   *
+   * A `dateSigned` field is asked for without a press, the moment its party's
+   * signature or initials are given: answer with the date, by your clock and
+   * in your format, and record it with the signature.
    */
   onFieldRequest: (field: SignerFieldDescriptor, current?: FieldValue) => Promise<FieldValue | null>;
   /**
@@ -91,6 +97,11 @@ export function moveFieldFocus(editor: IBaseEditor, direction: 1 | -1): string |
   return fieldStates.get(editor)?.moveFocus(direction) ?? null;
 }
 
+/** A field dated the moment its party signs, never filled by hand. */
+const isDateSigned = (field: SignerFieldDescriptor): boolean => field.kind === "dateSigned";
+/** Fields whose completion is a party signing. */
+const isSigning = (field: SignerFieldDescriptor): boolean => field.kind === "signature" || field.kind === "initials";
+
 /** Where each field node is in `doc`, by id. Read again only when the document is replaced. */
 function fieldPositions(doc: PmNode): Map<string, number> {
   const positions = new Map<string, number>();
@@ -111,7 +122,8 @@ function fieldPositions(doc: PmNode): Map<string, number> {
  *
  * The viewer's own fields show a hand and highlight under the pointer; a
  * click, or Enter on the field Tab moved to, opens one — again to change it.
- * Someone else's field says whose it is.
+ * A date signed is dated when its party signs, never by hand. Someone
+ * else's field says whose it is; text the author filled says what it is.
  */
 export const FieldCompletion = Extension.create<FieldCompletionOptions>({
   name: "fieldCompletion",
@@ -137,10 +149,14 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
   onViewReady(editor: IEditor) {
     const { fields, completable, onFieldRequest, onFieldRequestError, accentColor, paint } = this.options;
     const mayComplete = new Set(completable);
-    const mine = fields.filter((f) => mayComplete.has(f.id));
+    // What the signer fills, by pressing or with Tab; a date signed is dated for them.
+    const mine = fields.filter((f) => mayComplete.has(f.id) && !isDateSigned(f));
+    const datesSigned = fields.filter((f) => mayComplete.has(f.id) && isDateSigned(f));
     const pending = new Set<string>();
     let hovered: string | null = null;
     let focused: string | null = null;
+    /** Text the author filled, under the pointer. */
+    let filledText: HoverTarget | null = null;
 
     let positionsOf: { doc: PmNode; positions: Map<string, number> } | null = null;
     const positions = (): Map<string, number> => {
@@ -167,7 +183,9 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
       const current = fieldValues(editor.getState())[field.id];
       new Promise<FieldValue | null>((resolve) => resolve(onFieldRequest(field, current)))
         .then((value) => {
-          if (value) setFieldValue(editor, field.id, value);
+          if (!value) return;
+          setFieldValue(editor, field.id, value);
+          if (isSigning(field)) for (const date of datesSigned) if (date.role === field.role) ask(date);
         })
         .catch((error: unknown) => {
           // The field stays as it was. Declining is answering `null`, which
@@ -227,17 +245,19 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
       }
     });
 
-    const offHover = editor.on("hover", ({ point }) => {
+    const offHover = editor.on("hover", ({ point, targets }) => {
       const next = point ? (fields.find((f) => isOver(f, point))?.id ?? null) : null;
-      if (next === hovered) return;
+      const text = targets.find((t) => t.kind === "fieldRange") ?? null;
+      if (next === hovered && text?.pos === filledText?.pos && text?.end === filledText?.end) return;
       hovered = next;
+      filledText = text;
       editor.redraw();
     });
 
     const offCursor = editor.addPointerCursor(({ objectPos }) => {
       const field = objectPos === null ? undefined : fieldAt(objectPos);
       if (!field) return null;
-      return mayComplete.has(field.id) ? "pointer" : "default";
+      return mine.includes(field) ? "pointer" : "default";
     });
 
     const offPaint = editor.addOverlayRenderHandler((ctx, pageNumber, _pageConfig, charMap, theme) => {
@@ -253,11 +273,17 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
           ...drawn,
           color: (own ? accentColor : undefined) ?? drawn.color,
           own,
-          active: field.id === hovered || field.id === focused,
+          // A date signed is never pressed, so it never lights up as if it could be.
+          active: !isDateSigned(field) && (field.id === hovered || field.id === focused),
           focused: field.id === focused,
           pending: pending.has(field.id),
         };
         if (!paint?.(ctx, signing)) paintField(ctx, signing);
+      }
+      if (filledText) {
+        const prompt = editor.getState().doc.nodeAt(filledText.pos)?.marks.find((m) => m.type.name === "fieldRange")?.attrs["prompt"];
+        const rects = charMap.rangeRects(filledText.pos, filledText.end);
+        paintFilledText(ctx, rects, pageNumber, typeof prompt === "string" ? prompt : "", theme);
       }
     });
 
@@ -289,7 +315,7 @@ function paintField(ctx: CanvasRenderingContext2D, f: SigningFieldDrawing): void
     ctx.fillStyle = f.theme.pageBg;
     ctx.fillRect(x - 1, y - 1, width + 2, height + 3);
   }
-  if (f.own && f.active) {
+  if (f.own && f.active && control !== "checkbox") {
     ctx.globalAlpha = 0.1;
     ctx.fillStyle = f.color;
     ctx.fillRect(x, y, width, height);
@@ -297,13 +323,12 @@ function paintField(ctx: CanvasRenderingContext2D, f: SigningFieldDrawing): void
   }
 
   if (control === "checkbox") {
-    const ticked = f.value?.kind === "checkbox" && f.value.checked;
-    ctx.strokeStyle = f.own ? f.color : f.theme.imagePlaceholderBorder;
-    ctx.lineWidth = f.own ? 1.5 : 1;
-    if (!f.own && !ticked) ctx.setLineDash([2, 2]);
-    ctx.strokeRect(x + 0.75, y + 0.75, width - 1.5, height - 1.5);
-    ctx.setLineDash([]);
-    if (ticked) paintCheckboxTick(ctx, box, f.theme.defaultText);
+    paintCheckbox(ctx, box, {
+      checked: f.value?.kind === "checkbox" && f.value.checked,
+      color: f.own ? f.color : f.theme.imagePlaceholderBorder,
+      pageBg: f.theme.pageBg,
+      hover: f.own && f.active,
+    });
   } else if (filled) {
     if (f.own && f.active) {
       ctx.strokeStyle = f.color;
@@ -317,19 +342,40 @@ function paintField(ctx: CanvasRenderingContext2D, f: SigningFieldDrawing): void
   } else if (f.own) {
     const verb = fieldVerb(f.kind, control);
     paintFieldInk(ctx, box, { control, label: f.label, color: f.color, solid: true, faint: 1, baselineY: f.baselineY });
-    // Said once: a label that is already the verb needs no badge repeating it.
-    if (verb !== f.label) paintBadge(ctx, box, verb, f.color, f.theme.pageBg);
+    // Said once: a label that is already the verb needs no badge repeating it,
+    // and a date signed asks nothing of the signer.
+    if (verb !== f.label && f.kind !== "dateSigned") paintBadge(ctx, box, verb, f.color, f.theme.pageBg);
   } else {
     paintFieldInk(ctx, box, { control, label: roleName(f.role), color: f.theme.imagePlaceholderBorder, faint: 0.8, baselineY: f.baselineY });
   }
 
   if (f.focused) {
+    // A native control's focus ring: soft, rounded, and clear of the control.
+    ctx.globalAlpha = 0.45;
     ctx.strokeStyle = f.color;
-    ctx.lineWidth = 1.5;
-    ctx.strokeRect(x - 2.5, y - 2.5, width + 5, height + 5);
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(x - 3, y - 3, width + 6, height + 6, 4);
+    ctx.stroke();
   }
   ctx.restore();
   if (!f.own && f.active) paintFieldTag(ctx, box, `For the ${roleName(f.role)}`, f.theme);
+}
+
+/**
+ * Text the author filled, framed faintly with what it is — as Word frames a
+ * content control under the pointer — so a reader can tell the words filled
+ * in for this document from the template's own.
+ */
+function paintFilledText(ctx: CanvasRenderingContext2D, rects: ReadonlyArray<FieldBox & { page: number }>, page: number, prompt: string, theme: ResolvedTheme): void {
+  ctx.save();
+  ctx.strokeStyle = fieldRoleColor(null);
+  ctx.globalAlpha = 0.6;
+  ctx.lineWidth = 1;
+  for (const r of rects) if (r.page === page) ctx.strokeRect(r.x - 1.5, r.y + 0.5, r.width + 3, r.height - 1);
+  ctx.restore();
+  const first = rects[0];
+  if (first?.page === page && prompt) paintFieldTag(ctx, first, prompt, theme);
 }
 
 /** What the signer does, on a small badge at the end of the field's line. */

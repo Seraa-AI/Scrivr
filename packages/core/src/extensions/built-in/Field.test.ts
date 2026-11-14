@@ -657,6 +657,22 @@ describe("a field's box on the page", () => {
     editor.destroy();
   });
 
+  it("keeps a dropdown's choice by its id, and sets the label a person reads", () => {
+    const options = [{ id: "net-15", label: "Net 15" }, { id: "net-60", label: "Net 60 days" }];
+    const attrs = { nodeId: "t", kind: "dropdown", fill: "signer", role: "client", options, width: 300, height: 24 };
+    const chosen = laidOutField(attrs, Field.configure({ values: { t: { kind: "choice", id: "net-15" } } }));
+
+    expect(chosen.width).toBeGreaterThanOrEqual(measureTextWidth("Net 15", chosen.font));
+    expect(chosen.width).toBeLessThan(measureTextWidth("Net 60 days", chosen.font));
+  });
+
+  it("leaves a dropdown empty when its choice is no longer offered", () => {
+    const options = [{ id: "net-15", label: "Net 15" }];
+    const attrs = { nodeId: "t", kind: "dropdown", fill: "signer", role: "client", options, width: 300, height: 24 };
+
+    expect(laidOutField(attrs, Field.configure({ values: { t: { kind: "choice", id: "gone" } } })).width).toBe(laidOutField(attrs).width);
+  });
+
   it("sets a typed signature as text, fitted to it, rather than in the signature's box", () => {
     const attrs = { nodeId: "sig", kind: "signature", fill: "signer", role: "client", width: 180, height: 44 };
     const typed = laidOutField(attrs, Field.configure({ values: { sig: { kind: "text", text: "Ada Lovelace" } } }));
@@ -714,5 +730,38 @@ describe("a field's box on the page", () => {
 
     expect(span).toMatchObject({ kind: "object", width: 180, height: 44 });
     expect(span?.kind === "object" && span.font).toContain("App Sans");
+  });
+});
+
+describe("text an author filled, under the pointer", () => {
+  const range = (nodeId: string, prompt: string) => ({ type: "fieldRange", attrs: { nodeId, kind: "text", prompt } });
+
+  it("is hovered as one field over its whole text, next to another field it touches", () => {
+    const editor = createTestEditor({
+      extensions: [StarterKit, Field],
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              { type: "text", text: "Between " },
+              { type: "text", text: "Acme ", marks: [range("client", "Client name")] },
+              { type: "text", text: "Ltd", marks: [{ type: "bold" }, range("client", "Client name")] },
+              { type: "text", text: "Kenya", marks: [range("where", "Country")] },
+            ],
+          },
+        ],
+      },
+    });
+    editor.ensurePagePopulated(1);
+    const from = 1 + "Between ".length;
+    const at = editor.charMap.coordsAtPos(from + 6)!;
+    const next = editor.charMap.coordsAtPos(from + 7)!;
+
+    const targets = editor.resolveHoverTargets({ page: at.page, x: (at.x + next.x) / 2, y: at.y + at.height / 2, region: "content" });
+
+    expect(targets).toEqual([{ kind: "fieldRange", surfaceId: "body", pos: from, end: from + "Acme Ltd".length, at: from + 6 }]);
+    editor.destroy();
   });
 });

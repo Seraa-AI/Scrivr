@@ -1,7 +1,7 @@
 import { fieldRoleColor, type Editor } from "@scrivr/core";
 import { ROLE_LABEL, SIGNING_ROLES } from "./signingDemo";
 
-const SIGNER_KINDS = ["signature", "initials", "date", "name", "title", "email", "checkbox", "dropdown"] as const;
+const SIGNER_KINDS = ["signature", "initials", "dateSigned", "date", "name", "title", "email", "checkbox", "dropdown"] as const;
 
 const TERMS = [
   { id: "net-15", label: "Net 15" },

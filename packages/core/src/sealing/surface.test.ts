@@ -17,7 +17,7 @@ import {
   fieldValues,
   hashArtifact,
   listSignerFields,
-  paintCheckboxTick,
+  paintCheckbox,
   setFieldValue,
   verifySnapshot,
   type BuiltInFieldKind,
@@ -82,7 +82,7 @@ describe("what a signing host builds on", () => {
     expect(setFieldValue(editor, "f", value)).toBe(true);
     expect(fieldValues(editor.getState())).toEqual({ f: value });
     expect(fieldDrawingAt(editor, 0, { box, baselineY: 20, theme: editor.getResolvedTheme() })).toBeNull();
-    expect(typeof paintCheckboxTick).toBe("function");
+    expect(typeof paintCheckbox).toBe("function");
     expect([control, insert.kind, range.kind, denied.reason, typeof gate, fields, refusal]).toEqual([
       "signatureLine",
       "dropdown",

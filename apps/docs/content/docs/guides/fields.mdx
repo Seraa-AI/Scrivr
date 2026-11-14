@@ -68,6 +68,7 @@ editor.commands.unwrapFieldBlock();
 | `signature` | Signature | signature line |
 | `initials` | Initials | text |
 | `date` | Date | date |
+| `dateSigned` | Date signed | date — dated when its party signs |
 | `text` | Text | text |
 | `checkbox` | — | checkbox |
 | `name` | Name | text |
@@ -77,7 +78,7 @@ editor.commands.unwrapFieldBlock();
 | `number` | Number | text |
 | `dropdown` | Choose | dropdown |
 
-The **control** is what a field *is*: how its box is drawn, whether it can be ticked, and what Word receives when the document is exported. A dropdown needs its choices, each with an id of its own — the id is what Word stores, the label what a person reads:
+The **control** is what a field *is*: how its box is drawn, whether it can be ticked, and what Word receives when the document is exported. A dropdown needs its choices, each with an id of its own — the id is what a signer's answer and Word store, the label what a person reads:
 
 ```ts
 editor.commands.insertField({
@@ -193,12 +194,21 @@ const editor = new Editor({
 });
 ```
 
+A dropdown is answered with the choice's id, `{ kind: "choice", id: "net-60" }`; `Field` shows its label, so renaming a label in a later template does not orphan the answers already given.
+
 Values live in `Field`, beside the document and never in it, so a sealed document takes them. Open the editor with the values already given as `Field.configure({ values })`, show one another participant completes with `setFieldValue(editor, fieldId, value)` (both from `@scrivr/core`), and read them back with `fieldValues(editor.getState())`.
 
 ### A host's own kinds, failures and the keyboard
 
 - The signing view draws your own kinds and colours as `Field` was given them, so a kind of your own completes as the control it declares there too.
 - `onFieldRequestError(field, error)` is called when your `onFieldRequest` throws or rejects. The field stays as it was; tell the signer and let them try again. Resolving `null` is declining, not failing.
+- A `dateSigned` field is never pressed. The moment its party gives a signature or initials, `onFieldRequest` is called for it with no press: answer with the date by your own clock and in your own format, and record it with the signature.
+
+  ```ts
+  onFieldRequest: async (field) =>
+    field.kind === "dateSigned" ? { kind: "text", text: formatDate(await signedAt(field.role)) } : openSignaturePad(field),
+  ```
+- Text the author filled is the document's own, but under the pointer it is framed with its prompt ("Client name"), as Word frames a content control, so a signer can check the words filled in for this document.
 - Tab and Shift+Tab move between the viewer's own fields; past the last or first, focus goes on to the page's next control. Enter opens the focused field; pressing elsewhere on the page lets it go.
 
 ## The executed document
@@ -229,7 +239,7 @@ const { doc, fieldValues } = await importDocx(editor, bytes);
 // { "client-name-field": { kind: "text", text: "Alice Example" } }
 ```
 
-Record them as the signer's, or pass them on to `Field.configure({ values })`. Only a ticked box counts as an answer: an unticked one is how it was handed to the signer. A drawing in a signature control is not brought back (the import warns `field-drawing-not-imported`): signatures are captured by your signing host.
+Record them as the signer's, or pass them on to `Field.configure({ values })`. Only a ticked box counts as an answer: an unticked one is how it was handed to the signer. A dropdown comes back as the choice its text names, by id; text that is none of its choices is no answer. A drawing in a signature control is not brought back (the import warns `field-drawing-not-imported`): signatures are captured by your signing host.
 
 ## In other formats
 

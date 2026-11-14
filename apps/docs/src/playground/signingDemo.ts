@@ -138,11 +138,11 @@ export const SIGNING_DEMO_DOC = {
     p(signer("signing-provider-signature", "signature", "provider")),
     p(text("Name: "), signer("signing-provider-signer-name", "name", "provider")),
     p(text("Title: "), signer("signing-provider-title", "title", "provider")),
-    p(text("Date: "), signer("signing-provider-date", "date", "provider")),
+    p(text("Date: "), signer("signing-provider-date", "dateSigned", "provider")),
     p(bold("For the Client")),
     p(signer("signing-client-signature", "signature", "client")),
     p(text("Name: "), signer("signing-client-signer-name", "name", "client")),
     p(text("Email: "), signer("signing-client-email", "email", "client", { required: false })),
-    p(text("Date: "), signer("signing-client-date", "date", "client")),
+    p(text("Date: "), signer("signing-client-date", "dateSigned", "client")),
   ],
 };

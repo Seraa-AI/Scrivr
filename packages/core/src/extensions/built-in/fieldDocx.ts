@@ -204,10 +204,15 @@ export const importedFieldValues = (ctx: DocxImportContext): Record<string, Fiel
 
 /**
  * The value a signer left in a control, or null when they left none. An
- * unticked box is how it was handed to them, so only a tick is an answer.
+ * unticked box is how it was handed to them, so only a tick is an answer;
+ * Word keeps a dropdown's label as its text, which names the choice.
  */
-function controlValue(text: string, control: FieldControl): FieldValue | null {
+function controlValue(text: string, control: FieldControl, choices: readonly FieldChoice[]): FieldValue | null {
   if (control === "checkbox") return text.includes("☒") ? { kind: "checkbox", checked: true } : null;
+  if (control === "dropdown") {
+    const chosen = choices.find((choice) => choice.label === text);
+    return chosen ? { kind: "choice", id: chosen.id } : null;
+  }
   return text ? { kind: "text", text } : null;
 }
 
@@ -222,7 +227,8 @@ export const fieldImport =
     const kind = params.get("kind") ?? "text";
     const text = inline.content.map((item) => (item.type === "text" ? item.text : "")).join("").trim();
     const id = params.get("id") || null;
-    const value = fill === "signer" && id && !inline.placeholder ? controlValue(text, kinds[kind]?.control ?? "text") : null;
+    const options = inline.listItems.map((item) => ({ id: item.value, label: item.displayText }));
+    const value = fill === "signer" && id && !inline.placeholder ? controlValue(text, kinds[kind]?.control ?? "text", options) : null;
     if (value && id) ctx.shared.getOrInit<Record<string, FieldValue>>(FIELD_VALUES_KEY, () => ({}))[id] = value;
     if (fill === "signer" && !inline.placeholder && inline.content.some((item) => item.type === "image")) {
       ctx.diagnostics.warn({
@@ -237,7 +243,7 @@ export const fieldImport =
       role: fill === "signer" ? params.get("role") : null,
       required: params.get("required") === "1",
       checked: fill === "author" && text.includes("☒"),
-      options: inline.listItems.map((item) => ({ id: item.value, label: item.displayText })),
+      options,
       ...(Number(params.get("width")) > 0 ? { width: Number(params.get("width")) } : {}),
       ...(Number(params.get("height")) > 0 ? { height: Number(params.get("height")) } : {}),
     });
