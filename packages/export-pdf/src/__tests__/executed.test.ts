@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { createCanvas } from "@napi-rs/canvas";
 import {
+  BUILT_IN_FIELD_KINDS,
   Field,
   ServerEditor,
   StarterKit,
@@ -35,7 +36,7 @@ async function sealed(): Promise<SealedSnapshot> {
       ],
     },
   });
-  const result = await createSnapshot(author.getState().doc, { assignedRoles: ["client"] });
+  const result = await createSnapshot(author.getState().doc, { kinds: BUILT_IN_FIELD_KINDS, assignedRoles: ["client"] });
   if (!result.ok) throw new Error(result.refusal.reason);
   return result.snapshot;
 }
@@ -87,12 +88,42 @@ describe("exportExecutedPdf", () => {
     expect(!result.ok && result.refusal.reason === "unanswered-fields" && result.refusal.missing.map((f) => f.id)).toEqual(["sig"]);
   });
 
+  it("prints a date signed only beside its party's signature", async () => {
+    const author = new ServerEditor({
+      extensions: [StarterKit, Field],
+      content: { type: "doc", content: [{ type: "paragraph", content: [signer("sig", "signature", "client", false), signer("dated", "dateSigned", "client", false)] }] },
+    });
+    const made = await createSnapshot(author.getState().doc, { assignedRoles: ["client"], kinds: BUILT_IN_FIELD_KINDS });
+    if (!made.ok) throw new Error(made.refusal.reason);
+    const texts = async (values: Record<string, FieldValue>) =>
+      (
+        await recordDrawOps(async () => {
+          const result = await exportExecutedPdf(made.snapshot, values, options);
+          return result.ok ? result.pdf : new Uint8Array();
+        })
+      )
+        .filter((op) => op.op === "text")
+        .map((op) => op["value"]);
+    const date: FieldValue = { kind: "text", text: "14 November 2026" };
+
+    expect(await texts({ sig: { kind: "text", text: "Ada Lovelace" }, dated: date })).toContain("14 November 2026");
+    expect(await texts({ sig: { kind: "text", text: "  " }, dated: date })).not.toContain("14 November 2026");
+  });
+
+  it("says plainly when the editor it was given cannot hold a value", async () => {
+    const withoutFieldState = { editorOptions: { extensions: [StarterKit], textMeasurer: measurer() } };
+    const plain = await createSnapshot(new ServerEditor({ extensions: [StarterKit] }).getState().doc, { assignedRoles: [], kinds: BUILT_IN_FIELD_KINDS });
+    if (!plain.ok) throw new Error(plain.refusal.reason);
+
+    await expect(exportExecutedPdf(plain.snapshot, signed, withoutFieldState)).rejects.toThrow(/needs Field/);
+  });
+
   it("never prints a value over what the author sealed", async () => {
     const author = new ServerEditor({
       extensions: [StarterKit, Field],
       content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "field", attrs: { nodeId: "agreed", kind: "checkbox", fill: "author", checked: true } }] }] },
     });
-    const sealedResult = await createSnapshot(author.getState().doc, { assignedRoles: [] });
+    const sealedResult = await createSnapshot(author.getState().doc, { kinds: BUILT_IN_FIELD_KINDS, assignedRoles: [] });
     if (!sealedResult.ok) throw new Error(sealedResult.refusal.reason);
 
     const ops = await recordDrawOps(async () => {

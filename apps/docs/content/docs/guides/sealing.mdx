@@ -21,11 +21,13 @@ What stays yours: who may seal, the record of it, locking, authentication, stora
 Stop writes to the room **before** you read it. A snapshot taken of a room still accepting updates can be outdated by the time it is stored, leaving the room different from what was sealed. So block writes first, on connections already open and on any that join meanwhile, then snapshot, persist and stamp, and open the room again only if the seal fails. Do this inside whatever your server already uses to order a seal against a save, such as a row lock or a queue.
 
 ```ts
-import { ServerEditor, StarterKit, Field } from "@scrivr/core";
+import { ServerEditor, StarterKit, Field, fieldKindsOf } from "@scrivr/core";
 import { snapshotFromYDoc, stampSeal } from "@scrivr/plugins";
 import type { Document } from "@hocuspocus/server";
 
-const { schema } = new ServerEditor({ extensions: [StarterKit, Field] });
+const server = new ServerEditor({ extensions: [StarterKit, Field] }); // with your Field.configure({ kinds }), if any
+const { schema } = server;
+const kinds = fieldKindsOf(server);
 
 /** Rooms being sealed right now: `onAuthenticate` makes anyone who joins one read-only. */
 const sealing = new Set<string>();
@@ -43,7 +45,7 @@ async function seal(document: Document, revisionId: string, assignedRoles: strin
 
   try {
     // 2. Read the room only now that it can no longer move.
-    const result = await snapshotFromYDoc(document, schema, { assignedRoles });
+    const result = await snapshotFromYDoc(document, schema, { assignedRoles, kinds });
     if (!result.ok) {
       reopen();
       return result.refusal; // show it to whoever asked to seal
@@ -74,7 +76,7 @@ A seal is refused, with a reason, while:
 | `unknown-roles` | You assigned a role no field carries — its field was removed |
 | `fields-outside-body` | A signer field sits in a header or footer, where no signer could be shown to complete it |
 | `unidentified-fields` | A signer field has no id or role, or shares another's id — nobody could complete it, or two values would collide |
-| `dates-without-signature` | A party has a date signed but nothing to sign, so nothing would ever date it — pass your editor's `kinds` (`fieldKindsOf`) when you register your own signature kinds |
+| `dates-without-signature` | A party's required date signed has no required signature beside it, so it might never be dated |
 
 ### Your own checks
 
@@ -92,6 +94,7 @@ const inSigningOrder: SealCheck = ({ fields }) => {
 
 await snapshotFromYDoc(document, schema, {
   assignedRoles,
+  kinds,
   checks: { before: [templateIsApproved], after: [inSigningOrder] },
 });
 ```

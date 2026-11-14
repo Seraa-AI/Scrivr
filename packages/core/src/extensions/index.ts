@@ -19,6 +19,7 @@ export {
   roleName,
   setFieldValue,
   unansweredBeforeSigning,
+  valuesOnRecord,
 } from "./built-in/Field";
 export { importedFieldValues } from "./built-in/fieldDocx";
 export type { FieldFill, InsertFieldOptions, SignerFieldDescriptor } from "./built-in/Field";

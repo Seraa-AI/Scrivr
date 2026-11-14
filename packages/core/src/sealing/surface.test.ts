@@ -24,6 +24,8 @@ import {
   paintCheckbox,
   setFieldValue,
   unansweredBeforeSigning,
+  valuesOnRecord,
+  WORD_PART_NAMESPACES,
   verifySnapshot,
   type BuiltInFieldKind,
   type CreateSnapshotOptions,
@@ -71,7 +73,7 @@ describe("what a signing host builds on", () => {
     const fields: SignerFieldDescriptor[] = listSignerFields(doc);
     const signingOrder: SealCheck = ({ fields: sealed }: SealCheckSubject): HostSealRefusal | null =>
       sealed.length > 99 ? { reason: "host", code: "too-many", message: "Too many signers." } : null;
-    const snapshotOptions: CreateSnapshotOptions = { assignedRoles: [], checks: { after: [signingOrder] } };
+    const snapshotOptions: CreateSnapshotOptions = { assignedRoles: [], checks: { after: [signingOrder] }, kinds: fieldKindsOf(editor) };
     const result: SnapshotResult = await createSnapshot(doc, snapshotOptions);
     const snapshot: SealedSnapshot | null = result.ok ? result.snapshot : null;
     const refusal: SealRefusal | null = result.ok ? null : result.refusal;
@@ -93,6 +95,8 @@ describe("what a signing host builds on", () => {
     const kinds: FieldKinds = fieldKindsOf(editor);
     expect(isFieldAnswered(terms, undefined, kinds)).toBe(false);
     expect(unansweredBeforeSigning([terms], {}, "client", kinds)).toEqual([terms]);
+    expect(valuesOnRecord([terms], {}, kinds)).toEqual({});
+    expect(WORD_PART_NAMESPACES["mc:Ignorable"]).toBe("w14");
     expect(isSigningKind(BUILT_IN_FIELD_KINDS, "signature") && isDatedWhenSigned(BUILT_IN_FIELD_KINDS, "dateSigned")).toBe(true);
     expect([control, insert.kind, range.kind, denied.reason, typeof gate, fields, refusal]).toEqual([
       "signatureLine",

@@ -208,10 +208,15 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
         .then((value) => {
           if (!value) return;
           setFieldValue(editor, field.id, value);
-          // Dated as the party signs — a signature that answers it, not
-          // initials given on the way, nor a name of blanks.
-          if (!isSigningKind(kinds, field.kind) || !isFieldAnswered(field, value, kinds)) return;
-          for (const date of datesSigned) if (date.role === field.role && !pending.has(date.id)) ask(date);
+          if (!isSigningKind(kinds, field.kind)) return;
+          const partyDates = datesSigned.filter((date) => date.role === field.role);
+          // Dated only by a signature that answers — not initials on the way,
+          // not blank text — and a date never outlives its signature.
+          if (!isFieldAnswered(field, value, kinds)) {
+            for (const date of partyDates) setFieldValue(editor, date.id, null);
+            return;
+          }
+          for (const date of partyDates) if (!pending.has(date.id)) ask(date);
         })
         .catch((error: unknown) => {
           // The field stays as it was. Declining is answering `null`, which
@@ -253,8 +258,8 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
         focusOn(mine[at + direction]?.id ?? null);
         return focused;
       },
-      // Enter on a focused field is always acted on: it opens, or a held-back
-      // signature sends focus to what it waits on.
+      // Consumed even when nothing opens — a held-back signature, a pending
+      // field — so Enter never reaches the document.
       openFocused: () => {
         if (focused === null) return false;
         state.request(focused);

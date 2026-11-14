@@ -28,7 +28,6 @@ import type { Node } from "@scrivr/core/pm";
 import { getHeaderFooterPolicy } from "./getPolicy";
 import type { HeaderFooterDefinition, HeaderFooterPolicy } from "./types";
 
-
 /** A `<w:fldSimple>` field with a fallback run (what Word shows until it recalcs). */
 function field(instr: string, fallback: string): XmlNode {
   return xml("w:fldSimple", { "w:instr": instr }, [

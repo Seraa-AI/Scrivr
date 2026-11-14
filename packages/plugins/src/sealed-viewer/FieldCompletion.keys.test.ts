@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 /**
- * The keys FieldCompletion answers, as the editor's input bridge calls them:
- * with the editor's navigator and the key's event.
+ * The keys FieldCompletion answers, called as the input bridge calls them —
+ * with the editor's navigator and the key's event — from the handlers the
+ * extensions contribute.
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { ExtensionManager, Field, StarterKit, type SignerFieldDescriptor } from "@scrivr/core";

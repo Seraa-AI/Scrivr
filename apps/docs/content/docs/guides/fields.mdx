@@ -70,7 +70,7 @@ editor.commands.unwrapFieldBlock();
 | `date` | Date | date |
 | `dateSigned` | Date signed | date — dated when its party signs (`datedWhenSigned`) |
 | `text` | Text | text |
-| `checkbox` | — | checkbox |
+| `checkbox` | Checkbox | checkbox |
 | `name` | Name | text |
 | `email` | Email | text |
 | `title` | Title | text |
@@ -160,10 +160,11 @@ A copied or pasted field gets a fresh id, so one signature can never fill two bo
 Sealing freezes a document into a snapshot and its hash. It refuses while suggestions are still pending, while text the author fills still shows its prompt, or while the roles you assign do not match the fields:
 
 ```ts
-import { createSnapshot } from "@scrivr/core";
+import { createSnapshot, fieldKindsOf } from "@scrivr/core";
 
 const result = await createSnapshot(editor.getState().doc, {
   assignedRoles: ["client-authorized-signatory"],
+  kinds: fieldKindsOf(editor), // your kinds decide what signs and what is dated
 });
 if (!result.ok) throw new Error(result.refusal.reason);
 const { content, contentHash, fields } = result.snapshot;
@@ -196,7 +197,7 @@ const editor = new Editor({
 
 A dropdown is answered with the choice's id, `{ kind: "choice", id: "net-60" }`; `Field` shows its label, so renaming a label in a later template does not orphan the answers already given.
 
-Values live in `Field`, beside the document and never in it, so a sealed document takes them. Open the editor with the values already given as `Field.configure({ values })`, show one another participant completes with `setFieldValue(editor, fieldId, value)` (both from `@scrivr/core`), and read them back with `fieldValues(editor.getState())`. A value only ever fills a signer's field — what an author sealed is never laid over — and only one the field can show: a checkbox takes a tick, a dropdown a choice, a signature a drawing (a raster image; SVG is never drawn) or text. Anything else is no answer, and `isFieldAnswered(field, value, kinds)` says so.
+Values live in `Field`, beside the document and never in it, so a sealed document takes them. Open the editor with the values already given as `Field.configure({ values })`, show one another participant completes with `setFieldValue(editor, fieldId, value)` (both from `@scrivr/core`), and read them back with `fieldValues(editor.getState())`. A value only ever fills a signer's field — what an author sealed is never laid over — and only one the field can show: a checkbox takes a tick, a dropdown a choice, a signature or initials a drawing or words, any other field words. A drawing is an inline PNG or JPEG (a `data:` URL, as a signature pad gives): it prints in the executed PDF and cannot change once given, where a link could — so offer your signers PNG or JPEG. Anything else is no answer, and `isFieldAnswered(field, value, kinds)` says so.
 
 ### A host's own kinds, failures and the keyboard
 
@@ -212,6 +213,7 @@ Values live in `Field`, beside the document and never in it, so a sealed documen
     throw new Error("Complete every required field first");
   }
   ```
+- A date signed stands only beside its party's answered signature: clearing a signature clears its date, and `valuesOnRecord(fields, values, kinds)` gives the values as the record shows them, for your server to keep.
 - A `dateSigned` field is never pressed. The moment its party's signature is given (initials on the way do not count), `onFieldRequest` is called for it with no press: answer with the date by your own clock and in your own format, and record it with the signature.
 
   ```ts

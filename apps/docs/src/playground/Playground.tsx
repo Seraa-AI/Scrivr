@@ -44,7 +44,7 @@ import {
   describeSuggestionRefusal,
 } from "@scrivr/react";
 import type { SuggestionRefusalText } from "@scrivr/react";
-import { createSnapshot, Field, type Editor, type SealedSnapshot, type SealRefusal, type ToolbarState } from "@scrivr/core";
+import { createSnapshot, Field, fieldKindsOf, type Editor, type SealedSnapshot, type SealRefusal, type ToolbarState } from "@scrivr/core";
 import { Selection, TextSelection } from "@scrivr/core/pm";
 import { ChatPanel } from "./ChatPanel";
 import { DemoContent, demoDoc, startingDemo, type DemoKind } from "./demoContent";
@@ -228,8 +228,8 @@ function describeSealRefusal(refusal: SealRefusal): SuggestionRefusalText {
       };
     case "dates-without-signature":
       return {
-        message: `Can't seal: ${roles(refusal.roles)} ${refusal.roles.length === 1 ? "has" : "have"} a Date signed but nothing to sign.`,
-        remedy: "Add a signature for that party, or remove its Date signed, then seal again.",
+        message: `Can't seal: ${roles(refusal.roles)} ${refusal.roles.length === 1 ? "has" : "have"} a required Date signed but no required signature.`,
+        remedy: "Make that party's signature required, or its Date signed optional, then seal again.",
       };
     case "host":
       return { message: `Can't seal: ${refusal.message}`, remedy: "This check is the host app's own." };
@@ -329,7 +329,7 @@ export function Playground() {
   };
   const seal = async () => {
     if (!editor) return;
-    const result = await createSnapshot(editor.getState().doc, { assignedRoles: SIGNING_ROLES });
+    const result = await createSnapshot(editor.getState().doc, { assignedRoles: SIGNING_ROLES, kinds: fieldKindsOf(editor) });
     if (result.ok) setSealed(result.snapshot);
     else setRefusal(describeSealRefusal(result.refusal));
     if (!result.ok && result.refusal.reason === "unfilled-fields") selectFirstPrompt(editor);

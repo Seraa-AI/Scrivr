@@ -5,7 +5,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
-import { Extension, ServerEditor, StarterKit } from "@scrivr/core";
+import { BUILT_IN_FIELD_KINDS, Extension, ServerEditor, StarterKit } from "@scrivr/core";
 import { TextSelection } from "@scrivr/core/pm";
 import { YBinding, DOC_ATTRS_MAP_NAME, type DocAttrEnvelope } from "./YBinding";
 import { snapshotFromYDoc, stampEditable, stampSeal } from "./revision";
@@ -68,7 +68,7 @@ const type = (editor: ServerEditor, text: string) => {
 
 /** What a host does: seal the room's document and stamp the room. */
 async function sealRoom(server: Y.Doc, schema: ServerEditor["schema"]) {
-  const result = await snapshotFromYDoc(server, schema, { assignedRoles: [] });
+  const result = await snapshotFromYDoc(server, schema, { kinds: BUILT_IN_FIELD_KINDS, assignedRoles: [] });
   if (!result.ok) throw new Error(result.refusal.reason);
   const seal = { revisionId: "rev-1", contentHash: result.snapshot.contentHash, sealedAt: "2026-11-11T09:00:00.000Z" };
   stampSeal(server, seal);

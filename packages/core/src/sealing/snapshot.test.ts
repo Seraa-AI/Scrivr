@@ -27,7 +27,7 @@ const docOf = (content: unknown[]) =>
 const contract = docOf([para("Terms."), { type: "paragraph", content: [signerField("client", true), signerField("witness", false)] }]);
 
 const sealed = async (doc = contract, assignedRoles = ["client"]) => {
-  const result = await createSnapshot(doc, { assignedRoles });
+  const result = await createSnapshot(doc, { kinds: BUILT_IN_FIELD_KINDS, assignedRoles });
   if (!result.ok) throw new Error(`refused: ${result.refusal.reason}`);
   return result.snapshot;
 };
@@ -73,14 +73,14 @@ describe("createSnapshot", () => {
   });
 
   it("refuses while a required role has nobody assigned", async () => {
-    expect(await createSnapshot(contract, { assignedRoles: [] })).toEqual({
+    expect(await createSnapshot(contract, { kinds: BUILT_IN_FIELD_KINDS, assignedRoles: [] })).toEqual({
       ok: false,
       refusal: { reason: "unassigned-roles", missing: ["client"] },
     });
   });
 
   it("refuses a role no field carries — the field was removed after someone was invited", async () => {
-    expect(await createSnapshot(contract, { assignedRoles: ["client", "guarantor"] })).toEqual({
+    expect(await createSnapshot(contract, { kinds: BUILT_IN_FIELD_KINDS, assignedRoles: ["client", "guarantor"] })).toEqual({
       ok: false,
       refusal: { reason: "unknown-roles", unknown: ["guarantor"] },
     });
@@ -96,7 +96,7 @@ describe("createSnapshot", () => {
       contract.child(1).toJSON(),
     ]);
 
-    expect(await createSnapshot(redline, { assignedRoles: ["client"] })).toEqual({
+    expect(await createSnapshot(redline, { kinds: BUILT_IN_FIELD_KINDS, assignedRoles: ["client"] })).toEqual({
       ok: false,
       refusal: { reason: "pending-tracked-changes", count: 1 },
     });
@@ -106,7 +106,7 @@ describe("createSnapshot", () => {
     const unnamed = { type: "field", attrs: { kind: "signature", fill: "signer", role: "client", required: true } };
     const roleless = { type: "field", attrs: { nodeId: "loose", kind: "signature", fill: "signer", required: true } };
     const refused = (fields: unknown[]) =>
-      createSnapshot(docOf([para("Terms."), { type: "paragraph", content: fields }]), { assignedRoles: ["client"] });
+      createSnapshot(docOf([para("Terms."), { type: "paragraph", content: fields }]), { kinds: BUILT_IN_FIELD_KINDS, assignedRoles: ["client"] });
 
     for (const fields of [[unnamed], [roleless], [signerField("client", true), signerField("client", true)]]) {
       expect(await refused(fields)).toEqual({ ok: false, refusal: { reason: "unidentified-fields", count: 1 } });
@@ -121,8 +121,13 @@ describe("createSnapshot", () => {
     const kinds = { ...BUILT_IN_FIELD_KINDS, witness: { label: "Witness", size: { width: 180, height: 44 }, control: "signatureLine" } } satisfies FieldKinds;
     const witnessed = docOf([{ type: "paragraph", content: [field("w", "witness"), field("d", "dateSigned")] }]);
 
-    expect(await createSnapshot(undatable, { assignedRoles: ["client"] })).toEqual({ ok: false, refusal: { reason: "dates-without-signature", roles: ["client"] } });
-    expect((await createSnapshot(dated, { assignedRoles: ["client"] })).ok).toBe(true);
+    expect(await createSnapshot(undatable, { kinds: BUILT_IN_FIELD_KINDS, assignedRoles: ["client"] })).toEqual({ ok: false, refusal: { reason: "dates-without-signature", roles: ["client"] } });
+    expect((await createSnapshot(dated, { kinds: BUILT_IN_FIELD_KINDS, assignedRoles: ["client"] })).ok).toBe(true);
+    // A required date needs a required signature: an optional one may never be given.
+    const optionalSignature = docOf([
+      { type: "paragraph", content: [{ type: "field", attrs: { nodeId: "s", kind: "signature", fill: "signer", role: "client", required: false } }, field("d", "dateSigned")] },
+    ]);
+    expect(await createSnapshot(optionalSignature, { kinds: BUILT_IN_FIELD_KINDS, assignedRoles: ["client"] })).toEqual({ ok: false, refusal: { reason: "dates-without-signature", roles: ["client"] } });
     expect((await createSnapshot(witnessed, { assignedRoles: ["client"], kinds })).ok).toBe(true);
   });
 
@@ -139,7 +144,7 @@ describe("createSnapshot", () => {
         : null;
     };
 
-    const result = await createSnapshot(contract, { assignedRoles: ["client"], checks: { before: [approvedTemplate], after: [signingOrder] } });
+    const result = await createSnapshot(contract, { kinds: BUILT_IN_FIELD_KINDS, assignedRoles: ["client"], checks: { before: [approvedTemplate], after: [signingOrder] } });
 
     expect(result).toEqual({ ok: false, refusal: { reason: "host", code: "no-signing-order", message: "Put the client in the signing order." } });
     expect(ran).toEqual(["before", "after"]);
@@ -147,7 +152,7 @@ describe("createSnapshot", () => {
 
   it("does not run a host's after-checks once its own checks have refused", async () => {
     const after = vi.fn(() => null);
-    const result = await createSnapshot(contract, { assignedRoles: [], checks: { after: [after] } });
+    const result = await createSnapshot(contract, { kinds: BUILT_IN_FIELD_KINDS, assignedRoles: [], checks: { after: [after] } });
 
     expect(result.ok).toBe(false);
     expect(after).not.toHaveBeenCalled();
@@ -169,7 +174,7 @@ describe("createSnapshot", () => {
     it("refuses a prompt still showing in a header", async () => {
       const header = [para("Client name", [{ type: "fieldRange", attrs: { nodeId: "h1", kind: "text", prompt: "Client name", placeholder: true } }])];
 
-      expect(await createSnapshot(withHeader(header), { assignedRoles: ["client"] })).toEqual({
+      expect(await createSnapshot(withHeader(header), { kinds: BUILT_IN_FIELD_KINDS, assignedRoles: ["client"] })).toEqual({
         ok: false,
         refusal: { reason: "unfilled-fields", prompts: ["Client name"] },
       });
@@ -180,7 +185,7 @@ describe("createSnapshot", () => {
         { type: "paragraph", content: [{ type: "image", attrs: { src: "data:image/png;base64,AA==", dataTracked: [{ id: "c9", status: "pending" }] } }] },
       ];
 
-      expect(await createSnapshot(withHeader(header), { assignedRoles: ["client"] })).toEqual({
+      expect(await createSnapshot(withHeader(header), { kinds: BUILT_IN_FIELD_KINDS, assignedRoles: ["client"] })).toEqual({
         ok: false,
         refusal: { reason: "pending-tracked-changes", count: 1 },
       });
@@ -189,7 +194,7 @@ describe("createSnapshot", () => {
     it("refuses a signer field outside the body, which no signer could be shown to complete", async () => {
       const header = [{ type: "paragraph", content: [signerField("witness", true)] }];
 
-      expect(await createSnapshot(withHeader(header), { assignedRoles: ["client", "witness"] })).toEqual({
+      expect(await createSnapshot(withHeader(header), { kinds: BUILT_IN_FIELD_KINDS, assignedRoles: ["client", "witness"] })).toEqual({
         ok: false,
         refusal: { reason: "fields-outside-body", count: 1 },
       });
@@ -202,11 +207,11 @@ describe("createSnapshot", () => {
     const unfilled = docOf([range("client-name", "Client name", true), contract.child(1).toJSON()]);
     const filled = docOf([range("client-name", "Ada Lovelace", false), contract.child(1).toJSON()]);
 
-    expect(await createSnapshot(unfilled, { assignedRoles: ["client"] })).toEqual({
+    expect(await createSnapshot(unfilled, { kinds: BUILT_IN_FIELD_KINDS, assignedRoles: ["client"] })).toEqual({
       ok: false,
       refusal: { reason: "unfilled-fields", prompts: ["Client name"] },
     });
-    expect((await createSnapshot(filled, { assignedRoles: ["client"] })).ok).toBe(true);
+    expect((await createSnapshot(filled, { kinds: BUILT_IN_FIELD_KINDS, assignedRoles: ["client"] })).ok).toBe(true);
   });
 });
 

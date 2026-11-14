@@ -2,14 +2,16 @@ import type { Node as PmNode } from "prosemirror-model";
 import { z } from "zod";
 import type { ResolvedTheme } from "../../model/theme";
 import type { PdfNodeContext } from "../../exports/pdf";
-import { safeImageUrl } from "../../model/safeUrl";
 
 /** The control a field is: how it draws, whether it toggles, and what Word gets. */
 export type FieldControl = "signatureLine" | "checkbox" | "date" | "dropdown" | "text";
 
 /** A kind of field — Scrivr's built-ins, or one a host registers. */
 export interface FieldKindSpec {
-  /** Shown on the empty box and as the control's name in Word. */
+  /**
+   * Shown on the empty box and as the control's name in Word. A checkbox's
+   * box says what it is, so its label names it in Word and in host drawings only.
+   */
   label: string;
   /** The box an inserted field reserves, in CSS pixels. */
   size: { width: number; height: number };
@@ -29,7 +31,7 @@ export const BUILT_IN_FIELD_KINDS = {
   date: { label: "Date", size: { width: 110, height: 24 }, control: "date" },
   dateSigned: { label: "Date signed", size: { width: 110, height: 24 }, control: "date", datedWhenSigned: true },
   text: { label: "Text", size: { width: 160, height: 24 } },
-  checkbox: { label: "", size: { width: 16, height: 16 }, control: "checkbox" },
+  checkbox: { label: "Checkbox", size: { width: 16, height: 16 }, control: "checkbox" },
   name: { label: "Name", size: { width: 160, height: 24 } },
   email: { label: "Email", size: { width: 180, height: 24 } },
   title: { label: "Title", size: { width: 140, height: 24 } },
@@ -44,9 +46,10 @@ export type BuiltInFieldKind = keyof typeof BUILT_IN_FIELD_KINDS;
 export type FieldKind = BuiltInFieldKind | (string & {});
 
 /**
- * What fills a field. `image` is a raster drawn signature; `data:` URLs
- * allowed, SVG not. `choice` names a dropdown's choice by its `id`, so a
- * renamed label still answers the same choice.
+ * What fills a field. `image` is a drawn signature or initials, as an inline
+ * PNG or JPEG (`data:` URL) — printable, and fixed once given. `choice` names a
+ * dropdown's choice by its `id`, so a renamed label still answers the same
+ * choice.
  */
 export type FieldValue =
   | { kind: "text"; text: string }
@@ -90,9 +93,9 @@ export interface FieldOptions {
   kinds: Record<string, FieldKindSpec>;
   /**
    * Completed values by field id that the editor opens with; `setFieldValue`
-   * gives one later. A field is laid out, drawn and printed with its value —
-   * the executed document a signing ends with — yet values never enter the
-   * document, so its seal holds.
+   * gives one later. A signer's field is laid out, drawn and printed with a
+   * value its control can show (`shownValue`) — the executed document a
+   * signing ends with — yet values never enter the document, so its seal holds.
    */
   values: Record<string, FieldValue>;
   /** A colour per role, by role name. A role left out takes one from Scrivr's palette. */
@@ -122,7 +125,7 @@ export interface FieldDrawing {
   /** Its party's colour. */
   color: string;
   theme: ResolvedTheme;
-  /** The value it holds. */
+  /** The value it shows, if any: a signer's field, with a value its control can show. */
   value?: FieldValue;
 }
 
@@ -137,39 +140,36 @@ export const isDatedWhenSigned = (kinds: FieldKinds, kind: string): boolean => k
 /** The control a kind declares; `"text"` when it declares none. */
 export const controlOfKind = (kinds: FieldKinds, kind: string): FieldControl => kinds[kind]?.control ?? "text";
 
+/** The control a field's kind declares. */
 export const controlOf = (kinds: FieldKinds, node: PmNode): FieldControl => controlOfKind(kinds, String(node.attrs["kind"]));
 
-/**
- * What each control can show. A drawing on a text control is drawn initials;
- * a checkbox shows only its tick, a dropdown only a choice it offers.
- */
+/** The words or marks each control shows. A drawing is a field's only when it is drawn — see `shownValue`. */
 const SHOWN_BY: Record<FieldControl, ReadonlySet<FieldValue["kind"]>> = {
-  signatureLine: new Set(["image", "text"]),
-  text: new Set(["text", "image"]),
+  signatureLine: new Set(["text"]),
+  text: new Set(["text"]),
   date: new Set(["text"]),
   dropdown: new Set(["choice"]),
   checkbox: new Set(["checkbox"]),
 };
 
-/**
- * The value a field of `control` shows: one it can show, or none. A drawing
- * the page may not draw — SVG, an unsafe URL — shows nothing, so it is none.
- */
-export function shownValue(control: FieldControl, value: FieldValue | undefined): FieldValue | undefined {
-  if (!value || !SHOWN_BY[control].has(value.kind)) return undefined;
-  return value.kind === "image" && safeImageUrl(value.src) === null ? undefined : value;
-}
+/** An inline PNG or JPEG: printable in a PDF, and fixed — a link could change after signing. */
+const INLINE_RASTER = /^data:image\/(?:png|jpe?g);base64,/i;
 
 /**
- * What a field is, as its label says it: "Signature". A kind drawn without a
- * label — a checkbox — is still named, by its kind, wherever a name is read.
+ * The value a field shows: one its control can show, or none. A drawing
+ * belongs only to a field that is drawn — a signature, initials — and only as
+ * an inline PNG or JPEG; anything else shows nothing, so it is none.
  */
-export function fieldLabel(kinds: FieldKinds, node: PmNode): string {
-  const kind = String(node.attrs["kind"]);
-  return kinds[kind]?.label || kind.charAt(0).toUpperCase() + kind.slice(1);
+export function shownValue(kind: string, control: FieldControl, value: FieldValue | undefined): FieldValue | undefined {
+  if (value?.kind === "image") return setsLike(kind, control) === "picture" && INLINE_RASTER.test(value.src) ? value : undefined;
+  return value && SHOWN_BY[control].has(value.kind) ? value : undefined;
 }
 
-/** What an empty field shows in print: its kind's label, and whose it is. */
+/** What a field is, as its label says it: "Signature". */
+export const fieldLabel = (kinds: FieldKinds, node: PmNode): string =>
+  kinds[String(node.attrs["kind"])]?.label ?? String(node.attrs["kind"]);
+
+/** A field's name with whose it is — what an empty field shows in print, and Word's name for its control. */
 export function fieldCaption(kinds: FieldKinds, node: PmNode): string {
   const label = fieldLabel(kinds, node);
   const role = node.attrs["role"];

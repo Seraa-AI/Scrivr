@@ -862,6 +862,25 @@ read-only and storing a certificate signature over its package parts; any
 later edit, an import and re-export included, invalidates that signature,
 and today nothing of it reaches Scrivr.
 
+**Hardened by the review of the executed record (2026-11-14).**
+
+- **A value fills a signer's field only.** `Field` laid any held value over
+  any field with an id, so a stray value could untick an author's sealed box
+  in the executed PDF. Only a signer's field shows a value now.
+- **Answered means printed.** A value counts only where its field can show
+  it (`shownValue`): a tick on a checkbox, a choice on a dropdown, words, and
+  a drawing only on a field that is drawn — a signature, initials — given as
+  an inline PNG or JPEG, which a PDF can print and a link cannot change.
+  Layout, the canvas, the PDF and `isFieldAnswered` read the one rule, so the
+  executed record cannot vouch for a field it prints blank.
+- **A date signed stands only beside its signature.** `valuesOnRecord` drops a
+  party's date when no signature of theirs answers; the signing view clears
+  it when a signature is blanked; a seal refuses a required date signed whose
+  party has no required signature (`dates-without-signature`).
+- **Kinds are passed, never assumed.** `createSnapshot`, `isFieldAnswered` and
+  `unansweredBeforeSigning` take the editor's kinds (`fieldKindsOf`), so a
+  host's own signature kind is treated alike everywhere.
+
 **Decided: Word signing will come back as evidence (2026-11-14) — not built
 yet; its own PR, with its own RFC.** A signature field stays Word's signature
 line, so a signer can sign in Word. Import will read what Word did — which

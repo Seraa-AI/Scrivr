@@ -8,7 +8,7 @@ import { NodeSelection, TextSelection } from "prosemirror-state";
 import { DOMParser, DOMSerializer, type Node as PmNode } from "prosemirror-model";
 import { ServerEditor } from "../../ServerEditor";
 import { StarterKit } from "../StarterKit";
-import { Field, fieldDrawingAt, fieldValues, isFieldAnswered, listSignerFields, paintCheckbox, setFieldValue, unansweredBeforeSigning, type SignerFieldDescriptor } from "./Field";
+import { Field, fieldDrawingAt, fieldValues, isFieldAnswered, listSignerFields, paintCheckbox, setFieldValue, unansweredBeforeSigning, valuesOnRecord, type SignerFieldDescriptor } from "./Field";
 import { BUILT_IN_FIELD_KINDS, fieldIconStrokes, fieldInk, fieldRoleColor, fieldValueLayout, fieldVerb, type FieldKinds, type FieldValue } from "./fieldKinds";
 import { createMeasurer, createTestEditor, measureTextWidth } from "../../test-utils";
 import { DefaultFontProvider } from "../../fonts/DefaultFontProvider";
@@ -846,6 +846,33 @@ describe("what a party completes before they sign", () => {
     expect(isFieldAnswered(agree, { kind: "text", text: "yes" }, kinds)).toBe(false);
     expect(isFieldAnswered(field("sig", "signature"), { kind: "image", src: "data:image/svg+xml;base64,PHN2Zy8+" }, kinds)).toBe(false);
     expect(isFieldAnswered(field("sig", "signature"), { kind: "text", text: "Ada Lovelace" }, kinds)).toBe(true);
+  });
+
+  it("takes a drawing only on a field that is drawn, and only as an inline PNG or JPEG the record can print", () => {
+    const kinds = BUILT_IN_FIELD_KINDS;
+    const png = "data:image/png;base64,iVBORw0KGgo=";
+    expect(isFieldAnswered(field("sig", "signature"), { kind: "image", src: png }, kinds)).toBe(true);
+    expect(isFieldAnswered(field("sig", "signature"), { kind: "image", src: "data:image/jpeg;base64,/9j/" }, kinds)).toBe(true);
+    expect(isFieldAnswered(field("ini", "initials"), { kind: "image", src: png }, kinds)).toBe(true);
+    // A link can change after signing, and an SVG cannot be printed.
+    expect(isFieldAnswered(field("sig", "signature"), { kind: "image", src: "https://example.com/sig.png" }, kinds)).toBe(false);
+    expect(isFieldAnswered(field("sig", "signature"), { kind: "image", src: "https://example.com/sig.svg" }, kinds)).toBe(false);
+    // A name is words: a drawing would be squeezed into a line of text.
+    expect(isFieldAnswered(name, { kind: "image", src: png }, kinds)).toBe(false);
+  });
+});
+
+describe("the values a record shows", () => {
+  const signer = (id: string, kind: string, required = true): SignerFieldDescriptor => ({ id, role: "client", kind, required, options: [] });
+  const fields = [signer("sig", "signature", false), signer("dated", "dateSigned", false), signer("name", "name")];
+  const date: FieldValue = { kind: "text", text: "14 November 2026" };
+
+  it("keep a date signed only beside an answered signature of its party", () => {
+    const signed = { sig: { kind: "text", text: "Ada" }, dated: date, name: { kind: "text", text: "Ada" } } satisfies Record<string, FieldValue>;
+    const blanked = { ...signed, sig: { kind: "text", text: "  " } } satisfies Record<string, FieldValue>;
+
+    expect(valuesOnRecord(fields, signed, BUILT_IN_FIELD_KINDS)).toEqual(signed);
+    expect(valuesOnRecord(fields, blanked, BUILT_IN_FIELD_KINDS)).toEqual({ sig: blanked.sig, name: blanked.name });
   });
 });
 

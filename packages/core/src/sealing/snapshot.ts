@@ -1,6 +1,6 @@
 import type { Node as PmNode } from "prosemirror-model";
 import { listSignerFields, type SignerFieldDescriptor } from "../extensions/built-in/Field";
-import { BUILT_IN_FIELD_KINDS, isDatedWhenSigned, isSigningKind, type FieldKinds } from "../extensions/built-in/fieldKinds";
+import { isDatedWhenSigned, isSigningKind, type FieldKinds } from "../extensions/built-in/fieldKinds";
 
 /** A revision frozen as the exact bytes that were agreed. */
 export interface SealedSnapshot {
@@ -33,8 +33,9 @@ export type SealRefusal =
    */
   | { reason: "fields-outside-body"; count: number }
   /**
-   * A role's date signed with no field of that role whose completion is
-   * signing — nothing would ever date it, and the record would show it blank.
+   * A role's required date signed with no required field of that role whose
+   * completion is signing — nothing might ever date it, and the record would
+   * show it blank.
    */
   | { reason: "dates-without-signature"; roles: string[] }
   /** One of the host's own checks refused — a signing order, an approval, anything Scrivr cannot know. */
@@ -69,11 +70,11 @@ export interface CreateSnapshotOptions {
    */
   checks?: { before?: readonly SealCheck[]; after?: readonly SealCheck[] };
   /**
-   * The editor's field kinds (`fieldKindsOf`), when the host registers its
-   * own: what a kind declares — a signature line, a date signed — decides
-   * what a seal checks. The built-ins when omitted.
+   * The editor's field kinds (`fieldKindsOf`): what a kind declares — a
+   * signature line, a date signed — decides what a seal checks, so a host's
+   * own kinds are checked as the signing view will treat them.
    */
-  kinds?: FieldKinds;
+  kinds: FieldKinds;
 }
 
 async function hostRefusal(checks: readonly SealCheck[] | undefined, subject: SealCheckSubject): Promise<HostSealRefusal | null> {
@@ -196,10 +197,13 @@ function roleRefusal(fields: readonly SignerFieldDescriptor[], assigned: readonl
   return null;
 }
 
-/** Roles with a field dated when they sign, and no field whose completion is their signing. */
+/**
+ * Roles with a required field dated when they sign, and no required field
+ * whose completion is their signing — an optional signature may never come.
+ */
 function rolesDatedWithoutSigning(fields: readonly SignerFieldDescriptor[], kinds: FieldKinds): string[] {
-  const signs = new Set(fields.filter((f) => isSigningKind(kinds, f.kind)).map((f) => f.role));
-  return [...new Set(fields.filter((f) => isDatedWhenSigned(kinds, f.kind) && !signs.has(f.role)).map((f) => f.role))];
+  const signs = new Set(fields.filter((f) => f.required && isSigningKind(kinds, f.kind)).map((f) => f.role));
+  return [...new Set(fields.filter((f) => f.required && isDatedWhenSigned(kinds, f.kind) && !signs.has(f.role)).map((f) => f.role))];
 }
 
 /**
@@ -213,7 +217,7 @@ function rolesDatedWithoutSigning(fields: readonly SignerFieldDescriptor[], kind
  */
 export async function createSnapshot(
   doc: PmNode,
-  { assignedRoles, checks, kinds = BUILT_IN_FIELD_KINDS }: CreateSnapshotOptions,
+  { assignedRoles, checks, kinds }: CreateSnapshotOptions,
 ): Promise<SnapshotResult> {
   const fields = listSignerFields(doc);
   const subject: SealCheckSubject = { doc, fields, assignedRoles };

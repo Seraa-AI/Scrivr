@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { prosemirrorToYXmlFragment } from "y-prosemirror";
-import { Field, ServerEditor, StarterKit, createSnapshot } from "@scrivr/core";
+import { BUILT_IN_FIELD_KINDS, Field, ServerEditor, StarterKit, createSnapshot } from "@scrivr/core";
 import {
   isSealed,
   matchesSnapshot,
@@ -43,8 +43,8 @@ function room(doc = editor.getState().doc): Y.Doc {
 
 describe("snapshotFromYDoc", () => {
   it("seals the room's document as the editor would", async () => {
-    const fromRoom = await snapshotFromYDoc(room(), schema, { assignedRoles: ["client"] });
-    const fromEditor = await createSnapshot(editor.getState().doc, { assignedRoles: ["client"] });
+    const fromRoom = await snapshotFromYDoc(room(), schema, { kinds: BUILT_IN_FIELD_KINDS, assignedRoles: ["client"] });
+    const fromEditor = await createSnapshot(editor.getState().doc, { kinds: BUILT_IN_FIELD_KINDS, assignedRoles: ["client"] });
 
     expect(fromRoom).toEqual(fromEditor);
   });
@@ -53,8 +53,8 @@ describe("snapshotFromYDoc", () => {
     const attr = editor.getDocAttrNames()[0]!;
     const withPolicy = editor.getState().tr.setDocAttribute(attr, { changed: true }).doc;
 
-    const plain = await snapshotFromYDoc(room(), schema, { assignedRoles: ["client"] });
-    const changed = await snapshotFromYDoc(room(withPolicy), schema, { assignedRoles: ["client"] });
+    const plain = await snapshotFromYDoc(room(), schema, { kinds: BUILT_IN_FIELD_KINDS, assignedRoles: ["client"] });
+    const changed = await snapshotFromYDoc(room(withPolicy), schema, { kinds: BUILT_IN_FIELD_KINDS, assignedRoles: ["client"] });
 
     expect(plain.ok && changed.ok && plain.snapshot.contentHash !== changed.snapshot.contentHash).toBe(true);
   });
@@ -103,7 +103,7 @@ describe("the revision stamp", () => {
 describe("a room that drifted from its seal", () => {
   it("is caught, and put back to exactly what was sealed", async () => {
     const ydoc = room();
-    const sealed = await snapshotFromYDoc(ydoc, schema, { assignedRoles: ["client"] });
+    const sealed = await snapshotFromYDoc(ydoc, schema, { kinds: BUILT_IN_FIELD_KINDS, assignedRoles: ["client"] });
     if (!sealed.ok) throw new Error("expected a snapshot");
     const { content, contentHash } = sealed.snapshot;
 

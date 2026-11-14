@@ -6,6 +6,7 @@ import {
   isFieldAnswered,
   listSignerFields,
   setFieldValue,
+  valuesOnRecord,
   verifySnapshot,
   type EditorOptions,
   type FieldValue,
@@ -43,8 +44,10 @@ export type ExecutedPdfResult =
  * longer matches its hash, or a required field the record would show blank.
  * The fields are read from the verified content, not from what was stored
  * beside it, and are checked against the values as the printing editor holds
- * them — what it prints is what was checked. Values are printed, never
- * written: the snapshot and its hash are unchanged.
+ * them, as a record shows them (`valuesOnRecord`) — what it prints is what
+ * was checked. Throws when the editor cannot hold values: `Field` is missing
+ * from `editorOptions`. Values are printed, never written: the snapshot and
+ * its hash are unchanged.
  */
 export async function exportExecutedPdf(
   snapshot: Pick<SealedSnapshot, "content" | "contentHash">,
@@ -57,10 +60,16 @@ export async function exportExecutedPdf(
   const { editorOptions, ...pdfOptions } = options;
   const editor = new Editor({ ...editorOptions, content: documentJson(snapshot.content), sealed: true });
   try {
-    for (const [id, value] of Object.entries(values)) setFieldValue(editor, id, value);
-    const held = fieldValues(editor.getState());
+    for (const [id, value] of Object.entries(values)) {
+      if (!setFieldValue(editor, id, value)) throw new Error("exportExecutedPdf needs Field among editorOptions.extensions to hold values");
+    }
     const kinds = fieldKindsOf(editor);
-    const missing = listSignerFields(editor.getState().doc).filter((f) => f.required && !isFieldAnswered(f, held[f.id], kinds));
+    const fields = listSignerFields(editor.getState().doc);
+    // What the record shows: a date signed with no signature beside it is dropped.
+    const held = fieldValues(editor.getState());
+    const onRecord = valuesOnRecord(fields, held, kinds);
+    for (const id of Object.keys(held)) if (!(id in onRecord)) setFieldValue(editor, id, null);
+    const missing = fields.filter((f) => f.required && !isFieldAnswered(f, onRecord[f.id], kinds));
     if (missing.length > 0) return { ok: false, refusal: { reason: "unanswered-fields", missing } };
     const pdf = await exportToPdf(editor, pdfOptions);
     return { ok: true, pdf, artifactHash: await hashArtifact(pdf) };
@@ -69,7 +78,7 @@ export async function exportExecutedPdf(
   }
 }
 
-/** A verified snapshot's document: canonical JSON of one object. */
+/** A verified snapshot's document object, rebuilt as a typed record rather than cast. */
 function documentJson(content: string): Record<string, unknown> {
   const parsed: unknown = JSON.parse(content);
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new Error("A snapshot's content is a document object");

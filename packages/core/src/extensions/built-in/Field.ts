@@ -102,7 +102,7 @@ export interface SignerFieldDescriptor {
  * control can show it. `kinds` are the editor's own (`fieldKindsOf`).
  */
 export function isFieldAnswered(field: SignerFieldDescriptor, value: FieldValue | undefined, kinds: FieldKinds): boolean {
-  const shown = shownValue(controlOfKind(kinds, field.kind), value);
+  const shown = shownValue(field.kind, controlOfKind(kinds, field.kind), value);
   switch (shown?.kind) {
     case "checkbox":
       return shown.checked;
@@ -136,6 +136,21 @@ export function unansweredBeforeSigning(
       !isDatedWhenSigned(kinds, f.kind) &&
       !isFieldAnswered(f, values[f.id], kinds),
   );
+}
+
+/**
+ * The values as a signed record shows them: a date signed stands only beside
+ * an answered signature of its party — a date with nothing signed is no date.
+ * What the executed record prints, and what a host's server should keep.
+ */
+export function valuesOnRecord(
+  fields: readonly SignerFieldDescriptor[],
+  values: Readonly<Record<string, FieldValue>>,
+  kinds: FieldKinds,
+): Record<string, FieldValue> {
+  const signed = new Set(fields.filter((f) => isSigningKind(kinds, f.kind) && isFieldAnswered(f, values[f.id], kinds)).map((f) => f.role));
+  const unsigned = new Set(fields.filter((f) => isDatedWhenSigned(kinds, f.kind) && !signed.has(f.role)).map((f) => f.id));
+  return Object.fromEntries(Object.entries(values).filter(([id]) => !unsigned.has(id)));
 }
 
 /**
@@ -287,9 +302,10 @@ const fieldValuesPlugin = (initial: FieldValues) =>
 export const fieldValues = (state: EditorState): FieldValues => fieldValuesKey.getState(state) ?? {};
 
 /**
- * Give field `id` a value — `null` empties it. The field is laid out, drawn
- * and printed with it; the document is untouched. Returns false when the
- * editor has no `Field`.
+ * Give field `id` a value — `null` empties it; the document is untouched. A
+ * signer's field is laid out, drawn and printed with it when its control can
+ * show it (`shownValue`); otherwise it is held but shows nothing. Returns
+ * false when the editor has no `Field`.
  */
 export function setFieldValue(editor: IBaseEditor, id: string, value: FieldValue | null): boolean {
   const state = editor.getState();
@@ -572,13 +588,13 @@ const pdfColor = (css: string): Rgb => {
 const valueOf = (kinds: FieldKinds, values: FieldValues, node: PmNode): FieldValue | undefined => {
   const id = node.attrs["nodeId"];
   if (typeof id !== "string" || !isSigner(node)) return undefined;
-  return shownValue(controlOf(kinds, node), values[id]);
+  return shownValue(String(node.attrs["kind"]), controlOf(kinds, node), values[id]);
 };
 
 /**
  * The same blank as on canvas, but a PDF cannot dash, so its rule prints
  * solid, and it names whose it is — a printed page may have no colour. A
- * field with a value prints the value instead: the executed document.
+ * field showing a value prints the value instead: the executed document.
  */
 const fieldPdf =
   (kinds: FieldKinds, options: FieldOptions, values: () => FieldValues): PdfNodeHandler =>

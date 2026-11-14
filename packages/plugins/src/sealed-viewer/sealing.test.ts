@@ -1,6 +1,6 @@
 /** A redline is not an agreement: a document with open suggestions does not seal. */
 import { describe, expect, it } from "vitest";
-import { Field, ServerEditor, StarterKit, createSnapshot } from "@scrivr/core";
+import { BUILT_IN_FIELD_KINDS, Field, ServerEditor, StarterKit, createSnapshot } from "@scrivr/core";
 import { TextSelection } from "@scrivr/core/pm";
 import { TrackChanges, TrackChangesStatus } from "../index";
 
@@ -14,7 +14,7 @@ describe("sealing a document under review", () => {
       const state = editor.getState();
       editor.applyTransaction(state.tr.setSelection(TextSelection.create(state.doc, from, to)));
     };
-    const sealing = () => createSnapshot(editor.getState().doc, { assignedRoles: [] });
+    const sealing = () => createSnapshot(editor.getState().doc, { kinds: BUILT_IN_FIELD_KINDS, assignedRoles: [] });
     return { editor, select, sealing };
   };
   const refusedFor = (count: number) => ({ ok: false, refusal: { reason: "pending-tracked-changes", count } });

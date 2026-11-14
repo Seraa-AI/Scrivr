@@ -458,6 +458,22 @@ describe("FieldCompletion — the date a party signed", () => {
     expect(request.mock.calls.map(([field]) => field.id)).toEqual([signHere.id]);
   });
 
+  it("goes when its signature does: a date never stands beside a blank signature", async () => {
+    let answer: FieldValue = signature;
+    const request = vi.fn(async (field: SignerFieldDescriptor): Promise<FieldValue | null> => (field.kind === "dateSigned" ? today : answer));
+    const e = signingWithDates(request);
+    requestField(e, signHere.id);
+    await flush();
+    await flush();
+    expect(fieldValues(e.getState())[signed.id]).toEqual(today);
+
+    answer = { kind: "text", text: "  " };
+    requestField(e, signHere.id);
+    await flush();
+
+    expect(fieldValues(e.getState())[signed.id]).toBeUndefined();
+  });
+
   it("is asked for once while the host is still dating it, however often the party signs", async () => {
     let date: (value: FieldValue) => void = () => {};
     const request = vi.fn((field: SignerFieldDescriptor) =>
@@ -484,11 +500,16 @@ describe("FieldCompletion — the date a party signed", () => {
     expect(moveFieldFocus(e, 1)).toBeNull();
 
     const map = new CharacterMap();
+    map.registerObjectRect({ docPos: 2, x: 100, y: 560, width: 180, height: 44, page: 2, baseline: 600 });
     map.registerObjectRect({ docPos: 3, x: 100, y: 600, width: 110, height: 24, page: 2, baseline: 620 });
     e.emit("hover", { targets: [], point: point(2, 120, 610) });
     e.painters.at(-1)!(recordingContext([]), 2, defaultPageConfig, map, e.getResolvedTheme());
 
-    expect(seen.find((f) => f.kind === "dateSigned")?.active).toBe(false);
+    const dated = seen.find((f) => f.kind === "dateSigned");
+    expect(dated?.active).toBe(false);
+    expect(dated?.datedWhenSigned).toBe(true);
+    expect(dated?.answered).toBe(false);
+    expect(seen.find((f) => f.kind === "signature")?.datedWhenSigned).toBe(false);
   });
 });
 

@@ -3,6 +3,7 @@ import { Scrivr, StarterKit, defaultPageConfig, useScrivrEditor } from "@scrivr/
 import {
   DefaultContent,
   Field,
+  type Editor,
   ServerEditor,
   BUILT_IN_FIELD_KINDS,
   fieldKindsOf,
@@ -91,6 +92,8 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
   const content = useMemo(() => JSON.parse(snapshot.content), [snapshot]);
   const mine = snapshot.fields.filter((f) => f.role === role);
 
+  // The editor a request is answered for: the one mounted now, not the one these options were made with.
+  const editorRef = useRef<Editor | null>(null);
   const editor = useScrivrEditor(
     {
       sealed: true,
@@ -114,7 +117,8 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
                 return resolve({ kind: "checkbox", checked: !(current?.kind === "checkbox" && current.checked) });
               }
               // Dated as the party signs: a real host takes the date from its own record of the signature.
-              if (editor && isDatedWhenSigned(fieldKindsOf(editor), field.kind)) {
+              const mounted = editorRef.current;
+              if (mounted && isDatedWhenSigned(fieldKindsOf(mounted), field.kind)) {
                 return resolve({ kind: "text", text: new Date().toLocaleDateString(undefined, { dateStyle: "long" }) });
               }
               setRequest({ field, current, resolve });
@@ -146,6 +150,9 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
   );
 
   const pageCount = editor?.layout.pages.length ?? 0;
+  useEffect(() => {
+    editorRef.current = editor;
+  }, [editor]);
   // The kinds this room's Field knows, read as the signing view reads them.
   const kinds = editor ? fieldKindsOf(editor) : BUILT_IN_FIELD_KINDS;
   const missing = snapshot.fields.filter((f) => f.required && !isFieldAnswered(f, values[f.id], kinds));
@@ -266,7 +273,7 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
           <ul className="flex flex-col gap-1">
             {mine.map((f) => {
               const value = values[f.id];
-              const answered = value !== undefined && isFieldAnswered(f, value, kinds);
+              const answered = isFieldAnswered(f, value, kinds);
               return (
                 <li key={f.id}>
                   <button
@@ -279,7 +286,7 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
                       {!f.required && <span style={{ color: "var(--app-text-muted)" }}> (optional)</span>}
                     </span>
                     <span style={{ color: answered ? "var(--app-accent)" : "var(--app-text-muted)" }}>
-                      {value && answered ? describe(value, f) : isDatedWhenSigned(kinds, f.kind) ? "When you sign" : "Open"}
+                      {answered && value ? describe(value, f) : isDatedWhenSigned(kinds, f.kind) ? "When you sign" : "Open"}
                     </span>
                   </button>
                 </li>
