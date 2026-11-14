@@ -16,6 +16,7 @@ import type {
 	ToolbarItemSpec,
 	ToolbarState,
 	OverlayRenderHandler,
+	PointerCursorResolver,
 	IEditor,
 } from "./extensions/types";
 import type { Mark, Node as PmNode, Schema } from "prosemirror-model";
@@ -202,6 +203,14 @@ export interface EditorOptions {
 	 * Defaults to false.
 	 */
 	readOnly?: boolean;
+	/**
+	 * Start sealed: the content loads, then the document refuses every change,
+	 * from this client and collaborators alike. There is no unseal. Leave it
+	 * off for an editor joining a room — the room's content would be refused;
+	 * `Collaboration` seals the editor when the room is sealed.
+	 * Defaults to false.
+	 */
+	sealed?: boolean;
 	/**
 	 * Diagnostic flags. Currently only `drag` — when true, PointerController
 	 * console.debugs structured drag events and DragDebugOverlay paints anchored
@@ -517,6 +526,7 @@ export class Editor extends BaseEditor implements IEditor {
 	 * Called by TileManager.paintOverlay() for each visible page.
 	 */
 	private readonly overlayRenderHandlers = new Set<OverlayRenderHandler>();
+	private readonly pointerCursors = new Set<PointerCursorResolver>();
 
 	/**
 	 * Diagnostic flags. Mutable — flip `editor.debug.drag = true; editor.redraw()`
@@ -540,6 +550,7 @@ export class Editor extends BaseEditor implements IEditor {
 		uploadPastedImage,
 		startReady = true,
 		readOnly = false,
+		sealed = false,
 		debug = {},
 		theme,
 		themeRoot,
@@ -609,7 +620,7 @@ export class Editor extends BaseEditor implements IEditor {
 		});
 
 		// ── Surface registry — plugins register their own surfaces lazily.
-		this.surfaces = new SurfaceRegistry();
+		this.surfaces = new SurfaceRegistry((state, tr) => this.applyThroughGate(state, tr));
 		const owners = this.manager.getSurfaceOwners();
 		this.surfaces.setOwnerMediator({
 			commit: s => {
@@ -734,6 +745,7 @@ export class Editor extends BaseEditor implements IEditor {
 
 		// Apply initial read-only state after infrastructure is ready.
 		if (readOnly) this.setReadOnly(true);
+		if (sealed) this.seal();
 
 		// Debug overlays — always installed; self-gate on the corresponding
 		// `this.debug.<flag>` at paint time so toggling at runtime requires no
@@ -779,8 +791,8 @@ export class Editor extends BaseEditor implements IEditor {
 	 * the viewport where the caller put it — e.g. `revealCitation` sets the
 	 * highlight here, then scrolls the cited range into view itself.
 	 */
-	override applyTransaction(tr: Transaction): void {
-		this.viewDispatch(tr, tr.scrolledIntoView);
+	override applyTransaction(tr: Transaction): boolean {
+		return this.viewDispatch(tr, tr.scrolledIntoView);
 	}
 
 	/**
@@ -791,13 +803,9 @@ export class Editor extends BaseEditor implements IEditor {
 		return this.surfaces.activeSurface?.state ?? this.editorState;
 	}
 
-	protected override dispatchToActive(tr: Transaction): void {
+	protected override dispatchToActive(tr: Transaction): boolean {
 		const active = this.surfaces.activeSurface;
-		if (active) {
-			active.dispatch(tr);
-		} else {
-			this.viewDispatch(tr);
-		}
+		return active ? active.dispatch(tr) : this.viewDispatch(tr);
 	}
 
 	/**
@@ -805,14 +813,15 @@ export class Editor extends BaseEditor implements IEditor {
 	 * setting the flag and notifying subscribers.
 	 */
 	override setReadOnly(value: boolean): void {
-		if (this.readOnly === value) return;
+		const wasReadOnly = this.readOnly;
 		super.setReadOnly(value);
-		this.ib.setReadOnly(value);
-		if (value) {
-			this.cursorManager.stop();
-		} else if (this.ib.isFocused) {
-			this.cursorManager.start();
-		}
+		if (this.readOnly !== wasReadOnly) this.syncInputToWritability();
+	}
+
+	override seal(): void {
+		const wasReadOnly = this.readOnly;
+		super.seal();
+		if (this.readOnly !== wasReadOnly) this.syncInputToWritability();
 	}
 
 	/** Override to route through active surface when one is set. */
@@ -851,8 +860,7 @@ export class Editor extends BaseEditor implements IEditor {
 			);
 			tr = tr.insert(finalInsertPos, node);
 			tr = tr.setSelection(NodeSelection.create(tr.doc, finalInsertPos));
-			this.dispatchToActive(tr);
-			return true;
+			return this.dispatchToActive(tr);
 		} catch {
 			return false;
 		}
@@ -903,8 +911,7 @@ export class Editor extends BaseEditor implements IEditor {
 			);
 			tr = tr.insert(finalInsertPos, updated);
 			tr = tr.setSelection(NodeSelection.create(tr.doc, finalInsertPos));
-			this.dispatchToActive(tr);
-			return true;
+			return this.dispatchToActive(tr);
 		} catch {
 			return false;
 		}
@@ -1560,6 +1567,27 @@ export class Editor extends BaseEditor implements IEditor {
 		return () => this.overlayRenderHandlers.delete(handler);
 	}
 
+	addPointerCursor(resolve: PointerCursorResolver): () => void {
+		this.pointerCursors.add(resolve);
+		return () => this.pointerCursors.delete(resolve);
+	}
+
+	/**
+	 * The cursor an extension asked for at `point`, or null.
+	 *
+	 * @internal — the pointer controller's.
+	 */
+	pointerCursorAt(point: PagePoint): string | null {
+		if (this.pointerCursors.size === 0) return null;
+		const owner = this.pointOwnerAt(point.x, point.y, point.page);
+		const objectPos = owner.kind === "inlineObject" ? owner.rect.docPos : null;
+		for (const resolve of this.pointerCursors) {
+			const cursor = resolve({ point, objectPos });
+			if (cursor !== null) return cursor;
+		}
+		return null;
+	}
+
 	/**
 	 * Resolve a pointer position to a semantic `HitTarget` via extension hit
 	 * testers (highest priority first), or null when none claims it — in which
@@ -1733,10 +1761,12 @@ export class Editor extends BaseEditor implements IEditor {
 	/**
 	 * Invalidate the layout cache so the next paint triggers a full re-layout.
 	 * Use when external factors change chrome heights (e.g. live surface editing
-	 * grows the header band).
+	 * grows the header band). `remeasure` measures every block again too — for
+	 * a change to what a strategy measures that the document doesn't show.
 	 */
-	invalidateLayout(): void {
-		this.lc.invalidate();
+	invalidateLayout(options: { remeasure?: boolean } = {}): void {
+		if (options.remeasure) this.lc.remeasure();
+		else this.lc.invalidate();
 		this.redraw();
 	}
 
@@ -1831,7 +1861,7 @@ export class Editor extends BaseEditor implements IEditor {
 	 *
 	 * All transaction paths in Editor (commands, input, external) converge here.
 	 */
-	private viewDispatch(tr: Transaction, scrollToCursor = true): void {
+	private viewDispatch(tr: Transaction, scrollToCursor = true): boolean {
 		// Stale first, publish second. applyState emits "update" and notifies
 		// listeners synchronously, so anything it wakes reads the new document —
 		// and would read the old layout with it, because a coordinator that still
@@ -1840,14 +1870,24 @@ export class Editor extends BaseEditor implements IEditor {
 		// matches the stale layout it came from, so the geometry looks coherent
 		// while describing text that has already moved.
 		this.lc.invalidate();
-		// applyState is in BaseEditor: applies tr, emits "update", notifyListeners
-		this.applyState(tr);
+		if (!this.applyState(tr)) return false;
 		// resetSilent: reset blink state WITHOUT calling onTick (which fires notifyListeners).
 		// Calling reset() here was the root cause of O(N²) repaints during Y.js initial sync.
 		this.cursorManager.resetSilent();
 		this.onChangeHandler?.(this.editorState);
 		if (scrollToCursor) this.pendingScrollToCursor = true;
 		this.scheduleFlush();
+		return true;
+	}
+
+	/** Input and caret follow `readOnly`, which a seal also makes true. */
+	private syncInputToWritability(): void {
+		this.ib.setReadOnly(this.readOnly);
+		if (this.readOnly) {
+			this.cursorManager.stop();
+		} else if (this.ib.isFocused) {
+			this.cursorManager.start();
+		}
 	}
 
 	/**

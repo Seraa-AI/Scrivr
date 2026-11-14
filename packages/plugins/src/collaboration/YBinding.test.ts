@@ -267,7 +267,7 @@ describe("YBinding — doc-attr sync (Y → PM)", () => {
     headerFooter: null,
   });
 
-  it("applies a Y.Map envelope to PM doc.attrs after markSynced", () => {
+  it("applies a Y.Map envelope to PM doc.attrs as it arrives, before markSynced", () => {
     const { editor, ydoc, attrsMap, binding } = makePeer({
       extensions: [StarterKit, HeaderFooter],
     });
@@ -277,8 +277,8 @@ describe("YBinding — doc-attr sync (Y → PM)", () => {
       attrsMap.set("headerFooter", { localSeq: 1, value: policy });
     });
 
-    // Before markSynced, Y→PM is gated off.
-    expect(editor.getState().doc.attrs.headerFooter).toBeNull();
+    // Only PM→Y waits for markSynced; the room's state lands as it arrives.
+    expect(editor.getState().doc.attrs.headerFooter).toEqual(policy);
 
     binding.markSynced();
 
@@ -447,6 +447,26 @@ describe("YBinding — two-peer sync", () => {
     b.binding.destroy();
   });
 
+  it("a read-only viewer still receives the author's text and policy", () => {
+    const a = makePeer({ extensions: [StarterKit, HeaderFooter] });
+    const b = makePeer({ extensions: [StarterKit, HeaderFooter] });
+    const unpair = pairDocs(a.ydoc, b.ydoc);
+    a.binding.markSynced();
+    b.binding.markSynced();
+    b.editor.setReadOnly(true);
+
+    const policy = { enabled: true, headerHeight: 36 };
+    a.editor.applyTransaction(a.editor.getState().tr.insertText("typed ", 1));
+    a.editor.applyTransaction(a.editor.getState().tr.setDocAttribute("headerFooter", policy));
+
+    expect(b.editor.getState().doc.textContent).toBe(a.editor.getState().doc.textContent);
+    expect(b.editor.getState().doc.attrs.headerFooter).toEqual(policy);
+
+    unpair();
+    a.binding.destroy();
+    b.binding.destroy();
+  });
+
   it("concurrent writes converge — both peers end up with the same value (Yjs LWW)", () => {
     const a = makePeer({ extensions: [StarterKit, HeaderFooter] });
     const b = makePeer({ extensions: [StarterKit, HeaderFooter] });
@@ -569,7 +589,7 @@ describe("YBinding — a split's new id is assigned once, by its author", () => 
 describe("YBinding — late join", () => {
   const HeaderFooter = makeDocAttrContributor("headerFooter", { headerFooter: null });
 
-  it("a peer joining a room with an existing policy adopts it on markSynced", () => {
+  it("a peer joining a room with an existing policy adopts it with the content", () => {
     const a = makePeer({ extensions: [StarterKit, HeaderFooter] });
     a.binding.markSynced();
 
@@ -583,8 +603,8 @@ describe("YBinding — late join", () => {
     const b = makePeer({ extensions: [StarterKit, HeaderFooter] });
     Y.applyUpdate(b.ydoc, Y.encodeStateAsUpdate(a.ydoc));
 
-    // Before markSynced, B's PM has not yet adopted the policy.
-    expect(b.editor.getState().doc.attrs.headerFooter).toBeNull();
+    // Adopted as it arrives, with the content — not held back until markSynced.
+    expect(b.editor.getState().doc.attrs.headerFooter).toEqual(policy);
 
     b.binding.markSynced();
     expect(b.editor.getState().doc.attrs.headerFooter).toEqual(policy);
@@ -608,6 +628,56 @@ describe("YBinding — late join", () => {
     // After markSynced, B's first edit should not have overwritten the policy.
     expect(b.attrsMap.get("headerFooter")?.value).toEqual(policy);
 
+    a.binding.destroy();
+    b.binding.destroy();
+  });
+});
+
+describe("YBinding — a sealed peer", () => {
+  const HeaderFooter = makeDocAttrContributor("headerFooter", { headerFooter: null });
+
+  function sealedPair() {
+    const a = makePeer({ extensions: [StarterKit, HeaderFooter] });
+    const b = makePeer({ extensions: [StarterKit, HeaderFooter] });
+    a.binding.markSynced();
+    b.binding.markSynced();
+    const unpair = pairDocs(a.ydoc, b.ydoc);
+    a.editor.applyTransaction(
+      a.editor.getState().tr.insertText("Net 30.", 1).setDocAttribute("headerFooter", { enabled: true }),
+    );
+    b.editor.seal();
+    return { a, b, unpair };
+  }
+
+  const click = (editor: ServerEditor) => {
+    const state = editor.getState();
+    editor.applyTransaction(state.tr.setSelection(TextSelection.create(state.doc, 2)));
+  };
+
+  it("refuses a collaborator's edit, and never writes its own copy back over the room", () => {
+    const { a, b, unpair } = sealedPair();
+
+    a.editor.applyTransaction(a.editor.getState().tr.insertText(" Net 60.", 8));
+    expect(b.editor.getState().doc.textContent).toBe("Net 30.");
+
+    click(b.editor);
+    expect(a.editor.getState().doc.textContent).toBe("Net 30. Net 60.");
+
+    unpair();
+    a.binding.destroy();
+    b.binding.destroy();
+  });
+
+  it("refuses a collaborator's policy change, and never writes its own back over the room", () => {
+    const { a, b, unpair } = sealedPair();
+
+    a.editor.applyTransaction(a.editor.getState().tr.setDocAttribute("headerFooter", { enabled: false }));
+    expect(b.editor.getState().doc.attrs.headerFooter).toEqual({ enabled: true });
+
+    click(b.editor);
+    expect(a.attrsMap.get("headerFooter")?.value).toEqual({ enabled: false });
+
+    unpair();
     a.binding.destroy();
     b.binding.destroy();
   });

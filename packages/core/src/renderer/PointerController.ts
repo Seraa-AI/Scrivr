@@ -376,6 +376,8 @@ export class PointerController {
   private hoverCursorFor(hit: PagePoint): string {
     const resizeHit = this.hitHandleAt(hit.x, hit.y, hit.page);
     if (resizeHit) return resizeHit.cursor;
+    const asked = this.deps.editor.pointerCursorAt(hit);
+    if (asked !== null) return asked;
 
     return this.ownerAt(hit.x, hit.y, hit.page).kind === "text" ? "text" : "move";
   }
@@ -478,6 +480,10 @@ export class PointerController {
     this.lastClickTime = now;
     this.lastClickX = e.clientX;
     this.lastClickY = e.clientY;
+
+    // Before any routing, and in read-only too: what is painted over a page
+    // without being a document node — a sealed field — hears presses here.
+    if (e.button === 0) editor.emit("press", { point: hit, clickCount: this.clickCount });
 
     // Chrome bands are separate editing surfaces, so their activation routing
     // precedes body hit testing.

@@ -49,6 +49,11 @@ export interface ServerEditorOptions {
    * provider it cannot say what its text is set in.
    */
   fonts?: FontProvider;
+  /**
+   * Start sealed: the content loads, then the document refuses every change.
+   * There is no unseal.
+   */
+  sealed?: boolean;
 }
 
 /**
@@ -94,6 +99,7 @@ export class ServerEditor extends BaseEditor {
     clone = false,
     theme,
     fonts,
+    sealed = false,
   }: ServerEditorOptions = {}) {
     super({ extensions, clone, ...(content ? { content } : {}), ...(fonts ? { fonts } : {}) });
     if (theme && themeContainsCssVars(theme)) {
@@ -117,6 +123,7 @@ export class ServerEditor extends BaseEditor {
     // the engine only fires in browser `Editor`. ServerEditor silently skips
     // that phase, so view APIs (overlays, layout, redraw, selection,
     // surfaces) never get touched headlessly.
+    if (sealed) this.seal();
     this.fireEditorReady();
   }
 
@@ -152,8 +159,15 @@ export class ServerEditor extends BaseEditor {
    *
    * Note: this does NOT notify subscribers — it is a hard reset intended for
    * loading a fresh document. Call `subscribe` callbacks manually if needed.
+   *
+   * A sealed document is never replaced: returns `false` and reports the
+   * refusal through `"mutationDenied"`.
    */
-  setContent(json: Record<string, unknown>): void {
+  setContent(json: Record<string, unknown>): boolean {
+    if (this.sealed) {
+      this.emit("mutationDenied", { reason: "sealed", origin: "local" });
+      return false;
+    }
     // Ingestion-time normalization — URL allow-list, table repair, fingerprint,
     // warnings. Same pipeline as the base constructor. Block-ID assignment is
     // OFF on this read/emit surface (see assignsBlockIdsOnLoad): a headless load
@@ -166,9 +180,10 @@ export class ServerEditor extends BaseEditor {
     this.lastNormalizeResultValue = result;
     this.editorState = EditorState.create({
       schema: this.manager.schema,
-      plugins: this.manager.buildPlugins(),
+      plugins: this.buildStatePlugins(),
       doc: result.doc,
     });
+    return true;
   }
 
   /**

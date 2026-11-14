@@ -7,8 +7,15 @@ export interface UseCanvasEditorOptions {
   extensions?: Extension[];
   /** Page dimensions and margins. Defaults to A4 with 1-inch margins. */
   pageConfig?: PageConfig;
-  /** When true, the editor blocks all mutations. Default: false. */
+  /** When true, this viewer cannot edit; collaborators' edits still arrive. Default: false. */
   readOnly?: boolean;
+  /**
+   * Start sealed: the content loads, then the document refuses every change,
+   * from this client and collaborators alike. Leave it off with
+   * `Collaboration`, which seals the editor when its room is sealed.
+   * Default: false.
+   */
+  sealed?: boolean;
   /**
    * Which typefaces this editor may measure and paint in.
    *
@@ -81,6 +88,7 @@ export function useScrivrEditor(
       extensions: opts.extensions ?? [StarterKit],
       ...(opts.pageConfig ? { pageConfig: opts.pageConfig } : {}),
       readOnly: opts.readOnly ?? false,
+      sealed: opts.sealed ?? false,
       ...(opts.fonts ? { fonts: opts.fonts } : {}),
       ...(opts.theme ? { theme: opts.theme } : {}),
       ...(opts.themeRoot ? { themeRoot: opts.themeRoot } : {}),

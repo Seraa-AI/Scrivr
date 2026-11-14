@@ -12,7 +12,7 @@ import {
 } from "@scrivr/react";
 import { useEffect, useState, type ReactNode } from "react";
 import { useTheme } from "next-themes";
-import type { EditorStateContext, EditorTheme } from "@scrivr/react";
+import type { EditorStateContext } from "@scrivr/react";
 import { PdfExport } from "@scrivr/export-pdf";
 import { DocxExport, DocxImport } from "@scrivr/docx";
 import {
@@ -33,6 +33,7 @@ import { BubbleMenuBar } from "./BubbleMenuBar";
 import { FloatingMenuBar } from "./FloatingMenuBar";
 import { ModeSwitcher, useEditorMode, type EditorMode } from "./ModeSwitcher";
 import { ContentSwitcher } from "./ContentSwitcher";
+import { PLAYGROUND_THEME } from "./theme";
 import { onRefusal, reportRefusal } from "./refusals";
 import {
   TrackChangesPopover,
@@ -43,11 +44,14 @@ import {
   describeSuggestionRefusal,
 } from "@scrivr/react";
 import type { SuggestionRefusalText } from "@scrivr/react";
-import type { Editor, ToolbarState } from "@scrivr/core";
-import { Selection } from "@scrivr/core/pm";
+import { createSnapshot, Field, fieldKindsOf, type Editor, type SealedSnapshot, type SealRefusal, type ToolbarState } from "@scrivr/core";
+import { Selection, TextSelection } from "@scrivr/core/pm";
 import { ChatPanel } from "./ChatPanel";
 import { DemoContent, demoDoc, startingDemo, type DemoKind } from "./demoContent";
 import { TrackChangesInspector } from "./TrackChangesInspector";
+import { SigningRoom } from "./SigningRoom";
+import { FieldInsertMenu, RoleLegend } from "./FieldInsertMenu";
+import { ROLE_LABEL, SIGNING_ROLES } from "./signingDemo";
 import { env } from "../lib/env";
 import {
   ChevronLeft,
@@ -88,24 +92,6 @@ const USE_COLLAB = env.get("VITE_COLLAB") === "true";
 // See docs/guides/ai-features.mdx for the full rationale and setup walkthrough.
 const AI_ENABLED =
   import.meta.env.DEV || import.meta.env.VITE_AI_ENABLED === "true";
-
-// Canvas theme — every token is a CSS variable so the MutationObserver in the
-// Editor auto-repaints when the `dark` class flips on <html>. The variables
-// are defined in styles/app.css under `:root` (light) and `.dark` (dark).
-const PLAYGROUND_THEME: EditorTheme = {
-  pageBg: "var(--scrivr-page-bg)",
-  pageShadow: "none",
-  defaultText: "var(--scrivr-text)",
-  link: "var(--scrivr-link)",
-  cursor: "var(--scrivr-cursor)",
-  selectionFill: "var(--scrivr-selection)",
-  imagePlaceholderBg: "var(--scrivr-img-placeholder-bg)",
-  imagePlaceholderBorder: "var(--scrivr-img-placeholder-border)",
-  imagePlaceholderText: "var(--scrivr-img-placeholder-text)",
-  marker: "var(--scrivr-marker)",
-  hrColor: "var(--scrivr-hr)",
-  resizeHandle: "var(--scrivr-resize-handle)",
-};
 
 function useDarkMode(): { isDark: boolean; toggle: () => void } {
   const { resolvedTheme, setTheme } = useTheme();
@@ -154,6 +140,7 @@ const EXTENSIONS =
           user: { name: identity.userName, color: identity.userColor },
         }),
         HeaderFooter,
+        Field,
         PdfExport.configure({ filename: identity.room }),
         DocxExport.configure({ filename: identity.room }),
         DocxImport,
@@ -169,6 +156,7 @@ const EXTENSIONS =
     : [
         StarterKit.configure({ table: true }),
         HeaderFooter,
+        Field,
         PdfExport.configure({ filename: "scrivr-demo" }),
         DocxExport.configure({ filename: "scrivr-demo" }),
         DocxImport,
@@ -197,7 +185,61 @@ const EMPTY_TOOLBAR: ToolbarState = {
 type SidebarTab = "ai" | "changes";
 
 /** The mode a demo is meant to be tried in. */
-const DEMO_MODE: Record<DemoKind, EditorMode> = { editing: "editing", "track-changes": "suggesting" };
+const DEMO_MODE: Record<DemoKind, EditorMode> = { editing: "editing", "track-changes": "suggesting", signing: "editing" };
+
+/** Select the first author field still showing its prompt, so typing fills it. */
+function selectFirstPrompt(editor: Editor): void {
+  const { doc, tr } = editor.getState();
+  let prompt: { from: number; to: number } | null = null;
+  doc.descendants((node, pos) => {
+    if (prompt) return false;
+    const blank = node.isText && node.marks.some((m) => m.type.name === "fieldRange" && m.attrs["placeholder"] === true);
+    if (blank) prompt = { from: pos, to: pos + node.nodeSize };
+    return true;
+  });
+  if (!prompt) return;
+  const { from, to } = prompt;
+  editor.applyTransaction(tr.setSelection(TextSelection.create(doc, from, to)).scrollIntoView());
+  editor.focus();
+}
+
+/** Why the agreement could not be sealed, in the words the refusal toast shows. */
+function describeSealRefusal(refusal: SealRefusal): SuggestionRefusalText {
+  const roles = (names: string[]) => names.map((name) => ROLE_LABEL[name] ?? name).join(", ");
+  switch (refusal.reason) {
+    case "pending-tracked-changes":
+      return {
+        message: `Can't seal: ${refusal.count} suggestion${refusal.count === 1 ? " is" : "s are"} still pending.`,
+        remedy: "Accept or reject every suggestion in the Changes panel, then seal again.",
+      };
+    case "unassigned-roles":
+      return { message: `Can't seal: nobody is assigned to ${roles(refusal.missing)}.`, remedy: "This demo assigns the Provider and the Client only." };
+    case "unfilled-fields":
+      return {
+        message: `Can't seal: “${refusal.prompts.join("”, “")}” is still blank.`,
+        remedy: "It's selected in the document now — type to fill it, then seal again.",
+      };
+    case "unknown-roles":
+      return { message: `Can't seal: no field is left for ${roles(refusal.unknown)}.`, remedy: "Add a signer field for that party, then seal again." };
+    case "fields-outside-body":
+      return {
+        message: `Can't seal: ${refusal.count} signer field${refusal.count === 1 ? " is" : "s are"} in a header or footer.`,
+        remedy: "Move signer fields into the body of the agreement, then seal again.",
+      };
+    case "dates-without-signature":
+      return {
+        message: `Can't seal: ${roles(refusal.roles)} ${refusal.roles.length === 1 ? "has" : "have"} a required Date signed but no required signature.`,
+        remedy: "Make that party's signature required, or its Date signed optional, then seal again.",
+      };
+    case "host":
+      return { message: `Can't seal: ${refusal.message}`, remedy: "This check is the host app's own." };
+    case "unidentified-fields":
+      return {
+        message: `Can't seal: ${refusal.count} signer field${refusal.count === 1 ? " has" : "s have"} no id or party of its own.`,
+        remedy: "Delete the field and insert it again from the Insert field menu.",
+      };
+  }
+}
 
 /**
  * Replaces the document with a demo's, as initial content: what it holds is
@@ -278,10 +320,19 @@ export function Playground() {
   const [demo, setDemo] = useState<DemoKind>(startingDemo);
   const [mode, setMode] = useState<EditorMode>(() => DEMO_MODE[startingDemo()]);
   useEditorMode(editor, mode);
+  const [sealed, setSealed] = useState<SealedSnapshot | null>(null);
   const switchDemo = (next: DemoKind) => {
     if (editor) loadDemo(editor, next);
+    setSealed(null);
     setDemo(next);
     setMode(DEMO_MODE[next]);
+  };
+  const seal = async () => {
+    if (!editor) return;
+    const result = await createSnapshot(editor.getState().doc, { assignedRoles: SIGNING_ROLES, kinds: fieldKindsOf(editor) });
+    if (result.ok) setSealed(result.snapshot);
+    else setRefusal(describeSealRefusal(result.refusal));
+    if (!result.ok && result.refusal.reason === "unfilled-fields") selectFirstPrompt(editor);
   };
 
   // An edit the editor stopped while suggesting: say why, and what to do instead.
@@ -329,7 +380,7 @@ export function Playground() {
           </div>
         </div>
 
-        <div className="hidden shrink-0 items-center lg:flex">
+        <div className="hidden shrink-0 items-center 2xl:flex">
           <StatusPill icon={<FileText size={12} strokeWidth={2} />}>
             Page {pageInfo.current} of {pageInfo.total}
           </StatusPill>
@@ -358,7 +409,21 @@ export function Playground() {
             </a>
           )}
           {!USE_COLLAB && <ContentSwitcher demo={demo} onChange={switchDemo} />}
-          <ModeSwitcher mode={mode} onChange={setMode} />
+          {demo === "signing" && !sealed && (
+            <>
+              <RoleLegend />
+              <FieldInsertMenu editor={editor} />
+              <button
+                type="button"
+                onClick={() => void seal()}
+                className="h-[28px] shrink-0 rounded-md border px-2.5 text-[12px] font-semibold"
+                style={{ background: "var(--app-accent)", borderColor: "var(--app-accent)", color: "var(--app-accent-fg)" }}
+              >
+                Seal for signing
+              </button>
+            </>
+          )}
+          {!sealed && <ModeSwitcher mode={mode} onChange={setMode} />}
           <IconButton
             onClick={toggleDark}
             title={isDark ? "Switch to light mode" : "Switch to dark mode"}
@@ -377,6 +442,10 @@ export function Playground() {
         </div>
       </header>
 
+      {sealed ? (
+        <SigningRoom snapshot={sealed} onBack={() => setSealed(null)} />
+      ) : (
+      <>
       <div
         className="flex shrink-0 items-stretch border-b"
         style={{ background: "var(--app-surface)", borderColor: "var(--app-border)" }}
@@ -622,6 +691,9 @@ export function Playground() {
       <ImageMenu editor={editor} hover />
       <TableMenu editor={editor} />
       <TrackChangesPopover editor={editor} />
+      </>
+      )}
+
       {refusal && (
         <div
           role="status"

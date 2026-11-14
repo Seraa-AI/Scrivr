@@ -898,3 +898,84 @@ describe("what chrome painting is given", () => {
     }
   });
 });
+
+describe("pagesInView — what a reader actually has on screen", () => {
+  const GAP = 20;
+  const mountScrolled = (pageConfig?: PageConfig, offsetInScrollParent = 0) => {
+    const setup = makeRendererTestSetup({ scrollParent: true, offsetInScrollParent, ...(pageConfig ? { pageConfig } : {}) });
+    const seen: Array<{ first: number; last: number }> = [];
+    setup.editor.on("pagesInView", ({ first, last }) => seen.push({ first, last }));
+    const tm = new TileManager(setup.editor, setup.container, { gap: GAP });
+    const scrollTo = (top: number) => {
+      setup.scrollParent!.scrollTop = top;
+      tm.update();
+    };
+    return { setup, seen, tm, scrollTo, slot: setup.pageConfig.pageHeight + GAP };
+  };
+
+  it("reports the first page on the first paint, and how many there are", () => {
+    const { setup, seen, tm } = mountScrolled();
+    const counts: number[] = [];
+    setup.editor.on("pagesInView", ({ pageCount }) => counts.push(pageCount));
+    tm.update();
+    expect(seen).toEqual([{ first: 1, last: 1 }]);
+    expect(counts).toEqual([setup.editor.layout.pages.length]);
+    tm.destroy();
+    setup.cleanup();
+  });
+
+  it("reports every page the viewport overlaps, without overscan", () => {
+    const { setup, seen, tm, scrollTo, slot } = mountScrolled();
+    // Viewport is 800px: starts 500px into page 2, ends past the top of page 3.
+    scrollTo(slot + 500);
+    expect(seen.at(-1)).toEqual({ first: 2, last: 3 });
+    tm.destroy();
+    setup.cleanup();
+  });
+
+  it("measures from where the pages begin, below the scroll parent's padding", () => {
+    const { setup, seen, tm, scrollTo, slot } = mountScrolled(undefined, 300);
+    // 300px of padding above page 1: the viewport ends 100px short of page 3.
+    scrollTo(slot + 600);
+    expect(seen.at(-1)).toEqual({ first: 2, last: 2 });
+    tm.destroy();
+    setup.cleanup();
+  });
+
+  it("reports nothing while the viewport has no height", () => {
+    const { setup, seen, tm } = mountScrolled();
+    Object.defineProperty(setup.scrollParent!, "clientHeight", { value: 0, configurable: true });
+    tm.update();
+    expect(seen).toEqual([]);
+    tm.destroy();
+    setup.cleanup();
+  });
+
+  it("does not count a page whose bottom is above the viewport", () => {
+    const { setup, seen, tm, scrollTo } = mountScrolled();
+    // The viewport starts in the gap under page 1.
+    scrollTo(setup.pageConfig.pageHeight + 5);
+    expect(seen.at(-1)).toEqual({ first: 2, last: 2 });
+    tm.destroy();
+    setup.cleanup();
+  });
+
+  it("stays quiet while the range does not change", () => {
+    const { setup, seen, tm, scrollTo } = mountScrolled();
+    tm.update();
+    scrollTo(10);
+    scrollTo(20);
+    expect(seen).toHaveLength(1);
+    tm.destroy();
+    setup.cleanup();
+  });
+
+  it("reports nothing in pageless mode, which has no pages", () => {
+    const { setup, seen, tm, scrollTo } = mountScrolled(defaultPagelessConfig);
+    tm.update();
+    scrollTo(500);
+    expect(seen).toEqual([]);
+    tm.destroy();
+    setup.cleanup();
+  });
+});

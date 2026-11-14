@@ -216,6 +216,8 @@ export interface RendererTestSetupOptions {
   pageCount?: number;
   /** Extra extensions appended to StarterKit (e.g. chrome contributions). */
   extraExtensions?: Extension[];
+  /** How far below the top of the scroll parent's content the editor sits — its padding, a toolbar. */
+  offsetInScrollParent?: number;
 }
 
 export interface RendererTestSetup {
@@ -244,6 +246,12 @@ export function makeRendererTestSetup(
     scrollParent.style.overflowY = "scroll";
     Object.defineProperty(scrollParent, "clientHeight", { value: 800, configurable: true });
     Object.defineProperty(scrollParent, "scrollTop", { value: 0, configurable: true, writable: true });
+    // happy-dom does no layout: place the editor where a browser would, below
+    // the parent's own top by its offset and moved up by the scroll.
+    const parent = scrollParent;
+    const offset = opts.offsetInScrollParent ?? 0;
+    parent.getBoundingClientRect = () => new DOMRect(0, 0, 0, 800);
+    container.getBoundingClientRect = () => new DOMRect(0, offset - parent.scrollTop, 0, 0);
     scrollParent.appendChild(container);
     document.body.appendChild(scrollParent);
   } else {

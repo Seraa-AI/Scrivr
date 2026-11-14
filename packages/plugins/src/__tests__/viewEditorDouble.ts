@@ -13,6 +13,7 @@ import {
   type HoverTarget,
   type IEditor,
   type OverlayRenderHandler,
+  type PointerCursorResolver,
   type Selection,
   type ServerEditorOptions,
 } from "@scrivr/core";
@@ -30,6 +31,10 @@ export class ViewEditorDouble extends ServerEditor implements IEditor {
   readonly selection: SelectionController;
   /** The overlay painters extensions registered, in order. */
   readonly painters: OverlayRenderHandler[] = [];
+  /** The pointer cursors extensions asked for, in order. */
+  readonly pointerCursors: PointerCursorResolver[] = [];
+  /** Every range an extension scrolled into view. */
+  readonly scrolledTo: Array<{ from: number; to: number | undefined }> = [];
   private readonly charMap = new CharacterMap();
 
   constructor(options: ServerEditorOptions) {
@@ -50,6 +55,24 @@ export class ViewEditorDouble extends ServerEditor implements IEditor {
 
   get layout(): DocumentLayout {
     return EMPTY_LAYOUT;
+  }
+
+  addPointerCursor(resolve: PointerCursorResolver): () => void {
+    this.pointerCursors.push(resolve);
+    return () => {
+      const at = this.pointerCursors.indexOf(resolve);
+      if (at >= 0) this.pointerCursors.splice(at, 1);
+    };
+  }
+
+  /** The cursor the registered resolvers give for the object at `objectPos`. */
+  cursorAt(objectPos: number | null): string | null {
+    const point = { page: 1, x: 0, y: 0, region: "content" as const };
+    for (const resolve of this.pointerCursors) {
+      const cursor = resolve({ point, objectPos });
+      if (cursor !== null) return cursor;
+    }
+    return null;
   }
 
   addOverlayRenderHandler(handler: OverlayRenderHandler): () => void {
@@ -93,7 +116,7 @@ export class ViewEditorDouble extends ServerEditor implements IEditor {
     return null;
   }
 
-  getNodeViewportRects(): DOMRect[] {
+  getNodeViewportRects(_docPos: number): DOMRect[] {
     return [];
   }
 
@@ -111,12 +134,13 @@ export class ViewEditorDouble extends ServerEditor implements IEditor {
 
   selectNode(): void {}
 
-  getPageScreenPosition(): { screenLeft: number; screenTop: number } | null {
+  getPageScreenPosition(_page: number): { screenLeft: number; screenTop: number } | null {
     return null;
   }
 
-  scrollRangeIntoView(): boolean {
-    return false;
+  scrollRangeIntoView(from: number, to?: number): boolean {
+    this.scrolledTo.push({ from, to });
+    return true;
   }
 
   redraw(): void {}

@@ -8,7 +8,7 @@ export {
 } from "./theme";
 export type { EditorTheme, ResolvedTheme } from "./theme";
 export { resolveTheme, resolveThemeColor, disposeProbe } from "./resolveTheme";
-export { safeUrl, safeImageUrl } from "./safeUrl";
+export { safeUrl, safeImageUrl, safeDrawingUrl, MAX_DRAWING_BYTES } from "./safeUrl";
 export { parseCssColor, compositeColor, toHex6 } from "./cssColor";
 export type { Rgb, Rgba } from "./cssColor";
 export { spansToFragment, sameMark, resolveInlineMark, resolveInlineMarks, describeInlineMark, isTrackedMark } from "./spansToFragment";

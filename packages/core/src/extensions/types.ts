@@ -22,8 +22,9 @@ import type { FontProvider } from "../fonts/types";
 /**
  * Named keybinding precedences. Higher wins first refusal for a key.
  *
- * The ladder is "most specific context first": a binding only applies inside a
- * table, then inside a code block, then inside a list, then anywhere. Each
+ * The ladder is "most specific context first": a binding only applies right
+ * beside an inline object, then inside a table, then inside a code block,
+ * then inside a list, then anywhere. Each
  * declines by returning `false`, delegating down the chain.
  *
  * Extensions may use any number; these names exist so built-ins read as intent
@@ -31,6 +32,8 @@ import type { FontProvider } from "../fonts/types";
  * them (e.g. `KeymapPriority.list + 10`).
  */
 export const KeymapPriority = {
+  /** Bindings that only apply right beside an inline object, wherever it sits. */
+  inlineObject: 500,
   /** Bindings that only apply inside a table cell. */
   table: 400,
   /** Bindings that only apply inside a code block. */
@@ -48,6 +51,7 @@ import type { EditorEvents, SafeFlatCommands } from "../types/augmentation";
 import type { DeferredEditOptions } from "../BaseEditor";
 import type { InputRule } from "prosemirror-inputrules";
 import type { CharacterMap } from "../layout/CharacterMap";
+import type { PagePoint } from "../layout/pagePoint";
 import type { PageConfig, DocumentLayout } from "../layout/PageLayout";
 import type { BlockStrategy, InlineStrategy, NodeLayout } from "../layout/BlockRegistry";
 import type { AnchoredSpec } from "../layout/AnchoredObjects";
@@ -151,10 +155,14 @@ export interface IBaseEditor {
   on<K extends keyof EditorEvents>(event: K, handler: (payload: EditorEvents[K]) => void): () => void;
   /** Current ProseMirror state. */
   getState(): EditorState;
-  /** True when the editor is in read-only / view mode. */
+  /** True when this viewer may not author — set by the host, or by a seal. */
   get readOnly(): boolean;
   /** Enable or disable read-only / view mode. Notifies subscribers. */
   setReadOnly(value: boolean): void;
+  /** True once the document is sealed and refuses every change. */
+  get sealed(): boolean;
+  /** Seal the document. One-way: there is no unseal. */
+  seal(): void;
   /**
    * Update the attrs of the node at docPos, merging with its current attrs.
    * No-op if there is no node at that position.
@@ -167,9 +175,10 @@ export interface IBaseEditor {
    * remote sync or AI suggestions). Routes through the same path as
    * command-dispatched transactions: plugin appendTransaction hooks run,
    * layout is invalidated, subscribers are notified, and (in `Editor`) a
-   * render flush is scheduled.
+   * render flush is scheduled. Returns `false` when the editor refused the
+   * change (read-only to a local edit, or sealed).
    */
-  applyTransaction(tr: Transaction): void;
+  applyTransaction(tr: Transaction): boolean;
   /** The merged ProseMirror Schema built from all extensions. */
   readonly schema: Schema;
   /** Typed old→new identity map produced during document cloning. */
@@ -280,6 +289,12 @@ export interface IEditor extends IBaseEditor {
   /** Register a canvas draw function for the overlay layer. Returns unregister. */
   addOverlayRenderHandler(handler: OverlayRenderHandler): () => void;
   /**
+   * Say what the pointer looks like at a point — over something an extension
+   * paints or owns, such as a field a viewer can complete. The first resolver
+   * to answer wins; answer `null` to defer. Returns unregister.
+   */
+  addPointerCursor(resolve: PointerCursorResolver): () => void;
+  /**
    * The kind-tagged, capability-carrying view of the active selection. UI reads
    * this instead of `instanceof`-ing the ProseMirror selection.
    */
@@ -356,8 +371,12 @@ export interface IEditor extends IBaseEditor {
   scrollRangeIntoView(from: number, to?: number): boolean;
   /** Trigger a redraw without a state change (e.g. on awareness update). */
   redraw(): void;
-  /** Invalidate the layout cache and trigger a re-layout on next paint. */
-  invalidateLayout(): void;
+  /**
+   * Invalidate the layout cache and trigger a re-layout on next paint.
+   * `remeasure` measures every block again — what a strategy measures from
+   * changed outside the document.
+   */
+  invalidateLayout(options?: { remeasure?: boolean }): void;
   /**
    * Synchronously complete any streamed partial layout.
    * Serialization paths should call this before reading `layout.pages`.
@@ -754,6 +773,12 @@ export interface EditorNavigator {
  * Return true when handled — the caller will preventDefault().
  */
 export type InputHandler = (nav: EditorNavigator, e: KeyboardEvent) => boolean;
+
+/**
+ * A CSS cursor for a point on a page, or `null` to defer. `objectPos` is the
+ * document position of the inline object under the point, if any.
+ */
+export type PointerCursorResolver = (at: { point: PagePoint; objectPos: number | null }) => string | null;
 
 // ── Extension context ─────────────────────────────────────────────────────────
 

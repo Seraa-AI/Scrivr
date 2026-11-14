@@ -412,3 +412,49 @@ describe("PointerController — cross-page text-selection drag", () => {
     expect(last?.[1]).toBe(50);
   });
 });
+
+describe("press — every primary press, as a page point", () => {
+  // Things painted over a page that are not document nodes — a sealed
+  // signature field — cannot be claimed through the hit-target registry, so
+  // they learn about presses from this event.
+  let s: PointerControllerSetup;
+  afterEach(() => s.cleanup());
+
+  const pressAt = (x: number, y: number, init: PointerEventInit = {}) => {
+    s.container.dispatchEvent(pointerEvent("pointerdown", x, y, init));
+    s.container.dispatchEvent(pointerEvent("pointerup", x, y, init));
+  };
+
+  it("reports the page point and click count", () => {
+    s = makePointerControllerSetup();
+    const presses: Array<{ page: number; x: number; y: number; clickCount: number }> = [];
+    s.editor.on("press", ({ point, clickCount }) =>
+      presses.push({ page: point.page, x: point.x, y: point.y, clickCount }),
+    );
+
+    pressAt(150, 300);
+
+    expect(presses).toEqual([{ page: 1, x: 150, y: 300, clickCount: 1 }]);
+  });
+
+  it("still reports in a sealed editor, where nothing else answers a press", () => {
+    s = makePointerControllerSetup();
+    s.editor.seal();
+    const presses = vi.fn();
+    s.editor.on("press", presses);
+
+    pressAt(150, 300);
+
+    expect(presses).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a secondary-button press", () => {
+    s = makePointerControllerSetup();
+    const presses = vi.fn();
+    s.editor.on("press", presses);
+
+    pressAt(150, 300, { button: 2 });
+
+    expect(presses).not.toHaveBeenCalled();
+  });
+});

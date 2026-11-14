@@ -250,7 +250,7 @@ function drawFloat(
   // Use inline strategy if available.
   const strategy = inlineRegistry?.get(node.type.name);
   if (strategy) {
-    strategy.render(ctx, x, y, width, height, node, theme);
+    strategy.render(ctx, x, y, width, height, node, theme, { baselineY: y + height });
     return;
   }
 
@@ -316,7 +316,10 @@ export function drawBlock(
         const objectStrategy = inlineRegistry?.get(span.node.type.name);
         if (objectStrategy) {
           paintInSpanStyle(ctx, atomStyle(span, objX, objY, markDecorators, theme, ctx), () => {
-            objectStrategy.render(ctx, objX, objY, span.width, span.height, span.node, theme);
+            objectStrategy.render(ctx, objX, objY, span.width, span.height, span.node, theme, {
+              baselineY: baseline,
+              ...(span.font !== undefined ? { font: span.font } : {}),
+            });
           });
         }
         map.registerObjectRect({
@@ -326,6 +329,8 @@ export function drawBlock(
           width: span.width,
           height: span.height,
           page: pageNumber,
+          baseline,
+          ...(span.font !== undefined ? { font: span.font } : {}),
         });
         // Full-width glyph: midpoint at image center → 50/50 click split.
         // y = textY so cursor draws at the text baseline, not the image top.

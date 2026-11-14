@@ -221,6 +221,10 @@ class ExportPdfEditorDouble extends ServerEditor implements IEditor {
     return () => {};
   }
 
+  addPointerCursor(): () => void {
+    return () => {};
+  }
+
   getSelectionDescriptor() {
     return this.describeSelection(this.getState().selection);
   }

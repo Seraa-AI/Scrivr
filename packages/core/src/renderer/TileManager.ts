@@ -176,6 +176,7 @@ export class TileManager {
   private unsubscribe: (() => void) | null = null;
   private rafId: number | null = null;
   private readonly gap: number;
+  private pagesInView: { first: number; last: number; pageCount: number; complete: boolean } | null = null;
   private readonly overscan: number;
   private readonly showMarginGuides: boolean;
   private readonly smallTileHeight: number;
@@ -343,6 +344,7 @@ export class TileManager {
     // unready, or the view freezes under the user.
     if (!this.hasPainted && this.editor.loadingState === "syncing") return;
     this.hasPainted = true;
+    this.reportPagesInView(layout, scrollTop, viewportH);
 
     /** Compute visible tile range */
     const total = this.totalTiles(layout);
@@ -412,6 +414,46 @@ export class TileManager {
       this.paintContent(tile, layout, layout.version);
       this.paintOverlay(tile, layout);
     }
+  }
+
+  /**
+   * Pages the viewport overlaps, without overscan, announced when the range
+   * changes. Only this class knows the scroll position, so reading telemetry
+   * starts here. Pageless has no pages and reports nothing.
+   */
+  private reportPagesInView(layout: DocumentLayout, scrollTop: number, viewportH: number): void {
+    if (this.editor.isPageless || layout.pages.length === 0 || viewportH <= 0) return;
+    const sh = this.slotHeight;
+    // The pages start below whatever the scroll container shows above them —
+    // its padding, a toolbar — so the viewport is measured from there.
+    const top = scrollTop - this.offsetInScrollParent();
+    const first = Math.max(1, Math.floor((top - this.tileHeight) / sh) + 2);
+    const last = Math.min(layout.pages.length, Math.ceil((top + viewportH) / sh));
+    const pageCount = layout.pages.length;
+    const complete = !layout.isPartial;
+    const previous = this.pagesInView;
+    if (
+      previous?.first === first &&
+      previous.last === last &&
+      previous.pageCount === pageCount &&
+      previous.complete === complete
+    ) {
+      return;
+    }
+    this.pagesInView = { first, last, pageCount, complete };
+    this.editor.emit("pagesInView", this.pagesInView);
+  }
+
+  /** How far below the top of the scroll container's content the pages begin. */
+  private offsetInScrollParent(): number {
+    const parent = this.scrollParent;
+    if (!parent) return 0;
+    return (
+      this.container.getBoundingClientRect().top -
+      parent.getBoundingClientRect().top -
+      parent.clientTop +
+      parent.scrollTop
+    );
   }
 
   /** Content painting */
@@ -654,8 +696,9 @@ export class TileManager {
       ? `cell:${descriptor.rows.from},${descriptor.rows.to},` +
         `${descriptor.columns.from},${descriptor.columns.to}:${descriptor.selectedCellCount}`
       : `${descriptor.kind}:${descriptor.head}:${descriptor.from}:${descriptor.to}`;
+    // A document nobody here may type into shows no caret; selecting still works.
     const blinkOn =
-      this.editor.isFocused && this.editor.cursorManager.isVisible;
+      this.editor.isFocused && !this.editor.readOnly && this.editor.cursorManager.isVisible;
 
     // ── Blink gate ────────────────────────────────────────────────────────
     const pmState = this.editor.getState();

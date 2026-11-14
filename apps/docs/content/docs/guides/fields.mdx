@@ -1,0 +1,264 @@
+---
+title: Fields
+description: Signature, date, text, checkbox and dropdown fields — authored in a document, completed on a sealed revision, and how to add a kind of your own.
+---
+
+A field is a place in a document that someone fills in: a signature, a date, a name, a box to tick. Scrivr keeps one rule about them that everything else follows from:
+
+**A field's definition is part of the document. A signer's value never is.**
+
+The author places an empty field, and it is saved, hashed and exported with the rest of the document. When a signer completes it, the value is held by your application and painted over the page — the document, and the hash that proves what was agreed, do not change from the first signer to the last.
+
+---
+
+## Adding fields to an editor
+
+`Field` is not part of `StarterKit`. Add it where documents carry fields:
+
+```ts
+import { Editor, Field, StarterKit } from "@scrivr/core";
+
+const editor = new Editor({ extensions: [StarterKit, Field] });
+```
+
+## Three shapes of field
+
+| Shape | Insert with | For |
+|---|---|---|
+| An inline box | `insertField` | Everything a **signer** completes, and an author's checkbox |
+| Text the author fills | `insertFieldRange` | A client name, an amount — text that belongs to the document |
+| A block | `insertFieldBlock` | A templated section: special terms, a schedule |
+
+### A signer field
+
+Each field says who completes it, **by role, not by person** — `client-authorized-signatory`, not Jane. Your application decides who holds each role when it sends the document out, which keeps a document a reusable template.
+
+```ts
+editor.commands.insertField({
+  kind: "signature",
+  fill: "signer",
+  role: "client-authorized-signatory",
+  required: true,
+});
+```
+
+The command refuses a signer field with no `role`: nobody could ever be asked to complete it.
+
+### An author's text
+
+Text the author fills is ordinary text, so it is a range rather than a box. Insert a placeholder at the caret — or select text to make it the field's value:
+
+```ts
+editor.commands.insertFieldRange({ kind: "text", prompt: "Client name" });
+```
+
+It behaves like a content control in Word: clicking the placeholder selects it whole, typing replaces it, deleting the text brings the placeholder back, and **ArrowRight** at its end steps out so what follows is plain text.
+
+### A block
+
+```ts
+editor.commands.insertFieldBlock({ kind: "text", prompt: "Special terms" }); // wraps the selected paragraphs
+editor.commands.unwrapFieldBlock();
+```
+
+## Built-in kinds
+
+| Kind | Label | Control |
+|---|---|---|
+| `signature` | Signature | signature line |
+| `initials` | Initials | text — drawn (`drawn`), badge "Initial" |
+| `date` | Date | date |
+| `dateSigned` | Date signed | date — dated when its party signs (`datedWhenSigned`) |
+| `text` | Text | text |
+| `checkbox` | Checkbox | checkbox |
+| `name` | Name | text |
+| `email` | Email | text |
+| `title` | Title | text |
+| `company` | Company | text |
+| `number` | Number | text |
+| `dropdown` | Choose | dropdown |
+
+The **control** is what a field *is*: how its box is drawn, whether it can be ticked, and what Word receives when the document is exported. A dropdown needs its choices, each with an id of its own — the id is what a signer's answer and Word store, the label what a person reads:
+
+```ts
+editor.commands.insertField({
+  kind: "dropdown",
+  fill: "signer",
+  role: "client",
+  options: [
+    { id: "net-30", label: "Net 30" },
+    { id: "net-60", label: "Net 60" },
+  ],
+});
+```
+
+## Adding a kind of your own
+
+Register kinds with `Field.configure`. A kind needs a label and the size of box it reserves; `control` defaults to `"text"`.
+
+```ts
+const editor = new Editor({
+  extensions: [
+    StarterKit,
+    Field.configure({
+      kinds: {
+        stamp: { label: "Company stamp", size: { width: 120, height: 120 }, drawn: true, verb: "Stamp" },
+        agree: { label: "I agree", size: { width: 16, height: 16 }, control: "checkbox" },
+      },
+    }),
+  ],
+});
+
+editor.commands.insertField({ kind: "stamp", fill: "signer", role: "client" });
+```
+
+A kind you register behaves as the control it declares everywhere at once: `agree` above draws as a checkbox, can be ticked by an author, prints as one in the PDF, and exports to Word as Word's checkbox. A kind whose control is `"text"` exports as a Word text control and still comes back as your kind when the document is imported. A text kind declares `drawn: true` when it is completed by drawing, as `stamp` above and the built-in initials are: it takes an image, keeps its `size` on the baseline, and its badge says `verb` ("Draw" when it gives none). Registering a name that is already built in refines the built-in: what you give replaces what it declares, and the rest stays — relabel `initials` and they are still drawn; give it another control and it takes nothing that belonged to the old one.
+
+<Callout type="info">
+A field sits in its line like a word. A text field is as tall as the text around it, and as wide as the space its author left; a dropdown is as wide as its widest choice. A drawn field — a signature, or a kind that declares `drawn`, as initials do — keeps the size it was inserted at, from the kind's `size` or the `width` / `height` you pass. Once a field holds a value it fits that value, and the line closes up around it — on screen while signing and in the executed PDF alike.
+</Callout>
+
+## Your own look
+
+Each party has a colour, the same wherever its fields are, and each field is drawn as a dotted rule in that colour with its label on it. Pick the colours yourself; the signing view takes them from `Field`, so a signer sees what the author saw:
+
+```ts
+Field.configure({ roleColors: { provider: "#0e7490", client: "#be185d" } });
+```
+
+Or draw fields yourself. `paint` is called for every field on screen, and `print` for every field in the PDF. Each is handed everything Scrivr knows: the box, the line's baseline (`baselineY`), the kind, control, label, role, colour, theme and the value it holds. Return `true` when you drew the field; return `false` and Scrivr draws it:
+
+```ts
+Field.configure({
+  paint(ctx, field) {
+    if (field.kind !== "signature") return false;
+    ctx.strokeStyle = field.color;
+    ctx.strokeRect(field.box.x, field.box.y, field.box.width, field.box.height);
+    return true;
+  },
+});
+```
+
+`FieldCompletion` takes a `paint` of its own for the signing view. It is also told whether the field is this viewer's (`own`), whether it is under the pointer or keyboard focus (`active`, `focused`), and whether its value is being captured (`pending`).
+
+## Reading the fields in a document
+
+`listSignerFields` gives you every signer field, in reading order, with its id. It works on any document — including on the server, so a backend can check a template before anything is sent:
+
+```ts
+import { listSignerFields, ServerEditor, StarterKit, Field } from "@scrivr/core";
+
+const editor = new ServerEditor({ extensions: [StarterKit, Field], content: templateJson });
+listSignerFields(editor.getState().doc);
+// [{ id: "…", role: "client-authorized-signatory", kind: "signature", required: true, options: [] }]
+```
+
+A copied or pasted field gets a fresh id, so one signature can never fill two boxes.
+
+## Completing fields on a sealed revision
+
+Sealing freezes a document into a snapshot and its hash. It refuses while suggestions are still pending, while text the author fills still shows its prompt, or while the roles you assign do not match the fields:
+
+```ts
+import { createSnapshot, fieldKindsOf } from "@scrivr/core";
+
+const result = await createSnapshot(editor.getState().doc, {
+  assignedRoles: ["client-authorized-signatory"],
+  kinds: fieldKindsOf(editor), // your kinds decide what signs and what is dated
+});
+if (!result.ok) throw new Error(result.refusal.reason);
+const { content, contentHash, fields } = result.snapshot;
+```
+
+A signer then opens the snapshot in a sealed editor. `FieldCompletion` (from `@scrivr/plugins`) shows each field this signer may complete and asks **your application** for the value when they press it — your signature pad, your consent text, your record of what happened:
+
+```tsx
+import { FieldCompletion, ReadingProgress } from "@scrivr/plugins";
+
+const editor = new Editor({
+  content: JSON.parse(content),
+  sealed: true,
+  extensions: [
+    StarterKit,
+    Field,
+    FieldCompletion.configure({
+      fields,
+      completable: fieldsForThisSigner,
+      onFieldRequest: async (field) => {
+        const { image, signedAt } = await openSignaturePad(field); // yours: the drawing, and when it was given
+        await recordSignature(field.id, image, signedAt);           // yours
+        return { kind: "image", src: image, signedAt }; // the field takes it; or null to leave it open
+      },
+    }),
+    ReadingProgress.configure({ onReading: (event) => recordReading(event) }),
+  ],
+});
+```
+
+A dropdown is answered with the choice's id, `{ kind: "choice", id: "net-60" }`; `Field` shows its label, so renaming a label in a later template does not orphan the answers already given.
+
+Values live in `Field`, beside the document and never in it, so a sealed document takes them. Open the editor with the values already given as `Field.configure({ values })`, show one another participant completes with `setFieldValue(editor, fieldId, value)` (both from `@scrivr/core`), and read them back with `fieldValues(editor.getState())`. A value only ever fills a signer's field — what an author sealed is never laid over — and only one the field can show: a checkbox takes a tick, a dropdown a choice, a drawn field a drawing or words, any other field words. A drawing is an inline PNG or JPEG (a `data:` URL, as a signature pad gives) whose bytes open as the format it names, no larger than `MAX_DRAWING_BYTES`: it prints in the executed PDF and cannot change once given, where a link could. Check one with `safeDrawingUrl` before you hand it over, so a signer never draws into a field that stays empty. The executed PDF is the strict reader: it embeds each drawing and counts it only then, so a drawing well-formed but corrupt inside is refused there even if a browser drew it. Anything else is no answer, and `isFieldAnswered(field, value, kinds)` says so.
+
+### A host's own kinds, failures and the keyboard
+
+Use `replaceFieldValues(editor, values)` from `@scrivr/core` when loading a complete record from your host. It replaces all values in one transaction; omitted ids are emptied. Both it and `setFieldValue` return `false` when `Field` is absent or a plugin refuses the transaction. Check that result before treating the displayed record as updated. A refusal leaves the previous values intact.
+
+- The signing view draws your own kinds and colours as `Field` was given them, so a kind of your own completes as the control it declares there too.
+- `onFieldRequestError(field, error)` is called when your `onFieldRequest` throws or rejects, or the editor refuses the returned value. The field stays as it was; tell the signer and let them try again. This does not roll back anything your host already recorded. Resolving `null` is declining, not failing.
+- A signature comes last, as on DocuSign or Adobe Sign. Until the viewer's other required fields are answered (a box ticked, a choice made, text given), going to sign moves focus to the first of them — it never answers one for them — and `onSignatureBlocked(signature, missing)` tells you which, so you can say "Choose payment terms before you sign". Optional fields never hold a signature back, and a kind of your own whose control is `"signatureLine"` is held back like the built-in signature. The view only guides the signer: check the same rule on your server, over the whole role, when you record a signature, with the function the view uses and your editor's kinds:
+
+  ```ts
+  import { fieldKindsOf, unansweredBeforeSigning } from "@scrivr/core";
+
+  // `server` is the ServerEditor with your `Field.configure({ kinds })`.
+  if (unansweredBeforeSigning(fields, values, role, fieldKindsOf(server)).length > 0) {
+    throw new Error("Complete every required field first");
+  }
+  ```
+- A date signed is never a value, and never asked for. A signature carries the moment it was given — answer it with `signedAt` from your own record of the signing: an ISO timestamp with `Z` or the signer's offset (`2026-11-14T23:30:00-05:00`), or an ISO day. Its party's date signed shows the day the latest of their answered signatures names, in its own offset — the signer's day, on every machine. Re-sign later and it moves; blank the signature and it goes; initials do not date anyone. A `signedAt` with no zone, or naming a day that does not exist, is no moment: the signing view refuses it through `onFieldRequestError`, so check it with `signedAtOf` before you record it. Format the date with `Field.configure({ formatSignedDate })`, handed that `signedAt` as you recorded it; give the same words wherever the record prints — a format that reads the machine's zone or language prints another date elsewhere. `defaultSignedDate` otherwise. `valuesOnRecord(fields, values, kinds, formatSignedDate)` gives the values as the record shows them, the dates derived, for your server to read.
+
+  ```ts
+  onFieldRequest: async (field) => {
+    const { image, signedAt } = await openSignaturePad(field); // yours: the drawing, and when it was given
+    return { kind: "image", src: image, signedAt };
+  },
+  ```
+- Text the author filled is the document's own, but under the pointer it is framed with its prompt ("Client name"), as Word frames a content control, so a signer can check the words filled in for this document.
+- Tab and Shift+Tab move between the viewer's own fields; past the last or first, focus goes on to the page's next control. Enter opens the focused field; pressing elsewhere on the page lets it go.
+
+## The executed document
+
+The signed record is a PDF: the sealed snapshot with every party's values printed in their fields, laid out exactly as the signers saw it. A drawn signature keeps its proportions in its box, a typed one prints as text in the size of the text around it, and an optional field nobody completed prints as the empty field with whose it was. Make it in one call, with the editor setup the signers used:
+
+```ts
+import { exportExecutedPdf } from "@scrivr/export-pdf";
+
+const result = await exportExecutedPdf(snapshot, allSignedValues, {
+  editorOptions: { extensions: [StarterKit, Field.configure({ kinds })], fonts, pageConfig },
+});
+if (!result.ok) throw new Error(result.refusal.reason); // "snapshot-altered" | "unanswered-fields"
+const { pdf, artifactHash } = result; // keep both: the record, and the hash of exactly these bytes
+```
+
+`allSignedValues` is the complete record for this export. It replaces any initial values configured in `Field`, including when it is empty. A drawing the PDF cannot embed is omitted from that record; it cannot fall back to an earlier signature. The exporter submits the complete record in one transaction and throws if a plugin refuses it.
+
+It refuses rather than print a record of something else: a snapshot that no longer matches its hash, or a required field still unanswered (`refusal.missing` names them). It prints the values as the record shows them, so each date signed shows when its party signed, and nothing where no signature of theirs answers, and it throws when `Field` is not among `editorOptions.extensions`. The values are printed, never written: the snapshot, and its `contentHash`, are the same before and after. Laying out a PDF needs a browser `Editor` — a page, or a server running a headless DOM with a canvas — since `ServerEditor` lays nothing out.
+
+## Values entered in Word
+
+A field exported to Word is a content control a signer can fill there. Import the file and their entries come back **beside** the document, never in it, as `fieldValues`, by field id:
+
+```ts
+const { doc, fieldValues } = await importDocx(editor, bytes);
+// { "client-name-field": { kind: "text", text: "Alice Example" } }
+```
+
+Record them as the signer's, or pass them on to `Field.configure({ values })`. Only a ticked box counts as an answer: an unticked one is how it was handed to the signer. A dropdown comes back as the choice its text names, by id; text that is none of its choices is no answer. A date typed into a date signed never comes back as an answer: it shows when its party signs. A drawing in a signature control is not brought back (the import warns `field-drawing-not-imported`): signatures are captured by your signing host.
+
+## In other formats
+
+| Format | A field becomes |
+|---|---|
+| PDF | The same box the canvas draws, outlined solid since a PDF cannot dash; a checked checkbox with its tick |
+| DOCX | A Word content control carrying the field's id, kind and role, so it imports back as the same field. A signature is Word's own signature line, which Word can sign |
+| Markdown | Its caption — `[Signature · client]`; a checkbox as ☐ or ☒ |

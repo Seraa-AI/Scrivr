@@ -21,8 +21,9 @@ import type { IBaseEditor } from "@scrivr/core";
 import { YBinding } from "./YBinding";
 import { DOC_ATTRS_MAP_NAME, type DocAttrEnvelope } from "./YBinding";
 import { collaborationRegistry } from "./collaborationState";
+import { watchRevision, type RevisionCallbacks } from "./watchRevision";
 
-interface CollaborationOptions {
+interface CollaborationOptions extends RevisionCallbacks {
   /** WebSocket URL of the HocusPocus server. Default: "ws://localhost:1234" */
   url?: string;
   /** Document / room name — all clients with the same name share the document. */
@@ -117,6 +118,19 @@ export const Collaboration = Extension.create<CollaborationOptions>({
     const binding = new YBinding(editor, ydoc, type, attrsMap);
     binding.bind();
 
+    let synced = false;
+    const { onSealed, onStaleEdits, onRevision } = this.options;
+    const revision = watchRevision(
+      ydoc,
+      editor,
+      {
+        ...(onSealed ? { onSealed } : {}),
+        ...(onStaleEdits ? { onStaleEdits } : {}),
+        ...(onRevision ? { onRevision } : {}),
+      },
+      () => synced,
+    );
+
     const provider = new HocuspocusProvider({
       url,
       name,
@@ -124,6 +138,8 @@ export const Collaboration = Extension.create<CollaborationOptions>({
       token: this.options.token ?? null,
       onSynced: () => {
         binding.markSynced();
+        synced = true;
+        revision.check();
         setReadyIfSupported(editor, true);
       },
       ...(this.options.onConnect ? { onConnect: this.options.onConnect } : {}),
@@ -135,6 +151,7 @@ export const Collaboration = Extension.create<CollaborationOptions>({
     collaborationRegistry.set(editor, { ydoc, provider, binding });
 
     return () => {
+      revision.dispose();
       binding.destroy();
       provider.destroy();
       ydoc.destroy();

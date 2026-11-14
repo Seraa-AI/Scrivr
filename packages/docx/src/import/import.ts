@@ -20,7 +20,15 @@
  */
 
 import type { Node as PmNode } from "@scrivr/core/pm";
-import { applyPageFont, assignBlockIds, prepareDocumentFonts, type FontKey, type FontSynthesis } from "@scrivr/core";
+import {
+  applyPageFont,
+  assignBlockIds,
+  importedFieldValues,
+  prepareDocumentFonts,
+  type FieldValue,
+  type FontKey,
+  type FontSynthesis,
+} from "@scrivr/core";
 import type {
   DocxImports,
   IBaseEditor,
@@ -53,6 +61,12 @@ import { DocxImportError } from "./error";
 export interface DocxImportResult {
   doc: PmNode;
   diagnostics: DocxDiagnostic[];
+  /**
+   * What signers entered into fields' controls in Word, by field id — kept out
+   * of `doc`, as a signer's value always is. Pass on to `Field.configure({ values })`
+   * or `FieldCompletion`, or record it as the signer's.
+   */
+  fieldValues: Record<string, FieldValue>;
 }
 
 export interface DocxImportCallOptions extends DocxImportOptions {
@@ -259,7 +273,7 @@ export async function importDocx(
         throw new DocxImportError(fatal.message, finalDiagnostics);
       }
     }
-    return { doc, diagnostics: finalDiagnostics };
+    return { doc, diagnostics: finalDiagnostics, fieldValues: importedFieldValues(ctx) };
   } catch (err) {
     if (err instanceof DocxImportError) throw err;
     const message = err instanceof Error ? err.message : String(err);
@@ -314,21 +328,38 @@ function collectHandlers(
   for (const contrib of editor.getImportContributions()) {
     const docx = contrib.docx;
     if (!docx) continue;
-    if (docx.blocks) Object.assign(blocks, docx.blocks);
+    if (docx.blocks) layerOver(blocks, docx.blocks);
     if (docx.paragraphStyles) Object.assign(paragraphStyles, docx.paragraphStyles);
-    if (docx.marks) Object.assign(marks, docx.marks);
-    if (docx.inlines) Object.assign(inlines, docx.inlines);
+    if (docx.marks) layerOver(marks, docx.marks);
+    if (docx.inlines) layerOver(inlines, docx.inlines);
   }
 
   if (overrides) {
-    if (overrides.blocks) Object.assign(blocks, overrides.blocks);
+    if (overrides.blocks) layerOver(blocks, overrides.blocks);
     if (overrides.paragraphStyles)
       Object.assign(paragraphStyles, overrides.paragraphStyles);
-    if (overrides.marks) Object.assign(marks, overrides.marks);
-    if (overrides.inlines) Object.assign(inlines, overrides.inlines);
+    if (overrides.marks) layerOver(marks, overrides.marks);
+    if (overrides.inlines) layerOver(inlines, overrides.inlines);
   }
 
   return { blocks, paragraphStyles, marks, inlines };
+}
+
+/**
+ * Register handlers over the ones already there. A later handler is asked
+ * first; when it declines with `null`, the earlier one is asked. One element
+ * serves several owners — every extension that stores something in a content
+ * control claims `<w:sdt>`, and its marks, by its tag — so replacing would
+ * hide all but one.
+ */
+function layerOver<Args extends unknown[], Result>(
+  registry: Record<string, (...args: Args) => Result | null>,
+  added: Record<string, (...args: Args) => Result | null>,
+): void {
+  for (const [key, later] of Object.entries(added)) {
+    const earlier = registry[key];
+    registry[key] = earlier ? (...args: Args) => later(...args) ?? earlier(...args) : later;
+  }
 }
 
 interface LifecycleHooks {
