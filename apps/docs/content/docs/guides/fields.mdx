@@ -246,7 +246,7 @@ const { doc, fieldValues } = await importDocx(editor, bytes);
 // { "client-name-field": { kind: "text", text: "Alice Example" } }
 ```
 
-Record them as the signer's, or pass them on to `Field.configure({ values })`. Only a ticked box counts as an answer: an unticked one is how it was handed to the signer. A dropdown comes back as the choice its text names, by id; text that is none of its choices is no answer. A date signed is locked in Word and never comes back as an answer: it is your signing host's to give. A drawing in a signature control is not brought back (the import warns `field-drawing-not-imported`): signatures are captured by your signing host.
+Record them as the signer's, or pass them on to `Field.configure({ values })`. Only a ticked box counts as an answer: an unticked one is how it was handed to the signer. A dropdown comes back as the choice its text names, by id; text that is none of its choices is no answer. A date typed into a date signed never comes back as an answer: it is your signing host's to give. A drawing in a signature control is not brought back (the import warns `field-drawing-not-imported`): signatures are captured by your signing host.
 
 ## In other formats
 

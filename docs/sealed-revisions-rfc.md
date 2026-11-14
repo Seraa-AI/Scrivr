@@ -828,8 +828,8 @@ since the first; what they found, each fixed test first:
   pressed: when its party's signature is given — not initials on the way —
   `FieldCompletion` asks the host for it through `onFieldRequest`, so the
   date is the host's — its clock, its format, its record — on the one path
-  every value already takes. In Word its control is locked, and an import
-  never takes a date found there as the signer's.
+  every value already takes. An import never takes a date typed into its
+  Word control as the signer's.
 - **Filled author text frames itself under the pointer** with its prompt, as
   Word frames a content control, so a signer can tell the words filled in for
   this document from the template's own. It reaches the signing view as a
@@ -857,9 +857,18 @@ import; Scrivr's part there is a faithful round trip — fields, choices,
 roles, formatting — not signing inside Word. Word signs a file by locking it
 read-only and storing a certificate signature over its package parts; any
 later edit, an import and re-export included, invalidates that signature,
-and nothing of it reaches Scrivr. Its place in this design is still open: a
-signature field exported as Word's signature line invites a Word signing
-that cannot survive the round trip.
+and today nothing of it reaches Scrivr.
+
+**Decided: Word signing comes back as evidence (2026-11-14), in its own PR
+with its own RFC.** A signature field stays Word's signature line, so a
+signer can sign in Word. Import reads what Word did — which field, who, when,
+the signed image, whether the covered parts still match — and the host seals
+it as Scrivr's own revision with that evidence; a broken signature is still
+sealed, marked invalid, and reported in the import's diagnostics like any
+other. An export carries a document id — the host's, or one Scrivr makes —
+that Word keeps, and an import hands it back first, so a host pulling a file
+from a drive matches it to its own record before anything else. Copying a
+file copies its id; telling two such files apart is the host's.
 
 Still to do before claiming Word compatibility: open exported files in desktop
 Word — signature-line rendering and Sign, fill → save → reopen → re-import for

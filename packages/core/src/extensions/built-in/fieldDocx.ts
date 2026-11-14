@@ -125,6 +125,17 @@ const dropdown = (choices: readonly FieldChoice[]): XmlNode =>
     choices.map((choice) => xml("w:listItem", { "w:displayText": choice.label, "w:value": choice.id })),
   );
 
+/**
+ * The name Word shows on a control's tab. A kind drawn without a label — a
+ * checkbox — is still named, by its kind, so it never shows an empty tab.
+ */
+function controlTitle(kind: string, caption: string, node: PmNode): string {
+  if (caption) return caption;
+  const role = node.attrs["role"];
+  const name = kind.charAt(0).toUpperCase() + kind.slice(1);
+  return typeof role === "string" && role ? `${name} · ${role}` : name;
+}
+
 /** Each field as the control its kind declares; a kind Word has no control for is a text control. */
 export const fieldDocx = (kinds: FieldKinds): DocxNodeHandler => (node, _children, ctx) => {
   const id = String(node.attrs["nodeId"] ?? "");
@@ -147,17 +158,13 @@ export const fieldDocx = (kinds: FieldKinds): DocxNodeHandler => (node, _childre
   const shapes: Record<FieldControl, () => { props: XmlNode[]; content: XmlNode }> = {
     signatureLine: () => ({ props: [], content: signatureLine(node, id) }),
     checkbox: () => ({ props: [checkbox(checked)], content: glyphRun(checked ? "☒" : "☐") }),
-    // A date signed is the signing host's to fill, so Word locks what it holds.
-    date: () => ({
-      props: [...(isDatedWhenSigned(kinds, kind) ? [xml("w:lock", { "w:val": "contentLocked" })] : []), xml("w:showingPlcHdr"), dateControl()],
-      content: plainRun(caption),
-    }),
+    date: () => ({ props: [xml("w:showingPlcHdr"), dateControl()], content: plainRun(caption) }),
     dropdown: () => ({ props: [xml("w:showingPlcHdr"), dropdown(fieldChoices(node.attrs["options"]))], content: plainRun(caption) }),
     text: () => ({ props: [xml("w:showingPlcHdr"), xml("w:text")], content: plainRun(caption) }),
   };
   const { props, content } = shapes[kinds[kind]?.control ?? "text"]();
   return xml("w:sdt", undefined, [
-    xml("w:sdtPr", undefined, [xml("w:alias", { "w:val": caption }), tag, controlId(ctx), ...props]),
+    xml("w:sdtPr", undefined, [xml("w:alias", { "w:val": controlTitle(kind, caption, node) }), tag, controlId(ctx), ...props]),
     xml("w:sdtContent", undefined, [content]),
   ]);
 };

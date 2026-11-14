@@ -218,16 +218,22 @@ describe("a field filled in Word", () => {
     expect(fieldValues).toEqual({ who: { kind: "choice", id: "net-30" } });
   });
 
-  it("locks a date signed in Word, and never takes a date typed there as the signer's", async () => {
-    const editor = new ServerEditor({
-      extensions,
-      content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "field", attrs: { nodeId: "who", kind: "dateSigned", fill: "signer", role: "client", width: 110, height: 24 } }] }] },
-    });
-    const xml = strFromU8(unzipSync(await exportDocxBytes(editor))["word/document.xml"]!);
+  it("never takes a date typed into a date signed as the signer's — it is dated as they sign", async () => {
     const { fieldValues } = await importDocx(new ServerEditor({ extensions }), await filledInWord("dateSigned", "2020-01-01"));
 
-    expect(xml).toMatch(/<w:lock w:val="contentLocked"\/>.*<w:date>/);
     expect(fieldValues).toEqual({});
+  });
+
+  it("names every control on its tab, a checkbox too, and marks Word 2010's checkbox as one older Word may read past", async () => {
+    const editor = new ServerEditor({
+      extensions,
+      content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "field", attrs: { nodeId: "ok", kind: "checkbox", fill: "signer", role: "client", width: 16, height: 16 } }] }] },
+    });
+    const xml = strFromU8(unzipSync(await exportDocxBytes(editor))["word/document.xml"]!);
+
+    expect(xml).toContain('<w:alias w:val="Checkbox · client"/>');
+    expect(xml).toMatch(/<w:document [^>]*mc:Ignorable="w14"/);
+    expect(xml).toMatch(/<w:document [^>]*xmlns:w14="http:\/\/schemas\.microsoft\.com\/office\/word\/2010\/wordml"/);
   });
 
   it("brings back a box the signer ticked, and nothing for one left as it was handed to them", async () => {
