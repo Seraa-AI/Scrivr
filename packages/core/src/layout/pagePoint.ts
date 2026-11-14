@@ -40,9 +40,11 @@ export interface PagePointContext {
   /** Top-left of the tiles container, in client coordinates. */
   origin: { left: number; top: number };
   pageless: boolean;
-  /** Tile height plus the inter-page gap in paged mode; tile height in pageless. */
+  /** Tile height plus the inter-page gap in paged mode; tile height in pageless. In page units. */
   slotHeight: number;
   tileHeight: number;
+  /** Screen pixels per page unit — the view's zoom. Default: 1. */
+  zoom?: number;
   layout: PageRegionLayout;
 }
 
@@ -58,8 +60,10 @@ export function resolvePagePoint(
   clientY: number,
   ctx: PagePointContext,
 ): PagePoint {
-  const x = clientX - ctx.origin.left;
-  const visualY = clientY - ctx.origin.top;
+  // The column of pages is scaled as one, so dividing by the zoom gives page units.
+  const zoom = ctx.zoom ?? 1;
+  const x = (clientX - ctx.origin.left) / zoom;
+  const visualY = (clientY - ctx.origin.top) / zoom;
 
   if (ctx.pageless) {
     return { page: 1, x, y: visualY, region: pageRegionAt(ctx.layout, 1, x, visualY) ?? "outside" };

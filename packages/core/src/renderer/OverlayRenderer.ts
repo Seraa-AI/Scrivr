@@ -4,6 +4,7 @@ import type {
   LineEntry,
 } from "../layout/CharacterMap";
 import { HANDLE_SIZE } from "./ResizeController";
+import { screenPixels, setPaintZoom } from "./zoom";
 import type { SelectionPrimitive, SelectionRole } from "../selection/types";
 import type { ResolvedTheme } from "../model/theme";
 
@@ -475,6 +476,9 @@ export function renderAnchoredDragCaret(
  */
 let activeDpr = 1;
 
+/** A page-unit x on the device pixel grid's centre, so a 1px stroke lands on one pixel. */
+const onPixelCentre = (x: number): number => (Math.round(x * activeDpr) + 0.5) / activeDpr;
+
 /** @internal Set the active DPR for testing snapRect without calling clearOverlay. */
 export function setActiveDpr(dpr: number): void {
   activeDpr = dpr;
@@ -545,8 +549,10 @@ export function clearOverlay(
   width: number,
   height: number,
   dpr: number,
+  zoom = 1,
 ): void {
   activeDpr = dpr;
+  setPaintZoom(zoom);
   ctx.resetTransform();
   ctx.clearRect(0, 0, width * dpr, height * dpr);
   ctx.scale(dpr, dpr);
@@ -593,28 +599,20 @@ export function paintSelectionPrimitives(
         break;
       case "outline":
         ctx.strokeStyle = roleColor(p.role ?? "affordance", theme);
-        ctx.lineWidth = p.width;
+        ctx.lineWidth = screenPixels(p.width);
         ctx.strokeRect(p.rect.x, p.rect.y, p.rect.width, p.rect.height);
         break;
-      case "handles":
+      case "handles": {
         ctx.fillStyle = roleColor(p.role ?? "affordance", theme);
+        const size = screenPixels(HANDLE_SIZE);
         for (const h of p.handles) {
-          ctx.fillRect(h.x - HANDLE_SIZE / 2, h.y - HANDLE_SIZE / 2, HANDLE_SIZE, HANDLE_SIZE);
+          ctx.fillRect(h.x - size / 2, h.y - size / 2, size, size);
         }
         break;
-      case "caret": {
-        if (p.height <= 0) break;
-        // +0.5 so the 1px stroke lands on a physical pixel boundary.
-        const x = Math.round(p.x) + 0.5;
-        ctx.strokeStyle = theme.cursor;
-        ctx.lineWidth = 1.5;
-        ctx.lineCap = "round";
-        ctx.beginPath();
-        ctx.moveTo(x, p.y + 1);
-        ctx.lineTo(x, p.y + p.height - 1);
-        ctx.stroke();
-        break;
       }
+      case "caret":
+        renderCursor(ctx, p, theme.cursor);
+        break;
     }
     ctx.restore();
   }
@@ -622,21 +620,21 @@ export function paintSelectionPrimitives(
 
 export function renderCursor(
   ctx: CanvasRenderingContext2D,
-  coords: CoordsResult,
+  coords: Pick<CoordsResult, "x" | "y" | "height">,
   cursorColor: string,
 ): void {
   if (coords.height <= 0) return;
 
-  // +0.5 sub-pixel offset → 1px stroke lands on a physical pixel boundary
-  const x = Math.round(coords.x) + 0.5;
+  const x = onPixelCentre(coords.x);
+  const inset = screenPixels(1);
 
   ctx.save();
   ctx.strokeStyle = cursorColor;
-  ctx.lineWidth = 1.5;
+  ctx.lineWidth = screenPixels(1.5);
   ctx.lineCap = "round";
   ctx.beginPath();
-  ctx.moveTo(x, coords.y + 1);
-  ctx.lineTo(x, coords.y + coords.height - 1);
+  ctx.moveTo(x, coords.y + inset);
+  ctx.lineTo(x, coords.y + coords.height - inset);
   ctx.stroke();
   ctx.restore();
 }

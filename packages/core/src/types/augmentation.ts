@@ -1,5 +1,6 @@
 import type { Mappable } from "prosemirror-transform";
 import type { HoverEvent } from "../hover/types";
+import type { ZoomRequest } from "../renderer/zoom";
 /**
  * augmentation.ts
  *
@@ -130,6 +131,11 @@ export interface EditorEvents {
    * listeners should stick with `"update"` to avoid needless work on scroll.
    */
   viewport: void;
+  /**
+   * The document is shown at a new factor — `setZoom`, or a fit following its
+   * view as it resizes. `"viewport"` fires with it, so anchored UI follows.
+   */
+  zoom: { zoom: number; previous: number; request: ZoomRequest };
   /** Fired when a click lands in a chrome band (header/footer area). */
   chromeClick: { page: number; x: number; y: number; band: "header" | "footer"; clickCount: number };
   /**

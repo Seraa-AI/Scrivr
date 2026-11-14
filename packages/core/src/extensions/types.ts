@@ -114,7 +114,9 @@ export type ScrivrNodeSpec = NodeSpec & {
  * additional content on the overlay canvas for a specific page.
  *
  * Called once per visible page after the built-in cursor/selection are drawn.
- * The ctx is already scaled by dpr — draw in logical CSS pixels.
+ * The ctx is already scaled by the display's pixel ratio and the view's zoom —
+ * draw in page units. Something that should keep its size on screen at every
+ * zoom, as the caret and resize handles do, sizes itself with `screenPixels`.
  *
  * @example
  * // CollaborationCursor uses this to draw remote users' cursors

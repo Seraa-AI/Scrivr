@@ -1,6 +1,6 @@
 # RFC: Zoom — one scale at the viewport, fit to the screen
 
-Status: proposed (2026-11-15). Not built.
+Status: v1 built (2026-11-15) — see [What shipped](#what-shipped).
 
 ## Problem
 
@@ -75,7 +75,6 @@ That boundary already exists in two places, which is what makes this small:
    Ctrl + wheel), zoom the document** about the pointer, instead of the
    browser zooming the whole app. Cmd/Ctrl + `=` / `−` / `0` stay the
    browser's, as in Google Docs. A host can turn the gesture off.
-   *(Default chosen without a direct answer; strike if unwanted.)*
 8. **Pageless mode zooms too.** Its column is scaled the same way; fit-width
    fits its content width.
 9. **Export and print are unaffected.** PDF and DOCX read the layout, which
@@ -167,4 +166,25 @@ control (presets 50–200%, Fit width, Fit page).
 
 ## What shipped
 
-Nothing yet.
+Built as proposed, on `feat/zoom`. Where the code departs from the text above:
+
+- **The boundary lives in `InputBridge.pageToScreen`**, beside the page-corner
+  lookup it already held, rather than in a new helper on `Editor`: the four
+  `get*ViewportRect` methods and `scrollCursorIntoView` all call it.
+- **The factor in effect is resolved by `Editor.refitZoom()`**, through
+  `setViewportSizeLookup`, which `TileManager` registers with the scroll
+  container's content box. `TileManager` calls it once it finds the container
+  and on every resize; the constructor resolves a factor at once, and a fit
+  shows 100% until a view mounts.
+- **`PointerController` reads `editor.zoom`** rather than a new dependency: the
+  handle hit radius and edge band are screen pixels; resize deltas are
+  divided into page units. The anchored-object and inline drags already go
+  through `resolvePagePoint`, so they needed nothing.
+- **Furniture sizes itself with `screenPixels(n)`**, exported from core and
+  backed by the zoom the overlay clear records for the paint under way. The
+  caret also snaps to device pixels (`dpr × zoom`) rather than CSS pixels.
+  Collaboration cursors and the AI caret are left to scale with the page;
+  they annotate the document rather than follow the pointer.
+- **React:** `useZoom(editor)`; `useScrivrEditor({ zoom })`;
+  `<Scrivr zoomGestures>`; the header/footer ribbon places itself in the gap
+  at the zoom. The playground opens at Fit width, with a zoom control.

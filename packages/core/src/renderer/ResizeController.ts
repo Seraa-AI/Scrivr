@@ -5,6 +5,7 @@
  * any future element that needs 8-point resize handles (tables, float images,
  * widgets, etc.) without duplicating the geometry logic.
  */
+import { screenPixels } from "./zoom";
 
 export interface ResizeHandle {
   /** Position identifier: TL TC TR | ML MR | BL BC BR */
@@ -17,10 +18,9 @@ export interface ResizeHandle {
   cursor: string;
 }
 
-/** Side length of each drawn square handle, in logical CSS pixels. */
+/** Side length of each drawn square handle, in screen pixels at every zoom. */
 export const HANDLE_SIZE = 7;
 
-const HANDLE_HALF = HANDLE_SIZE / 2;
 const HANDLE_COLOR = "#1a73e8";
 /** Hit radius — slightly larger than the drawn size for easier grabbing. */
 const HIT_RADIUS = (HANDLE_SIZE + 5) / 2;
@@ -49,17 +49,20 @@ export function getHandles(
 
 /**
  * Returns the handle under canvas-space (canvasX, canvasY), or null.
- * Checks each handle's center against HIT_RADIUS.
+ * Checks each handle's center against HIT_RADIUS screen pixels — page units
+ * at `zoom` — so a handle is as easy to grab at every zoom.
  */
 export function hitHandle(
   canvasX: number,
   canvasY: number,
   handles: ResizeHandle[],
+  zoom = 1,
 ): ResizeHandle | null {
+  const radius = HIT_RADIUS / zoom;
   for (const h of handles) {
     if (
-      Math.abs(canvasX - h.hx) <= HIT_RADIUS &&
-      Math.abs(canvasY - h.hy) <= HIT_RADIUS
+      Math.abs(canvasX - h.hx) <= radius &&
+      Math.abs(canvasY - h.hy) <= radius
     ) {
       return h;
     }
@@ -141,12 +144,13 @@ export function renderHandles(
 
   // Selection border + handles in theme color (defaults to legacy blue)
   ctx.strokeStyle = handleColor;
-  ctx.lineWidth = 1.5;
+  ctx.lineWidth = screenPixels(1.5);
   ctx.strokeRect(x, y, w, h);
 
   ctx.fillStyle = handleColor;
+  const size = screenPixels(HANDLE_SIZE);
   for (const { hx, hy } of getHandles(x, y, w, h)) {
-    ctx.fillRect(hx - HANDLE_HALF, hy - HANDLE_HALF, HANDLE_SIZE, HANDLE_SIZE);
+    ctx.fillRect(hx - size / 2, hy - size / 2, size, size);
   }
 
   ctx.restore();

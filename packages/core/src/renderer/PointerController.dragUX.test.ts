@@ -30,6 +30,7 @@ import {
 import type { PointerControllerSetup } from "../test-utils";
 import type { AnchoredObjectPlacement } from "../layout/AnchoredObjects";
 import { StarterKit } from "../extensions/StarterKit";
+import { computeNewSize } from "./ResizeController";
 
 // ── Local test fixtures ──────────────────────────────────────────────────────
 
@@ -738,6 +739,26 @@ describe("PointerController — drag UX", () => {
       if (!after) throw new Error("image vanished");
       expect(after.x).toBeCloseTo(before.x + 100, 6);
       expect(after.node.attrs["x"]).toBeCloseTo(after.x - setup.editor.layout.pageConfig.margins.left, 6);
+    });
+  });
+
+  describe("at a zoom", () => {
+    it("grabs a handle where it is drawn on screen, and resizes by page units, not screen pixels", () => {
+      setup = makePointerControllerSetup({ isPageless: true });
+      overrideLayout(setup.editor, { anchoredObjects: [makePlacement(setup)] });
+      stubImageSelection(setup, 5);
+      vi.spyOn(setup.editor, "getNodeRect").mockReturnValue({ ...SQUARE_RECT });
+      setup.editor.setZoom(2);
+
+      // The top-left handle, drawn at twice its page position.
+      mousedown(setup.container, SQUARE_RECT.x * 2, SQUARE_RECT.y * 2);
+      expect(setup.controller.pendingResize?.handle).toBe("TL");
+
+      // 100 screen pixels left is 50 page units at 200%.
+      mousemove(SQUARE_RECT.x * 2 - 100, SQUARE_RECT.y * 2);
+      const { pageWidth, margins } = setup.editor.layout.pageConfig;
+      const expected = computeNewSize("TL", SQUARE_RECT.width, SQUARE_RECT.height, -50, 0, pageWidth - margins.left - margins.right);
+      expect(setup.controller.pendingResize).toMatchObject({ width: expected.width, height: expected.height });
     });
   });
 });

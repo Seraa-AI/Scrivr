@@ -300,6 +300,7 @@ export class PointerController {
       pageless: this.deps.isPageless(),
       slotHeight: this.deps.slotHeight(),
       tileHeight: this.deps.tileHeight(),
+      zoom: this.deps.editor.zoom,
       layout: this.deps.editor.layout,
     });
   }
@@ -345,7 +346,7 @@ export class PointerController {
         canvasY - r.y,
         r.y + r.height - canvasY,
       );
-      if (distToEdge > EDGE_BAND_PX) return null;
+      if (distToEdge > EDGE_BAND_PX / this.deps.editor.zoom) return null;
     }
 
     // Resize hit-testing uses the canonical 8-point `getHandles(nodeRect)` grid.
@@ -355,7 +356,7 @@ export class PointerController {
     // positions. A behavior that wants bespoke handle geometry can't express it
     // yet (the emitted `handles` primitives carry no id to drive the drag);
     // that lands with the resize → standalone gesture-provider refactor.
-    return hitHandle(canvasX, canvasY, getHandles(r.x, r.y, r.width, r.height));
+    return hitHandle(canvasX, canvasY, getHandles(r.x, r.y, r.width, r.height), this.deps.editor.zoom);
   }
 
   /**
@@ -663,8 +664,9 @@ export class PointerController {
         handle,
         startW,
         startH,
-        e.clientX - startX,
-        e.clientY - startY,
+        // Screen pixels moved, as page units: at 200% a 100px drag grows 50.
+        (e.clientX - startX) / this.deps.editor.zoom,
+        (e.clientY - startY) / this.deps.editor.zoom,
         maxWidth,
       );
       this.resizeDrag.pendingWidth = width;

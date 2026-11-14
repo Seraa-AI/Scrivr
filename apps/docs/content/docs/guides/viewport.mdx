@@ -65,6 +65,45 @@ Default is `24px`. The gap is purely visual — it does not affect layout or pag
 
 ---
 
+## Zoom
+
+Zoom shows the document larger or smaller without changing it: lines break in the same
+places at every zoom, as in Word, because layout is in page units and zoom only scales
+the view. Each page is painted at the zoom's resolution, so text stays sharp at 400%.
+
+```tsx
+const editor = useScrivrEditor({ extensions: [StarterKit], zoom: "fit-width" });
+
+editor.setZoom(1.5);         // 150% — any factor from MIN_ZOOM (0.1) to MAX_ZOOM (5)
+editor.setZoom("fit-width"); // the page's width fills the view
+editor.setZoom("fit-page");  // the whole page fits the view
+editor.zoom;                 // the factor in effect, e.g. 0.47 for a fit on a phone
+editor.zoomRequest;          // what was asked: "fit-width"
+```
+
+A fit follows the scroll container as it resizes — a phone fits the width, and rotating
+it fits again — while a factor stays fixed. The default is `1`.
+
+When the zoom changes, the line at the top of the view stays at the top. Ctrl/Cmd + scroll
+and a trackpad pinch zoom about the pointer instead of zooming the whole page; turn that
+off with `<Scrivr zoomGestures={false} />`. Cmd/Ctrl + `=` / `−` / `0` stay the browser's.
+
+In React, `useZoom(editor)` gives the factor in effect and re-renders as it changes. Size
+anything wrapped around `<Scrivr />` from it, so the page column has room:
+
+```tsx
+const zoom = useZoom(editor);
+return <Scrivr editor={editor} style={{ width: pageConfig.pageWidth * zoom }} />;
+```
+
+Everything positioned with `getViewportRect` and its siblings follows the zoom, as do the
+built-in menus and popovers; `editor.on("zoom", …)` fires with the new and previous factor,
+and `"viewport"` fires with it. Page-unit values — `layout`, `charMap`, `getNodeRect` — are
+the same at every zoom. The caret and resize handles keep their size on screen; an overlay
+handler that wants the same sizes itself with `screenPixels(n)`.
+
+---
+
 ## Virtual scrolling and overscan
 
 `ViewManager` only paints pages that intersect with the scroll viewport ± `overscan` pixels.

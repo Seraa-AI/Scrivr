@@ -77,6 +77,7 @@ import {
 	type DragDebugConfig,
 } from "./renderer/DragDebugOverlay";
 import { installAnchoredObjectDebugOverlay } from "./renderer/AnchoredObjectDebugOverlay";
+import { resolveZoom, type ZoomRequest, type ZoomViewport } from "./renderer/zoom";
 import {
 	defaultEditorTheme,
 	mergeEditorTheme,
@@ -242,6 +243,14 @@ export interface EditorOptions {
 	 * and no lane can say what it got — so an export has to guess a second time.
 	 */
 	fonts?: FontProvider;
+	/**
+	 * How large the document is shown: a factor (1 is 100%, clamped to
+	 * `MIN_ZOOM`–`MAX_ZOOM`), or a fit to the view the editor scrolls in —
+	 * `"fit-width"` or `"fit-page"` — that follows the view as it resizes. A view
+	 * scale only: layout and the document are the same at every zoom. 1 by
+	 * default.
+	 */
+	zoom?: ZoomRequest;
 }
 
 /**
@@ -545,6 +554,7 @@ export class Editor extends BaseEditor implements IEditor {
 		themeRoot,
 		textMeasurer,
 		fonts,
+		zoom = 1,
 	}: EditorOptions) {
 		// BaseEditor handles: manager, state, commands, storage, event emitter
 		super({
@@ -565,6 +575,7 @@ export class Editor extends BaseEditor implements IEditor {
 			? resolveTheme(this.theme, this.themeRoot)
 			: Object.freeze({ ...defaultEditorTheme });
 
+		this.zoomAsked = zoom;
 		this.onChangeHandler = onChange;
 		this.onFocusChangeHandler = onFocusChange;
 
@@ -575,6 +586,8 @@ export class Editor extends BaseEditor implements IEditor {
 			builtConfig && pageConfig
 				? { ...builtConfig, ...pageConfig }
 				: (builtConfig ?? pageConfig ?? defaultPageConfig);
+		// A fit has no view to fit until TileManager mounts one: 100% until then.
+		this.zoomShown = resolveZoom(zoom, null, { width: this.pageConfig.pageWidth, height: this.pageConfig.pageHeight });
 
 		this.fontConfig = this.manager.buildBlockStyles();
 		this.measurer =
@@ -702,6 +715,7 @@ export class Editor extends BaseEditor implements IEditor {
 			getSchema: () => this.manager.schema,
 			copyHtmlTransforms: this.getCopyHtmlTransforms(),
 			getViewportRect: (from, to) => this.getViewportRect(from, to),
+			getZoom: () => this.zoom,
 			// TODO(pr7): getViewportRect still resolves positions against the flow
 			// layout. When a surface is active, `from`/`to` are surface-doc positions
 			// and need surface-aware coordinate lookup. Safe today because no plugin
@@ -1161,14 +1175,7 @@ export class Editor extends BaseEditor implements IEditor {
 		const fromCoords = this.lc.charMap.coordsAtPos(from);
 		if (!fromCoords) return null;
 
-		const pageScreenRect = this.ib.lookupPageScreenRect(fromCoords.page);
-		if (!pageScreenRect) return null;
-
 		const toCoords = this.lc.charMap.coordsAtPos(to);
-
-		const left = pageScreenRect.screenLeft + fromCoords.x;
-		const top = pageScreenRect.screenTop + fromCoords.y;
-		const height = fromCoords.height;
 
 		const sameLine =
 			toCoords &&
@@ -1177,7 +1184,7 @@ export class Editor extends BaseEditor implements IEditor {
 		const width =
 			sameLine && toCoords ? Math.abs(toCoords.x - fromCoords.x) : 1;
 
-		return new DOMRect(left, top, Math.max(1, width), height);
+		return this.ib.pageToScreen(fromCoords.page, { x: fromCoords.x, y: fromCoords.y, width: Math.max(1, width), height: fromCoords.height });
 	}
 
 	getNodeViewportRect(docPos: number): DOMRect | null {
@@ -1211,25 +1218,11 @@ export class Editor extends BaseEditor implements IEditor {
 			if (object.docPos >= from && object.docPos < to) rects.push(object);
 		}
 		rects.sort((a, b) => a.page - b.page || a.y - b.y);
-		const out: DOMRect[] = [];
-		for (const rect of rects) {
-			const page = this.ib.lookupPageScreenRect(rect.page);
-			if (!page) continue;
-			out.push(new DOMRect(page.screenLeft + rect.x, page.screenTop + rect.y, rect.width, rect.height));
-		}
-		return out;
+		return rects.flatMap((rect) => this.ib.pageToScreen(rect.page, rect) ?? []);
 	}
 
 	getNodeViewportRects(docPos: number): DOMRect[] {
-		const out: DOMRect[] = [];
-		for (const rect of this.getNodeRects(docPos)) {
-			const page = this.ib.lookupPageScreenRect(rect.page);
-			if (!page) continue;
-			out.push(
-				new DOMRect(page.screenLeft + rect.x, page.screenTop + rect.y, rect.width, rect.height),
-			);
-		}
-		return out;
+		return this.getNodeRects(docPos).flatMap((rect) => this.ib.pageToScreen(rect.page, rect) ?? []);
 	}
 
 	/**
@@ -1774,6 +1767,50 @@ export class Editor extends BaseEditor implements IEditor {
 	 */
 	getScrollContainerRect(): DOMRect | null {
 		return this.scrollContainerLookup?.() ?? null;
+	}
+
+	private zoomAsked: ZoomRequest;
+	private zoomShown = 1;
+	private viewportSizeLookup: (() => ZoomViewport | null) | null = null;
+
+	/** The factor the document is shown at: 1 is 100%. A fit resolves to the factor that fits. */
+	get zoom(): number {
+		return this.zoomShown;
+	}
+
+	/** The zoom asked for — a factor, or a fit the view follows as it resizes. */
+	get zoomRequest(): ZoomRequest {
+		return this.zoomAsked;
+	}
+
+	/**
+	 * Show the document at `request`: a factor, or `"fit-width"` / `"fit-page"`.
+	 * Repaints, never re-lays-out; fires `"zoom"` and `"viewport"` when the
+	 * factor changes.
+	 */
+	setZoom(request: ZoomRequest): void {
+		this.zoomAsked = request;
+		this.refitZoom();
+	}
+
+	/**
+	 * Register the size, in CSS pixels, of the view a fit fills — the scroll
+	 * container's content box. TileManager wires this on construction, and
+	 * calls `refitZoom` once it finds the view and whenever it resizes.
+	 */
+	setViewportSizeLookup(fn: (() => ZoomViewport | null) | null): void {
+		this.viewportSizeLookup = fn;
+	}
+
+	/** Resolve the zoom asked for against the view as it is now — a fit follows the view; a factor stays. */
+	refitZoom(): void {
+		const { pageWidth, pageHeight } = this.pageConfig;
+		const zoom = resolveZoom(this.zoomAsked, this.viewportSizeLookup?.() ?? null, { width: pageWidth, height: pageHeight });
+		if (zoom === this.zoomShown) return;
+		const previous = this.zoomShown;
+		this.zoomShown = zoom;
+		this.emit("zoom", { zoom, previous, request: this.zoomAsked });
+		this.emit("viewport", undefined);
 	}
 
 	/**

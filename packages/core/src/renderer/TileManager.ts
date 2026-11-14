@@ -39,12 +39,19 @@ export interface TileManagerOptions {
    * Ignored in pageless mode.
    */
   pageStyle?: Partial<CSSStyleDeclaration>;
+  /**
+   * Ctrl/Cmd + wheel, and a trackpad pinch (which browsers report as one),
+   * zoom the document about the pointer instead of the browser zooming the
+   * whole page. Default: true.
+   */
+  zoomGestures?: boolean;
 }
 
 export interface TileEntry {
   wrapper: HTMLDivElement;
   contentCanvas: HTMLCanvasElement;
   overlayCanvas: HTMLCanvasElement;
+  /** Device pixels per page unit the tile was painted at: the display's ratio times the zoom. */
   dpr: number;
   /** pageless: slice index; paged: pageIndex (0-based). */
   tileIndex: number;
@@ -184,6 +191,9 @@ export class TileManager {
   private firstPaintDone = false;
   private unwatchDpr: (() => void) | null = null;
   private readonly pointer: PointerController;
+  private readonly offZoom: () => void;
+  /** Where a gesture zoomed about, in client coordinates; the view's top centre otherwise. */
+  private zoomAnchor: { x: number; y: number } | null = null;
 
   constructor(
     private readonly editor: Editor,
@@ -195,6 +205,7 @@ export class TileManager {
     this.showMarginGuides = options.showMarginGuides ?? false;
     this.smallTileHeight = options.smallTileHeight ?? DEFAULT_SMALL_TILE_HEIGHT;
     this.pageStyle = options.pageStyle ?? {};
+    if (options.zoomGestures ?? true) container.addEventListener("wheel", this.handleWheel, { passive: false });
 
     // ── tiles container ──────────────────────────────────────────────────────
     this.tilesContainer = document.createElement("div");
@@ -231,7 +242,7 @@ export class TileManager {
       const visualY = this.docYToVisualY(page, 0);
       return {
         screenLeft: tileRect.left,
-        screenTop: tileRect.top + visualY,
+        screenTop: tileRect.top + visualY * this.zoom,
       };
     });
 
@@ -240,6 +251,12 @@ export class TileManager {
     editor.setScrollContainerLookup(
       () => this.scrollParent?.getBoundingClientRect() ?? null,
     );
+
+    // ── zoom ─────────────────────────────────────────────────────────────────
+    // A fit fills the scroll container's content box; a new factor re-places
+    // and repaints every tile, keeping the reader's place.
+    editor.setViewportSizeLookup(() => this.viewportSize());
+    this.offZoom = editor.on("zoom", ({ zoom, previous }) => this.handleZoom(zoom, previous));
 
     // ── subscribe to editor ──────────────────────────────────────────────────
     this.unsubscribe = editor.subscribe(() => this.scheduleUpdate());
@@ -258,6 +275,23 @@ export class TileManager {
   }
 
   /** Geometry helpers */
+
+  /** Screen pixels per page unit. Every tile size below is in page units; the DOM gets them × zoom. */
+  private get zoom(): number {
+    return this.editor.zoom;
+  }
+
+  /** The scroll container's content box — what a fit fills. Null before it is found. */
+  private viewportSize(): { width: number; height: number } | null {
+    const el = this.scrollParent;
+    if (!el) return null;
+    const style = window.getComputedStyle(el);
+    const padding = (a: string, b: string) => (parseFloat(a) || 0) + (parseFloat(b) || 0);
+    return {
+      width: el.clientWidth - padding(style.paddingLeft, style.paddingRight),
+      height: el.clientHeight - padding(style.paddingTop, style.paddingBottom),
+    };
+  }
 
   private get tileHeight(): number {
     return this.editor.isPageless
@@ -323,19 +357,21 @@ export class TileManager {
           this.scheduleUpdate();
           // Anchored popovers need to reposition when the viewport resizes.
           this.editor.emit("viewport", undefined);
+          // A fit follows the view.
+          this.editor.refitZoom();
         });
         this.resizeObserver.observe(this.scrollParent);
+        this.editor.refitZoom();
       }
     }
 
     const scrollEl = this.scrollParent;
-    const scrollTop = scrollEl ? scrollEl.scrollTop : 0;
-    const viewportH = scrollEl ? scrollEl.clientHeight : window.innerHeight;
+    // In page units, so the tile math below needs no zoom.
+    const scrollTop = (scrollEl ? scrollEl.scrollTop : 0) / this.zoom;
+    const viewportH = (scrollEl ? scrollEl.clientHeight : window.innerHeight) / this.zoom;
 
     /** ── Container sizing ────────────────────────────────────────────────── */
-    const ch = this.containerHeight(layout);
-    this.tilesContainer.style.height = `${ch}px`;
-    this.tilesContainer.style.width = `${layout.pageConfig.pageWidth}px`;
+    this.sizeContainer(layout);
 
     // Sized and observed above, but nothing painted while the editor has
     // nothing honest to show. Only ever the first paint: once something has
@@ -401,8 +437,8 @@ export class TileManager {
         tile.lastPendingResizeKey = "";
         tile.lastPendingAnchoredDragKey = "";
         tile.lastOverlayContentKey = "";
-        tile.wrapper.style.top = `${idx * sh}px`;
-        tile.wrapper.style.height = `${this.tileHeight}px`;
+        tile.wrapper.style.top = `${idx * sh * this.zoom}px`;
+        tile.wrapper.style.height = `${this.tileHeight * this.zoom}px`;
         tile.wrapper.style.display = "block";
         this.activeTiles.set(idx, tile);
       }
@@ -412,6 +448,12 @@ export class TileManager {
       this.paintContent(tile, layout, layout.version);
       this.paintOverlay(tile, layout);
     }
+  }
+
+  /** The tiles container at the zoom: the whole column of pages, scaled as one. */
+  private sizeContainer(layout: DocumentLayout): void {
+    this.tilesContainer.style.height = `${this.containerHeight(layout) * this.zoom}px`;
+    this.tilesContainer.style.width = `${layout.pageConfig.pageWidth * this.zoom}px`;
   }
 
   /** Content painting */
@@ -500,15 +542,13 @@ export class TileManager {
     const { ctx, dpr } = setupCanvas(tile.contentCanvas, {
       width: pageConfig.pageWidth,
       height: pageConfig.pageHeight,
+      scale: this.zoom,
     });
     tile.dpr = dpr;
 
     // Size overlay canvas only after the content candidate is admitted, so a
     // rejected frame preserves both visible layers.
-    tile.overlayCanvas.width = Math.round(pageConfig.pageWidth * dpr);
-    tile.overlayCanvas.height = Math.round(pageConfig.pageHeight * dpr);
-    tile.overlayCanvas.style.width = `${pageConfig.pageWidth}px`;
-    tile.overlayCanvas.style.height = `${pageConfig.pageHeight}px`;
+    this.sizeOverlay(tile, pageConfig.pageWidth, pageConfig.pageHeight);
 
     return renderPage({
       ctx,
@@ -560,7 +600,7 @@ export class TileManager {
       ? fragmentsInTile(layout.fragments, tileTop, tileBottom)
       : [];
 
-    const dpr = window.devicePixelRatio ?? 1;
+    const dpr = (window.devicePixelRatio ?? 1) * this.zoom;
     tile.dpr = dpr;
 
     // Size canvases
@@ -568,12 +608,9 @@ export class TileManager {
     const h = this.tileHeight;
     tile.contentCanvas.width = Math.round(w * dpr);
     tile.contentCanvas.height = Math.round(h * dpr);
-    tile.contentCanvas.style.width = `${w}px`;
-    tile.contentCanvas.style.height = `${h}px`;
-    tile.overlayCanvas.width = Math.round(w * dpr);
-    tile.overlayCanvas.height = Math.round(h * dpr);
-    tile.overlayCanvas.style.width = `${w}px`;
-    tile.overlayCanvas.style.height = `${h}px`;
+    tile.contentCanvas.style.width = `${w * this.zoom}px`;
+    tile.contentCanvas.style.height = `${h * this.zoom}px`;
+    this.sizeOverlay(tile, w, h);
 
     const ctx = tile.contentCanvas.getContext("2d", { alpha: false })!;
     const theme = this.editor.getResolvedTheme();
@@ -614,6 +651,14 @@ export class TileManager {
 
     ctx.restore();
     return true;
+  }
+
+  /** The overlay canvas over a `width` × `height` page-unit tile, at the tile's pixel ratio. */
+  private sizeOverlay(tile: TileEntry, width: number, height: number): void {
+    tile.overlayCanvas.width = Math.round(width * tile.dpr);
+    tile.overlayCanvas.height = Math.round(height * tile.dpr);
+    tile.overlayCanvas.style.width = `${width * this.zoom}px`;
+    tile.overlayCanvas.style.height = `${height * this.zoom}px`;
   }
 
   // ── Overlay painting ───────────────────────────────────────────────────────
@@ -708,12 +753,12 @@ export class TileManager {
     tile.lastPendingAnchoredDragKey = pendingAnchoredKey;
     tile.lastOverlayContentKey = contentKey;
 
-    const dpr = tile.dpr || (window.devicePixelRatio ?? 1);
+    const dpr = tile.dpr || (window.devicePixelRatio ?? 1) * this.zoom;
     const w = pageConfig.pageWidth;
     const h = this.tileHeight;
 
     const overlayCtx = tile.overlayCanvas.getContext("2d")!;
-    clearOverlay(overlayCtx, w, h, dpr);
+    clearOverlay(overlayCtx, w, h, dpr, this.zoom);
     // After clearOverlay: transform = scale(dpr). Apply tile translate for pageless.
     if (isPageless) {
       overlayCtx.save();
@@ -890,6 +935,49 @@ export class TileManager {
     };
   }
 
+  /** Zoom */
+
+  /**
+   * Ctrl/Cmd + wheel zooms the document about the pointer. A notch of a mouse
+   * wheel steps about 20%; a trackpad pinch's small deltas zoom smoothly.
+   */
+  private handleWheel = (e: WheelEvent): void => {
+    if (!e.ctrlKey && !e.metaKey) return;
+    e.preventDefault();
+    const delta = Math.max(-10, Math.min(10, e.deltaY));
+    this.zoomAnchor = { x: e.clientX, y: e.clientY };
+    this.editor.setZoom(this.zoom * Math.exp(-delta * 0.02));
+    this.zoomAnchor = null;
+  };
+
+  /**
+   * Re-place every tile at the new factor, and scroll so the point of the
+   * document under the anchor — the pointer for a gesture, the top centre of
+   * the view otherwise — stays where it was on screen.
+   */
+  private handleZoom(zoom: number, previous: number): void {
+    const scrollEl = this.scrollParent;
+    const before = this.tilesContainer.getBoundingClientRect();
+    const view = scrollEl?.getBoundingClientRect();
+    const anchor = this.zoomAnchor ?? { x: (view?.left ?? 0) + (scrollEl?.clientWidth ?? 0) / 2, y: view?.top ?? 0 };
+    const page = { x: (anchor.x - before.left) / previous, y: (anchor.y - before.top) / previous };
+
+    this.sizeContainer(this.editor.layout);
+    if (scrollEl) {
+      const after = this.tilesContainer.getBoundingClientRect();
+      scrollEl.scrollLeft += after.left + page.x * zoom - anchor.x;
+      scrollEl.scrollTop += after.top + page.y * zoom - anchor.y;
+    }
+
+    // Every tile's place, size and pixels change: assign and paint them afresh.
+    for (const tile of this.pool) {
+      tile.assigned = false;
+      tile.wrapper.style.display = "none";
+    }
+    this.activeTiles.clear();
+    this.scheduleUpdate();
+  }
+
   /** Scroll */
 
   private handleScroll = (): void => {
@@ -908,6 +996,8 @@ export class TileManager {
     if (this.rafId !== null) cancelAnimationFrame(this.rafId);
     this.unsubscribe?.();
     this.unwatchDpr?.();
+    this.offZoom();
+    this.container.removeEventListener("wheel", this.handleWheel);
     this.scrollParent?.removeEventListener("scroll", this.handleScroll);
     this.resizeObserver?.disconnect();
     this.pointer.detach();
@@ -915,5 +1005,6 @@ export class TileManager {
     this.tilesContainer.remove();
     this.editor.setPageTopLookup(null);
     this.editor.setScrollContainerLookup(null);
+    this.editor.setViewportSizeLookup(null);
   }
 }

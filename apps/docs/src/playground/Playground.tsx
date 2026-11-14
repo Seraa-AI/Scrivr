@@ -9,6 +9,7 @@ import {
   ImageMenu,
   TableMenu,
   HeaderFooterRibbon,
+  useZoom,
 } from "@scrivr/react";
 import { useEffect, useState, type ReactNode } from "react";
 import { useTheme } from "next-themes";
@@ -46,6 +47,7 @@ import type { SuggestionRefusalText } from "@scrivr/react";
 import type { Editor, ToolbarState } from "@scrivr/core";
 import { Selection } from "@scrivr/core/pm";
 import { ChatPanel } from "./ChatPanel";
+import { ZoomControl } from "./ZoomControl";
 import { DemoContent, demoDoc, startingDemo, type DemoKind } from "./demoContent";
 import { TrackChangesInspector } from "./TrackChangesInspector";
 import { env } from "../lib/env";
@@ -234,7 +236,10 @@ export function Playground() {
     // dark-class strategy drives canvas paint without a second toggle.
     themeRoot:
       typeof document !== "undefined" ? document.documentElement : undefined,
+    // The page fills the window's width, on a phone and a wide screen alike.
+    zoom: "fit-width",
   });
+  const zoom = useZoom(editor);
 
   // Debug helper — call window.inspectDoc() in the browser console to print
   // the full ProseMirror document JSON at the current moment.
@@ -388,6 +393,7 @@ export function Playground() {
             editor={editor}
           />
         </div>
+        <ZoomControl editor={editor} />
         <CitationsControl editor={editor} />
         <div className="flex shrink-0 items-center border-l px-2 md:hidden" style={{ borderColor: "var(--app-border)" }}>
           <span className="text-[11px] tabular-nums" style={{ color: "var(--app-text-muted)" }}>
@@ -400,10 +406,10 @@ export function Playground() {
         <main className="flex min-w-0 flex-1 overflow-hidden">
           <div className="min-w-0 flex-1 overflow-auto p-2 md:p-4">
             <div className="flex min-w-max justify-center">
-              <div className="relative shrink-0" style={{ width: pageInfo.pageWidth }}>
+              <div className="relative shrink-0" style={{ width: pageInfo.pageWidth * zoom }}>
                 <Scrivr
                   editor={editor}
-                  style={{ width: pageInfo.pageWidth }}
+                  style={{ width: pageInfo.pageWidth * zoom }}
                   pageStyle={{
                     border: "1px solid var(--scrivr-page-border)",
                     background: "var(--scrivr-page-bg)",

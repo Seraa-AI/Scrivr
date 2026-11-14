@@ -23,11 +23,17 @@ export interface CanvasSetupOptions {
    * Defaults to window.devicePixelRatio.
    */
   dpr?: number;
+  /**
+   * The view's zoom. The canvas is shown at `width × scale` CSS pixels and
+   * its backing store rasterised at that size, so text stays crisp at every
+   * zoom while draw calls keep using logical units. Default: 1.
+   */
+  scale?: number;
 }
 
 export interface CanvasSetupResult {
   ctx: CanvasRenderingContext2D;
-  /** The actual device pixel ratio used */
+  /** Device pixels per logical unit: the display's pixel ratio times `scale`. */
   dpr: number;
   /** Logical width (CSS pixels) */
   width: number;
@@ -49,16 +55,16 @@ export function setupCanvas(
   canvas: HTMLCanvasElement,
   options: CanvasSetupOptions
 ): CanvasSetupResult {
-  const { width, height } = options;
-  const dpr = options.dpr ?? window.devicePixelRatio ?? 1;
+  const { width, height, scale = 1 } = options;
+  const dpr = (options.dpr ?? window.devicePixelRatio ?? 1) * scale;
 
   // Physical backing store — sized up by dpr
   canvas.width = Math.round(width * dpr);
   canvas.height = Math.round(height * dpr);
 
-  // CSS display size — stays at logical size so layout is unaffected
-  canvas.style.width = `${width}px`;
-  canvas.style.height = `${height}px`;
+  // CSS display size — the logical size at the view's zoom
+  canvas.style.width = `${width * scale}px`;
+  canvas.style.height = `${height * scale}px`;
 
   const ctx = canvas.getContext("2d", { alpha: false })!;
 
