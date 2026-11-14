@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createTestEditor } from "../test-utils";
+import { createTestEditor, expectSamePosition } from "../test-utils";
 import { StarterKit } from "../extensions/StarterKit";
 import { DefaultContent } from "../extensions/built-in/DefaultContent";
 import { defaultPageConfig } from "./PageLayout";
@@ -72,7 +72,7 @@ describe("nodeFragmentRects", () => {
     const rows = editor.layout.pages[0]!.blocks.filter((b) => b.kind === "composite");
     expect(rows).toHaveLength(3);
     expect(rects[0]!.y).toBe(rows[0]!.y);
-    expect(rects[0]!.y + rects[0]!.height).toBe(rows[2]!.y + rows[2]!.height);
+    expectSamePosition(rects[0]!.y + rects[0]!.height, rows[2]!.y + rows[2]!.height);
   });
 
   it("returns a cell's own rect, inside its table's", () => {

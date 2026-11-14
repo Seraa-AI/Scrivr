@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { Node } from "prosemirror-model";
 import { ExtensionManager } from "../extensions/ExtensionManager";
 import { StarterKit } from "../extensions/StarterKit";
-import { createMeasurer, measureTextWidth } from "../test-utils";
+import { createMeasurer, expectSamePosition, measureTextWidth } from "../test-utils";
 import {
   runPipeline,
   collapseMargins,
@@ -127,7 +127,7 @@ function naturalY(l: DocumentLayout, block: Placed): number {
 function expectOnAnchor(l: DocumentLayout, f: AnchoredObjectPlacement, needle: string, yOffset: number): void {
   const anchor = blockWith(l, needle);
   expect(f.page).toBe(anchor.page);
-  if (!f.clamped) expect(f.y).toBeCloseTo(anchor.y + yOffset, 6);
+  if (!f.clamped) expectSamePosition(f.y, anchor.y + yOffset);
 }
 
 function expectBelowFloat(rows: Placed[], f: AnchoredObjectPlacement): void {
@@ -142,7 +142,7 @@ function expectBelowFloat(rows: Placed[], f: AnchoredObjectPlacement): void {
   for (let i = 1; i < rows.length; i++) {
     const prev = must(rows[i - 1], "previous row");
     const row = must(rows[i], "row");
-    if (row.page === prev.page) expect(row.y).toBe(prev.y + prev.height);
+    if (row.page === prev.page) expectSamePosition(row.y, prev.y + prev.height);
   }
 }
 
@@ -289,7 +289,7 @@ describe("float beside a table — the table moves below the float", () => {
       const anchorNow = blockWith(l, "Anchor");
       expect(rowsOf(l, "T").map((r) => r.y)).toEqual(rows.map((r) => r.y));
       expect(f.page).toBe(anchorNow.page);
-      expect(f.y).toBe(anchorNow.y + yOffset);
+      expectSamePosition(f.y, anchorNow.y + yOffset);
       expect(rowsOf(l, "T").some((r) => overlaps(r, f))).toBe(true);
     });
 

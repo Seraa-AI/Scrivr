@@ -11,7 +11,7 @@
  * a fake. See `feedback_no_canvas_mocking.md` for the rationale.
  */
 
-import { vi } from "vitest";
+import { expect, vi } from "vitest";
 import { ExtensionManager, getSchema } from "./extensions/ExtensionManager";
 import { StarterKit } from "./extensions/StarterKit";
 import { TextMeasurer } from "./layout/TextMeasurer";
@@ -92,6 +92,17 @@ export function createTestEditor(options: Partial<EditorOptions> = {}): Editor {
  * Measure a string with the same backend the engine uses in tests. Use this
  * to drive `toBeCloseTo` assertions instead of hardcoding pixel constants.
  */
+/**
+ * Two layout positions that should meet — one row's bottom and the next row's
+ * top. Each is a sum of measured, fractional widths and heights, and the same
+ * sum taken in another order differs in its last bits: on Linux CI's fonts a
+ * row's `y + height` and the next row's `y` disagree by 1e-13. So they agree
+ * to a millionth of a pixel, never bit for bit.
+ */
+export function expectSamePosition(actual: number | undefined, expected: number): void {
+  expect(actual).toBeCloseTo(expected, 6);
+}
+
 export function measureTextWidth(text: string, font = DEFAULT_TEST_FONT): number {
   const ctx = createNapiCanvasContext();
   ctx.font = font;
