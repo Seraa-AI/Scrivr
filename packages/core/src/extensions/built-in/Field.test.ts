@@ -8,7 +8,7 @@ import { NodeSelection, TextSelection } from "prosemirror-state";
 import { DOMParser, DOMSerializer, type Node as PmNode } from "prosemirror-model";
 import { ServerEditor } from "../../ServerEditor";
 import { StarterKit } from "../StarterKit";
-import { Field, fieldValues, listSignerFields, setFieldValue } from "./Field";
+import { Field, fieldValues, isFieldAnswered, listSignerFields, setFieldValue, unansweredBeforeSigning, type SignerFieldDescriptor } from "./Field";
 import { fieldIconStrokes, fieldInk, fieldRoleColor, fieldValueLayout, fieldVerb } from "./fieldKinds";
 import { createTestEditor, measureTextWidth } from "../../test-utils";
 import { DefaultFontProvider } from "../../fonts/DefaultFontProvider";
@@ -763,5 +763,53 @@ describe("text an author filled, under the pointer", () => {
 
     expect(targets).toEqual([{ kind: "fieldRange", surfaceId: "body", pos: from, end: from + "Acme Ltd".length, at: from + 6 }]);
     editor.destroy();
+  });
+});
+
+describe("what a party completes before they sign", () => {
+  const field = (id: string, kind: string, extra: Partial<SignerFieldDescriptor> = {}): SignerFieldDescriptor => ({
+    id,
+    role: "client",
+    kind,
+    required: true,
+    options: [],
+    ...extra,
+  });
+  const terms = field("terms", "dropdown", { options: [{ id: "net-30", label: "Net 30" }] });
+  const agree = field("agree", "checkbox");
+  const name = field("name", "name");
+  const fields = [
+    terms,
+    agree,
+    name,
+    field("email", "email", { required: false }),
+    field("initials", "initials"),
+    field("sig", "signature"),
+    field("dated", "dateSigned"),
+    field("other", "name", { role: "provider" }),
+  ];
+
+  it("is every required field of theirs but the signature and the date it is signed", () => {
+    expect(unansweredBeforeSigning(fields, {}, "client").map((f) => f.id)).toEqual(["terms", "agree", "name", "initials"]);
+    expect(
+      unansweredBeforeSigning(
+        fields,
+        {
+          terms: { kind: "choice", id: "net-30" },
+          agree: { kind: "checkbox", checked: true },
+          name: { kind: "text", text: "Ada" },
+          initials: { kind: "text", text: "AL" },
+        },
+        "client",
+      ),
+    ).toEqual([]);
+  });
+
+  it("counts an unticked box, a choice no longer offered, or blank text as unanswered", () => {
+    expect(isFieldAnswered(agree, { kind: "checkbox", checked: false })).toBe(false);
+    expect(isFieldAnswered(terms, { kind: "choice", id: "net-90" })).toBe(false);
+    expect(isFieldAnswered(name, { kind: "text", text: "  " })).toBe(false);
+    expect(isFieldAnswered(name, undefined)).toBe(false);
+    expect(isFieldAnswered(field("sig", "signature"), { kind: "image", src: "data:image/png;base64,AA==" })).toBe(true);
   });
 });

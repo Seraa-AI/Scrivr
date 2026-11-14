@@ -451,3 +451,55 @@ describe("FieldCompletion — the date a party signed", () => {
     expect(moveFieldFocus(e, 1)).toBeNull();
   });
 });
+
+describe("FieldCompletion — signing last", () => {
+  const terms: SignerFieldDescriptor = {
+    id: "f-terms",
+    role: signHere.role,
+    kind: "dropdown",
+    required: true,
+    options: [{ id: "net-30", label: "Net 30" }],
+  };
+
+  const signingAfterTerms = (onFieldRequest: (field: SignerFieldDescriptor) => Promise<FieldValue | null>) => {
+    const blocked: Array<{ signature: string; missing: string[] }> = [];
+    editor = new LaidOutViewer({
+      extensions: [
+        StarterKit,
+        Field,
+        FieldCompletion.configure({
+          fields: [terms, signHere],
+          completable: [terms.id, signHere.id],
+          onFieldRequest,
+          onSignatureBlocked: (signature, missing) => blocked.push({ signature: signature.id, missing: missing.map((f) => f.id) }),
+        }),
+      ],
+      content: {
+        type: "doc",
+        content: [{ type: "paragraph", content: [{ ...fieldNode(terms), attrs: { ...fieldNode(terms).attrs, options: terms.options } }, fieldNode(signHere)] }],
+      },
+      sealed: true,
+    });
+    editor.mountView();
+    return { e: editor, blocked };
+  };
+
+  it("holds a signature back until the party's other required fields are answered, opening the first of them instead", async () => {
+    const request = vi.fn(async (field: SignerFieldDescriptor): Promise<FieldValue | null> =>
+      field.id === terms.id ? { kind: "choice", id: "net-30" } : signature,
+    );
+    const { e, blocked } = signingAfterTerms(request);
+
+    requestField(e, signHere.id);
+    await flush();
+
+    expect(request.mock.calls.map(([field]) => field.id)).toEqual([terms.id]);
+    expect(blocked).toEqual([{ signature: signHere.id, missing: [terms.id] }]);
+
+    requestField(e, signHere.id);
+    await flush();
+
+    expect(request.mock.calls.map(([field]) => field.id)).toEqual([terms.id, signHere.id]);
+    expect(fieldValues(e.getState())[signHere.id]).toEqual(signature);
+  });
+});

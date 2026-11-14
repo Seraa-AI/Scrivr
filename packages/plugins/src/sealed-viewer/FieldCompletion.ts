@@ -9,6 +9,7 @@ import {
   paintFieldTag,
   roleName,
   setFieldValue,
+  unansweredBeforeSigning,
 } from "@scrivr/core";
 import type {
   FieldBox,
@@ -45,6 +46,12 @@ export interface FieldCompletionOptions {
    * tell the signer, and let them try again.
    */
   onFieldRequestError?: (field: SignerFieldDescriptor, error: unknown) => void;
+  /**
+   * The viewer went to sign while their party's other required fields are
+   * still unanswered (`unansweredBeforeSigning`). The signature waits and the
+   * first of them opens instead; say why — "Choose payment terms before you sign".
+   */
+  onSignatureBlocked?: (signature: SignerFieldDescriptor, missing: SignerFieldDescriptor[]) => void;
   /** Colour of the viewer's own fields. Defaults to their party's colour, as the author saw it. */
   accentColor?: string;
   /**
@@ -81,7 +88,8 @@ const byNavigator = new WeakMap<object, FieldState>();
 /**
  * Open a field the viewer may complete, as if they had pressed it — scrolled
  * into view first. What a host's list of fields, or its "Next field" button,
- * calls. Returns false when this viewer may not complete it, or it is already open.
+ * calls. A signature whose party still owes required fields opens the first
+ * of those instead. Returns false when this viewer may not complete it, or it is already open.
  */
 export function requestField(editor: IBaseEditor, id: string): boolean {
   return fieldStates.get(editor)?.request(id) ?? false;
@@ -122,7 +130,9 @@ function fieldPositions(doc: PmNode): Map<string, number> {
  *
  * The viewer's own fields show a hand and highlight under the pointer; a
  * click, or Enter on the field Tab moved to, opens one — again to change it.
- * A date signed is dated when its party signs, never by hand. Someone
+ * A signature comes last: until the party's other required fields are
+ * answered, going to sign opens the first of them. A date signed is dated
+ * when its party signs, never by hand. Someone
  * else's field says whose it is; text the author filled says what it is.
  */
 export const FieldCompletion = Extension.create<FieldCompletionOptions>({
@@ -147,7 +157,7 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
   },
 
   onViewReady(editor: IEditor) {
-    const { fields, completable, onFieldRequest, onFieldRequestError, accentColor, paint } = this.options;
+    const { fields, completable, onFieldRequest, onFieldRequestError, onSignatureBlocked, accentColor, paint } = this.options;
     const mayComplete = new Set(completable);
     // What the signer fills, by pressing or with Tab; a date signed is dated for them.
     const mine = fields.filter((f) => mayComplete.has(f.id) && !isDateSigned(f));
@@ -202,6 +212,15 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
       request: (id) => {
         const field = mine.find((f) => f.id === id);
         if (!field || pending.has(id)) return false;
+        if (field.kind === "signature") {
+          // Signed last, as on a paper form: what the party still owes opens first.
+          const missing = unansweredBeforeSigning(fields, fieldValues(editor.getState()), field.role);
+          if (missing.length > 0) {
+            onSignatureBlocked?.(field, missing);
+            const first = missing.find((f) => mine.includes(f));
+            return first ? state.request(first.id) : false;
+          }
+        }
         reveal(id);
         focused = id;
         ask(field);

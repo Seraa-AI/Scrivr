@@ -202,6 +202,13 @@ Values live in `Field`, beside the document and never in it, so a sealed documen
 
 - The signing view draws your own kinds and colours as `Field` was given them, so a kind of your own completes as the control it declares there too.
 - `onFieldRequestError(field, error)` is called when your `onFieldRequest` throws or rejects. The field stays as it was; tell the signer and let them try again. Resolving `null` is declining, not failing.
+- A signature comes last, as on DocuSign or Adobe Sign. Until the party's other required fields are answered (a box ticked, a choice made, text given), going to sign opens the first of them instead, and `onSignatureBlocked(signature, missing)` tells you which, so you can say "Choose payment terms before you sign". Optional fields never hold a signature back. The view only guides the signer: check the same rule on your server when you record a signature, with the function the view uses:
+
+  ```ts
+  import { unansweredBeforeSigning } from "@scrivr/core";
+
+  if (unansweredBeforeSigning(fields, values, role).length > 0) throw new Error("Complete every required field first");
+  ```
 - A `dateSigned` field is never pressed. The moment its party gives a signature or initials, `onFieldRequest` is called for it with no press: answer with the date by your own clock and in your own format, and record it with the signature.
 
   ```ts

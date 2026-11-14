@@ -10,12 +10,14 @@ export {
   Field,
   fieldDrawingAt,
   fieldValues,
+  isFieldAnswered,
   listSignerFields,
   paintCheckbox,
   paintFieldInk,
   paintFieldTag,
   roleName,
   setFieldValue,
+  unansweredBeforeSigning,
 } from "./built-in/Field";
 export { importedFieldValues } from "./built-in/fieldDocx";
 export type { FieldFill, InsertFieldOptions, SignerFieldDescriptor } from "./built-in/Field";

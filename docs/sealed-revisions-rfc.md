@@ -830,6 +830,12 @@ since the first; what they found, each fixed test first:
   Word frames a content control, so a signer can tell the words filled in for
   this document from the template's own. It reaches the signing view as a
   `fieldRange` hover target.
+- **A signature comes last.** Until a party's other required fields are
+  answered, going to sign opens the first of them instead — DocuSign's and
+  Adobe Sign's rule. A required box is an "I agree", so only a tick answers
+  it. The rule is one function, `unansweredBeforeSigning`, which the signing
+  view uses and a host's server runs again when it records a signature: the
+  view only guides, the server enforces.
 - **A checkbox draws as a native control:** rounded, filled with its colour
   and a white tick when checked. The PDF keeps the printed form's box and tick.
 

@@ -91,6 +91,38 @@ export interface SignerFieldDescriptor {
   options: FieldChoice[];
 }
 
+/** Whether a value answers its field: a box ticked, a choice it still offers, text that is not blank. */
+export function isFieldAnswered(field: SignerFieldDescriptor, value: FieldValue | undefined): boolean {
+  switch (value?.kind) {
+    case undefined:
+      return false;
+    case "checkbox":
+      return value.checked;
+    case "choice":
+      return field.options.some((choice) => choice.id === value.id);
+    case "text":
+      return value.text.trim() !== "";
+    case "image":
+      return true;
+  }
+}
+
+/**
+ * A party's required fields still unanswered, which they complete before they
+ * sign: all but their signature, and the date it is signed. The signing view
+ * holds a signature back until this is empty; check it again on the server
+ * when a signature is recorded.
+ */
+export function unansweredBeforeSigning(
+  fields: readonly SignerFieldDescriptor[],
+  values: Readonly<Record<string, FieldValue>>,
+  role: string,
+): SignerFieldDescriptor[] {
+  return fields.filter(
+    (f) => f.role === role && f.required && f.kind !== "signature" && f.kind !== "dateSigned" && !isFieldAnswered(f, values[f.id]),
+  );
+}
+
 /**
  * The signer fields in a document, in reading order — what a host assigns
  * people to before sealing. Works on any document, so a backend can validate a

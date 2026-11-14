@@ -6,6 +6,7 @@ import {
   Field,
   ServerEditor,
   hashArtifact,
+  isFieldAnswered,
   listSignerFields,
   verifySnapshot,
   type FieldValue,
@@ -120,6 +121,8 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
               if (value) setValues((all) => ({ ...all, [field.id]: value }));
               return value;
             }),
+          onSignatureBlocked: (_signature, missing) =>
+            setProblem(`Complete ${missing.map((f) => KIND_LABEL[f.kind] ?? f.kind).join(", ")} before you sign.`),
           onFieldRequestError: (field, error) =>
             setProblem(`${KIND_LABEL[field.kind] ?? field.kind} could not be completed: ${error instanceof Error ? error.message : String(error)}. Try again.`),
         }),
@@ -141,8 +144,8 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
   );
 
   const pageCount = editor?.layout.pages.length ?? 0;
-  const missing = snapshot.fields.filter((f) => f.required && !values[f.id]);
-  const nextOpen = mine.find((f) => !values[f.id] && f.kind !== "dateSigned");
+  const missing = snapshot.fields.filter((f) => f.required && !isFieldAnswered(f, values[f.id]));
+  const nextOpen = mine.find((f) => f.kind !== "dateSigned" && !isFieldAnswered(f, values[f.id]));
 
   const answer = (value: FieldValue | null) => {
     request?.resolve(value);
