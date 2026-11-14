@@ -2,11 +2,9 @@ import { useEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode
 import { Scrivr, StarterKit, defaultPageConfig, useScrivrEditor } from "@scrivr/react";
 import {
   DefaultContent,
-  Editor,
   Field,
   ServerEditor,
   BUILT_IN_FIELD_KINDS,
-  hashArtifact,
   isDatedWhenSigned,
   isFieldAnswered,
   listSignerFields,
@@ -17,7 +15,7 @@ import {
   type SignerFieldDescriptor,
 } from "@scrivr/core";
 import { FieldCompletion, ReadingProgress, requestField, type ReadingEvent } from "@scrivr/plugins";
-import { exportToPdf } from "@scrivr/export-pdf";
+import { exportExecutedPdf } from "@scrivr/export-pdf";
 import { playgroundFonts } from "./fonts";
 import { PLAYGROUND_THEME } from "./theme";
 import { ROLE_LABEL, SIGNING_ROLES, type SigningRole } from "./signingDemo";
@@ -167,19 +165,22 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
     if (!verified) return;
     setExporting(true);
     setProblem(null);
-    // The executed document is the sealed snapshot with the values printed in
-    // their fields — rendered by an editor of its own, never by editing this one.
-    const printer = new Editor({
-      sealed: true,
-      pageConfig: defaultPageConfig,
-      fonts: playgroundFonts,
-      extensions: [StarterKit.configure({ table: true }), Field.configure({ values }), DefaultContent.configure({ json: content })],
-    });
+    // The executed document: the sealed snapshot with every party's values
+    // printed in their fields, laid out by the editor the signers used.
     try {
-      const bytes = await exportToPdf(printer);
-      const hash = await hashArtifact(bytes);
-      const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: "application/pdf" }));
-      setExecuted({ hash, url });
+      const result = await exportExecutedPdf(snapshot, values, {
+        editor: { pageConfig: defaultPageConfig, fonts: playgroundFonts, extensions: [StarterKit.configure({ table: true }), Field] },
+      });
+      if (!result.ok) {
+        setProblem(
+          result.refusal.reason === "snapshot-altered"
+            ? "The sealed snapshot no longer matches its hash, so there is no executed document to make."
+            : `Still unanswered: ${result.refusal.missing.map((f) => KIND_LABEL[f.kind] ?? f.kind).join(", ")}.`,
+        );
+        return;
+      }
+      const url = URL.createObjectURL(new Blob([new Uint8Array(result.pdf)], { type: "application/pdf" }));
+      setExecuted({ hash: result.artifactHash, url });
       const link = document.createElement("a");
       link.href = url;
       link.download = "services-agreement-executed.pdf";
@@ -187,7 +188,6 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
     } catch (error) {
       setProblem(`The executed PDF could not be made: ${error instanceof Error ? error.message : String(error)}. Try again.`);
     } finally {
-      printer.destroy();
       setExporting(false);
     }
   };

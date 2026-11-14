@@ -223,22 +223,19 @@ Values live in `Field`, beside the document and never in it, so a sealed documen
 
 ## The executed document
 
-When everyone has signed, render the sealed snapshot with the values printed in their fields. Give `Field` the values on the editor that exports — a drawn signature keeps its proportions in its box, a typed one prints as text in the size of the text around it, laid out exactly as the signers saw it, and a field nobody completed prints as the empty field with whose it was, so the record shows it was left blank:
+The signed record is a PDF: the sealed snapshot with every party's values printed in their fields, laid out exactly as the signers saw it. A drawn signature keeps its proportions in its box, a typed one prints as text in the size of the text around it, and an optional field nobody completed prints as the empty field with whose it was. Make it in one call, with the editor setup the signers used:
 
 ```ts
-import { exportToPdf } from "@scrivr/export-pdf";
-import { hashArtifact } from "@scrivr/core";
+import { exportExecutedPdf } from "@scrivr/export-pdf";
 
-const executed = new Editor({
-  content: JSON.parse(content),
-  sealed: true,
-  extensions: [StarterKit, Field.configure({ kinds, values: allSignedValues })],
+const result = await exportExecutedPdf(snapshot, allSignedValues, {
+  editor: { extensions: [StarterKit, Field.configure({ kinds })], fonts, pageConfig },
 });
-const pdf = await exportToPdf(executed);
-const artifactHash = await hashArtifact(pdf); // what was displayed, with the signatures in it
+if (!result.ok) throw new Error(result.refusal.reason); // "snapshot-altered" | "unanswered-fields"
+const { pdf, artifactHash } = result; // keep both: the record, and the hash of exactly these bytes
 ```
 
-The values are printed, never written: the snapshot, and its `contentHash`, are the same before and after.
+It refuses rather than print a record of something else: a snapshot that no longer matches its hash, or a required field still unanswered (`refusal.missing` names them). The values are printed, never written: the snapshot, and its `contentHash`, are the same before and after. Laying out a PDF needs a browser `Editor` — a page, or a server running a headless DOM with a canvas — since `ServerEditor` lays nothing out.
 
 ## Values entered in Word
 

@@ -847,6 +847,20 @@ since the first; what they found, each fixed test first:
 - **A checkbox draws as a native control:** rounded, filled with its colour
   and a white tick when checked. The PDF keeps the printed form's box and tick.
 
+**Decided: the signed record is a PDF; DOCX is for editing (2026-11-14).**
+A host always ends a signing with a PDF — the sealed snapshot with every
+party's values printed in it — which Scrivr makes in one call,
+`exportExecutedPdf`: it verifies the snapshot, refuses while a required field
+is unanswered, and returns the bytes with their `artifactHash`. Word is where
+a template or draft is edited, the way Scrivr is, and comes back through
+import; Scrivr's part there is a faithful round trip — fields, choices,
+roles, formatting — not signing inside Word. Word signs a file by locking it
+read-only and storing a certificate signature over its package parts; any
+later edit, an import and re-export included, invalidates that signature,
+and nothing of it reaches Scrivr. Its place in this design is still open: a
+signature field exported as Word's signature line invites a Word signing
+that cannot survive the round trip.
+
 Still to do before claiming Word compatibility: open exported files in desktop
 Word — signature-line rendering and Sign, fill → save → reopen → re-import for
 every control, copied and multiline controls, and what re-export does to

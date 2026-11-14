@@ -501,3 +501,6 @@ async function embedImages(
 
   return result;
 }
+
+export { exportExecutedPdf } from "./executed";
+export type { ExecutedPdfOptions, ExecutedPdfRefusal, ExecutedPdfResult } from "./executed";
