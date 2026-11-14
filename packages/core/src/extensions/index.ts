@@ -33,6 +33,7 @@ export {
   fieldValueLayout,
   fieldVerb,
   isDatedWhenSigned,
+  isDrawnKind,
   isSigningKind,
 } from "./built-in/fieldKinds";
 export type {

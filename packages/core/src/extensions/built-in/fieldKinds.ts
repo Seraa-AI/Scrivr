@@ -21,10 +21,13 @@ export interface FieldKindSpec {
   /** Defaults to `"text"`. A `"signatureLine"` field is its party signing. */
   control?: FieldControl;
   /**
-   * Completed by drawing, as initials are: it takes a drawn image. A
-   * `"signatureLine"` control is always drawn.
+   * Completed by drawing, as initials are: it takes a drawn image and keeps
+   * its `size` on the baseline, as a picture does. A `"signatureLine"`
+   * control is always drawn; a checkbox never is.
    */
   drawn?: boolean;
+  /** The word on its badge — what a signer does: "Initial". Else "Draw" for a drawn kind, or its control's. */
+  verb?: string;
   /**
    * Dated by the host, through `onFieldRequest`, the moment its party's
    * signature is given — never pressed, never taken from Word, never holding
@@ -35,7 +38,7 @@ export interface FieldKindSpec {
 
 export const BUILT_IN_FIELD_KINDS = {
   signature: { label: "Signature", size: { width: 180, height: 44 }, control: "signatureLine" },
-  initials: { label: "Initials", size: { width: 64, height: 36 }, drawn: true },
+  initials: { label: "Initials", size: { width: 64, height: 36 }, drawn: true, verb: "Initial" },
   date: { label: "Date", size: { width: 110, height: 24 }, control: "date" },
   dateSigned: { label: "Date signed", size: { width: 110, height: 24 }, control: "date", datedWhenSigned: true },
   text: { label: "Text", size: { width: 160, height: 24 } },
@@ -54,8 +57,9 @@ export type BuiltInFieldKind = keyof typeof BUILT_IN_FIELD_KINDS;
 export type FieldKind = BuiltInFieldKind | (string & {});
 
 /**
- * What fills a field. `image` is a drawn signature or initials, as an inline
- * PNG or JPEG (`data:` URL) — printable, and fixed once given. `choice` names a
+ * What fills a field. `image` is a drawing for a drawn field — a signature,
+ * initials — as an inline PNG or JPEG (`safeDrawingUrl`): printable, and
+ * fixed once given. `choice` names a
  * dropdown's choice by its `id`, so a renamed label still answers the same
  * choice.
  */
@@ -103,7 +107,7 @@ export interface FieldOptions {
    * Completed values by field id that the editor opens with; `setFieldValue`
    * gives one later. A signer's field is laid out, drawn and printed with a
    * value it can show — a tick on a checkbox, a choice on a dropdown, words,
-   * a drawing on a signature or initials as an inline PNG or JPEG — and a
+   * a drawing on a drawn field as an inline PNG or JPEG — and a
    * date signed only beside its party's answered signature: the executed
    * document a signing ends with. Values never enter the document, so its
    * seal holds.
@@ -131,6 +135,8 @@ export interface FieldDrawing {
   control: FieldControl;
   /** What the field is, as its kind names it: "Signature". */
   label: string;
+  /** What a signer does to complete it — the word on its badge: "Sign". */
+  verb: string;
   /** Who fills it; `null` for a field the author fills. */
   role: string | null;
   /** Its party's colour. */
@@ -171,7 +177,7 @@ const SHOWN_BY: Record<FieldControl, ReadonlySet<FieldValue["kind"]>> = {
  */
 export function shownValue(kinds: FieldKinds, kind: string, value: FieldValue | undefined): FieldValue | undefined {
   if (value?.kind === "image") {
-    const src = setsLike(kinds, kind) === "picture" ? safeDrawingUrl(value.src) : null;
+    const src = isDrawnKind(kinds, kind) ? safeDrawingUrl(value.src) : null;
     return src === null ? undefined : { kind: "image", src };
   }
   return value && SHOWN_BY[controlOfKind(kinds, kind)].has(value.kind) ? value : undefined;
@@ -241,23 +247,31 @@ export function fieldRoleColor(role: string | null | undefined, overrides?: Read
   return ROLE_COLORS[hash % ROLE_COLORS.length]!;
 }
 
+/** Whether a field of `kind` is completed by drawing: a signature line, or a kind that declares `drawn`. */
+export function isDrawnKind(kinds: FieldKinds, kind: string): boolean {
+  const control = controlOfKind(kinds, kind);
+  return control !== "checkbox" && (control === "signatureLine" || kinds[kind]?.drawn === true);
+}
+
 /**
  * Whether a field is set like text — as tall as the words around it, so its
  * line keeps its height, as a Word content control does — or like a picture,
- * at its own size on the baseline, as an inline image is: signatures and
- * initials, which are drawn. A checkbox is a glyph.
+ * at its own size on the baseline, as an inline image is: a drawn field. A
+ * checkbox is a glyph.
  */
 export function setsLike(kinds: FieldKinds, kind: string): "text" | "picture" | "glyph" {
-  const control = controlOfKind(kinds, kind);
-  if (control === "checkbox") return "glyph";
-  return control === "signatureLine" || kinds[kind]?.drawn === true ? "picture" : "text";
+  if (controlOfKind(kinds, kind) === "checkbox") return "glyph";
+  return isDrawnKind(kinds, kind) ? "picture" : "text";
 }
 
-/** What a signer does to complete a field — the word on its badge. */
-export function fieldVerb(kind: string, control: FieldControl): string {
-  if (kind === "initials") return "Initial";
-  const verbs: Record<FieldControl, string> = { signatureLine: "Sign", date: "Date", dropdown: "Choose", checkbox: "Tick", text: "Fill" };
-  return verbs[control];
+const VERBS: Record<FieldControl, string> = { signatureLine: "Sign", date: "Date", dropdown: "Choose", checkbox: "Tick", text: "Fill" };
+
+/** What a signer does to complete a field — the word on its badge: what its kind declares, else "Draw" for a drawn one, else its control's. */
+export function fieldVerb(kinds: FieldKinds, kind: string): string {
+  const declared = kinds[kind]?.verb;
+  if (declared) return declared;
+  const control = controlOfKind(kinds, kind);
+  return isDrawnKind(kinds, kind) && control !== "signatureLine" ? "Draw" : VERBS[control];
 }
 
 /** The size of a field's label text. */

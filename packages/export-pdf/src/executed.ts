@@ -7,6 +7,7 @@ import {
   hashArtifact,
   isFieldAnswered,
   listSignerFields,
+  safeDrawingUrl,
   setFieldValue,
   valuesOnRecord,
   verifySnapshot,
@@ -15,6 +16,9 @@ import {
   type SealedSnapshot,
   type SignerFieldDescriptor,
 } from "@scrivr/core";
+import { PDFDocument } from "pdf-lib";
+import { embedImage } from "./embedImage";
+import { createDefaultImageResolver } from "./fetchImage";
 import { exportToPdf, type PdfExportOptions } from "./index";
 
 export interface ExecutedPdfOptions extends PdfExportOptions {
@@ -60,6 +64,7 @@ export async function exportExecutedPdf(
     return { ok: false, refusal: { reason: "snapshot-altered" } };
   }
   const { editorOptions, ...pdfOptions } = options;
+  // Extensions are one by name, so a Field renamed is another extension.
   if (!flattenExtensions(editorOptions.extensions ?? []).some((extension) => extension.name === Field.name)) {
     throw new Error("exportExecutedPdf needs Field among editorOptions.extensions: only Field reads a field or holds its value");
   }
@@ -73,7 +78,18 @@ export async function exportExecutedPdf(
     const fields = listSignerFields(editor.getState().doc);
     // Field prints by this same rule: a date signed shows only beside its party's signature.
     const onRecord = valuesOnRecord(fields, fieldValues(editor.getState()), kinds);
-    const missing = fields.filter((f) => f.required && !isFieldAnswered(f, onRecord[f.id], kinds));
+    // A drawing counts once it embeds as this PDF will embed it: a record never shows a blank signature.
+    const resolveImage = pdfOptions.resolveImage ?? createDefaultImageResolver(pdfOptions.onImageRefused);
+    const scratch = await PDFDocument.create();
+    const prints = async (value: FieldValue | undefined): Promise<boolean> => {
+      if (value?.kind !== "image") return true;
+      const src = safeDrawingUrl(value.src);
+      return src !== null && (await embedImage(scratch, resolveImage, src)) !== null;
+    };
+    const missing: SignerFieldDescriptor[] = [];
+    for (const f of fields) {
+      if (f.required && !(isFieldAnswered(f, onRecord[f.id], kinds) && (await prints(onRecord[f.id])))) missing.push(f);
+    }
     if (missing.length > 0) return { ok: false, refusal: { reason: "unanswered-fields", missing } };
     const pdf = await exportToPdf(editor, pdfOptions);
     return { ok: true, pdf, artifactHash: await hashArtifact(pdf) };

@@ -18,6 +18,7 @@ import {
   fieldValues,
   hashArtifact,
   isDatedWhenSigned,
+  isDrawnKind,
   isFieldAnswered,
   isSigningKind,
   listSignerFields,
@@ -62,6 +63,8 @@ describe("what a signing host builds on", () => {
     const control: FieldControl = BUILT_IN_FIELD_KINDS[kind].control ?? "text";
     const choice: FieldChoice = FieldChoiceSchema.parse({ id: "net-30", label: "Net 30" });
     const spec = { label: "Agree", size: { width: 16, height: 16 }, control: "checkbox" } satisfies FieldKindSpec;
+    const drawnSpec = { label: "Stamp", size: { width: 120, height: 120 }, drawn: true, verb: "Stamp" } satisfies FieldKindSpec;
+    expect(isDrawnKind({ ...BUILT_IN_FIELD_KINDS, stamp: drawnSpec }, "stamp")).toBe(true);
     const options = { kinds: { agree: spec }, values: {} } satisfies FieldOptions;
     const insert = { kind: "dropdown" satisfies FieldKind, fill: "signer" satisfies FieldFill, role: "client", options: [choice] } satisfies InsertFieldOptions;
     const range = { kind: "text" satisfies FieldRangeKind, prompt: "Client name" } satisfies InsertFieldRangeOptions;

@@ -21,6 +21,7 @@ import {
   fieldRoleColor,
   fieldChoices,
   fieldValueLayout,
+  fieldVerb,
   isDatedWhenSigned,
   isSigningKind,
   setsLike,
@@ -96,8 +97,8 @@ export interface SignerFieldDescriptor {
 /**
  * Whether a value answers its field — whether an executed record would print
  * it: a box ticked, words (text that is not blank, a choice the field still
- * offers), or on a signature or initials a drawing as an inline PNG or JPEG
- * whose bytes open as one; each only where the field's control can show it.
+ * offers), or on a drawn field a drawing as an inline PNG or JPEG whose
+ * bytes open as one; each only where the field's control can show it.
  * `kinds` are the editor's own (`fieldKindsOf`).
  */
 export function isFieldAnswered(field: SignerFieldDescriptor, value: FieldValue | undefined, kinds: FieldKinds): boolean {
@@ -272,7 +273,15 @@ const fieldBoxPlugin = new Plugin({
 });
 
 /** The built-in kinds, with the host's added over them. */
-const resolveKinds = (options: FieldOptions): FieldKinds => ({ ...BUILT_IN_FIELD_KINDS, ...options.kinds });
+/**
+ * The built-in kinds and the host's own. A host's kind under a built-in name
+ * refines it: what it gives replaces what the built-in declares, and the rest
+ * — a control, `drawn` — stays, so relabelling initials keeps them drawn.
+ */
+const resolveKinds = (options: FieldOptions): FieldKinds => {
+  const builtIn: FieldKinds = BUILT_IN_FIELD_KINDS;
+  return { ...builtIn, ...Object.fromEntries(Object.entries(options.kinds).map(([name, spec]) => [name, { ...builtIn[name], ...spec }])) };
+};
 
 type FieldValues = Readonly<Record<string, FieldValue>>;
 
@@ -303,8 +312,8 @@ export const fieldValues = (state: EditorState): FieldValues => fieldValuesKey.g
 /**
  * Give field `id` a value — `null` empties it; the document is untouched. A
  * signer's field is laid out, drawn and printed with it when it can show it
- * (`isFieldAnswered` says which values those are); otherwise it is held but
- * shows nothing. Returns false when the editor has no `Field`, or a plugin
+ * (`isFieldAnswered`) — a date signed only beside its party's answered
+ * signature (`valuesOnRecord`); otherwise it is held but shows nothing. Returns false when the editor has no `Field`, or a plugin
  * refuses the change.
  */
 export function setFieldValue(editor: IBaseEditor, id: string, value: FieldValue | null): boolean {
@@ -332,13 +341,8 @@ export const fieldKindsOf = (editor: IBaseEditor): FieldKinds => setupByEditor.g
 /** What each held set of values shows in a document, read again only when either changes. */
 const shownCache = new WeakMap<FieldValues, { doc: PmNode; shown: FieldValues }>();
 
-/**
- * The values `state`'s fields show: as a record shows them (`valuesOnRecord`),
- * so a date signed stands only beside an answered signature of its party —
- * on screen, in print and in the executed record alike, however the values
- * arrived.
- */
-function valuesShown(kinds: FieldKinds, state: EditorState): FieldValues {
+/** The values `state`'s fields show: as a record shows them (`valuesOnRecord`). */
+function valuesOnRecordIn(kinds: FieldKinds, state: EditorState): FieldValues {
   const values = fieldValues(state);
   const cached = shownCache.get(values);
   if (cached?.doc === state.doc) return cached.shown;
@@ -347,10 +351,21 @@ function valuesShown(kinds: FieldKinds, state: EditorState): FieldValues {
   return shown;
 }
 
-/** The values a contribution resolved in `context` lays out and prints with. */
+/** Whether two sets of shown values are the same values, field by field. */
+function sameValues(a: FieldValues, b: FieldValues): boolean {
+  const ids = Object.keys(a);
+  return ids.length === Object.keys(b).length && ids.every((id) => a[id] === b[id]);
+}
+
+/**
+ * The values a contribution resolved in `context` lays out and prints with.
+ * Before the editor is ready — its first layout — there is no state to read
+ * them as a record does, so the configured values stand until `onViewReady`
+ * measures again.
+ */
 const valuesIn = (context: object, options: FieldOptions): FieldValues => {
   const setup = setupByContext.get(context);
-  return setup ? valuesShown(setup.kinds, setup.editor.getState()) : options.values;
+  return setup ? valuesOnRecordIn(setup.kinds, setup.editor.getState()) : options.values;
 };
 
 /**
@@ -365,7 +380,7 @@ export function fieldDrawingAt(
   const setup = setupByEditor.get(editor);
   const node = editor.getState().doc.nodeAt(pos);
   if (!setup || node?.type.name !== "field") return null;
-  return drawingOf(setup.kinds, setup.options, valuesShown(setup.kinds, editor.getState()), node, at);
+  return drawingOf(setup.kinds, setup.options, valuesOnRecordIn(setup.kinds, editor.getState()), node, at);
 }
 
 /** A field as a host's own drawing is handed it. */
@@ -384,6 +399,7 @@ const drawingOf = (
     kind: String(node.attrs["kind"]),
     control: controlOf(kinds, node),
     label: fieldLabel(kinds, node),
+    verb: fieldVerb(kinds, String(node.attrs["kind"])),
     role,
     color: fieldRoleColor(role, options.roleColors),
     ...(value ? { value } : {}),
@@ -517,6 +533,7 @@ function paintFieldValue(
     ctx.textBaseline = "alphabetic";
     ctx.fillText(text, set.x, set.baselineY);
   } else if (value?.kind === "image") {
+    // `value.src` passed `safeDrawingUrl` on its way here, through `shownValue`.
     const img = getCachedImage(value.src);
     if (img) {
       const scale = Math.min(box.width / img.naturalWidth, box.height / img.naturalHeight);
@@ -633,6 +650,7 @@ const fieldPdf =
       return;
     }
     if (value?.kind === "image") {
+      // `value.src` passed `safeDrawingUrl` on its way here, through `shownValue`.
       ctx.draw.image({ x, y, width, height, image: { src: value.src }, fit: "contain" });
       return;
     }
@@ -850,12 +868,17 @@ export const Field = Extension.create<FieldOptions>({
   },
 
   onViewReady(editor: IEditor) {
-    // A field fits its value, so a new value is measured again.
-    let values = fieldValues(editor.getState());
+    // A field fits the value it shows, so a change in what any field shows is
+    // measured again — a new value, or a date whose signature came or went
+    // elsewhere in the document. The first layout ran before Field could
+    // read its values as a record shows them, so it is measured once more.
+    const kinds = fieldKindsOf(editor);
+    let shown = valuesOnRecordIn(kinds, editor.getState());
+    editor.invalidateLayout({ remeasure: true });
     const offValues = editor.on("update", () => {
-      const next = fieldValues(editor.getState());
-      if (next === values) return;
-      values = next;
+      const next = valuesOnRecordIn(kinds, editor.getState());
+      if (sameValues(next, shown)) return;
+      shown = next;
       editor.invalidateLayout({ remeasure: true });
     });
     const offImages = onImageLoad(() => editor.redraw());

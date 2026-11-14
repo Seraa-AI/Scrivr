@@ -4,7 +4,6 @@ import {
   fieldKindsOf,
   fieldRoleColor,
   fieldValues,
-  fieldVerb,
   isDatedWhenSigned,
   isFieldAnswered,
   isSigningKind,
@@ -198,7 +197,21 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
       editor.redraw();
     };
 
-    const ask = (field: SignerFieldDescriptor): void => {
+    // A date belongs to the signature it was given for. Each signature value
+    // starts a new signing for its party; a date answered for an earlier one
+    // is dropped, and asked for again once the date being given settles.
+    const signings = new Map<string, number>();
+    const redate = new Set<string>();
+    const askDate = (date: SignerFieldDescriptor): void => {
+      if (pending.has(date.id)) {
+        redate.add(date.id);
+        return;
+      }
+      const signing = signings.get(date.role);
+      ask(date, () => signings.get(date.role) === signing);
+    };
+
+    const ask = (field: SignerFieldDescriptor, stillCurrent: () => boolean = () => true): void => {
       pending.add(field.id);
       editor.redraw();
       // Asked inside an executor, so a request that throws before returning a
@@ -206,13 +219,19 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
       const current = fieldValues(editor.getState())[field.id];
       new Promise<FieldValue | null>((resolve) => resolve(onFieldRequest(field, current)))
         .then((value) => {
-          if (!value) return;
+          if (!value || !stillCurrent()) return;
           setFieldValue(editor, field.id, value);
-          // Only a signature dates its party — initials on the way do not —
-          // and only one that answers; a date with no answered signature
-          // beside it is never shown (`valuesOnRecord`).
-          if (!isSigningKind(kinds, field.kind) || !isFieldAnswered(field, value, kinds)) return;
-          for (const date of datesSigned) if (date.role === field.role && !pending.has(date.id)) ask(date);
+          // Only a signature dates its party — initials on the way do not.
+          if (!isSigningKind(kinds, field.kind)) return;
+          const partyDates = datesSigned.filter((date) => date.role === field.role);
+          signings.set(field.role, (signings.get(field.role) ?? 0) + 1);
+          for (const date of partyDates) setFieldValue(editor, date.id, null);
+          // Dated again only by a signature that answers.
+          if (!isFieldAnswered(field, value, kinds)) {
+            for (const date of partyDates) redate.delete(date.id);
+            return;
+          }
+          for (const date of partyDates) askDate(date);
         })
         .catch((error: unknown) => {
           // The field stays as it was. Declining is answering `null`, which
@@ -221,6 +240,7 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
         })
         .finally(() => {
           pending.delete(field.id);
+          if (redate.delete(field.id)) askDate(field);
           editor.redraw();
         });
     };
@@ -386,7 +406,7 @@ function paintField(ctx: CanvasRenderingContext2D, f: SigningFieldDrawing): void
       ctx.stroke();
     }
   } else if (f.own) {
-    const verb = fieldVerb(f.kind, control);
+    const verb = f.verb;
     paintFieldInk(ctx, box, { control, label: f.label, color: f.color, solid: true, faint: 1, baselineY: f.baselineY });
     // Said once: a label that is already the verb needs no badge repeating it,
     // and a date signed asks nothing of the signer.

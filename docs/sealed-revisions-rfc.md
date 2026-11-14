@@ -878,9 +878,17 @@ and today nothing of it reaches Scrivr.
 - **A date signed stands only beside its signature.** `valuesOnRecord` drops a
   party's date when no signature of theirs answers, and `Field` shows values
   by it — screen, print and executed record alike, however the values
-  arrived, with no copy of the rule anywhere else; a seal refuses a required
-  date signed whose party has no required signature
-  (`dates-without-signature`).
+  arrived; a date belongs to the signature it was given for, so a new
+  signature clears its party's date and asks again, and a date answered for
+  an earlier signature is dropped; a seal refuses a required date signed
+  whose party has no required signature (`dates-without-signature`).
+- **What a kind is, it declares.** `drawn` (a kind completed by drawing) and
+  `verb` (its badge) replace the last checks of the name "initials"; a
+  host's kind under a built-in name refines it rather than replacing it.
+- **A record never shows a blank signature.** `safeDrawingUrl` gives a
+  drawing one lowercase form and caps its size (`MAX_DRAWING_BYTES`), and
+  `exportExecutedPdf` counts a drawing only once it embeds as the PDF will
+  embed it.
 - **Kinds are passed, never assumed.** `createSnapshot`, `isFieldAnswered` and
   `unansweredBeforeSigning` take the editor's kinds (`fieldKindsOf`), so a
   host's own signature kind is treated alike everywhere.

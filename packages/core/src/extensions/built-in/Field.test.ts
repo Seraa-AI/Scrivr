@@ -8,8 +8,8 @@ import { NodeSelection, TextSelection } from "prosemirror-state";
 import { DOMParser, DOMSerializer, type Node as PmNode } from "prosemirror-model";
 import { ServerEditor } from "../../ServerEditor";
 import { StarterKit } from "../StarterKit";
-import { Field, fieldDrawingAt, fieldValues, isFieldAnswered, listSignerFields, paintCheckbox, setFieldValue, unansweredBeforeSigning, valuesOnRecord, type SignerFieldDescriptor } from "./Field";
-import { BUILT_IN_FIELD_KINDS, fieldIconStrokes, fieldInk, fieldRoleColor, fieldValueLayout, fieldVerb, type FieldKinds, type FieldValue } from "./fieldKinds";
+import { Field, fieldDrawingAt, fieldKindsOf, fieldValues, isFieldAnswered, listSignerFields, paintCheckbox, setFieldValue, unansweredBeforeSigning, valuesOnRecord, type SignerFieldDescriptor } from "./Field";
+import { BUILT_IN_FIELD_KINDS, isDrawnKind, fieldIconStrokes, fieldInk, fieldRoleColor, fieldValueLayout, fieldVerb, type FieldKinds, type FieldValue } from "./fieldKinds";
 import { createMeasurer, createTestEditor, measureTextWidth } from "../../test-utils";
 import { DefaultFontProvider } from "../../fonts/DefaultFontProvider";
 
@@ -528,8 +528,17 @@ describe("a field's ink — how an unfilled field is drawn", () => {
   });
 
   it("names what a signer does, and draws an icon for it", () => {
-    expect([fieldVerb("signature", "signatureLine"), fieldVerb("initials", "text"), fieldVerb("date", "date")]).toEqual(["Sign", "Initial", "Date"]);
-    expect(fieldVerb("dropdown", "dropdown")).toBe("Choose");
+    const k = BUILT_IN_FIELD_KINDS;
+    expect([fieldVerb(k, "signature"), fieldVerb(k, "initials"), fieldVerb(k, "date")]).toEqual(["Sign", "Initial", "Date"]);
+    expect(fieldVerb(k, "dropdown")).toBe("Choose");
+    // A kind says what it asks for: declared, or drawn, or by its control.
+    const host = {
+      ...k,
+      stamp: { label: "Stamp", size: { width: 120, height: 120 }, drawn: true },
+      seal: { label: "Seal", size: { width: 120, height: 120 }, drawn: true, verb: "Stamp" },
+    } satisfies FieldKinds;
+    expect([fieldVerb(host, "stamp"), fieldVerb(host, "seal")]).toEqual(["Draw", "Stamp"]);
+    expect([isDrawnKind(host, "stamp"), isDrawnKind(host, "signature"), isDrawnKind(host, "name")]).toEqual([true, true, false]);
     expect(fieldIconStrokes("signatureLine", { x: 0, y: 0, size: 12 }).length).toBeGreaterThan(0);
     expect(fieldIconStrokes("text", { x: 0, y: 0, size: 12 })).toEqual([]);
   });
@@ -864,6 +873,14 @@ describe("what a party completes before they sign", () => {
     expect(isFieldAnswered(name, { kind: "image", src: png }, kinds)).toBe(false);
   });
 
+  it("keeps what a built-in kind declares when a host relabels it", () => {
+    const editor = new ServerEditor({ extensions: [StarterKit, Field.configure({ kinds: { initials: { label: "Paraphe", size: { width: 64, height: 36 } } } })] });
+    const kinds = fieldKindsOf(editor);
+
+    expect(kinds["initials"]?.label).toBe("Paraphe");
+    expect(isFieldAnswered(field("ini", "initials"), { kind: "image", src: "data:image/png;base64,iVBORw0KGgo=" }, kinds)).toBe(true);
+  });
+
   it("takes a drawing on a host's own kind that declares itself drawn", () => {
     const kinds = { ...BUILT_IN_FIELD_KINDS, witnessInitials: { label: "Witness initials", size: { width: 64, height: 36 }, drawn: true } } satisfies FieldKinds;
 
@@ -901,6 +918,45 @@ describe("a date signed, as Field shows it", () => {
     expect(dateShown({ a: { kind: "text", text: "Ada" }, b: { kind: "text", text: "  " }, d: date })).toEqual(date);
     expect(dateShown({ a: { kind: "text", text: "  " }, d: date })).toBeUndefined();
     expect(dateShown({ d: date })).toBeUndefined();
+  });
+});
+
+describe("a date signed, as Field lays it out", () => {
+  const date: FieldValue = { kind: "text", text: "14 November 2026" };
+  const signer = (nodeId: string, kind: string, width: number) => ({ type: "field", attrs: { nodeId, kind, fill: "signer", role: "client", width, height: 24 } });
+  const dateWidth = (editor: ReturnType<typeof createTestEditor>) => {
+    editor.ensureFullLayout();
+    const spans = editor.layout.pages[0]!.blocks.flatMap((block) => block.lines.flatMap((line) => line.spans));
+    return spans.find((s) => s.kind === "object" && s.node.attrs["kind"] === "dateSigned")?.width;
+  };
+
+  it("keeps its own width from the first layout while it shows no date", () => {
+    const editor = createTestEditor({
+      extensions: [StarterKit, Field.configure({ values: { d: date } })],
+      content: { type: "doc", content: [{ type: "paragraph", content: [signer("s", "signature", 180), signer("d", "dateSigned", 110)] }] },
+    });
+
+    expect(dateWidth(editor)).toBe(110);
+    editor.destroy();
+  });
+
+  it("is measured again when the signature it stands beside goes, though it lies in another paragraph", () => {
+    const editor = createTestEditor({
+      extensions: [StarterKit, Field.configure({ values: { s: { kind: "text", text: "Ada" }, d: date } })],
+      content: {
+        type: "doc",
+        content: [
+          { type: "paragraph", content: [signer("s", "signature", 180)] },
+          { type: "paragraph", content: [signer("d", "dateSigned", 110)] },
+        ],
+      },
+    });
+    expect(dateWidth(editor)).not.toBe(110);
+
+    editor.applyTransaction(editor.getState().tr.delete(1, 2));
+
+    expect(dateWidth(editor)).toBe(110);
+    editor.destroy();
   });
 });
 

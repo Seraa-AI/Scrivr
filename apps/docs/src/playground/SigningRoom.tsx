@@ -8,6 +8,7 @@ import {
   BUILT_IN_FIELD_KINDS,
   fieldKindsOf,
   isDatedWhenSigned,
+  isDrawnKind,
   isFieldAnswered,
   listSignerFields,
   unansweredBeforeSigning,
@@ -348,7 +349,7 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
         </button>
       </aside>
 
-      {request && <ValueDialog field={request.field} current={request.current} onAnswer={answer} />}
+      {request && <ValueDialog field={request.field} drawn={isDrawnKind(kinds, request.field.kind)} current={request.current} onAnswer={answer} />}
     </div>
   );
 }
@@ -383,14 +384,16 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
 /** What a host shows when a signer presses a field: capture the value, or cancel. */
 function ValueDialog({
   field,
+  drawn,
   current,
   onAnswer,
 }: {
   field: SignerFieldDescriptor;
+  /** The field is completed by drawing: offer a pad. */
+  drawn: boolean;
   current: FieldValue | undefined;
   onAnswer: (value: FieldValue | null) => void;
 }) {
-  const drawn = field.kind === "signature" || field.kind === "initials";
   const [typed, setTyped] = useState(() => {
     if (current?.kind === "text") return current.text;
     if (current?.kind === "choice") return current.id;

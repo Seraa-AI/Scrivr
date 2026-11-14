@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { createCanvas } from "@napi-rs/canvas";
 import {
   BUILT_IN_FIELD_KINDS,
+  Extension,
   Field,
   ServerEditor,
   StarterKit,
@@ -18,6 +19,7 @@ import {
   type TextMeasureContext,
 } from "@scrivr/core";
 import { exportExecutedPdf, type ExecutedPdfOptions, type ExecutedPdfRefusal, type ExecutedPdfResult } from "../index";
+import { Plugin } from "@scrivr/core/pm";
 import { recordDrawOps } from "./opLog";
 
 const signer = (nodeId: string, kind: string, role: string, required = true) => ({
@@ -78,8 +80,18 @@ describe("exportExecutedPdf", () => {
     expect(!result.ok && result.refusal.reason === "unanswered-fields" && result.refusal.missing.map((f) => f.id)).toEqual(["sig"]);
   });
 
-  it("needs Field among the extensions, and says so before reading the snapshot", async () => {
-    await expect(exportExecutedPdf(await sealed(), signed, { editorOptions: { extensions: [StarterKit], textMeasurer: measurer() } })).rejects.toThrow(/needs Field/);
+  it("needs Field among the extensions, and says so before reading the snapshot — even with no values to set", async () => {
+    await expect(exportExecutedPdf(await sealed(), {}, { editorOptions: { extensions: [StarterKit], textMeasurer: measurer() } })).rejects.toThrow(
+      /needs Field among editorOptions.extensions/,
+    );
+  });
+
+  it("names the field whose value another plugin refused", async () => {
+    // A host plugin that lets nothing but edits through refuses Field's values.
+    const editsOnly = Extension.create({ name: "editsOnly", addProseMirrorPlugins: () => [new Plugin({ filterTransaction: (tr) => tr.docChanged })] });
+    const refusing: ExecutedPdfOptions = { editorOptions: { extensions: [StarterKit, Field, editsOnly], textMeasurer: measurer() } };
+
+    await expect(exportExecutedPdf(await sealed(), signed, refusing)).rejects.toThrow(/could not hold the value of field "sig": a plugin refused it/);
   });
 
   it("checks the values it prints: a drawing the page may not draw is no signature", async () => {
@@ -116,6 +128,13 @@ describe("exportExecutedPdf", () => {
     if (!plain.ok) throw new Error(plain.refusal.reason);
 
     await expect(exportExecutedPdf(plain.snapshot, signed, withoutFieldState)).rejects.toThrow(/needs Field/);
+  });
+
+  it("refuses a drawing it could not print, rather than print the signature blank", async () => {
+    // Opens as a PNG, but is no image: the PDF could not embed it.
+    const result = await exportExecutedPdf(await sealed(), { sig: { kind: "image", src: "data:image/png;base64,iVBORw0KGgoAAAAAAAA" } }, options);
+
+    expect(!result.ok && result.refusal.reason === "unanswered-fields" && result.refusal.missing.map((f) => f.id)).toEqual(["sig"]);
   });
 
   it("never prints a value over what the author sealed", async () => {
