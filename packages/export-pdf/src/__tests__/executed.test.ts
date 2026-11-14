@@ -90,12 +90,38 @@ describe("exportExecutedPdf", () => {
     );
   });
 
-  it("names the field whose value another plugin refused", async () => {
+  it("reports when another plugin refuses the complete value set", async () => {
     // A host plugin that lets nothing but edits through refuses Field's values.
     const editsOnly = Extension.create({ name: "editsOnly", addProseMirrorPlugins: () => [new Plugin({ filterTransaction: (tr) => tr.docChanged })] });
     const refusing: ExecutedPdfOptions = { editorOptions: { extensions: [StarterKit, Field, editsOnly], textMeasurer: measurer() } };
 
-    await expect(exportExecutedPdf(await sealed(), signed, refusing)).rejects.toThrow(/could not hold the value of field "sig": a plugin refused it/);
+    await expect(exportExecutedPdf(await sealed(), signed, refusing)).rejects.toThrow(/could not hold the field values: a plugin refused them/);
+  });
+
+  it.each([{}, { sig: { kind: "image", src: "data:image/png;base64,iVBORw0KGgoAAAAAAAA" } }])(
+    "never falls back to a configured signature when the supplied record cannot answer it (%j)",
+    async (values) => {
+      const configured: ExecutedPdfOptions = {
+        editorOptions: { extensions: [StarterKit, Field.configure({ values: signed })], textMeasurer: measurer() },
+      };
+      const result = await exportExecutedPdf(await sealed(), values as Record<string, FieldValue>, configured);
+      expect(!result.ok && result.refusal.reason === "unanswered-fields" && result.refusal.missing.map((f) => f.id)).toEqual(["sig"]);
+    },
+  );
+
+  it("prints only supplied values, leaving configured optional answers out", async () => {
+    const snapshot = await sealed();
+    const ops = await recordDrawOps(async () => {
+      const result = await exportExecutedPdf(snapshot, signed, { editorOptions: {
+        extensions: [StarterKit, Field.configure({ values: { email: { kind: "text", text: "old@example.com" } } })],
+        textMeasurer: measurer(),
+      } });
+      expect(result.ok).toBe(true);
+      return result.ok ? result.pdf : new Uint8Array();
+    });
+    const texts = ops.filter((op) => op.op === "text").map((op) => op["value"]);
+    expect(texts).toContain("Ada Lovelace");
+    expect(texts).not.toContain("old@example.com");
   });
 
   it("checks the values it prints: a drawing the page may not draw is no signature", async () => {

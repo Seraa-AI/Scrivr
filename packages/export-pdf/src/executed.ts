@@ -7,7 +7,7 @@ import {
   isFieldAnswered,
   listSignerFields,
   safeDrawingUrl,
-  setFieldValue,
+  replaceFieldValues,
   valuesOnRecordOf,
   verifySnapshot,
   type EditorOptions,
@@ -51,7 +51,8 @@ export type ExecutedPdfResult =
  * beside it, and are checked against the values as the printing editor holds
  * them, as the record `Field` prints (`valuesOnRecordOf`: its kinds, its
  * `formatSignedDate`) — what it prints is what was checked. Throws when `Field` is not among `editorOptions.extensions`,
- * or a plugin refuses a value. Values are printed, never written: the
+ * or a plugin refuses the value set. The supplied values replace any configured
+ * initial values in Field. Values are printed, never written: the
  * snapshot and its hash are unchanged.
  */
 export async function exportExecutedPdf(
@@ -72,12 +73,15 @@ export async function exportExecutedPdf(
     // So the drawing checked is the drawing printed.
     const resolveImage = resolveOnce(pdfOptions.resolveImage ?? createDefaultImageResolver(pdfOptions.onImageRefused));
     const scratch = await PDFDocument.create();
+    const printable: Record<string, FieldValue> = {};
     for (const [id, value] of Object.entries(values)) {
       // A drawing the PDF cannot embed is no value: the record would print it blank, and it dates no one.
       if (value.kind === "image" && !(await embedsAsDrawing(scratch, resolveImage, value.src))) continue;
-      // Field is present, so only another plugin filtering the change refuses a value.
-      if (!setFieldValue(editor, id, value)) throw new Error(`exportExecutedPdf could not hold the value of field "${id}": a plugin refused it`);
+      printable[id] = value;
     }
+    // One authoritative record, including an empty one: configured values
+    // cannot fill omissions or stand in for drawings that could not embed.
+    if (!replaceFieldValues(editor, printable)) throw new Error("exportExecutedPdf could not hold the field values: a plugin refused them");
     const kinds = fieldKindsOf(editor);
     const fields = listSignerFields(editor.getState().doc);
     // The record Field prints — its kinds, its date format — so what is checked is what prints.

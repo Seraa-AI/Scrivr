@@ -201,8 +201,10 @@ Values live in `Field`, beside the document and never in it, so a sealed documen
 
 ### A host's own kinds, failures and the keyboard
 
+Use `replaceFieldValues(editor, values)` from `@scrivr/core` when loading a complete record from your host. It replaces all values in one transaction; omitted ids are emptied. Both it and `setFieldValue` return `false` when `Field` is absent or a plugin refuses the transaction. Check that result before treating the displayed record as updated. A refusal leaves the previous values intact.
+
 - The signing view draws your own kinds and colours as `Field` was given them, so a kind of your own completes as the control it declares there too.
-- `onFieldRequestError(field, error)` is called when your `onFieldRequest` throws or rejects. The field stays as it was; tell the signer and let them try again. Resolving `null` is declining, not failing.
+- `onFieldRequestError(field, error)` is called when your `onFieldRequest` throws or rejects, or the editor refuses the returned value. The field stays as it was; tell the signer and let them try again. This does not roll back anything your host already recorded. Resolving `null` is declining, not failing.
 - A signature comes last, as on DocuSign or Adobe Sign. Until the viewer's other required fields are answered (a box ticked, a choice made, text given), going to sign moves focus to the first of them — it never answers one for them — and `onSignatureBlocked(signature, missing)` tells you which, so you can say "Choose payment terms before you sign". Optional fields never hold a signature back, and a kind of your own whose control is `"signatureLine"` is held back like the built-in signature. The view only guides the signer: check the same rule on your server, over the whole role, when you record a signature, with the function the view uses and your editor's kinds:
 
   ```ts
@@ -237,6 +239,8 @@ const result = await exportExecutedPdf(snapshot, allSignedValues, {
 if (!result.ok) throw new Error(result.refusal.reason); // "snapshot-altered" | "unanswered-fields"
 const { pdf, artifactHash } = result; // keep both: the record, and the hash of exactly these bytes
 ```
+
+`allSignedValues` is the complete record for this export. It replaces any initial values configured in `Field`, including when it is empty. A drawing the PDF cannot embed is omitted from that record; it cannot fall back to an earlier signature. The exporter submits the complete record in one transaction and throws if a plugin refuses it.
 
 It refuses rather than print a record of something else: a snapshot that no longer matches its hash, or a required field still unanswered (`refusal.missing` names them). It prints the values as the record shows them, so each date signed shows when its party signed, and nothing where no signature of theirs answers, and it throws when `Field` is not among `editorOptions.extensions`. The values are printed, never written: the snapshot, and its `contentHash`, are the same before and after. Laying out a PDF needs a browser `Editor` — a page, or a server running a headless DOM with a canvas — since `ServerEditor` lays nothing out.
 

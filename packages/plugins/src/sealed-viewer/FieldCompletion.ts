@@ -50,7 +50,8 @@ export interface FieldCompletionOptions {
   onFieldRequest: (field: SignerFieldDescriptor, current?: FieldValue) => Promise<FieldValue | null>;
   /**
    * `onFieldRequest` failed — it threw or rejected, or answered a signature
-   * with no `signedAt` its party's date signed could show. The field stays as
+   * with no `signedAt` its party's date signed could show, or the editor
+   * refused to hold the returned value. The field stays as
    * it was; tell the signer, and let them try again. Without this, a refusal
    * is silent.
    */
@@ -223,7 +224,9 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
               `The signature for "${field.id}" has no signedAt its party's date signed can show: give an ISO timestamp with Z or an offset, or an ISO day`,
             );
           }
-          setFieldValue(editor, field.id, value);
+          if (!setFieldValue(editor, field.id, value)) {
+            throw new Error(`The editor could not hold the value of field "${field.id}": Field is absent or a plugin refused it`);
+          }
         })
         .catch((error: unknown) => {
           // The field stays as it was. Declining is answering `null`, which

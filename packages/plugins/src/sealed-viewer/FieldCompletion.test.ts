@@ -7,6 +7,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CharacterMap,
+  Extension,
   Field,
   StarterKit,
   defaultPageConfig,
@@ -17,6 +18,7 @@ import {
   type PagePoint,
   type SignerFieldDescriptor,
 } from "@scrivr/core";
+import { Plugin } from "@scrivr/core/pm";
 import { ViewEditorDouble } from "../__tests__/viewEditorDouble";
 import { FieldCompletion, moveFieldFocus, requestField, type FieldValue, type SigningFieldDrawing } from "../index";
 
@@ -221,6 +223,28 @@ describe("FieldCompletion", () => {
 
     // Still this viewer's to change: pressing it hands the host what is there.
     expect(request).toHaveBeenCalledWith(signHere, signature);
+  });
+
+  it("reports a refused value, preserves the previous answer, and allows retry", async () => {
+    let refuse = true;
+    const onFieldRequestError = vi.fn();
+    const previous: FieldValue = { kind: "text", text: "Previous answer" };
+    editor = new LaidOutViewer({
+      extensions: [StarterKit, Field.configure({ values: { [signHere.id]: previous } }),
+        Extension.create({ name: "refuseValues", addProseMirrorPlugins: () => [new Plugin({ filterTransaction: () => !refuse })] }),
+        FieldCompletion.configure({ fields: [signHere], completable: [signHere.id], onFieldRequest: async () => signature, onFieldRequestError }),
+      ], content, sealed: true,
+    });
+    editor.mountView();
+    expect(requestField(editor, signHere.id)).toBe(true);
+    await flush();
+    expect(fieldValues(editor.getState())[signHere.id]).toEqual(previous);
+    expect(onFieldRequestError).toHaveBeenCalledWith(signHere, expect.objectContaining({ message: expect.stringContaining("a plugin refused") }));
+    refuse = false;
+    expect(requestField(editor, signHere.id)).toBe(true);
+    await flush();
+    expect(fieldValues(editor.getState())[signHere.id]).toEqual(signature);
+    expect(onFieldRequestError).toHaveBeenCalledTimes(1);
   });
 });
 

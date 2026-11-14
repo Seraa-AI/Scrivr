@@ -17,6 +17,7 @@ export {
   paintFieldInk,
   paintFieldTag,
   roleName,
+  replaceFieldValues,
   setFieldValue,
   unansweredBeforeSigning,
   valuesOnRecord,

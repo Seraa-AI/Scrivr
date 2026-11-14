@@ -338,16 +338,26 @@ const fieldValuesPlugin = (initial: FieldValues) =>
     state: {
       init: () => initial,
       apply(tr, values) {
-        const given: { id: string; value: FieldValue | null } | undefined = tr.getMeta(fieldValuesKey);
-        if (!given) return values;
-        const { [given.id]: _replaced, ...rest } = values;
-        return given.value ? { ...rest, [given.id]: given.value } : rest;
+        const given: FieldValues | undefined = tr.getMeta(fieldValuesKey);
+        return given ?? values;
       },
     },
   });
 
 /** The values fields hold in `state`, by field id. */
 export const fieldValues = (state: EditorState): FieldValues => fieldValuesKey.getState(state) ?? {};
+
+/**
+ * Replace the complete set of field values in one transaction. Omitted ids
+ * are emptied, including values configured when Field opened. The document
+ * and undo history are untouched. Returns false when Field is absent or a
+ * plugin refuses the transaction; in that case the previous set stays intact.
+ */
+export function replaceFieldValues(editor: IBaseEditor, values: FieldValues): boolean {
+  const state = editor.getState();
+  if (!fieldValuesKey.get(state)) return false;
+  return editor.applyTransaction(state.tr.setMeta(fieldValuesKey, { ...values }).setMeta("addToHistory", false));
+}
 
 /**
  * Give field `id` a value — `null` empties it; the document is untouched. A
@@ -358,9 +368,8 @@ export const fieldValues = (state: EditorState): FieldValues => fieldValuesKey.g
  * the change.
  */
 export function setFieldValue(editor: IBaseEditor, id: string, value: FieldValue | null): boolean {
-  const state = editor.getState();
-  if (!fieldValuesKey.get(state)) return false;
-  return editor.applyTransaction(state.tr.setMeta(fieldValuesKey, { id, value }).setMeta("addToHistory", false));
+  const { [id]: _replaced, ...rest } = fieldValues(editor.getState());
+  return replaceFieldValues(editor, value ? { ...rest, [id]: value } : rest);
 }
 
 interface FieldSetup {
