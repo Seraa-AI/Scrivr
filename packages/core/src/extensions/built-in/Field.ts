@@ -342,7 +342,8 @@ const fieldStrategy = (kinds: FieldKinds, options: FieldOptions, values: () => F
       case "picture":
         return { width: Number(node.attrs["width"]), height: Number(node.attrs["height"]) };
       case "glyph": {
-        const side = Math.round(ascent * 0.8);
+        // About as tall as the text's ascenders, as a native checkbox sits beside its label.
+        const side = Math.round(ascent * 0.95);
         return { width: side, height: side };
       }
       case "text":
