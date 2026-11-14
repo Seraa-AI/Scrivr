@@ -32,7 +32,8 @@ export interface FieldKindSpec {
    * Shows when its party signed — the latest `signedAt` among their answered
    * signatures — and is never a value of its own: never pressed, never taken
    * from Word, never holding a signature back. A seal refuses a party with a
-   * required one and no required signature.
+   * required one and no required signature. Read on a `"date"` or `"text"`
+   * control; a checkbox or dropdown shows a tick or a choice.
    */
   datedWhenSigned?: boolean;
 }
@@ -62,8 +63,9 @@ export type FieldKind = BuiltInFieldKind | (string & {});
  * initials — as an inline PNG or JPEG (`safeDrawingUrl`): printable, and
  * fixed once given. `choice` names a dropdown's choice by its `id`, so a
  * renamed label still answers the same choice. `signedAt` on a signature is
- * when it was given — an ISO timestamp with `Z` or an offset, from the host's
- * own record (`parseSignedAt`) — and is what its party's date signed shows.
+ * when it was given, from the host's own record — an ISO timestamp with `Z`
+ * or the signer's offset, or an ISO day (`parseSignedAt`) — and its party's
+ * date signed shows the day it names.
  */
 export type FieldValue =
   | { kind: "text"; text: string; signedAt?: string }
@@ -75,13 +77,58 @@ const MONTHS = ["January", "February", "March", "April", "May", "June", "July", 
 
 /**
  * A moment of signing as a date signed shows it unless `Field` is given
- * `formatSignedDate`: the UTC day, "14 November 2026" — fixed, so a record
- * reads the same wherever it is printed.
+ * `formatSignedDate`: the day `signedAt` names, in the signer's own offset —
+ * "14 November 2026" — so a record reads the day they signed, wherever it is
+ * printed. Nothing for what is no moment.
  */
 export function defaultSignedDate(signedAt: string): string {
-  const at = new Date(signedAt);
-  const month = MONTHS[at.getUTCMonth()];
-  return month === undefined ? "" : `${at.getUTCDate()} ${month} ${at.getUTCFullYear()}`;
+  const moment = readSignedAt(signedAt);
+  return moment ? `${moment.day} ${MONTHS[moment.month - 1]} ${moment.year}` : "";
+}
+
+/**
+ * `YYYY-MM-DD`, then optionally a time with `Z` or an offset. A time with no
+ * zone, or a date in some locale's words, would be read in whatever zone the
+ * machine is in.
+ */
+const SIGNED_AT = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?(?:Z|([+-])(\d{2}):(\d{2})))?$/;
+
+const isLeapYear = (year: number): boolean => (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+const daysInMonth = (year: number, month: number): number => (month === 2 ? (isLeapYear(year) ? 29 : 28) : [4, 6, 9, 11].includes(month) ? 30 : 31);
+
+/**
+ * The parts `signedAt` writes, each in range, and the moment they name — read
+ * here rather than by `Date.parse`, which some engines let roll 30 February
+ * over into March while others refuse it.
+ */
+function readSignedAt(signedAt: string): { year: number; month: number; day: number; at: number } | null {
+  const parts = SIGNED_AT.exec(signedAt);
+  if (!parts) return null;
+  const [year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0, offsetHours = 0, offsetMinutes = 0] = [1, 2, 3, 4, 5, 6, 9, 10].map((i) =>
+    Number(parts[i] ?? 0),
+  );
+  if (month < 1 || month > 12 || day < 1 || day > daysInMonth(year, month)) return null;
+  if (hour > 23 || minute > 59 || second > 59 || offsetHours > 23 || offsetMinutes > 59) return null;
+  const millis = Number((parts[7] ?? "").padEnd(3, "0").slice(0, 3));
+  const offset = (parts[8] === "-" ? -1 : 1) * (offsetHours * 60 + offsetMinutes);
+  const utc = new Date(0);
+  utc.setUTCFullYear(year, month - 1, day);
+  utc.setUTCHours(hour, minute - offset, second, millis);
+  return { year, month, day, at: utc.getTime() };
+}
+
+/**
+ * When a signature was given, from its `signedAt`: an ISO timestamp with `Z`
+ * or an offset, or an ISO day, naming a day that exists. Anything else would
+ * read differently on another machine, and a record must read the same
+ * everywhere, so it is no moment: `null`.
+ */
+export const parseSignedAt = (signedAt: string): number | null => readSignedAt(signedAt)?.at ?? null;
+
+/** The `signedAt` a value carries when it names a moment (`parseSignedAt`); `null` otherwise. */
+export function signedAtOf(value: FieldValue | undefined): string | null {
+  if (!value || !("signedAt" in value) || value.signedAt === undefined) return null;
+  return parseSignedAt(value.signedAt) === null ? null : value.signedAt;
 }
 
 /** One choice a dropdown offers: `id` is what is stored and exported, `label` what a person reads. */
@@ -133,8 +180,11 @@ export interface FieldOptions {
    */
   values: Record<string, FieldValue>;
   /**
-   * How a date signed shows the moment its party signed (`signedAt`, an ISO
-   * timestamp): their time zone, your date format. `defaultSignedDate` when
+   * How a date signed shows the moment its party signed, handed the latest
+   * signature's own `signedAt` as the host recorded it — its offset kept, so
+   * the day can read as the signer saw it. A format must give the same words
+   * wherever the record is printed: one that reads the machine's zone or
+   * language prints a different date on another. `defaultSignedDate` when
    * omitted.
    */
   formatSignedDate?: (signedAt: string) => string;

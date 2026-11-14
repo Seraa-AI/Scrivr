@@ -455,6 +455,7 @@ describe("FieldCompletion — the date a party signed", () => {
   });
 
   it("refuses a signature with no moment its party's date could show, and tells the host", async () => {
+    let given = "2026-11-14T09:30:00";
     const failed = vi.fn();
     editor = new LaidOutViewer({
       extensions: [
@@ -463,7 +464,7 @@ describe("FieldCompletion — the date a party signed", () => {
         FieldCompletion.configure({
           fields: [initials, signHere, signed],
           completable: [signHere.id],
-          onFieldRequest: async () => ({ ...signature, signedAt: "2026-11-14T09:30:00" }),
+          onFieldRequest: async () => ({ ...signature, signedAt: given }),
           onFieldRequestError: failed,
         }),
       ],
@@ -477,6 +478,14 @@ describe("FieldCompletion — the date a party signed", () => {
 
     expect(fieldValues(editor.getState())).toEqual({});
     expect(failed).toHaveBeenCalledWith(signHere, expect.objectContaining({ message: expect.stringMatching(/signedAt/) }));
+
+    // A day that does not exist is no moment either.
+    given = "2026-02-30T09:30:00Z";
+    requestField(editor, signHere.id);
+    await flush();
+
+    expect(fieldValues(editor.getState())).toEqual({});
+    expect(failed).toHaveBeenCalledTimes(2);
   });
 
   it("is not dated by initials given on the way to signing", async () => {

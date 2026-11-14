@@ -103,7 +103,7 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
       extensions: [
         StarterKit.configure({ table: true }),
         // Opens with what every party has given so far: the room's record.
-        Field.configure({ values: valuesRef.current, formatSignedDate: localSignedDate }),
+        Field.configure({ values: valuesRef.current, formatSignedDate: signedDateInWords }),
         DefaultContent.configure({ json: content }),
         FieldCompletion.configure({
           fields: snapshot.fields,
@@ -149,7 +149,7 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
   // The kinds this room's Field knows, read as the signing view reads them.
   const kinds = editor ? fieldKindsOf(editor) : BUILT_IN_FIELD_KINDS;
   // The room's values as the record shows them — each date signed derived from its party's signature.
-  const shown = valuesOnRecord(snapshot.fields, values, kinds, localSignedDate);
+  const shown = valuesOnRecord(snapshot.fields, values, kinds, signedDateInWords);
   const missing = snapshot.fields.filter((f) => f.required && !isFieldAnswered(f, shown[f.id], kinds));
   // What a signer owes before signing comes first, as the signing view asks for it.
   const nextOpen =
@@ -174,7 +174,7 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
     // printed in their fields, laid out with the setup the signers used.
     try {
       const result = await exportExecutedPdf(snapshot, values, {
-        editorOptions: { pageConfig: defaultPageConfig, fonts: playgroundFonts, extensions: [StarterKit.configure({ table: true }), Field.configure({ formatSignedDate: localSignedDate })] },
+        editorOptions: { pageConfig: defaultPageConfig, fonts: playgroundFonts, extensions: [StarterKit.configure({ table: true }), Field.configure({ formatSignedDate: signedDateInWords })] },
       });
       if (!result.ok) {
         setProblem(
@@ -344,14 +344,26 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
   );
 }
 
-/** A value as the room records it: words and drawings stamped with the moment they were given. */
-/** The room shows a date signed in the signer's own zone and words, as DocuSign shows a recipient's. */
-function localSignedDate(signedAt: string): string {
-  return new Date(signedAt).toLocaleDateString(undefined, { dateStyle: "long" });
+/**
+ * The day a signature names, in the room's own words — "November 14, 2026". Read from the
+ * date `signedAt` writes, never from this machine's zone or language, so every viewer and
+ * the executed PDF print the same day.
+ */
+function signedDateInWords(signedAt: string): string {
+  return new Date(`${signedAt.slice(0, 10)}T00:00:00Z`).toLocaleDateString("en-US", { dateStyle: "long", timeZone: "UTC" });
 }
 
+/** A value as the room records it: words and drawings stamped with the moment they were given, in the signer's own offset. */
 function recordedNow(value: FieldValue): FieldValue {
-  return value.kind === "text" || value.kind === "image" ? { ...value, signedAt: new Date().toISOString() } : value;
+  return value.kind === "text" || value.kind === "image" ? { ...value, signedAt: signersTimestamp(new Date()) } : value;
+}
+
+/** `at` as the signer's clock reads it, with their offset — "2026-11-14T23:30:00-05:00" — as Adobe Sign stamps a signature. */
+function signersTimestamp(at: Date): string {
+  const minutesEast = -at.getTimezoneOffset();
+  const pad = (n: number) => String(Math.abs(n)).padStart(2, "0");
+  const local = new Date(at.getTime() + minutesEast * 60_000).toISOString().slice(0, 19);
+  return `${local}${minutesEast < 0 ? "-" : "+"}${pad(Math.trunc(minutesEast / 60))}:${pad(minutesEast % 60)}`;
 }
 
 function describe(value: FieldValue, field: SignerFieldDescriptor): string {

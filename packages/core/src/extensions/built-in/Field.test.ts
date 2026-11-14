@@ -8,8 +8,8 @@ import { NodeSelection, TextSelection } from "prosemirror-state";
 import { DOMParser, DOMSerializer, type Node as PmNode } from "prosemirror-model";
 import { ServerEditor } from "../../ServerEditor";
 import { StarterKit } from "../StarterKit";
-import { Field, fieldDrawingAt, fieldKindsOf, fieldValues, isFieldAnswered, listSignerFields, paintCheckbox, parseSignedAt, setFieldValue, unansweredBeforeSigning, valuesOnRecord, valuesOnRecordOf, type SignerFieldDescriptor } from "./Field";
-import { BUILT_IN_FIELD_KINDS, defaultSignedDate, isDatedWhenSigned, isDrawnKind, fieldIconStrokes, fieldInk, fieldRoleColor, fieldValueLayout, fieldVerb, type FieldKinds, type FieldValue } from "./fieldKinds";
+import { Field, fieldDrawingAt, fieldKindsOf, fieldValues, isFieldAnswered, listSignerFields, paintCheckbox, setFieldValue, unansweredBeforeSigning, valuesOnRecord, valuesOnRecordOf, type SignerFieldDescriptor } from "./Field";
+import { BUILT_IN_FIELD_KINDS, defaultSignedDate, isDatedWhenSigned, parseSignedAt, signedAtOf, isDrawnKind, fieldIconStrokes, fieldInk, fieldRoleColor, fieldValueLayout, fieldVerb, type FieldKinds, type FieldValue } from "./fieldKinds";
 import { createMeasurer, createTestEditor, measureTextWidth } from "../../test-utils";
 import { DefaultFontProvider } from "../../fonts/DefaultFontProvider";
 
@@ -954,12 +954,58 @@ describe("the values a record shows", () => {
   it("takes only an unambiguous moment — an offset, or a day — so every machine reads the same date", () => {
     const at = (signedAt: string) => valuesOnRecord(fields, { a: { kind: "text", text: "Ada", signedAt } }, BUILT_IN_FIELD_KINDS)["dated"];
 
-    expect(at("2026-11-14T23:30:00-05:00")).toEqual({ kind: "text", text: "15 November 2026" });
     expect(at("2026-11-14")).toEqual({ kind: "text", text: "14 November 2026" });
     // Read in whatever zone the machine is in, so no moment at all.
     expect(at("2026-11-14T23:30:00")).toBeUndefined();
     expect(at("11/14/2026")).toBeUndefined();
     expect([parseSignedAt("2026-11-14T09:30:00Z"), parseSignedAt("14 November 2026")]).toEqual([Date.parse("2026-11-14T09:30:00Z"), null]);
+  });
+
+  it("shows the day the signer signed on, in their own offset — the same on every machine", () => {
+    const at = (signedAt: string) => valuesOnRecord(fields, { a: { kind: "text", text: "Ada", signedAt } }, BUILT_IN_FIELD_KINDS)["dated"];
+
+    // Late evening in New York is already the next day in UTC; the signer signed on the 14th.
+    expect(at("2026-11-14T23:30:00-05:00")).toEqual({ kind: "text", text: "14 November 2026" });
+    // Early morning in Tokyo is still the day before in UTC; the signer signed on the 15th.
+    expect(at("2026-11-15T00:30:00+09:00")).toEqual({ kind: "text", text: "15 November 2026" });
+  });
+
+  it("hands the host's format the signer's own signedAt, its offset kept", () => {
+    const signedAt = "2026-11-14T23:30:00-05:00";
+    const given: string[] = [];
+    valuesOnRecord(fields, { a: { kind: "text", text: "Ada", signedAt } }, BUILT_IN_FIELD_KINDS, (at) => {
+      given.push(at);
+      return at;
+    });
+
+    expect(given).toEqual([signedAt]);
+  });
+
+  it("picks the latest signing by the moment, and shows it on its own signer's day", () => {
+    const kinds = { ...BUILT_IN_FIELD_KINDS, initials: { ...BUILT_IN_FIELD_KINDS.initials, control: "signatureLine" } } satisfies FieldKinds;
+    // 04:30 UTC on the 15th, signed on the 14th in New York — later than 01:00 UTC on the 15th.
+    const record = valuesOnRecord(
+      fields,
+      { a: { kind: "text", text: "Ada", signedAt: "2026-11-14T23:30:00-05:00" }, b: { kind: "text", text: "AL", signedAt: "2026-11-15T01:00:00Z" } },
+      kinds,
+    );
+
+    expect(record["dated"]).toEqual({ kind: "text", text: "14 November 2026" });
+  });
+
+  it("takes no day that does not exist, as no engine agrees on one", () => {
+    for (const impossible of ["2026-02-30", "2026-02-29", "2026-04-31", "2026-11-14T24:00Z", "2026-11-14T09:60Z", "2026-11-14T09:30:60Z", "2026-11-14T09:30+24:00", "2026-00-10"]) {
+      expect(parseSignedAt(impossible)).toBeNull();
+    }
+    expect(parseSignedAt("2028-02-29")).toBe(Date.UTC(2028, 1, 29));
+    expect(parseSignedAt("2026-11-14T23:30:00.250-05:00")).toBe(Date.parse("2026-11-15T04:30:00.250Z"));
+  });
+
+  it("reads a value's moment once, for the record and the signing view alike", () => {
+    expect(signedAtOf({ kind: "text", text: "Ada", signedAt: "2026-11-14T09:30:00Z" })).toBe("2026-11-14T09:30:00Z");
+    expect(signedAtOf({ kind: "image", src: "data:image/png;base64,iVBORw0KGgo=", signedAt: "2026-11-14T09:30:00" })).toBeNull();
+    expect(signedAtOf({ kind: "checkbox", checked: true })).toBeNull();
+    expect(signedAtOf(undefined)).toBeNull();
   });
 
   it("shows no date when the host's format fails — throws, or gives nothing to show", () => {
@@ -970,6 +1016,9 @@ describe("the values a record shows", () => {
 
     expect(valuesOnRecord(fields, signed, BUILT_IN_FIELD_KINDS, throwing)).not.toHaveProperty("dated");
     expect(valuesOnRecord(fields, signed, BUILT_IN_FIELD_KINDS, () => "  ")).not.toHaveProperty("dated");
+    // A host written without types may give back anything.
+    const nothing = (): string => JSON.parse("null");
+    expect(valuesOnRecord(fields, signed, BUILT_IN_FIELD_KINDS, nothing)).not.toHaveProperty("dated");
   });
 
   it("formats no date from what is no moment, called directly", () => {

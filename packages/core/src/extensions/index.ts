@@ -14,7 +14,6 @@ export {
   isFieldAnswered,
   listSignerFields,
   paintCheckbox,
-  parseSignedAt,
   paintFieldInk,
   paintFieldTag,
   roleName,
@@ -24,7 +23,7 @@ export {
   valuesOnRecordOf,
 } from "./built-in/Field";
 export { importedFieldValues } from "./built-in/fieldDocx";
-export type { FieldFill, InsertFieldOptions, SignerFieldDescriptor } from "./built-in/Field";
+export type { FieldFill, FieldValues, InsertFieldOptions, SignerFieldDescriptor } from "./built-in/Field";
 export {
   BUILT_IN_FIELD_KINDS,
   FieldChoiceSchema,
@@ -38,6 +37,8 @@ export {
   isDatedWhenSigned,
   isDrawnKind,
   isSigningKind,
+  parseSignedAt,
+  signedAtOf,
 } from "./built-in/fieldKinds";
 export type {
   BuiltInFieldKind,

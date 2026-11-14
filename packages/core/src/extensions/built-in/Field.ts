@@ -25,7 +25,9 @@ import {
   fieldVerb,
   isDatedWhenSigned,
   isSigningKind,
+  parseSignedAt,
   setsLike,
+  signedAtOf,
   shownValue,
   valueText,
   type FieldBox,
@@ -141,24 +143,10 @@ export function unansweredBeforeSigning(
 }
 
 /**
- * When a signature was given, from its `signedAt`: an ISO timestamp with `Z`
- * or an offset, or an ISO day. Anything else — a time with no zone, a date in
- * some locale's words — would be read in whatever zone the machine is in, and
- * a record must read the same everywhere, so it is no moment: `null`.
- */
-export function parseSignedAt(signedAt: string): number | null {
-  if (!SIGNED_AT.test(signedAt)) return null;
-  const at = Date.parse(signedAt);
-  return Number.isNaN(at) ? null : at;
-}
-
-const SIGNED_AT = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2}))?$/;
-
-/**
  * The values as a signed record shows them. A date signed is never a value of
- * its own: it shows the moment its party signed — the latest `signedAt` among
- * their answered signatures — through `formatSignedDate`, and nothing while
- * none answers, or when the format gives nothing to show. `Field` shows values
+ * its own: it shows when its party signed — the latest of their answered
+ * signatures, whose own `signedAt`, offset kept, `formatSignedDate` is
+ * handed — and nothing while none answers, or when the format gives nothing. `Field` shows values
  * by this on screen and in print (`valuesOnRecordOf` gives exactly that
  * record); a host's server reads its record by it too.
  */
@@ -168,27 +156,29 @@ export function valuesOnRecord(
   kinds: FieldKinds,
   formatSignedDate: (signedAt: string) => string = defaultSignedDate,
 ): Record<string, FieldValue> {
-  const latestSigning = new Map<string, number>();
+  const latestSigning = new Map<string, { at: number; signedAt: string }>();
   for (const f of fields) {
     const value = values[f.id];
     if (!isSigningKind(kinds, f.kind) || !isFieldAnswered(f, value, kinds)) continue;
-    const at = value && "signedAt" in value && value.signedAt !== undefined ? parseSignedAt(value.signedAt) : null;
-    if (at !== null) latestSigning.set(f.role, Math.max(at, latestSigning.get(f.role) ?? at));
+    const signedAt = signedAtOf(value);
+    const at = signedAt === null ? null : parseSignedAt(signedAt);
+    if (signedAt !== null && at !== null && at > (latestSigning.get(f.role)?.at ?? -Infinity)) latestSigning.set(f.role, { at, signedAt });
   }
   const dated = fields.filter((f) => isDatedWhenSigned(kinds, f.kind));
   const record = Object.fromEntries(Object.entries(values).filter(([id]) => !dated.some((f) => f.id === id)));
   for (const f of dated) {
-    const at = latestSigning.get(f.role);
-    const text = at === undefined ? "" : formatted(formatSignedDate, new Date(at).toISOString());
-    if (text.trim() !== "") record[f.id] = { kind: "text", text };
+    const latest = latestSigning.get(f.role);
+    const text = latest ? formatted(formatSignedDate, latest.signedAt) : "";
+    if (text !== "") record[f.id] = { kind: "text", text };
   }
   return record;
 }
 
-/** A host's format of a moment, or nothing when it fails: a record shows no date rather than break. */
+/** A host's format of a moment, or nothing when it fails or gives nothing to show: a record shows no date rather than break. */
 function formatted(formatSignedDate: (signedAt: string) => string, signedAt: string): string {
   try {
-    return formatSignedDate(signedAt);
+    const text: unknown = formatSignedDate(signedAt);
+    return typeof text === "string" && text.trim() !== "" ? text : "";
   } catch {
     return "";
   }
@@ -332,7 +322,8 @@ function refine(base: FieldKindSpec | undefined, spec: FieldKindSpec): FieldKind
   return { ...kept, ...spec };
 }
 
-type FieldValues = Readonly<Record<string, FieldValue>>;
+/** The values given to a document's fields, by field id. */
+export type FieldValues = Readonly<Record<string, FieldValue>>;
 
 /**
  * Completed values, held by the editor beside its document rather than in
@@ -401,10 +392,10 @@ function valuesOnRecordIn(setup: FieldSetup, state: EditorState): FieldValues {
   return record;
 }
 
-/** The values `editor`'s fields show — the record `Field` lays out, draws and prints — or those held, without a `Field`. */
+/** The values `editor`'s fields show — the record `Field` lays out, draws and prints; none for an editor without `Field`. */
 export function valuesOnRecordOf(editor: IBaseEditor): FieldValues {
   const setup = setupByEditor.get(editor);
-  return setup ? valuesOnRecordIn(setup, editor.getState()) : fieldValues(editor.getState());
+  return setup ? valuesOnRecordIn(setup, editor.getState()) : {};
 }
 
 /** Whether two sets of shown values are the same, field by field — a derived date by its words. */

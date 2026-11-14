@@ -872,12 +872,14 @@ timestamp and formatted at display by an account's or recipient's date
 format and time zone, while the certificate keeps the moment itself; PandaDoc
 moves the date when a signer finishes on a later day. So in Scrivr:
 
-- A signature carries when it was given: `signedAt`, an ISO timestamp from
-  the host's own record of the signing, on the text or drawing value it
-  returns. The host records one value; the moment is part of it.
+- A signature carries when it was given: `signedAt`, an ISO timestamp with
+  its zone, from the host's own record of the signing, on the text or
+  drawing value it returns. The host records one value; the moment is part
+  of it.
 - A date signed is never a value. It shows the latest `signedAt` among its
   party's answered signatures, through `formatSignedDate` (`Field.configure`;
-  a fixed, locale-independent default so a PDF reads the same everywhere).
+  a fixed, locale-independent default so a PDF reads the same everywhere),
+  on the day that `signedAt` names in its own offset.
   Blank or replace a signature and the date follows; it cannot outlive one,
   return stale, or disagree with the host's record.
 - `valuesOnRecord` derives those dates, so the canvas, the PDF, the executed
@@ -918,10 +920,26 @@ moves the date when a signer finishes on a later day. So in Scrivr:
   as given on screen and is refused in the record; a host checks one with
   `safeDrawingUrl` and its own decoder before handing it over.
 - **A date signed reads the same everywhere.** `signedAt` must carry its zone
-  (`Z` or an offset) or be a bare day (`parseSignedAt`); a zoneless time
-  would be read in whatever zone a machine is in. The signing view refuses a
-  signature without one when its party has a date signed, and the record
-  checks the date it prints in `Field`'s own format (`valuesOnRecordOf`).
+  (`Z` or an offset) or be a bare day, naming a day that exists
+  (`parseSignedAt`); a zoneless time would be read in whatever zone a
+  machine is in. The signing view refuses a signature without a usable
+  `signedAt` when its party has a date signed (`signedAtOf`, the one reading
+  of a value's moment), and the record checks the date it prints in
+  `Field`'s own format (`valuesOnRecordOf`).
+- **A date signed is the signer's day (2026-11-14).** Requiring a zone and
+  then formatting the moment in UTC threw the zone away: a New York signature
+  at 23:30 dated the 15th, and a host's formatter, handed only UTC, could not
+  recover the signer's day. Adobe Sign stamps a signature in the offset of
+  the recipient applying it; DocuSign reads the date in a configured zone —
+  the signer's own where an account allows it, the sender's otherwise — and
+  a PDF already downloaded keeps the date it printed. So the latest
+  signature is picked by its moment, and `formatSignedDate` is handed that
+  signature's own `signedAt`, offset kept; `defaultSignedDate` prints the
+  day it names. A host wanting DocuSign's account zone stamps `signedAt` in
+  it. A format must not read the machine it runs on: one that formats in the
+  viewer's zone or language prints a different date on another machine.
+  `parseSignedAt` reads the parts itself rather than through `Date.parse`,
+  which in V8 rolls 30 February into March where other engines refuse it.
 - **A record never shows a blank signature.** `safeDrawingUrl` gives a
   drawing a canonical prefix and caps its size (`MAX_DRAWING_BYTES`), and
   `exportExecutedPdf` counts a drawing only once it embeds as the PDF will

@@ -8,11 +8,11 @@ import {
   isFieldAnswered,
   isSigningKind,
   paintCheckbox,
-  parseSignedAt,
   paintFieldInk,
   paintFieldTag,
   roleName,
   setFieldValue,
+  signedAtOf,
   unansweredBeforeSigning,
 } from "@scrivr/core";
 import type {
@@ -40,16 +40,19 @@ export interface FieldCompletionOptions {
    * resolves with the value the field takes, or `null` to leave it as it was.
    * Scrivr keeps the value only beside the document, as `setFieldValue` does.
    *
-   * A signature carries the moment it was given: answer with `signedAt`, an
-   * ISO timestamp from your own record of the signing. Its party's date
-   * signed shows that moment — it is never asked for, and never a value of
-   * its own.
+   * A signature carries the moment it was given: answer with `signedAt` from
+   * your own record of the signing — an ISO timestamp with `Z` or the
+   * signer's offset, or an ISO day. Its party's date signed shows the day it
+   * names; it is never asked for, and never a value of its own. A signature
+   * whose `signedAt` names no moment is refused after you resolve, so check
+   * it with `signedAtOf` before you record it.
    */
   onFieldRequest: (field: SignerFieldDescriptor, current?: FieldValue) => Promise<FieldValue | null>;
   /**
    * `onFieldRequest` failed — it threw or rejected, or answered a signature
    * with no `signedAt` its party's date signed could show. The field stays as
-   * it was; tell the signer, and let them try again.
+   * it was; tell the signer, and let them try again. Without this, a refusal
+   * is silent.
    */
   onFieldRequestError?: (field: SignerFieldDescriptor, error: unknown) => void;
   /**
@@ -178,7 +181,7 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
       isSigningKind(kinds, field.kind) &&
       datedRoles.has(field.role) &&
       isFieldAnswered(field, value, kinds) &&
-      !("signedAt" in value && value.signedAt !== undefined && parseSignedAt(value.signedAt) !== null);
+      signedAtOf(value) === null;
     const pending = new Set<string>();
     let hovered: string | null = null;
     let focused: string | null = null;
@@ -217,7 +220,7 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
           if (!value) return;
           if (undatable(field, value)) {
             throw new Error(
-              `The signature for "${field.id}" has no signedAt its party's date signed can show: give an ISO timestamp with Z or an offset`,
+              `The signature for "${field.id}" has no signedAt its party's date signed can show: give an ISO timestamp with Z or an offset, or an ISO day`,
             );
           }
           setFieldValue(editor, field.id, value);

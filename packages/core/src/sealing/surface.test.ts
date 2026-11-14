@@ -26,6 +26,7 @@ import {
   listSignerFields,
   paintCheckbox,
   parseSignedAt,
+  signedAtOf,
   safeDrawingUrl,
   setFieldValue,
   unansweredBeforeSigning,
@@ -34,6 +35,7 @@ import {
   WORD_PART_NAMESPACES,
   verifySnapshot,
   type BuiltInFieldKind,
+  type FieldValues,
   type CreateSnapshotOptions,
   type HostSealRefusal,
   type SealCheck,
@@ -108,7 +110,9 @@ describe("what a signing host builds on", () => {
     expect(MAX_DRAWING_BYTES).toBeGreaterThan(0);
     expect(defaultSignedDate("2026-11-14T09:30:00Z")).toBe("14 November 2026");
     expect(parseSignedAt("2026-11-14T09:30:00Z")).toBe(Date.parse("2026-11-14T09:30:00Z"));
-    expect(valuesOnRecordOf(editor)).toEqual(fieldValues(editor.getState()));
+    const shown: FieldValues = valuesOnRecordOf(editor);
+    expect(shown).toEqual(fieldValues(editor.getState()));
+    expect(signedAtOf({ kind: "text", text: "Ada", signedAt: "2026-11-14T09:30:00Z" })).toBe("2026-11-14T09:30:00Z");
     expect(WORD_PART_NAMESPACES["mc:Ignorable"]).toBe("w14");
     expect(isSigningKind(BUILT_IN_FIELD_KINDS, "signature") && isDatedWhenSigned(BUILT_IN_FIELD_KINDS, "dateSigned")).toBe(true);
     expect([control, insert.kind, range.kind, denied.reason, typeof gate, fields, refusal]).toEqual([

@@ -123,6 +123,8 @@ describe("exportExecutedPdf", () => {
     const signedAt = "2026-11-14T09:30:00Z";
 
     expect(await texts({ sig: { kind: "text", text: "Ada Lovelace", signedAt } })).toContain("14 November 2026");
+    // Signed late in the evening in New York: the record prints the signer's day, not the UTC one.
+    expect(await texts({ sig: { kind: "text", text: "Ada Lovelace", signedAt: "2026-11-14T23:30:00-05:00" } })).toContain("14 November 2026");
     expect(await texts({ sig: { kind: "text", text: "  ", signedAt } })).not.toContain("14 November 2026");
     // A drawing the PDF cannot embed is no signature: its date does not print beside a blank line.
     expect(await texts({ sig: { kind: "image", src: "data:image/png;base64,iVBORw0KGgoAAAAAAAA", signedAt } })).not.toContain("14 November 2026");

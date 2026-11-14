@@ -49,8 +49,8 @@ export type ExecutedPdfResult =
  * longer matches its hash, or a required field the record would show blank.
  * The fields are read from the verified content, not from what was stored
  * beside it, and are checked against the values as the printing editor holds
- * them, as a record shows them (`valuesOnRecord`) — what it prints is what
- * was checked. Throws when `Field` is not among `editorOptions.extensions`,
+ * them, as the record `Field` prints (`valuesOnRecordOf`: its kinds, its
+ * `formatSignedDate`) — what it prints is what was checked. Throws when `Field` is not among `editorOptions.extensions`,
  * or a plugin refuses a value. Values are printed, never written: the
  * snapshot and its hash are unchanged.
  */
