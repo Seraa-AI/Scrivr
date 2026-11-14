@@ -86,33 +86,42 @@ export function safeImageUrl(value: unknown): string | null {
   return RASTER_DATA_URL.test(cleaned) ? cleaned : null;
 }
 
-/** A drawing as an inline PNG or JPEG, in any case. */
+/** A drawing as an inline PNG or JPEG (prefix case-insensitive). */
 const DRAWING_DATA_URL = /^data:image\/(png|jpe?g);base64,([A-Za-z0-9+/]+={0,2})$/i;
 
-/** Each format's opening bytes, base64-encoded: `\x89PNG\r\n\x1a\n`, and JPEG's `FF D8 FF`. */
-const OPENS_AS: Record<string, { mime: string; bytes: string }> = {
-  png: { mime: "image/png", bytes: "iVBORw0KGgo" },
-  jpeg: { mime: "image/jpeg", bytes: "/9j/" },
-  jpg: { mime: "image/jpeg", bytes: "/9j/" },
+type DrawingFormat = "png" | "jpeg" | "jpg";
+
+/** Each format's canonical media type, and its opening bytes base64-encoded: `\x89PNG\r\n\x1a\n`, and JPEG's `FF D8 FF`. */
+const FORMATS: Record<DrawingFormat, { mime: string; opening: string }> = {
+  png: { mime: "image/png", opening: "iVBORw0KGgo" },
+  jpeg: { mime: "image/jpeg", opening: "/9j/" },
+  jpg: { mime: "image/jpeg", opening: "/9j/" },
 };
 
-/** The largest drawing a signature or initials takes, decoded — a pad's PNG is far smaller; a PDF embeds it whole. */
+const isDrawingFormat = (format: string): format is DrawingFormat => format === "png" || format === "jpeg" || format === "jpg";
+
+/** Whether base64 decodes: padded to a whole number of quads, or unpadded short of one by more than a character. */
+const wholeBase64 = (bytes: string): boolean => (bytes.endsWith("=") ? bytes.length % 4 === 0 : bytes.length % 4 !== 1);
+
+/** The largest drawing a drawn field takes, decoded — a pad's PNG is far smaller; a PDF embeds it whole. */
 export const MAX_DRAWING_BYTES = 2 * 1024 * 1024;
 
 /**
- * A drawn signature or initials a signed record can carry: an inline PNG or
- * JPEG whose bytes open as the format it names, no larger than
- * `MAX_DRAWING_BYTES` — what a PDF can embed, and fixed once given, where a
- * link could change after signing. Returned in one form, lowercase and
- * trimmed, as every reader of it expects; `null` for anything else.
+ * A drawing for a drawn field that a signed record can carry: an inline PNG
+ * or JPEG whose base64 decodes and opens as the format it names, no larger
+ * than `MAX_DRAWING_BYTES` — what a PDF can embed, and fixed once given, where
+ * a link could change after signing. Returned trimmed, with a canonical
+ * prefix (`data:image/png;base64,`, `jpg` as `jpeg`); `null` for anything else.
  */
 export function safeDrawingUrl(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const [, format, bytes] = DRAWING_DATA_URL.exec(value.replace(CONTROL_CHARS, "").trim()) ?? [];
-  const opens = format ? OPENS_AS[format.toLowerCase()] : undefined;
-  if (!opens || !bytes || !bytes.startsWith(opens.bytes)) return null;
+  const name = format?.toLowerCase();
+  if (!name || !isDrawingFormat(name) || !bytes) return null;
+  const { mime, opening } = FORMATS[name];
+  if (!bytes.startsWith(opening) || !wholeBase64(bytes)) return null;
   if (Math.floor((bytes.length * 3) / 4) > MAX_DRAWING_BYTES) return null;
-  return `data:${opens.mime};base64,${bytes}`;
+  return `data:${mime};base64,${bytes}`;
 }
 
 export function safeUrl(value: unknown): string | null {

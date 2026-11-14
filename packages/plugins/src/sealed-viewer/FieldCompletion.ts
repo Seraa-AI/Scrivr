@@ -39,9 +39,10 @@ export interface FieldCompletionOptions {
    * resolves with the value the field takes, or `null` to leave it as it was.
    * Scrivr keeps the value only beside the document, as `setFieldValue` does.
    *
-   * A field dated when signed (`dateSigned`) is asked for without a press,
-   * the moment its party's signature is given: answer with the date, by your
-   * clock and in your format, and record it with the signature.
+   * A signature carries the moment it was given: answer with `signedAt`, an
+   * ISO timestamp from your own record of the signing. Its party's date
+   * signed shows that moment — it is never asked for, and never a value of
+   * its own.
    */
   onFieldRequest: (field: SignerFieldDescriptor, current?: FieldValue) => Promise<FieldValue | null>;
   /**
@@ -167,9 +168,8 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
     const kinds = fieldKindsOf(editor);
     const mayComplete = new Set(completable);
     const isDated = (f: SignerFieldDescriptor): boolean => isDatedWhenSigned(kinds, f.kind);
-    // What the signer fills, by pressing or with Tab; a date signed is dated for them.
+    // What the signer fills, by pressing or with Tab; a date signed shows when they signed.
     const mine = fields.filter((f) => mayComplete.has(f.id) && !isDated(f));
-    const datesSigned = fields.filter((f) => mayComplete.has(f.id) && isDated(f));
     const pending = new Set<string>();
     let hovered: string | null = null;
     let focused: string | null = null;
@@ -197,21 +197,7 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
       editor.redraw();
     };
 
-    // A date belongs to the signature it was given for. Each signature value
-    // starts a new signing for its party; a date answered for an earlier one
-    // is dropped, and asked for again once the date being given settles.
-    const signings = new Map<string, number>();
-    const redate = new Set<string>();
-    const askDate = (date: SignerFieldDescriptor): void => {
-      if (pending.has(date.id)) {
-        redate.add(date.id);
-        return;
-      }
-      const signing = signings.get(date.role);
-      ask(date, () => signings.get(date.role) === signing);
-    };
-
-    const ask = (field: SignerFieldDescriptor, stillCurrent: () => boolean = () => true): void => {
+    const ask = (field: SignerFieldDescriptor): void => {
       pending.add(field.id);
       editor.redraw();
       // Asked inside an executor, so a request that throws before returning a
@@ -219,19 +205,7 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
       const current = fieldValues(editor.getState())[field.id];
       new Promise<FieldValue | null>((resolve) => resolve(onFieldRequest(field, current)))
         .then((value) => {
-          if (!value || !stillCurrent()) return;
-          setFieldValue(editor, field.id, value);
-          // Only a signature dates its party — initials on the way do not.
-          if (!isSigningKind(kinds, field.kind)) return;
-          const partyDates = datesSigned.filter((date) => date.role === field.role);
-          signings.set(field.role, (signings.get(field.role) ?? 0) + 1);
-          for (const date of partyDates) setFieldValue(editor, date.id, null);
-          // Dated again only by a signature that answers.
-          if (!isFieldAnswered(field, value, kinds)) {
-            for (const date of partyDates) redate.delete(date.id);
-            return;
-          }
-          for (const date of partyDates) askDate(date);
+          if (value) setFieldValue(editor, field.id, value);
         })
         .catch((error: unknown) => {
           // The field stays as it was. Declining is answering `null`, which
@@ -240,7 +214,6 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
         })
         .finally(() => {
           pending.delete(field.id);
-          if (redate.delete(field.id)) askDate(field);
           editor.redraw();
         });
     };
@@ -406,11 +379,10 @@ function paintField(ctx: CanvasRenderingContext2D, f: SigningFieldDrawing): void
       ctx.stroke();
     }
   } else if (f.own) {
-    const verb = f.verb;
     paintFieldInk(ctx, box, { control, label: f.label, color: f.color, solid: true, faint: 1, baselineY: f.baselineY });
     // Said once: a label that is already the verb needs no badge repeating it,
     // and a date signed asks nothing of the signer.
-    if (verb !== f.label && !f.datedWhenSigned) paintBadge(ctx, box, verb, f.color, f.theme.pageBg);
+    if (f.verb !== f.label && !f.datedWhenSigned) paintBadge(ctx, box, f.verb, f.color, f.theme.pageBg);
   } else {
     paintFieldInk(ctx, box, { control, label: roleName(f.role), color: f.theme.imagePlaceholderBorder, faint: 0.8, baselineY: f.baselineY });
   }

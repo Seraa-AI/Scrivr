@@ -9,6 +9,7 @@ import {
   StarterKit,
   checkboxTick,
   contentHashOf,
+  defaultSignedDate,
   createSnapshot,
   fieldDrawingAt,
   fieldIconStrokes,
@@ -19,6 +20,7 @@ import {
   hashArtifact,
   isDatedWhenSigned,
   isDrawnKind,
+  MAX_DRAWING_BYTES,
   isFieldAnswered,
   isSigningKind,
   listSignerFields,
@@ -101,6 +103,8 @@ describe("what a signing host builds on", () => {
     expect(unansweredBeforeSigning([terms], {}, "client", kinds)).toEqual([terms]);
     expect(valuesOnRecord([terms], {}, kinds)).toEqual({});
     expect(safeDrawingUrl("data:image/png;base64,iVBORw0KGgo=")).not.toBeNull();
+    expect(MAX_DRAWING_BYTES).toBeGreaterThan(0);
+    expect(defaultSignedDate("2026-11-14T09:30:00Z")).toBe("14 November 2026");
     expect(WORD_PART_NAMESPACES["mc:Ignorable"]).toBe("w14");
     expect(isSigningKind(BUILT_IN_FIELD_KINDS, "signature") && isDatedWhenSigned(BUILT_IN_FIELD_KINDS, "dateSigned")).toBe(true);
     expect([control, insert.kind, range.kind, denied.reason, typeof gate, fields, refusal]).toEqual([

@@ -881,6 +881,26 @@ describe("what a party completes before they sign", () => {
     expect(isFieldAnswered(field("ini", "initials"), { kind: "image", src: "data:image/png;base64,iVBORw0KGgo=" }, kinds)).toBe(true);
   });
 
+  it("takes nothing that belonged to a built-in's control when a host changes the control", () => {
+    const editor = new ServerEditor({
+      extensions: [StarterKit, Field.configure({ kinds: { initials: { label: "Terms", size: { width: 120, height: 24 }, control: "dropdown" } } })],
+    });
+    const kinds = fieldKindsOf(editor);
+
+    expect(fieldVerb(kinds, "initials")).toBe("Choose");
+    expect(isDrawnKind(kinds, "initials")).toBe(false);
+  });
+
+  it("draws only on a field that can hold a drawing — never a date or a dropdown, whatever it declares", () => {
+    const kinds = {
+      ...BUILT_IN_FIELD_KINDS,
+      when: { label: "When", size: { width: 110, height: 24 }, control: "date", drawn: true },
+      pick: { label: "Pick", size: { width: 110, height: 24 }, control: "dropdown", drawn: true },
+    } satisfies FieldKinds;
+
+    expect([isDrawnKind(kinds, "when"), isDrawnKind(kinds, "pick")]).toEqual([false, false]);
+  });
+
   it("takes a drawing on a host's own kind that declares itself drawn", () => {
     const kinds = { ...BUILT_IN_FIELD_KINDS, witnessInitials: { label: "Witness initials", size: { width: 64, height: 36 }, drawn: true } } satisfies FieldKinds;
 
@@ -890,39 +910,71 @@ describe("what a party completes before they sign", () => {
 
 describe("the values a record shows", () => {
   const signer = (id: string, kind: string, required = true): SignerFieldDescriptor => ({ id, role: "client", kind, required, options: [] });
-  const fields = [signer("sig", "signature", false), signer("dated", "dateSigned", false), signer("name", "name")];
-  const date: FieldValue = { kind: "text", text: "14 November 2026" };
+  const fields = [signer("a", "signature", false), signer("b", "initials", false), signer("dated", "dateSigned", false), signer("name", "name")];
+  const name: FieldValue = { kind: "text", text: "Ada Lovelace" };
 
-  it("keep a date signed only beside an answered signature of its party", () => {
-    const signed = { sig: { kind: "text", text: "Ada" }, dated: date, name: { kind: "text", text: "Ada" } } satisfies Record<string, FieldValue>;
-    const blanked = { ...signed, sig: { kind: "text", text: "  " } } satisfies Record<string, FieldValue>;
+  it("dates a party by the moment its signature carries, never by a value of its own", () => {
+    const record = valuesOnRecord(
+      fields,
+      { a: { kind: "text", text: "Ada", signedAt: "2026-11-14T09:30:00Z" }, dated: { kind: "text", text: "1 January 1999" }, name },
+      BUILT_IN_FIELD_KINDS,
+    );
 
-    expect(valuesOnRecord(fields, signed, BUILT_IN_FIELD_KINDS)).toEqual(signed);
-    expect(valuesOnRecord(fields, blanked, BUILT_IN_FIELD_KINDS)).toEqual({ sig: blanked.sig, name: blanked.name });
+    expect(record["dated"]).toEqual({ kind: "text", text: "14 November 2026" });
+    expect(record["name"]).toEqual(name);
+  });
+
+  it("shows no date while no signature of the party answers — blank, or none at all", () => {
+    expect(valuesOnRecord(fields, { a: { kind: "text", text: "  ", signedAt: "2026-11-14T09:30:00Z" } }, BUILT_IN_FIELD_KINDS)).not.toHaveProperty("dated");
+    expect(valuesOnRecord(fields, { name }, BUILT_IN_FIELD_KINDS)).toEqual({ name });
+  });
+
+  it("takes the latest signing of the party, as a signer finishing later moves the date", () => {
+    const kinds = { ...BUILT_IN_FIELD_KINDS, initials: { ...BUILT_IN_FIELD_KINDS.initials, control: "signatureLine" } } satisfies FieldKinds;
+    const record = valuesOnRecord(
+      fields,
+      { a: { kind: "text", text: "Ada", signedAt: "2026-11-14T09:30:00Z" }, b: { kind: "text", text: "AL", signedAt: "2026-11-16T08:00:00Z" } },
+      kinds,
+    );
+
+    expect(record["dated"]).toEqual({ kind: "text", text: "16 November 2026" });
+  });
+
+  it("formats the moment as the host asks, and ignores one that is no moment", () => {
+    const signedAt = "2026-11-14T09:30:00Z";
+    expect(valuesOnRecord(fields, { a: { kind: "text", text: "Ada", signedAt } }, BUILT_IN_FIELD_KINDS, (at) => at.slice(0, 10))["dated"]).toEqual({
+      kind: "text",
+      text: "2026-11-14",
+    });
+    expect(valuesOnRecord(fields, { a: { kind: "text", text: "Ada", signedAt: "soon" } }, BUILT_IN_FIELD_KINDS)).not.toHaveProperty("dated");
   });
 });
 
 describe("a date signed, as Field shows it", () => {
   const signerField = (nodeId: string, kind: string) => ({ type: "field", attrs: { nodeId, kind, fill: "signer", role: "client", required: false } });
-  const dateShown = (values: Record<string, FieldValue>) => {
+  const dateShown = (values: Record<string, FieldValue>, formatSignedDate?: (signedAt: string) => string) => {
     const editor = new ServerEditor({
-      extensions: [StarterKit, Field.configure({ values })],
+      extensions: [StarterKit, Field.configure({ values, ...(formatSignedDate ? { formatSignedDate } : {}) })],
       content: { type: "doc", content: [{ type: "paragraph", content: [signerField("a", "signature"), signerField("b", "signature"), signerField("d", "dateSigned")] }] },
     });
     const at = { box: { x: 0, y: 0, width: 110, height: 24 }, baselineY: 20, theme: editor.getResolvedTheme() };
     return fieldDrawingAt(editor, 3, at)?.value;
   };
-  const date: FieldValue = { kind: "text", text: "14 November 2026" };
+  const signed = { kind: "text", text: "Ada", signedAt: "2026-11-14T09:30:00Z" } satisfies FieldValue;
 
-  it("shows beside any answered signature of its party, and nowhere else — however the values arrived", () => {
-    expect(dateShown({ a: { kind: "text", text: "Ada" }, b: { kind: "text", text: "  " }, d: date })).toEqual(date);
-    expect(dateShown({ a: { kind: "text", text: "  " }, d: date })).toBeUndefined();
-    expect(dateShown({ d: date })).toBeUndefined();
+  it("shows the date its party signed, beside any answered signature — however the values arrived", () => {
+    expect(dateShown({ a: signed, b: { kind: "text", text: "  " } })).toEqual({ kind: "text", text: "14 November 2026" });
+    expect(dateShown({ a: { kind: "text", text: "  " } })).toBeUndefined();
+    expect(dateShown({ d: { kind: "text", text: "14 November 2026" } })).toBeUndefined();
+  });
+
+  it("in the format Field is given", () => {
+    expect(dateShown({ a: signed }, (at) => `on ${at.slice(0, 10)}`)).toEqual({ kind: "text", text: "on 2026-11-14" });
   });
 });
 
 describe("a date signed, as Field lays it out", () => {
-  const date: FieldValue = { kind: "text", text: "14 November 2026" };
+  const signed = { kind: "text", text: "Ada", signedAt: "2026-11-14T09:30:00Z" } satisfies FieldValue;
   const signer = (nodeId: string, kind: string, width: number) => ({ type: "field", attrs: { nodeId, kind, fill: "signer", role: "client", width, height: 24 } });
   const dateWidth = (editor: ReturnType<typeof createTestEditor>) => {
     editor.ensureFullLayout();
@@ -932,7 +984,7 @@ describe("a date signed, as Field lays it out", () => {
 
   it("keeps its own width from the first layout while it shows no date", () => {
     const editor = createTestEditor({
-      extensions: [StarterKit, Field.configure({ values: { d: date } })],
+      extensions: [StarterKit, Field.configure({ values: { s: { kind: "text", text: "  ", signedAt: "2026-11-14T09:30:00Z" } } })],
       content: { type: "doc", content: [{ type: "paragraph", content: [signer("s", "signature", 180), signer("d", "dateSigned", 110)] }] },
     });
 
@@ -942,7 +994,7 @@ describe("a date signed, as Field lays it out", () => {
 
   it("is measured again when the signature it stands beside goes, though it lies in another paragraph", () => {
     const editor = createTestEditor({
-      extensions: [StarterKit, Field.configure({ values: { s: { kind: "text", text: "Ada" }, d: date } })],
+      extensions: [StarterKit, Field.configure({ values: { s: signed } })],
       content: {
         type: "doc",
         content: [

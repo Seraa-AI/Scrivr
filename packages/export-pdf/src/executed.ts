@@ -17,8 +17,8 @@ import {
   type SignerFieldDescriptor,
 } from "@scrivr/core";
 import { PDFDocument } from "pdf-lib";
-import { embedImage } from "./embedImage";
-import { createDefaultImageResolver } from "./fetchImage";
+import { embedImage, resolveOnce } from "./embedImage";
+import { createDefaultImageResolver, type ImageResolver } from "./fetchImage";
 import { exportToPdf, type PdfExportOptions } from "./index";
 
 export interface ExecutedPdfOptions extends PdfExportOptions {
@@ -34,7 +34,7 @@ export interface ExecutedPdfOptions extends PdfExportOptions {
 export type ExecutedPdfRefusal =
   /** The stored snapshot no longer matches its hash: it is not what was agreed. */
   | { reason: "snapshot-altered" }
-  /** Required fields nobody has answered — an executed record would show them blank. */
+  /** Required fields the record would print blank: unanswered, or a drawing the PDF cannot embed. */
   | { reason: "unanswered-fields"; missing: SignerFieldDescriptor[] };
 
 export type ExecutedPdfResult =
@@ -64,38 +64,38 @@ export async function exportExecutedPdf(
     return { ok: false, refusal: { reason: "snapshot-altered" } };
   }
   const { editorOptions, ...pdfOptions } = options;
-  // Extensions are one by name, so a Field renamed is another extension.
+  // Matched by name, as the extension manager identifies extensions: a Field under another name is not Field.
   if (!flattenExtensions(editorOptions.extensions ?? []).some((extension) => extension.name === Field.name)) {
     throw new Error("exportExecutedPdf needs Field among editorOptions.extensions: only Field reads a field or holds its value");
   }
   const editor = new Editor({ ...editorOptions, content: documentJson(snapshot.content), sealed: true });
   try {
+    // One resolver, fetching each drawing once, for the check below and the print alike.
+    const resolveImage = resolveOnce(pdfOptions.resolveImage ?? createDefaultImageResolver(pdfOptions.onImageRefused));
+    const scratch = await PDFDocument.create();
     for (const [id, value] of Object.entries(values)) {
+      // A drawing the PDF cannot embed is no value: the record would print it blank, and it dates no one.
+      if (value.kind === "image" && !(await embedsAsDrawing(scratch, resolveImage, value.src))) continue;
       // Field is present, so only another plugin filtering the change refuses a value.
       if (!setFieldValue(editor, id, value)) throw new Error(`exportExecutedPdf could not hold the value of field "${id}": a plugin refused it`);
     }
     const kinds = fieldKindsOf(editor);
     const fields = listSignerFields(editor.getState().doc);
-    // Field prints by this same rule: a date signed shows only beside its party's signature.
+    // What Field prints: the values held, each date signed derived from its party's signature.
     const onRecord = valuesOnRecord(fields, fieldValues(editor.getState()), kinds);
-    // A drawing counts once it embeds as this PDF will embed it: a record never shows a blank signature.
-    const resolveImage = pdfOptions.resolveImage ?? createDefaultImageResolver(pdfOptions.onImageRefused);
-    const scratch = await PDFDocument.create();
-    const prints = async (value: FieldValue | undefined): Promise<boolean> => {
-      if (value?.kind !== "image") return true;
-      const src = safeDrawingUrl(value.src);
-      return src !== null && (await embedImage(scratch, resolveImage, src)) !== null;
-    };
-    const missing: SignerFieldDescriptor[] = [];
-    for (const f of fields) {
-      if (f.required && !(isFieldAnswered(f, onRecord[f.id], kinds) && (await prints(onRecord[f.id])))) missing.push(f);
-    }
+    const missing = fields.filter((f) => f.required && !isFieldAnswered(f, onRecord[f.id], kinds));
     if (missing.length > 0) return { ok: false, refusal: { reason: "unanswered-fields", missing } };
-    const pdf = await exportToPdf(editor, pdfOptions);
+    const pdf = await exportToPdf(editor, { ...pdfOptions, resolveImage });
     return { ok: true, pdf, artifactHash: await hashArtifact(pdf) };
   } finally {
     editor.destroy();
   }
+}
+
+/** Whether a drawing embeds as this PDF will embed it: through `safeDrawingUrl`, then the PDF's own embedding. */
+async function embedsAsDrawing(scratch: PDFDocument, resolveImage: ImageResolver, src: string): Promise<boolean> {
+  const drawing = safeDrawingUrl(src);
+  return drawing !== null && (await embedImage(scratch, resolveImage, drawing)) !== null;
 }
 
 /** The snapshot's document object: copied, not cast — content is untrusted until parsed. */

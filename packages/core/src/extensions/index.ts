@@ -27,6 +27,7 @@ export {
   BUILT_IN_FIELD_KINDS,
   FieldChoiceSchema,
   checkboxTick,
+  defaultSignedDate,
   fieldIconStrokes,
   fieldInk,
   fieldRoleColor,

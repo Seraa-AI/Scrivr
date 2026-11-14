@@ -22,16 +22,17 @@ export interface FieldKindSpec {
   control?: FieldControl;
   /**
    * Completed by drawing, as initials are: it takes a drawn image and keeps
-   * its `size` on the baseline, as a picture does. A `"signatureLine"`
-   * control is always drawn; a checkbox never is.
+   * its `size` on the baseline, as a picture does. Read on a `"text"`
+   * control; a `"signatureLine"` is always drawn, any other control never.
    */
   drawn?: boolean;
-  /** The word on its badge — what a signer does: "Initial". Else "Draw" for a drawn kind, or its control's. */
+  /** The word on its badge — what a signer does: "Initial". Else its control's ("Sign", "Fill"…), or "Draw" for a drawn text control. */
   verb?: string;
   /**
-   * Dated by the host, through `onFieldRequest`, the moment its party's
-   * signature is given — never pressed, never taken from Word, never holding
-   * a signature back. A seal refuses a party with one and nothing to sign.
+   * Shows when its party signed — the latest `signedAt` among their answered
+   * signatures — and is never a value of its own: never pressed, never taken
+   * from Word, never holding a signature back. A seal refuses a party with a
+   * required one and no required signature.
    */
   datedWhenSigned?: boolean;
 }
@@ -64,10 +65,22 @@ export type FieldKind = BuiltInFieldKind | (string & {});
  * choice.
  */
 export type FieldValue =
-  | { kind: "text"; text: string }
+  | { kind: "text"; text: string; signedAt?: string }
   | { kind: "choice"; id: string }
-  | { kind: "image"; src: string }
+  | { kind: "image"; src: string; signedAt?: string }
   | { kind: "checkbox"; checked: boolean };
+
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+/**
+ * A moment of signing as a date signed shows it unless `Field` is given
+ * `formatSignedDate`: the UTC day, "14 November 2026" — fixed, so a record
+ * reads the same wherever it is printed.
+ */
+export function defaultSignedDate(signedAt: string): string {
+  const at = new Date(signedAt);
+  return `${at.getUTCDate()} ${MONTHS[at.getUTCMonth()]} ${at.getUTCFullYear()}`;
+}
 
 /** One choice a dropdown offers: `id` is what is stored and exported, `label` what a person reads. */
 export const FieldChoiceSchema = z.object({ id: z.string(), label: z.string() });
@@ -101,7 +114,7 @@ export function valueText(value: FieldValue | undefined, choices: readonly Field
 }
 
 export interface FieldOptions {
-  /** Kinds added to — or replacing — the built-ins, by name. */
+  /** Kinds added to the built-ins, by name; one under a built-in name refines it (`resolveKinds`). */
   kinds: Record<string, FieldKindSpec>;
   /**
    * Completed values by field id that the editor opens with; `setFieldValue`
@@ -113,6 +126,12 @@ export interface FieldOptions {
    * seal holds.
    */
   values: Record<string, FieldValue>;
+  /**
+   * How a date signed shows the moment its party signed (`signedAt`, an ISO
+   * timestamp): their time zone, your date format. `defaultSignedDate` when
+   * omitted.
+   */
+  formatSignedDate?: (signedAt: string) => string;
   /** A colour per role, by role name. A role left out takes one from Scrivr's palette. */
   roleColors?: Readonly<Record<string, string>>;
   /**
@@ -178,7 +197,7 @@ const SHOWN_BY: Record<FieldControl, ReadonlySet<FieldValue["kind"]>> = {
 export function shownValue(kinds: FieldKinds, kind: string, value: FieldValue | undefined): FieldValue | undefined {
   if (value?.kind === "image") {
     const src = isDrawnKind(kinds, kind) ? safeDrawingUrl(value.src) : null;
-    return src === null ? undefined : { kind: "image", src };
+    return src === null ? undefined : { ...value, src };
   }
   return value && SHOWN_BY[controlOfKind(kinds, kind)].has(value.kind) ? value : undefined;
 }
@@ -247,10 +266,14 @@ export function fieldRoleColor(role: string | null | undefined, overrides?: Read
   return ROLE_COLORS[hash % ROLE_COLORS.length]!;
 }
 
-/** Whether a field of `kind` is completed by drawing: a signature line, or a kind that declares `drawn`. */
+/**
+ * Whether a field of `kind` is completed by drawing: a signature line, or a
+ * text control that declares `drawn`. A checkbox, a date or a dropdown holds
+ * a tick, a date or a choice, whatever it declares.
+ */
 export function isDrawnKind(kinds: FieldKinds, kind: string): boolean {
   const control = controlOfKind(kinds, kind);
-  return control !== "checkbox" && (control === "signatureLine" || kinds[kind]?.drawn === true);
+  return control === "signatureLine" || (control === "text" && kinds[kind]?.drawn === true);
 }
 
 /**
@@ -266,7 +289,11 @@ export function setsLike(kinds: FieldKinds, kind: string): "text" | "picture" | 
 
 const VERBS: Record<FieldControl, string> = { signatureLine: "Sign", date: "Date", dropdown: "Choose", checkbox: "Tick", text: "Fill" };
 
-/** What a signer does to complete a field — the word on its badge: what its kind declares, else "Draw" for a drawn one, else its control's. */
+/**
+ * What a signer does to complete a field — the word on its badge: what its
+ * kind declares, else its control's ("Sign", "Choose"…), or "Draw" for a
+ * drawn text control.
+ */
 export function fieldVerb(kinds: FieldKinds, kind: string): string {
   const declared = kinds[kind]?.verb;
   if (declared) return declared;

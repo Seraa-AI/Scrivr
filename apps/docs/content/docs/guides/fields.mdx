@@ -112,7 +112,7 @@ const editor = new Editor({
 editor.commands.insertField({ kind: "stamp", fill: "signer", role: "client" });
 ```
 
-A kind you register behaves as the control it declares everywhere at once: `agree` above draws as a checkbox, can be ticked by an author, prints as one in the PDF, and exports to Word as Word's checkbox. A kind whose control is `"text"` exports as a Word text control and still comes back as your kind when the document is imported. A kind declares `drawn: true` when it is completed by drawing, as `stamp` above and the built-in initials are: it takes an image, keeps its `size` on the baseline, and its badge says `verb` ("Draw" when it gives none). Registering a name that is already built in refines the built-in: what you give replaces what it declares, and the rest stays — relabel `initials` and they are still drawn.
+A kind you register behaves as the control it declares everywhere at once: `agree` above draws as a checkbox, can be ticked by an author, prints as one in the PDF, and exports to Word as Word's checkbox. A kind whose control is `"text"` exports as a Word text control and still comes back as your kind when the document is imported. A text kind declares `drawn: true` when it is completed by drawing, as `stamp` above and the built-in initials are: it takes an image, keeps its `size` on the baseline, and its badge says `verb` ("Draw" when it gives none). Registering a name that is already built in refines the built-in: what you give replaces what it declares, and the rest stays — relabel `initials` and they are still drawn; give it another control and it takes nothing that belonged to the old one.
 
 <Callout type="info">
 A field sits in its line like a word. A text field is as tall as the text around it, and as wide as the space its author left; a dropdown is as wide as its widest choice. A drawn field — a signature, or a kind that declares `drawn`, as initials do — keeps the size it was inserted at, from the kind's `size` or the `width` / `height` you pass. Once a field holds a value it fits that value, and the line closes up around it — on screen while signing and in the executed PDF alike.
@@ -213,12 +213,13 @@ Values live in `Field`, beside the document and never in it, so a sealed documen
     throw new Error("Complete every required field first");
   }
   ```
-- A date signed shows only beside its party's answered signature — on screen, in print and in the executed record, however the values arrived. A date belongs to the signature it was given for: a new signature value clears its party's date and, once it answers, asks for the date again — a date answered for an earlier signature is not kept. Declining (`null`) leaves both as they were. When your server records a new signature, drop the date it holds for that party the same way. `valuesOnRecord(fields, values, kinds)` gives the values as the record shows them, for your server to keep.
-- A `dateSigned` field is never pressed. The moment its party's signature is given (initials on the way do not count), `onFieldRequest` is called for it with no press: answer with the date by your own clock and in your own format, and record it with the signature.
+- A date signed is never a value, and never asked for. A signature carries the moment it was given — answer it with `signedAt`, an ISO timestamp from your own record of the signing — and its party's date signed shows that moment: the latest among their answered signatures, as DocuSign's Date Signed shows the signer's. Re-sign later and it moves; blank the signature and it goes; initials do not date anyone. Format it with `Field.configure({ formatSignedDate })` (your time zone and date format; `defaultSignedDate` otherwise). `valuesOnRecord(fields, values, kinds, formatSignedDate)` gives the values as the record shows them, the dates derived, for your server to read.
 
   ```ts
-  onFieldRequest: async (field) =>
-    field.kind === "dateSigned" ? { kind: "text", text: formatDate(await signedAt(field.role)) } : openSignaturePad(field),
+  onFieldRequest: async (field) => {
+    const { image, signedAt } = await openSignaturePad(field); // yours: the drawing, and when it was given
+    return { kind: "image", src: image, signedAt };
+  },
   ```
 - Text the author filled is the document's own, but under the pointer it is framed with its prompt ("Client name"), as Word frames a content control, so a signer can check the words filled in for this document.
 - Tab and Shift+Tab move between the viewer's own fields; past the last or first, focus goes on to the page's next control. Enter opens the focused field; pressing elsewhere on the page lets it go.

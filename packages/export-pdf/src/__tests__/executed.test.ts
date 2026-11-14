@@ -3,7 +3,7 @@
  * The executed document: the sealed snapshot with every party's values printed
  * in their fields — the signed record — and the hash of the bytes produced.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createCanvas } from "@napi-rs/canvas";
 import {
   BUILT_IN_FIELD_KINDS,
@@ -21,6 +21,10 @@ import {
 import { exportExecutedPdf, type ExecutedPdfOptions, type ExecutedPdfRefusal, type ExecutedPdfResult } from "../index";
 import { Plugin } from "@scrivr/core/pm";
 import { recordDrawOps } from "./opLog";
+import { createDefaultImageResolver } from "../fetchImage";
+
+/** A real PNG, inline — what a signature pad gives. */
+const samplePng = async (): Promise<string> => `data:image/png;base64,${createCanvas(40, 20).toBuffer("image/png").toString("base64")}`;
 
 const signer = (nodeId: string, kind: string, role: string, required = true) => ({
   type: "field",
@@ -80,7 +84,7 @@ describe("exportExecutedPdf", () => {
     expect(!result.ok && result.refusal.reason === "unanswered-fields" && result.refusal.missing.map((f) => f.id)).toEqual(["sig"]);
   });
 
-  it("needs Field among the extensions, and says so before reading the snapshot — even with no values to set", async () => {
+  it("needs Field among the extensions, and says so before building an editor — even with no values to set", async () => {
     await expect(exportExecutedPdf(await sealed(), {}, { editorOptions: { extensions: [StarterKit], textMeasurer: measurer() } })).rejects.toThrow(
       /needs Field among editorOptions.extensions/,
     );
@@ -116,10 +120,27 @@ describe("exportExecutedPdf", () => {
       )
         .filter((op) => op.op === "text")
         .map((op) => op["value"]);
-    const date: FieldValue = { kind: "text", text: "14 November 2026" };
+    const signedAt = "2026-11-14T09:30:00Z";
 
-    expect(await texts({ sig: { kind: "text", text: "Ada Lovelace" }, dated: date })).toContain("14 November 2026");
-    expect(await texts({ sig: { kind: "text", text: "  " }, dated: date })).not.toContain("14 November 2026");
+    expect(await texts({ sig: { kind: "text", text: "Ada Lovelace", signedAt } })).toContain("14 November 2026");
+    expect(await texts({ sig: { kind: "text", text: "  ", signedAt } })).not.toContain("14 November 2026");
+    // A drawing the PDF cannot embed is no signature: its date does not print beside a blank line.
+    expect(await texts({ sig: { kind: "image", src: "data:image/png;base64,iVBORw0KGgoAAAAAAAA", signedAt } })).not.toContain("14 November 2026");
+  });
+
+  it("refuses a drawing whose bytes cannot even be decoded, rather than fail", async () => {
+    const result = await exportExecutedPdf(await sealed(), { sig: { kind: "image", src: "data:image/png;base64,iVBORw0KGgoA1" } }, options);
+
+    expect(!result.ok && result.refusal.reason === "unanswered-fields" && result.refusal.missing.map((f) => f.id)).toEqual(["sig"]);
+  });
+
+  it("resolves each drawing once, for the check and the print alike", async () => {
+    const png = await samplePng();
+    const resolveImage = vi.fn(createDefaultImageResolver());
+    const result = await exportExecutedPdf(await sealed(), { sig: { kind: "image", src: png } }, { ...options, resolveImage });
+
+    expect(result.ok).toBe(true);
+    expect(resolveImage).toHaveBeenCalledTimes(1);
   });
 
   it("says plainly when the editor it was given cannot hold a value", async () => {

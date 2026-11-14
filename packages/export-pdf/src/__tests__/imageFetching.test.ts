@@ -108,6 +108,16 @@ describe("the URLs an export will fetch", () => {
     expect(resolved?.format).toBe("png");
     expect(spy).not.toHaveBeenCalled();
   });
+
+  it("reads a data URL's header in any case, as a URL's scheme and media type are", async () => {
+    const base64 = btoa(String.fromCharCode(...PNG));
+
+    expect((await createDefaultImageResolver()(`DATA:IMAGE/PNG;BASE64,${base64}`))?.format).toBe("png");
+  });
+
+  it("refuses a data URL whose bytes cannot be decoded, rather than throw", async () => {
+    expect(await createDefaultImageResolver()("data:image/png;base64,iVBORw0KGgoA1")).toBeNull();
+  });
 });
 
 /**

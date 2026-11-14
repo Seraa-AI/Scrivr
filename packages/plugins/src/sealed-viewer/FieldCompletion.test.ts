@@ -420,87 +420,47 @@ describe("FieldCompletion — the date a party signed", () => {
     editor.mountView();
     return editor;
   };
-  const answer = vi.fn(async (field: SignerFieldDescriptor): Promise<FieldValue | null> => (field.kind === "dateSigned" ? today : signature));
+  const signedAt = "2026-11-14T09:30:00Z";
+  const dateAt = (e: LaidOutViewer) =>
+    fieldDrawingAt(e, 3, { box: { x: 0, y: 0, width: 110, height: 24 }, baselineY: 20, theme: e.getResolvedTheme() })?.value;
 
-  it("is dated through the host the moment its party signs — never the signer's to fill", async () => {
-    answer.mockClear();
-    const e = signingWithDates(answer);
+  it("shows when its party signed, carried by the signature — never asked for, never the signer's to fill", async () => {
+    const request = vi.fn(async (_field: SignerFieldDescriptor): Promise<FieldValue | null> => ({ ...signature, signedAt }));
+    const e = signingWithDates(request);
 
     expect(requestField(e, signed.id)).toBe(false);
     requestField(e, signHere.id);
     await flush();
+
+    expect(request.mock.calls.map(([field]) => field.id)).toEqual([signHere.id]);
+    expect(fieldValues(e.getState())).toEqual({ [signHere.id]: { ...signature, signedAt } });
+    expect(dateAt(e)).toEqual(today);
+  });
+
+  it("follows its signature: re-signed later, it moves; blanked, it goes", async () => {
+    let answer: FieldValue = { ...signature, signedAt };
+    const e = signingWithDates(async () => answer);
+    requestField(e, signHere.id);
     await flush();
 
-    expect(answer.mock.calls.map(([field]) => field.id)).toEqual([signHere.id, signed.id]);
-    expect(fieldValues(e.getState())).toEqual({ [signHere.id]: signature, [signed.id]: today });
+    answer = { ...signature, signedAt: "2026-11-16T08:00:00Z" };
+    requestField(e, signHere.id);
+    await flush();
+    expect(dateAt(e)).toEqual({ kind: "text", text: "16 November 2026" });
+
+    answer = { kind: "text", text: "  ", signedAt: "2026-11-17T08:00:00Z" };
+    requestField(e, signHere.id);
+    await flush();
+    expect(dateAt(e)).toBeUndefined();
   });
 
   it("is not dated by initials given on the way to signing", async () => {
-    answer.mockClear();
-    const e = signingWithDates(answer);
+    const e = signingWithDates(async () => ({ kind: "text", text: "AL", signedAt }));
 
     requestField(e, initials.id);
     await flush();
-    await flush();
 
-    expect(answer.mock.calls.map(([field]) => field.id)).toEqual([initials.id]);
-  });
-
-  it("is not dated by a signature that answers nothing — a name of blanks", async () => {
-    const request = vi.fn(async (field: SignerFieldDescriptor): Promise<FieldValue | null> =>
-      field.kind === "dateSigned" ? today : { kind: "text", text: "   " },
-    );
-    const e = signingWithDates(request);
-
-    requestField(e, signHere.id);
-    await flush();
-    await flush();
-
-    expect(request.mock.calls.map(([field]) => field.id)).toEqual([signHere.id]);
-  });
-
-  it("belongs to the signature it was given for: a new signature clears it, and asks again", async () => {
-    let answer: FieldValue = signature;
-    let dateAnswer: FieldValue | null = today;
-    const request = vi.fn(async (field: SignerFieldDescriptor): Promise<FieldValue | null> => (field.kind === "dateSigned" ? dateAnswer : answer));
-    const e = signingWithDates(request);
-    requestField(e, signHere.id);
-    await flush();
-    await flush();
-    expect(fieldValues(e.getState())[signed.id]).toEqual(today);
-
-    // Blanked, then signed again — and the host declines the new date: the old one does not come back.
-    answer = { kind: "text", text: "  " };
-    requestField(e, signHere.id);
-    await flush();
-    answer = signature;
-    dateAnswer = null;
-    requestField(e, signHere.id);
-    await flush();
-    await flush();
-
-    expect(fieldValues(e.getState())[signed.id]).toBeUndefined();
-  });
-
-  it("keeps no date answered for an earlier signature, and asks again for the current one", async () => {
-    const dates: Array<(value: FieldValue) => void> = [];
-    const request = vi.fn((field: SignerFieldDescriptor) =>
-      field.kind === "dateSigned" ? new Promise<FieldValue | null>((resolve) => dates.push(resolve)) : Promise.resolve(signature),
-    );
-    const e = signingWithDates(request);
-
-    requestField(e, signHere.id);
-    await flush();
-    requestField(e, signHere.id); // signed again while the first date is still being given
-    await flush();
-    dates[0]!({ kind: "text", text: "Monday" });
-    await flush();
-    await flush();
-    expect(fieldValues(e.getState())[signed.id]).toBeUndefined();
-
-    dates[1]!({ kind: "text", text: "Wednesday" });
-    await flush();
-    expect(fieldValues(e.getState())[signed.id]).toEqual({ kind: "text", text: "Wednesday" });
+    expect(dateAt(e)).toBeUndefined();
   });
 
   it("is passed over by Tab, and never lights up under the pointer as if it could be pressed", () => {

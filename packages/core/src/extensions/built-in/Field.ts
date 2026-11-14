@@ -14,6 +14,7 @@ import {
   BUILT_IN_FIELD_KINDS,
   checkboxTick,
   controlOf,
+  defaultSignedDate,
   fieldCaption,
   fieldIconStrokes,
   fieldInk,
@@ -32,6 +33,7 @@ import {
   type FieldControl,
   type FieldDrawing,
   type FieldKind,
+  type FieldKindSpec,
   type FieldKinds,
   type FieldOptions,
   type FieldValue,
@@ -139,18 +141,32 @@ export function unansweredBeforeSigning(
 }
 
 /**
- * The values as a signed record shows them: a date signed stands only beside
- * an answered signature of its party. `Field` shows values by this rule on
- * screen and in print; a host's server can keep values by it too.
+ * The values as a signed record shows them. A date signed is never a value of
+ * its own: it shows the moment its party signed — the latest `signedAt` among
+ * their answered signatures — through `formatSignedDate`, and nothing while
+ * none answers. `Field` shows values by this on screen and in print; a host's
+ * server reads its record by it too.
  */
 export function valuesOnRecord(
   fields: readonly SignerFieldDescriptor[],
   values: Readonly<Record<string, FieldValue>>,
   kinds: FieldKinds,
+  formatSignedDate: (signedAt: string) => string = defaultSignedDate,
 ): Record<string, FieldValue> {
-  const signedRoles = new Set(fields.filter((f) => isSigningKind(kinds, f.kind) && isFieldAnswered(f, values[f.id], kinds)).map((f) => f.role));
-  const datesWithoutSignature = new Set(fields.filter((f) => isDatedWhenSigned(kinds, f.kind) && !signedRoles.has(f.role)).map((f) => f.id));
-  return Object.fromEntries(Object.entries(values).filter(([id]) => !datesWithoutSignature.has(id)));
+  const signedAt = new Map<string, number>();
+  for (const f of fields) {
+    const value = values[f.id];
+    if (!isSigningKind(kinds, f.kind) || !isFieldAnswered(f, value, kinds)) continue;
+    const at = value && "signedAt" in value && value.signedAt !== undefined ? Date.parse(value.signedAt) : Number.NaN;
+    if (!Number.isNaN(at)) signedAt.set(f.role, Math.max(at, signedAt.get(f.role) ?? at));
+  }
+  const dated = fields.filter((f) => isDatedWhenSigned(kinds, f.kind));
+  const record = Object.fromEntries(Object.entries(values).filter(([id]) => !dated.some((f) => f.id === id)));
+  for (const f of dated) {
+    const at = signedAt.get(f.role);
+    if (at !== undefined) record[f.id] = { kind: "text", text: formatSignedDate(new Date(at).toISOString()) };
+  }
+  return record;
 }
 
 /**
@@ -272,16 +288,23 @@ const fieldBoxPlugin = new Plugin({
   },
 });
 
-/** The built-in kinds, with the host's added over them. */
 /**
  * The built-in kinds and the host's own. A host's kind under a built-in name
  * refines it: what it gives replaces what the built-in declares, and the rest
- * — a control, `drawn` — stays, so relabelling initials keeps them drawn.
+ * stays — relabel initials and they are still drawn. One that changes the
+ * control takes nothing that belonged to the old one: not `drawn`, not `verb`.
  */
 const resolveKinds = (options: FieldOptions): FieldKinds => {
   const builtIn: FieldKinds = BUILT_IN_FIELD_KINDS;
-  return { ...builtIn, ...Object.fromEntries(Object.entries(options.kinds).map(([name, spec]) => [name, { ...builtIn[name], ...spec }])) };
+  return { ...builtIn, ...Object.fromEntries(Object.entries(options.kinds).map(([name, spec]) => [name, refine(builtIn[name], spec)])) };
 };
+
+function refine(base: FieldKindSpec | undefined, spec: FieldKindSpec): FieldKindSpec {
+  if (!base) return spec;
+  if (spec.control === undefined || spec.control === base.control) return { ...base, ...spec };
+  const { drawn: _drawn, verb: _verb, ...kept } = base;
+  return { ...kept, ...spec };
+}
 
 type FieldValues = Readonly<Record<string, FieldValue>>;
 
@@ -339,23 +362,26 @@ const setupByEditor = new WeakMap<IBaseEditor, FieldSetup>();
 export const fieldKindsOf = (editor: IBaseEditor): FieldKinds => setupByEditor.get(editor)?.kinds ?? BUILT_IN_FIELD_KINDS;
 
 /** What each held set of values shows in a document, read again only when either changes. */
-const shownCache = new WeakMap<FieldValues, { doc: PmNode; shown: FieldValues }>();
+const recordCache = new WeakMap<FieldValues, { doc: PmNode; record: FieldValues }>();
 
 /** The values `state`'s fields show: as a record shows them (`valuesOnRecord`). */
-function valuesOnRecordIn(kinds: FieldKinds, state: EditorState): FieldValues {
+function valuesOnRecordIn(setup: FieldSetup, state: EditorState): FieldValues {
   const values = fieldValues(state);
-  const cached = shownCache.get(values);
-  if (cached?.doc === state.doc) return cached.shown;
-  const shown = valuesOnRecord(listSignerFields(state.doc), values, kinds);
-  shownCache.set(values, { doc: state.doc, shown });
-  return shown;
+  const cached = recordCache.get(values);
+  if (cached?.doc === state.doc) return cached.record;
+  const record = valuesOnRecord(listSignerFields(state.doc), values, setup.kinds, setup.options.formatSignedDate);
+  recordCache.set(values, { doc: state.doc, record });
+  return record;
 }
 
-/** Whether two sets of shown values are the same values, field by field. */
+/** Whether two sets of shown values are the same, field by field — a derived date by its words. */
 function sameValues(a: FieldValues, b: FieldValues): boolean {
   const ids = Object.keys(a);
-  return ids.length === Object.keys(b).length && ids.every((id) => a[id] === b[id]);
+  return ids.length === Object.keys(b).length && ids.every((id) => sameValue(a[id], b[id]));
 }
+
+const sameValue = (a: FieldValue | undefined, b: FieldValue | undefined): boolean =>
+  a === b || (a?.kind === "text" && b?.kind === "text" && a.text === b.text && a.signedAt === b.signedAt);
 
 /**
  * The values a contribution resolved in `context` lays out and prints with.
@@ -365,7 +391,7 @@ function sameValues(a: FieldValues, b: FieldValues): boolean {
  */
 const valuesIn = (context: object, options: FieldOptions): FieldValues => {
   const setup = setupByContext.get(context);
-  return setup ? valuesOnRecordIn(setup.kinds, setup.editor.getState()) : options.values;
+  return setup ? valuesOnRecordIn(setup, setup.editor.getState()) : options.values;
 };
 
 /**
@@ -380,7 +406,7 @@ export function fieldDrawingAt(
   const setup = setupByEditor.get(editor);
   const node = editor.getState().doc.nodeAt(pos);
   if (!setup || node?.type.name !== "field") return null;
-  return drawingOf(setup.kinds, setup.options, valuesOnRecordIn(setup.kinds, editor.getState()), node, at);
+  return drawingOf(setup.kinds, setup.options, valuesOnRecordIn(setup, editor.getState()), node, at);
 }
 
 /** A field as a host's own drawing is handed it. */
@@ -870,13 +896,14 @@ export const Field = Extension.create<FieldOptions>({
   onViewReady(editor: IEditor) {
     // A field fits the value it shows, so a change in what any field shows is
     // measured again — a new value, or a date whose signature came or went
-    // elsewhere in the document. The first layout ran before Field could
-    // read its values as a record shows them, so it is measured once more.
-    const kinds = fieldKindsOf(editor);
-    let shown = valuesOnRecordIn(kinds, editor.getState());
-    editor.invalidateLayout({ remeasure: true });
+    // elsewhere in the document.
+    const setup = setupByEditor.get(editor);
+    let shown = setup ? valuesOnRecordIn(setup, editor.getState()) : {};
+    // The first layout runs while the editor is built, before Field is set up,
+    // so it measured the configured values; a date they sign is measured now.
+    if (!sameValues(shown, this.options.values)) editor.invalidateLayout({ remeasure: true });
     const offValues = editor.on("update", () => {
-      const next = valuesOnRecordIn(kinds, editor.getState());
+      const next = setup ? valuesOnRecordIn(setup, editor.getState()) : {};
       if (sameValues(next, shown)) return;
       shown = next;
       editor.invalidateLayout({ remeasure: true });

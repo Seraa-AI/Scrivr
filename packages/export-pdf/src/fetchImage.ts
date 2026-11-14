@@ -38,10 +38,16 @@ const formatOf = (bytes: Uint8Array): "png" | "jpeg" =>
 function decodeDataUrl(src: string): ImageBytes | null {
   const comma = src.indexOf(",");
   if (comma === -1) return null;
-  const header = src.slice(0, comma);
+  // A URL's scheme and media type are case-insensitive.
+  const header = src.slice(0, comma).toLowerCase();
   const body = src.slice(comma + 1);
   if (!header.includes(";base64")) return null;
-  const binary = atob(body);
+  let binary: string;
+  try {
+    binary = atob(body);
+  } catch {
+    return null; // not base64 at all: no image, as an unreadable one is
+  }
   if (binary.length > MAX_BYTES) return null;
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
@@ -114,7 +120,7 @@ export function createDefaultImageResolver(
   onRefused?: (src: string, reason: string) => void,
 ): ImageResolver {
   return async function resolveImage(src: string): Promise<ImageBytes | null> {
-    if (src.startsWith("data:")) return decodeDataUrl(src);
+    if (src.slice(0, 5).toLowerCase() === "data:") return decodeDataUrl(src);
 
     let url: URL;
     try {

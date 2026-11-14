@@ -3,7 +3,6 @@ import { Scrivr, StarterKit, defaultPageConfig, useScrivrEditor } from "@scrivr/
 import {
   DefaultContent,
   Field,
-  type Editor,
   ServerEditor,
   BUILT_IN_FIELD_KINDS,
   fieldKindsOf,
@@ -94,9 +93,6 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
   const content = useMemo(() => JSON.parse(snapshot.content), [snapshot]);
   const mine = snapshot.fields.filter((f) => f.role === role);
 
-  // The options' closure captured the editor of the render that made them — null on first mount, or one
-  // since replaced — so a request reads the editor mounted now.
-  const editorRef = useRef<Editor | null>(null);
   const editor = useScrivrEditor(
     {
       sealed: true,
@@ -119,14 +115,11 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
               if (field.kind === "checkbox") {
                 return resolve({ kind: "checkbox", checked: !(current?.kind === "checkbox" && current.checked) });
               }
-              // Dated as the party signs: a real host takes the date from its own record of the signature.
-              const mounted = editorRef.current;
-              if (mounted && isDatedWhenSigned(fieldKindsOf(mounted), field.kind)) {
-                return resolve({ kind: "text", text: new Date().toLocaleDateString(undefined, { dateStyle: "long" }) });
-              }
               setRequest({ field, current, resolve });
-            }).then((value) => {
+            }).then((answer) => {
               setProblem(null);
+              // The room records when each value was given; a signature's moment dates its party.
+              const value = answer && recordedNow(answer);
               if (value) setValues((all) => ({ ...all, [field.id]: value }));
               return value;
             }),
@@ -153,9 +146,6 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
   );
 
   const pageCount = editor?.layout.pages.length ?? 0;
-  useEffect(() => {
-    editorRef.current = editor;
-  }, [editor]);
   // The kinds this room's Field knows, read as the signing view reads them.
   const kinds = editor ? fieldKindsOf(editor) : BUILT_IN_FIELD_KINDS;
   // The room's values as the record shows them — a date only beside its signature.
@@ -352,6 +342,11 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
       {request && <ValueDialog field={request.field} drawn={isDrawnKind(kinds, request.field.kind)} current={request.current} onAnswer={answer} />}
     </div>
   );
+}
+
+/** A value as the room records it: words and drawings stamped with the moment they were given. */
+function recordedNow(value: FieldValue): FieldValue {
+  return value.kind === "text" || value.kind === "image" ? { ...value, signedAt: new Date().toISOString() } : value;
 }
 
 function describe(value: FieldValue, field: SignerFieldDescriptor): string {
