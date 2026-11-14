@@ -8,6 +8,7 @@ import { ServerEditor } from "../ServerEditor";
 import { Extension } from "../extensions/Extension";
 import { StarterKit } from "../extensions/StarterKit";
 import { Field } from "../extensions/built-in/Field";
+import { BUILT_IN_FIELD_KINDS, type FieldKinds } from "../extensions/built-in/fieldKinds";
 import { createSnapshot, hashArtifact, verifySnapshot } from "./snapshot";
 
 const para = (text: string, marks?: Array<{ type: string; attrs?: Record<string, unknown> }>) => ({
@@ -110,6 +111,19 @@ describe("createSnapshot", () => {
     for (const fields of [[unnamed], [roleless], [signerField("client", true), signerField("client", true)]]) {
       expect(await refused(fields)).toEqual({ ok: false, refusal: { reason: "unidentified-fields", count: 1 } });
     }
+  });
+
+  it("refuses a date signed whose party has nothing to sign, since nobody could ever date it", async () => {
+    const field = (nodeId: string, kind: string) => ({ type: "field", attrs: { nodeId, kind, fill: "signer", role: "client", required: true } });
+    const undatable = docOf([{ type: "paragraph", content: [field("i", "initials"), field("d", "dateSigned")] }]);
+    const dated = docOf([{ type: "paragraph", content: [field("s", "signature"), field("d", "dateSigned")] }]);
+    // A host's own signature kind dates its party's date as the built-in one does.
+    const kinds = { ...BUILT_IN_FIELD_KINDS, witness: { label: "Witness", size: { width: 180, height: 44 }, control: "signatureLine" } } satisfies FieldKinds;
+    const witnessed = docOf([{ type: "paragraph", content: [field("w", "witness"), field("d", "dateSigned")] }]);
+
+    expect(await createSnapshot(undatable, { assignedRoles: ["client"] })).toEqual({ ok: false, refusal: { reason: "dates-without-signature", roles: ["client"] } });
+    expect((await createSnapshot(dated, { assignedRoles: ["client"] })).ok).toBe(true);
+    expect((await createSnapshot(witnessed, { assignedRoles: ["client"], kinds })).ok).toBe(true);
   });
 
   it("runs a host's own checks — before Scrivr's and after them — and refuses with theirs", async () => {

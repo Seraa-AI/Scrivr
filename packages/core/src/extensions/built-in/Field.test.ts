@@ -8,9 +8,9 @@ import { NodeSelection, TextSelection } from "prosemirror-state";
 import { DOMParser, DOMSerializer, type Node as PmNode } from "prosemirror-model";
 import { ServerEditor } from "../../ServerEditor";
 import { StarterKit } from "../StarterKit";
-import { Field, fieldValues, isFieldAnswered, listSignerFields, paintCheckbox, setFieldValue, unansweredBeforeSigning, type SignerFieldDescriptor } from "./Field";
-import { BUILT_IN_FIELD_KINDS, fieldIconStrokes, fieldInk, fieldRoleColor, fieldValueLayout, fieldVerb } from "./fieldKinds";
-import { createTestEditor, measureTextWidth } from "../../test-utils";
+import { Field, fieldDrawingAt, fieldValues, isFieldAnswered, listSignerFields, paintCheckbox, setFieldValue, unansweredBeforeSigning, type SignerFieldDescriptor } from "./Field";
+import { BUILT_IN_FIELD_KINDS, fieldIconStrokes, fieldInk, fieldRoleColor, fieldValueLayout, fieldVerb, type FieldKinds, type FieldValue } from "./fieldKinds";
+import { createMeasurer, createTestEditor, measureTextWidth } from "../../test-utils";
 import { DefaultFontProvider } from "../../fonts/DefaultFontProvider";
 
 const terms = {
@@ -665,10 +665,11 @@ describe("a field's box on the page", () => {
 
   it("is a checkbox about as tall as the text's capitals and ascenders, as a native one sits by its label", () => {
     const { width, font } = laidOutField({ nodeId: "ok", kind: "checkbox", fill: "signer", role: "client", width: 16, height: 16 });
-    const fontPx = Number(/(\d+(?:\.\d+)?)px/.exec(font)?.[1]);
+    // Against the face's own ascent, measured as layout measures it — whatever font the machine has.
+    const { ascent } = createMeasurer().getFontMetrics(font);
 
-    expect(width).toBeGreaterThanOrEqual(fontPx * 0.85);
-    expect(width).toBeLessThanOrEqual(fontPx);
+    expect(width).toBeGreaterThanOrEqual(ascent * 0.9);
+    expect(width).toBeLessThanOrEqual(ascent + 1);
   });
 
   it("keeps a dropdown's choice by its id, and sets the label a person reads", () => {
@@ -823,19 +824,52 @@ describe("what a party completes before they sign", () => {
   it("knows a host's own signature, and its own dated kind, by what they declare", () => {
     const kinds = {
       ...BUILT_IN_FIELD_KINDS,
-      witness: { label: "Witness", size: { width: 180, height: 44 }, control: "signatureLine" as const },
-      stamped: { label: "Stamped on", size: { width: 110, height: 24 }, control: "date" as const, datedWhenSigned: true },
-    };
+      witness: { label: "Witness", size: { width: 180, height: 44 }, control: "signatureLine" },
+      stamped: { label: "Stamped on", size: { width: 110, height: 24 }, control: "date", datedWhenSigned: true },
+    } satisfies FieldKinds;
 
     expect(unansweredBeforeSigning([field("w", "witness"), field("s", "stamped"), name], {}, "client", kinds)).toEqual([name]);
   });
 
   it("counts an unticked box, a choice no longer offered, or blank text as unanswered", () => {
-    expect(isFieldAnswered(agree, { kind: "checkbox", checked: false })).toBe(false);
-    expect(isFieldAnswered(terms, { kind: "choice", id: "net-90" })).toBe(false);
-    expect(isFieldAnswered(name, { kind: "text", text: "  " })).toBe(false);
-    expect(isFieldAnswered(name, undefined)).toBe(false);
-    expect(isFieldAnswered(field("sig", "signature"), { kind: "image", src: "data:image/png;base64,AA==" })).toBe(true);
+    const kinds = BUILT_IN_FIELD_KINDS;
+    expect(isFieldAnswered(agree, { kind: "checkbox", checked: false }, kinds)).toBe(false);
+    expect(isFieldAnswered(terms, { kind: "choice", id: "net-90" }, kinds)).toBe(false);
+    expect(isFieldAnswered(name, { kind: "text", text: "  " }, kinds)).toBe(false);
+    expect(isFieldAnswered(name, undefined, kinds)).toBe(false);
+    expect(isFieldAnswered(field("sig", "signature"), { kind: "image", src: "data:image/png;base64,AA==" }, kinds)).toBe(true);
+  });
+
+  it("counts only a value the field can show — what an executed record would print", () => {
+    const kinds = BUILT_IN_FIELD_KINDS;
+    // A checkbox shows a tick, not words; a drawing must be one the page may draw.
+    expect(isFieldAnswered(agree, { kind: "text", text: "yes" }, kinds)).toBe(false);
+    expect(isFieldAnswered(field("sig", "signature"), { kind: "image", src: "data:image/svg+xml;base64,PHN2Zy8+" }, kinds)).toBe(false);
+    expect(isFieldAnswered(field("sig", "signature"), { kind: "text", text: "Ada Lovelace" }, kinds)).toBe(true);
+  });
+});
+
+describe("a value Field holds", () => {
+  const pageWith = (attrs: Record<string, unknown>, values: Record<string, FieldValue>) => {
+    const editor = new ServerEditor({
+      extensions: [StarterKit, Field.configure({ values })],
+      content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "field", attrs }] }] },
+    });
+    const at = { box: { x: 0, y: 0, width: 16, height: 16 }, baselineY: 16, theme: editor.getResolvedTheme() };
+    return fieldDrawingAt(editor, 1, at);
+  };
+
+  it("is a signer's, never laid over what the author sealed — an author's ticked box stays ticked", () => {
+    const drawing = pageWith({ nodeId: "agreed", kind: "checkbox", fill: "author", checked: true }, { agreed: { kind: "checkbox", checked: false } });
+
+    expect(drawing?.value).toBeUndefined();
+    expect(drawing?.node.attrs["checked"]).toBe(true);
+  });
+
+  it("is one the field can show, or none — no words in a checkbox", () => {
+    const drawing = pageWith({ nodeId: "ok", kind: "checkbox", fill: "signer", role: "client" }, { ok: { kind: "text", text: "yes" } });
+
+    expect(drawing?.value).toBeUndefined();
   });
 });
 

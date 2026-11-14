@@ -5,6 +5,7 @@ import {
   Field,
   ServerEditor,
   BUILT_IN_FIELD_KINDS,
+  fieldKindsOf,
   isDatedWhenSigned,
   isFieldAnswered,
   listSignerFields,
@@ -75,7 +76,7 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
   useEffect(() => {
     let current = true;
     void verifySnapshot(snapshot.content, snapshot.contentHash).then((intact) => {
-      const held = listSignerFields(new ServerEditor({ extensions: [StarterKit, Field], content: JSON.parse(snapshot.content) }).getState().doc);
+      const held = listSignerFields(new ServerEditor({ extensions: [StarterKit.configure({ table: true }), Field], content: JSON.parse(snapshot.content) }).getState().doc);
       if (current) setVerified(intact && JSON.stringify(held) === JSON.stringify(snapshot.fields));
     });
     return () => {
@@ -113,7 +114,7 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
                 return resolve({ kind: "checkbox", checked: !(current?.kind === "checkbox" && current.checked) });
               }
               // Dated as the party signs: a real host takes the date from its own record of the signature.
-              if (isDatedWhenSigned(BUILT_IN_FIELD_KINDS, field.kind)) {
+              if (editor && isDatedWhenSigned(fieldKindsOf(editor), field.kind)) {
                 return resolve({ kind: "text", text: new Date().toLocaleDateString(undefined, { dateStyle: "long" }) });
               }
               setRequest({ field, current, resolve });
@@ -145,11 +146,13 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
   );
 
   const pageCount = editor?.layout.pages.length ?? 0;
-  const missing = snapshot.fields.filter((f) => f.required && !isFieldAnswered(f, values[f.id]));
-  // What a signer is owed before they sign comes first, as the signing view asks for it.
+  // The kinds this room's Field knows, read as the signing view reads them.
+  const kinds = editor ? fieldKindsOf(editor) : BUILT_IN_FIELD_KINDS;
+  const missing = snapshot.fields.filter((f) => f.required && !isFieldAnswered(f, values[f.id], kinds));
+  // What a signer owes before signing comes first, as the signing view asks for it.
   const nextOpen =
-    unansweredBeforeSigning(mine, values, role, BUILT_IN_FIELD_KINDS)[0] ??
-    mine.find((f) => !isDatedWhenSigned(BUILT_IN_FIELD_KINDS, f.kind) && !isFieldAnswered(f, values[f.id]));
+    unansweredBeforeSigning(mine, values, role, kinds)[0] ??
+    mine.find((f) => !isDatedWhenSigned(kinds, f.kind) && !isFieldAnswered(f, values[f.id], kinds));
 
   const answer = (value: FieldValue | null) => {
     request?.resolve(value);
@@ -166,10 +169,10 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
     setExporting(true);
     setProblem(null);
     // The executed document: the sealed snapshot with every party's values
-    // printed in their fields, laid out by the editor the signers used.
+    // printed in their fields, laid out with the setup the signers used.
     try {
       const result = await exportExecutedPdf(snapshot, values, {
-        editor: { pageConfig: defaultPageConfig, fonts: playgroundFonts, extensions: [StarterKit.configure({ table: true }), Field] },
+        editorOptions: { pageConfig: defaultPageConfig, fonts: playgroundFonts, extensions: [StarterKit.configure({ table: true }), Field] },
       });
       if (!result.ok) {
         setProblem(
@@ -263,6 +266,7 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
           <ul className="flex flex-col gap-1">
             {mine.map((f) => {
               const value = values[f.id];
+              const answered = value !== undefined && isFieldAnswered(f, value, kinds);
               return (
                 <li key={f.id}>
                   <button
@@ -274,8 +278,8 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
                       {KIND_LABEL[f.kind] ?? f.kind}
                       {!f.required && <span style={{ color: "var(--app-text-muted)" }}> (optional)</span>}
                     </span>
-                    <span style={{ color: value ? "var(--app-accent)" : "var(--app-text-muted)" }}>
-                      {value ? describe(value, f) : isDatedWhenSigned(BUILT_IN_FIELD_KINDS, f.kind) ? "When you sign" : "Open"}
+                    <span style={{ color: answered ? "var(--app-accent)" : "var(--app-text-muted)" }}>
+                      {value && answered ? describe(value, f) : isDatedWhenSigned(kinds, f.kind) ? "When you sign" : "Open"}
                     </span>
                   </button>
                 </li>
@@ -340,7 +344,7 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
 
 function describe(value: FieldValue, field: SignerFieldDescriptor): string {
   if (value.kind === "text") return value.text;
-  if (value.kind === "choice") return field.options.find((choice) => choice.id === value.id)?.label ?? value.id;
+  if (value.kind === "choice") return field.options.find((choice) => choice.id === value.id)?.label ?? "";
   if (value.kind === "image") return "Drawn";
   return value.checked ? "Ticked" : "Unticked";
 }

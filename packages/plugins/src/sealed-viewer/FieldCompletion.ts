@@ -54,8 +54,9 @@ export interface FieldCompletionOptions {
    * The viewer went to sign while required fields of theirs are still
    * unanswered (`unansweredBeforeSigning`). The signature waits and focus
    * goes to the first of them; say why — "Choose payment terms before you
-   * sign". A field can be unanswered again after signing (a box unticked),
-   * so the server checks the rule again when it records the signature.
+   * sign". The view checks only this viewer's fields: run
+   * `unansweredBeforeSigning` over the whole role on your server when you
+   * record the signature.
    */
   onSignatureBlocked?: (signature: SignerFieldDescriptor, missing: SignerFieldDescriptor[]) => void;
   /** Colour of the viewer's own fields. Defaults to their party's colour, as the author saw it. */
@@ -76,6 +77,10 @@ export interface SigningFieldDrawing extends FieldDrawing {
   focused: boolean;
   /** The host is capturing its value. */
   pending: boolean;
+  /** Its value answers it — what the executed record would print. */
+  answered: boolean;
+  /** Dated when its party signs, never pressed. */
+  datedWhenSigned: boolean;
 }
 
 interface FieldState {
@@ -83,7 +88,7 @@ interface FieldState {
   request: (id: string) => boolean;
   /** Move keyboard focus to the viewer's next (`1`) or previous (`-1`) field. */
   moveFocus: (direction: 1 | -1) => string | null;
-  /** Open the field keyboard focus is on. */
+  /** Act on the field keyboard focus is on — open it, or go to what it waits on; whether there was one. */
   openFocused: () => boolean;
 }
 
@@ -162,10 +167,10 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
     const { fields, completable, onFieldRequest, onFieldRequestError, onSignatureBlocked, accentColor, paint } = this.options;
     const kinds = fieldKindsOf(editor);
     const mayComplete = new Set(completable);
-    const dated = (f: SignerFieldDescriptor): boolean => isDatedWhenSigned(kinds, f.kind);
+    const isDated = (f: SignerFieldDescriptor): boolean => isDatedWhenSigned(kinds, f.kind);
     // What the signer fills, by pressing or with Tab; a date signed is dated for them.
-    const mine = fields.filter((f) => mayComplete.has(f.id) && !dated(f));
-    const datesSigned = fields.filter((f) => mayComplete.has(f.id) && dated(f));
+    const mine = fields.filter((f) => mayComplete.has(f.id) && !isDated(f));
+    const datesSigned = fields.filter((f) => mayComplete.has(f.id) && isDated(f));
     const pending = new Set<string>();
     let hovered: string | null = null;
     let focused: string | null = null;
@@ -203,8 +208,9 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
         .then((value) => {
           if (!value) return;
           setFieldValue(editor, field.id, value);
-          // Dated as the party signs — its signature, not initials given on the way.
-          if (!isSigningKind(kinds, field.kind)) return;
+          // Dated as the party signs — a signature that answers it, not
+          // initials given on the way, nor a name of blanks.
+          if (!isSigningKind(kinds, field.kind) || !isFieldAnswered(field, value, kinds)) return;
           for (const date of datesSigned) if (date.role === field.role && !pending.has(date.id)) ask(date);
         })
         .catch((error: unknown) => {
@@ -228,9 +234,10 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
           // them: pressing a checkbox ticks it. Fields someone else in the
           // role completes are the server's to wait on.
           const owed = unansweredBeforeSigning(mine, fieldValues(editor.getState()), field.role, kinds);
-          if (owed.length > 0) {
+          const [first] = owed;
+          if (first) {
             onSignatureBlocked?.(field, owed);
-            focusOn(owed[0]!.id);
+            focusOn(first.id);
             return false;
           }
         }
@@ -246,7 +253,13 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
         focusOn(mine[at + direction]?.id ?? null);
         return focused;
       },
-      openFocused: () => focused !== null && state.request(focused),
+      // Enter on a focused field is always acted on: it opens, or a held-back
+      // signature sends focus to what it waits on.
+      openFocused: () => {
+        if (focused === null) return false;
+        state.request(focused);
+        return true;
+      },
     };
     fieldStates.set(editor, state);
     byNavigator.set(editor.selection, state);
@@ -303,11 +316,13 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
           color: (own ? accentColor : undefined) ?? drawn.color,
           own,
           // A date signed is never pressed, so it never lights up as if it could be.
-          active: !dated(field) && (field.id === hovered || field.id === focused),
+          active: !isDated(field) && (field.id === hovered || field.id === focused),
           focused: field.id === focused,
           pending: pending.has(field.id),
+          answered: isFieldAnswered(field, drawn.value, kinds),
+          datedWhenSigned: isDated(field),
         };
-        if (!paint?.(ctx, signing)) paintField(ctx, signing, { answered: isFieldAnswered(field, drawn.value), dated: dated(field) });
+        if (!paint?.(ctx, signing)) paintField(ctx, signing);
       }
       if (hoveredFilledText) {
         const { pos, end } = hoveredFilledText;
@@ -333,12 +348,12 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
  * badge, everyone else's faded. An answer shows it can still be changed only
  * under the pointer or keyboard focus.
  */
-function paintField(ctx: CanvasRenderingContext2D, f: SigningFieldDrawing, { answered, dated }: { answered: boolean; dated: boolean }): void {
+function paintField(ctx: CanvasRenderingContext2D, f: SigningFieldDrawing): void {
   const { box, control } = f;
   const { x, y, width, height } = box;
-  // What `Field` set as the field's words: a value that answers nothing — a
-  // withdrawn choice, blank text — leaves it as empty as no value.
-  const filled = answered && control !== "checkbox";
+  // A value that answers nothing — a withdrawn choice, blank text — draws as
+  // empty, as `Field` lays it out.
+  const filled = f.answered && control !== "checkbox";
   ctx.save();
   if (!filled) {
     // Cover the author's ink; the signing view draws the field its own way.
@@ -374,7 +389,7 @@ function paintField(ctx: CanvasRenderingContext2D, f: SigningFieldDrawing, { ans
     paintFieldInk(ctx, box, { control, label: f.label, color: f.color, solid: true, faint: 1, baselineY: f.baselineY });
     // Said once: a label that is already the verb needs no badge repeating it,
     // and a date signed asks nothing of the signer.
-    if (verb !== f.label && !dated) paintBadge(ctx, box, verb, f.color, f.theme.pageBg);
+    if (verb !== f.label && !f.datedWhenSigned) paintBadge(ctx, box, verb, f.color, f.theme.pageBg);
   } else {
     paintFieldInk(ctx, box, { control, label: roleName(f.role), color: f.theme.imagePlaceholderBorder, faint: 0.8, baselineY: f.baselineY });
   }

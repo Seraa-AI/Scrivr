@@ -226,6 +226,11 @@ function describeSealRefusal(refusal: SealRefusal): SuggestionRefusalText {
         message: `Can't seal: ${refusal.count} signer field${refusal.count === 1 ? " is" : "s are"} in a header or footer.`,
         remedy: "Move signer fields into the body of the agreement, then seal again.",
       };
+    case "dates-without-signature":
+      return {
+        message: `Can't seal: ${roles(refusal.roles)} ${refusal.roles.length === 1 ? "has" : "have"} a Date signed but nothing to sign.`,
+        remedy: "Add a signature for that party, or remove its Date signed, then seal again.",
+      };
     case "host":
       return { message: `Can't seal: ${refusal.message}`, remedy: "This check is the host app's own." };
     case "unidentified-fields":

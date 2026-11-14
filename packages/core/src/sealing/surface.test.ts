@@ -90,8 +90,8 @@ describe("what a signing host builds on", () => {
     expect(fieldDrawingAt(editor, 0, { box, baselineY: 20, theme: editor.getResolvedTheme() })).toBeNull();
     expect(typeof paintCheckbox).toBe("function");
     const terms: SignerFieldDescriptor = { id: "t", role: "client", kind: "dropdown", required: true, options: [] };
-    expect(isFieldAnswered(terms, undefined)).toBe(false);
     const kinds: FieldKinds = fieldKindsOf(editor);
+    expect(isFieldAnswered(terms, undefined, kinds)).toBe(false);
     expect(unansweredBeforeSigning([terms], {}, "client", kinds)).toEqual([terms]);
     expect(isSigningKind(BUILT_IN_FIELD_KINDS, "signature") && isDatedWhenSigned(BUILT_IN_FIELD_KINDS, "dateSigned")).toBe(true);
     expect([control, insert.kind, range.kind, denied.reason, typeof gate, fields, refusal]).toEqual([

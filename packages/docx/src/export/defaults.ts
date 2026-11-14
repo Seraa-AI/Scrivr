@@ -14,6 +14,7 @@
  *     this when page-size is wired through `doc.attrs`.
  */
 
+import { WORD_PART_NAMESPACES } from "@scrivr/core";
 import { xml, serializeXml } from "./xml";
 import type { DocxPackage, XmlNode } from "./context";
 import { PAGE_HEIGHT_TWIPS, PAGE_MARGIN_TWIPS, PAGE_WIDTH_TWIPS } from "./section";
@@ -25,9 +26,6 @@ import type {
 } from "./createContext";
 
 const W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
-const R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
-const MC_NS = "http://schemas.openxmlformats.org/markup-compatibility/2006";
-const W14_NS = "http://schemas.microsoft.com/office/word/2010/wordml";
 const PKG_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships";
 const PKG_CT_NS = "http://schemas.openxmlformats.org/package/2006/content-types";
 
@@ -147,9 +145,7 @@ export function buildDocumentRoot(body: XmlNode[]): XmlNode {
   const bodyChildren = body.length > 0 ? body : [xml("w:p")];
   return xml(
     "w:document",
-    // Word 2010's additions (a content-control checkbox) are marked ignorable,
-    // as Word marks them, so Word 2007 reads past them instead of refusing the file.
-    { "xmlns:w": W_NS, "xmlns:r": R_NS, "xmlns:mc": MC_NS, "xmlns:w14": W14_NS, "mc:Ignorable": "w14" },
+    { ...WORD_PART_NAMESPACES },
     [
       xml("w:body", undefined, [
         ...bodyChildren,

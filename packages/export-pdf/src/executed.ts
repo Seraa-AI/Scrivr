@@ -1,5 +1,7 @@
 import {
   Editor,
+  fieldKindsOf,
+  fieldValues,
   hashArtifact,
   isFieldAnswered,
   listSignerFields,
@@ -14,11 +16,11 @@ import { exportToPdf, type PdfExportOptions } from "./index";
 
 export interface ExecutedPdfOptions extends PdfExportOptions {
   /**
-   * The editor the signers saw, less its content: the same extensions — `Field`
+   * The setup the signers saw, less its content: the same extensions — `Field`
    * with the same kinds — fonts and page setup, so the record is laid out as
    * they signed it.
    */
-  editor: Omit<EditorOptions, "content" | "sealed">;
+  editorOptions: Omit<EditorOptions, "content" | "sealed">;
 }
 
 /** Why there is no executed document yet. */
@@ -38,9 +40,11 @@ export type ExecutedPdfResult =
  * of exactly the bytes returned, to keep beside it.
  *
  * Refuses rather than print a record of something else: a snapshot that no
- * longer matches its hash, or a required field still unanswered. The fields
- * are read from the verified content, not from what was stored beside it.
- * Values are printed, never written: the snapshot and its hash are unchanged.
+ * longer matches its hash, or a required field the record would show blank.
+ * The fields are read from the verified content, not from what was stored
+ * beside it, and are checked against the values as the printing editor holds
+ * them — what it prints is what was checked. Values are printed, never
+ * written: the snapshot and its hash are unchanged.
  */
 export async function exportExecutedPdf(
   snapshot: Pick<SealedSnapshot, "content" | "contentHash">,
@@ -50,17 +54,24 @@ export async function exportExecutedPdf(
   if (!(await verifySnapshot(snapshot.content, snapshot.contentHash))) {
     return { ok: false, refusal: { reason: "snapshot-altered" } };
   }
-  const { editor: editorOptions, ...pdfOptions } = options;
-  const editor = new Editor({ ...editorOptions, content: JSON.parse(snapshot.content), sealed: true });
+  const { editorOptions, ...pdfOptions } = options;
+  const editor = new Editor({ ...editorOptions, content: documentJson(snapshot.content), sealed: true });
   try {
-    const missing = listSignerFields(editor.getState().doc).filter((f) => f.required && !isFieldAnswered(f, values[f.id]));
+    for (const [id, value] of Object.entries(values)) setFieldValue(editor, id, value);
+    const held = fieldValues(editor.getState());
+    const kinds = fieldKindsOf(editor);
+    const missing = listSignerFields(editor.getState().doc).filter((f) => f.required && !isFieldAnswered(f, held[f.id], kinds));
     if (missing.length > 0) return { ok: false, refusal: { reason: "unanswered-fields", missing } };
-    for (const [id, value] of Object.entries(values)) {
-      if (!setFieldValue(editor, id, value)) throw new Error("exportExecutedPdf needs Field among the editor's extensions to print values");
-    }
     const pdf = await exportToPdf(editor, pdfOptions);
     return { ok: true, pdf, artifactHash: await hashArtifact(pdf) };
   } finally {
     editor.destroy();
   }
+}
+
+/** A verified snapshot's document: canonical JSON of one object. */
+function documentJson(content: string): Record<string, unknown> {
+  const parsed: unknown = JSON.parse(content);
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new Error("A snapshot's content is a document object");
+  return Object.fromEntries(Object.entries(parsed));
 }

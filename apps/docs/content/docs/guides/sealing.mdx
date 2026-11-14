@@ -74,6 +74,7 @@ A seal is refused, with a reason, while:
 | `unknown-roles` | You assigned a role no field carries — its field was removed |
 | `fields-outside-body` | A signer field sits in a header or footer, where no signer could be shown to complete it |
 | `unidentified-fields` | A signer field has no id or role, or shares another's id — nobody could complete it, or two values would collide |
+| `dates-without-signature` | A party has a date signed but nothing to sign, so nothing would ever date it — pass your editor's `kinds` (`fieldKindsOf`) when you register your own signature kinds |
 
 ### Your own checks
 

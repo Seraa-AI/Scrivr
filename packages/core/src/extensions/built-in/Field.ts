@@ -21,9 +21,11 @@ import {
   fieldRoleColor,
   fieldChoices,
   fieldValueLayout,
+  controlOfKind,
   isDatedWhenSigned,
   isSigningKind,
   setsLike,
+  shownValue,
   valueText,
   type FieldBox,
   type FieldChoice,
@@ -94,19 +96,22 @@ export interface SignerFieldDescriptor {
 }
 
 /**
- * Whether a value answers its field: a box ticked, a drawing, or words — text
- * that is not blank, or a choice the field still offers.
+ * Whether a value answers its field — whether an executed record would print
+ * it: a box ticked, a drawing the page may draw, or words (text that is not
+ * blank, a choice the field still offers), each only where the field's
+ * control can show it. `kinds` are the editor's own (`fieldKindsOf`).
  */
-export function isFieldAnswered(field: SignerFieldDescriptor, value: FieldValue | undefined): boolean {
-  switch (value?.kind) {
+export function isFieldAnswered(field: SignerFieldDescriptor, value: FieldValue | undefined, kinds: FieldKinds): boolean {
+  const shown = shownValue(controlOfKind(kinds, field.kind), value);
+  switch (shown?.kind) {
     case "checkbox":
-      return value.checked;
+      return shown.checked;
     case "image":
       return true;
     case "text":
     case "choice":
     case undefined:
-      return valueText(value, field.options) !== null;
+      return valueText(shown, field.options) !== null;
   }
 }
 
@@ -129,7 +134,7 @@ export function unansweredBeforeSigning(
       f.required &&
       !isSigningKind(kinds, f.kind) &&
       !isDatedWhenSigned(kinds, f.kind) &&
-      !isFieldAnswered(f, values[f.id]),
+      !isFieldAnswered(f, values[f.id], kinds),
   );
 }
 
@@ -338,7 +343,7 @@ const drawingOf = (
   at: { box: FieldBox; baselineY: number; theme: ResolvedTheme },
 ): FieldDrawing => {
   const role = isSigner(node) && typeof node.attrs["role"] === "string" ? node.attrs["role"] : null;
-  const value = valueOf(values, node);
+  const value = valueOf(kinds, values, node);
   return {
     node,
     ...at,
@@ -378,7 +383,7 @@ const fieldStrategy = (kinds: FieldKinds, options: FieldOptions, values: () => F
   // a drawing keeps its authored size, as an inline image does. Measuring
   // also records the run's font on the span — the face its value is set in.
   measure: (node, font, measurer) => {
-    const text = valueText(valueOf(values(), node), fieldChoices(node.attrs["options"]));
+    const text = valueText(valueOf(kinds, values(), node), fieldChoices(node.attrs["options"]));
     const { ascent, descent } = measurer.getFontMetrics(font);
     const height = Math.round(ascent + descent);
     // Typed text is set as text, whatever the field: a typed signature too.
@@ -560,9 +565,14 @@ const pdfColor = (css: string): Rgb => {
   return parsed ? compositeColor(parsed, WHITE) : BLACK;
 };
 
-const valueOf = (values: FieldValues, node: PmNode): FieldValue | undefined => {
+/**
+ * The value a field shows. Only a signer's field takes one — what an author
+ * sealed is never laid over — and only one its control can show.
+ */
+const valueOf = (kinds: FieldKinds, values: FieldValues, node: PmNode): FieldValue | undefined => {
   const id = node.attrs["nodeId"];
-  return typeof id === "string" ? values[id] : undefined;
+  if (typeof id !== "string" || !isSigner(node)) return undefined;
+  return shownValue(controlOf(kinds, node), values[id]);
 };
 
 /**
@@ -867,7 +877,7 @@ export const Field = Extension.create<FieldOptions>({
         // A drawn signature's bytes are fetched before the pages are written.
         embeds: {
           field: (node: PmNode) => {
-            const value = valueOf(valuesIn(this, this.options), node);
+            const value = valueOf(kinds, valuesIn(this, this.options), node);
             return value?.kind === "image" ? safeImageUrl(value.src) : null;
           },
         },

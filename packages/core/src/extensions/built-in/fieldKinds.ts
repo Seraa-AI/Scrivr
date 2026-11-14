@@ -2,6 +2,7 @@ import type { Node as PmNode } from "prosemirror-model";
 import { z } from "zod";
 import type { ResolvedTheme } from "../../model/theme";
 import type { PdfNodeContext } from "../../exports/pdf";
+import { safeImageUrl } from "../../model/safeUrl";
 
 /** The control a field is: how it draws, whether it toggles, and what Word gets. */
 export type FieldControl = "signatureLine" | "checkbox" | "date" | "dropdown" | "text";
@@ -14,7 +15,11 @@ export interface FieldKindSpec {
   size: { width: number; height: number };
   /** Defaults to `"text"`. A `"signatureLine"` field is its party signing. */
   control?: FieldControl;
-  /** Filled with the date its party signs, never by hand. */
+  /**
+   * Dated by the host, through `onFieldRequest`, the moment its party's
+   * signature is given — never pressed, never taken from Word, never holding
+   * a signature back. A seal refuses a party with one and nothing to sign.
+   */
   datedWhenSigned?: boolean;
 }
 
@@ -129,12 +134,40 @@ export const isSigningKind = (kinds: FieldKinds, kind: string): boolean => kinds
 /** Whether a field of `kind` is dated the moment its party signs, never filled by hand. */
 export const isDatedWhenSigned = (kinds: FieldKinds, kind: string): boolean => kinds[kind]?.datedWhenSigned === true;
 
-export const controlOf = (kinds: FieldKinds, node: PmNode): FieldControl =>
-  kinds[String(node.attrs["kind"])]?.control ?? "text";
+/** The control a kind declares; `"text"` when it declares none. */
+export const controlOfKind = (kinds: FieldKinds, kind: string): FieldControl => kinds[kind]?.control ?? "text";
 
-/** What a field is, as its label says it: "Signature". */
-export const fieldLabel = (kinds: FieldKinds, node: PmNode): string =>
-  kinds[String(node.attrs["kind"])]?.label ?? String(node.attrs["kind"]);
+export const controlOf = (kinds: FieldKinds, node: PmNode): FieldControl => controlOfKind(kinds, String(node.attrs["kind"]));
+
+/**
+ * What each control can show. A drawing on a text control is drawn initials;
+ * a checkbox shows only its tick, a dropdown only a choice it offers.
+ */
+const SHOWN_BY: Record<FieldControl, ReadonlySet<FieldValue["kind"]>> = {
+  signatureLine: new Set(["image", "text"]),
+  text: new Set(["text", "image"]),
+  date: new Set(["text"]),
+  dropdown: new Set(["choice"]),
+  checkbox: new Set(["checkbox"]),
+};
+
+/**
+ * The value a field of `control` shows: one it can show, or none. A drawing
+ * the page may not draw — SVG, an unsafe URL — shows nothing, so it is none.
+ */
+export function shownValue(control: FieldControl, value: FieldValue | undefined): FieldValue | undefined {
+  if (!value || !SHOWN_BY[control].has(value.kind)) return undefined;
+  return value.kind === "image" && safeImageUrl(value.src) === null ? undefined : value;
+}
+
+/**
+ * What a field is, as its label says it: "Signature". A kind drawn without a
+ * label — a checkbox — is still named, by its kind, wherever a name is read.
+ */
+export function fieldLabel(kinds: FieldKinds, node: PmNode): string {
+  const kind = String(node.attrs["kind"]);
+  return kinds[kind]?.label || kind.charAt(0).toUpperCase() + kind.slice(1);
+}
 
 /** What an empty field shows in print: its kind's label, and whose it is. */
 export function fieldCaption(kinds: FieldKinds, node: PmNode): string {

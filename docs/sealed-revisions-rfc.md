@@ -660,8 +660,10 @@ this section says so rather than the proposal being quietly rewritten to match.
 
 - Export as mapped above. Every control gets a `w:id` unique within the
   export; the signature line carries `issignatureline="t"`, a braced GUID from
-  the field id, and the role as `o:suggestedsigner2`. VML and `w14`
-  namespaces are declared on the elements, as `Image` does for DrawingML.
+  the field id, and the role as `o:suggestedsigner2`. VML namespaces are
+  declared on the elements, as `Image` does for DrawingML; every story part's
+  root — body, header, footer — declares `w14` and marks it `mc:Ignorable`, as
+  Word does (`WORD_PART_NAMESPACES`).
 - Two seams fixed first, each a defect on its own (`209041ef`): the walker
   wrapped every run separately — a link over mixed formatting became several
   `<w:hyperlink>`, a text field several `<w:sdt>` sharing an id — and now wraps
@@ -678,8 +680,9 @@ this section says so rather than the proposal being quietly rewritten to match.
 - Deferred to after phase 5, by decision: every DOCX check against real Word
   runs once all phases are in, so the live bugs it finds are fixed in one pass.
   To verify then: *Sign* on a signature line inside a content
-  control, whether Word needs `v:imagedata` for the line's preview, and Word
-  2007's handling of `w14` without `mc:Ignorable`. A content control from a
+  control, whether Word needs `v:imagedata` for the line's preview, and that Word
+  2007 reads past the ignorable `w14` checkbox, in the body and in headers and
+  footers. A content control from a
   document Scrivr did not write keeps its text but is not a field.
 
 **Phase 3e — kinds of field.** Shipped on PR #256, before phase 5 by decision,
@@ -859,16 +862,17 @@ read-only and storing a certificate signature over its package parts; any
 later edit, an import and re-export included, invalidates that signature,
 and today nothing of it reaches Scrivr.
 
-**Decided: Word signing comes back as evidence (2026-11-14), in its own PR
-with its own RFC.** A signature field stays Word's signature line, so a
-signer can sign in Word. Import reads what Word did — which field, who, when,
-the signed image, whether the covered parts still match — and the host seals
-it as Scrivr's own revision with that evidence; a broken signature is still
-sealed, marked invalid, and reported in the import's diagnostics like any
-other. An export carries a document id — the host's, or one Scrivr makes —
-that Word keeps, and an import hands it back first, so a host pulling a file
-from a drive matches it to its own record before anything else. Copying a
-file copies its id; telling two such files apart is the host's.
+**Decided: Word signing will come back as evidence (2026-11-14) — not built
+yet; its own PR, with its own RFC.** A signature field stays Word's signature
+line, so a signer can sign in Word. Import will read what Word did — which
+field, who, when, the signed image, whether the covered parts still match —
+and the host will seal it as Scrivr's own revision with that evidence; a
+broken signature will still be sealed, marked invalid, and reported in the
+import's diagnostics like any other. An export will carry a document id — the
+host's, or one Scrivr makes — that Word keeps, and an import will hand it
+back first, so a host pulling a file from a drive matches it to its own record
+before anything else. Copying a file copies its id; telling two such files
+apart will be the host's.
 
 Still to do before claiming Word compatibility: open exported files in desktop
 Word — signature-line rendering and Sign, fill → save → reopen → re-import for

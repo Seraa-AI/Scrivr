@@ -352,6 +352,22 @@ export interface DocxHandlers {
   onFinalize?(ctx: DocxContext): DocxPackage | Promise<DocxPackage>;
 }
 
+// ── Part roots ───────────────────────────────────────────────────────────────
+
+/**
+ * The namespaces every story part's root declares — the body's `<w:document>`,
+ * a `<w:hdr>`, a `<w:ftr>` — so content written into any of them reads the
+ * same. Word 2010's additions (a content-control checkbox) are marked
+ * ignorable, as Word marks them, so an older Word reads past them.
+ */
+export const WORD_PART_NAMESPACES: Readonly<XmlAttrs> = {
+  "xmlns:w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+  "xmlns:r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+  "xmlns:mc": "http://schemas.openxmlformats.org/markup-compatibility/2006",
+  "xmlns:w14": "http://schemas.microsoft.com/office/word/2010/wordml",
+  "mc:Ignorable": "w14",
+};
+
 // ── Unit conversion (px ↔ OOXML units) ──────────────────────────────────────
 
 /** 1 inch @ 96 DPI = 96 px = 1440 twips → 15 twips per px. */

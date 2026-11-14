@@ -1,5 +1,6 @@
 import type { Node as PmNode } from "prosemirror-model";
 import { listSignerFields, type SignerFieldDescriptor } from "../extensions/built-in/Field";
+import { BUILT_IN_FIELD_KINDS, isDatedWhenSigned, isSigningKind, type FieldKinds } from "../extensions/built-in/fieldKinds";
 
 /** A revision frozen as the exact bytes that were agreed. */
 export interface SealedSnapshot {
@@ -31,6 +32,11 @@ export type SealRefusal =
    * — the signing view completes fields in the body only.
    */
   | { reason: "fields-outside-body"; count: number }
+  /**
+   * A role's date signed with no field of that role whose completion is
+   * signing — nothing would ever date it, and the record would show it blank.
+   */
+  | { reason: "dates-without-signature"; roles: string[] }
   /** One of the host's own checks refused — a signing order, an approval, anything Scrivr cannot know. */
   | HostSealRefusal;
 
@@ -62,6 +68,12 @@ export interface CreateSnapshotOptions {
    * same reading of the document the snapshot is taken from.
    */
   checks?: { before?: readonly SealCheck[]; after?: readonly SealCheck[] };
+  /**
+   * The editor's field kinds (`fieldKindsOf`), when the host registers its
+   * own: what a kind declares — a signature line, a date signed — decides
+   * what a seal checks. The built-ins when omitted.
+   */
+  kinds?: FieldKinds;
 }
 
 async function hostRefusal(checks: readonly SealCheck[] | undefined, subject: SealCheckSubject): Promise<HostSealRefusal | null> {
@@ -184,6 +196,12 @@ function roleRefusal(fields: readonly SignerFieldDescriptor[], assigned: readonl
   return null;
 }
 
+/** Roles with a field dated when they sign, and no field whose completion is their signing. */
+function rolesDatedWithoutSigning(fields: readonly SignerFieldDescriptor[], kinds: FieldKinds): string[] {
+  const signs = new Set(fields.filter((f) => isSigningKind(kinds, f.kind)).map((f) => f.role));
+  return [...new Set(fields.filter((f) => isDatedWhenSigned(kinds, f.kind) && !signs.has(f.role)).map((f) => f.role))];
+}
+
 /**
  * Freeze a document into a snapshot and its hash. The manifest of fields and
  * the hash come from one reading of one document: checked separately, a field
@@ -193,7 +211,10 @@ function roleRefusal(fields: readonly SignerFieldDescriptor[], assigned: readonl
  * footer holds content this editor's schema cannot read: a seal no one could
  * check is no seal.
  */
-export async function createSnapshot(doc: PmNode, { assignedRoles, checks }: CreateSnapshotOptions): Promise<SnapshotResult> {
+export async function createSnapshot(
+  doc: PmNode,
+  { assignedRoles, checks, kinds = BUILT_IN_FIELD_KINDS }: CreateSnapshotOptions,
+): Promise<SnapshotResult> {
   const fields = listSignerFields(doc);
   const subject: SealCheckSubject = { doc, fields, assignedRoles };
   const before = await hostRefusal(checks?.before, subject);
@@ -207,6 +228,8 @@ export async function createSnapshot(doc: PmNode, { assignedRoles, checks }: Cre
   if (outside > 0) return { ok: false, refusal: { reason: "fields-outside-body", count: outside } };
   const unidentified = unidentifiedFields(doc);
   if (unidentified > 0) return { ok: false, refusal: { reason: "unidentified-fields", count: unidentified } };
+  const undated = rolesDatedWithoutSigning(fields, kinds);
+  if (undated.length > 0) return { ok: false, refusal: { reason: "dates-without-signature", roles: undated } };
   const refusal = roleRefusal(fields, assignedRoles);
   if (refusal) return { ok: false, refusal };
   const after = await hostRefusal(checks?.after, subject);

@@ -1,6 +1,7 @@
 ---
 "@scrivr/core": patch
 "@scrivr/docx": patch
+"@scrivr/plugins": patch
 ---
 
 Fields now go through DOCX, Markdown and semantic export:
@@ -10,4 +11,4 @@ Fields now go through DOCX, Markdown and semantic export:
 - **Markdown:** a field is written as its caption, where before `getMarkdown()` threw on a document containing fields.
 - **Semantic export:** a block field is its own `fieldBlock` unit.
 
-Every field control is named on its Word tab — a checkbox as "Checkbox · client" — and the document marks Word 2010's checkbox as ignorable, as Word does, so Word 2007 opens the file instead of refusing it.
+Every field control is named on its Word tab — a checkbox as "Checkbox · client". Every story part's root — the body, each header and footer — declares the same namespaces (`WORD_PART_NAMESPACES`) and marks Word 2010's checkbox as ignorable, as Word does, so an older Word can read past it.

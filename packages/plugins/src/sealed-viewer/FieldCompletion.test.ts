@@ -445,6 +445,19 @@ describe("FieldCompletion — the date a party signed", () => {
     expect(answer.mock.calls.map(([field]) => field.id)).toEqual([initials.id]);
   });
 
+  it("is not dated by a signature that answers nothing — a name of blanks", async () => {
+    const request = vi.fn(async (field: SignerFieldDescriptor): Promise<FieldValue | null> =>
+      field.kind === "dateSigned" ? today : { kind: "text", text: "   " },
+    );
+    const e = signingWithDates(request);
+
+    requestField(e, signHere.id);
+    await flush();
+    await flush();
+
+    expect(request.mock.calls.map(([field]) => field.id)).toEqual([signHere.id]);
+  });
+
   it("is asked for once while the host is still dating it, however often the party signs", async () => {
     let date: (value: FieldValue) => void = () => {};
     const request = vi.fn((field: SignerFieldDescriptor) =>

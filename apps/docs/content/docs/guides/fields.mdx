@@ -196,7 +196,7 @@ const editor = new Editor({
 
 A dropdown is answered with the choice's id, `{ kind: "choice", id: "net-60" }`; `Field` shows its label, so renaming a label in a later template does not orphan the answers already given.
 
-Values live in `Field`, beside the document and never in it, so a sealed document takes them. Open the editor with the values already given as `Field.configure({ values })`, show one another participant completes with `setFieldValue(editor, fieldId, value)` (both from `@scrivr/core`), and read them back with `fieldValues(editor.getState())`.
+Values live in `Field`, beside the document and never in it, so a sealed document takes them. Open the editor with the values already given as `Field.configure({ values })`, show one another participant completes with `setFieldValue(editor, fieldId, value)` (both from `@scrivr/core`), and read them back with `fieldValues(editor.getState())`. A value only ever fills a signer's field — what an author sealed is never laid over — and only one the field can show: a checkbox takes a tick, a dropdown a choice, a signature a drawing (a raster image; SVG is never drawn) or text. Anything else is no answer, and `isFieldAnswered(field, value, kinds)` says so.
 
 ### A host's own kinds, failures and the keyboard
 
@@ -229,7 +229,7 @@ The signed record is a PDF: the sealed snapshot with every party's values printe
 import { exportExecutedPdf } from "@scrivr/export-pdf";
 
 const result = await exportExecutedPdf(snapshot, allSignedValues, {
-  editor: { extensions: [StarterKit, Field.configure({ kinds })], fonts, pageConfig },
+  editorOptions: { extensions: [StarterKit, Field.configure({ kinds })], fonts, pageConfig },
 });
 if (!result.ok) throw new Error(result.refusal.reason); // "snapshot-altered" | "unanswered-fields"
 const { pdf, artifactHash } = result; // keep both: the record, and the hash of exactly these bytes
