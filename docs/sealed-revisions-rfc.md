@@ -828,11 +828,9 @@ since the first; what they found, each fixed test first:
   label as the control's text, so an import names the choice by that label.
 - **Date signed** is its own kind, `dateSigned`, beside a plain `date` that
   may be any date; a kind declares it with `datedWhenSigned`. It is never
-  pressed: when its party's signature is given — not initials on the way —
-  `FieldCompletion` asks the host for it through `onFieldRequest`, so the
-  date is the host's — its clock, its format, its record — on the one path
-  every value already takes. An import never takes a date typed into its
-  Word control as the signer's.
+  pressed. (First built as a value the host answered in a request after each
+  signature; superseded below by a date that travels with the signature.) An
+  import never takes a date typed into its Word control as the signer's.
 - **Filled author text frames itself under the pointer** with its prompt, as
   Word frames a content control, so a signer can tell the words filled in for
   this document from the template's own. It reaches the signing view as a
@@ -861,6 +859,30 @@ roles, formatting — not signing inside Word. Word signs a file by locking it
 read-only and storing a certificate signature over its package parts; any
 later edit, an import and re-export included, invalidates that signature,
 and today nothing of it reaches Scrivr.
+
+**Decided: the date signed travels with the signature (2026-11-14).** Three
+review rounds each found a new way for a date signed and its signature to
+part: the date was a value of its own, answered by the host in a request of
+its own after each signature, then cleared, re-asked and guarded against
+stale answers in the signing view — a second record of one fact, and every
+copy of it drifted. The e-signature tools model it the other way. DocuSign's
+Date Signed, Adobe Sign's date of signing, Dropbox Sign's and PandaDoc's
+signing date are read-only, filled when the signer signs, kept as a
+timestamp and formatted at display by an account's or recipient's date
+format and time zone, while the certificate keeps the moment itself; PandaDoc
+moves the date when a signer finishes on a later day. So in Scrivr:
+
+- A signature carries when it was given: `signedAt`, an ISO timestamp from
+  the host's own record of the signing, on the text or drawing value it
+  returns. The host records one value; the moment is part of it.
+- A date signed is never a value. It shows the latest `signedAt` among its
+  party's answered signatures, through `formatSignedDate` (`Field.configure`;
+  a fixed, locale-independent default so a PDF reads the same everywhere).
+  Blank or replace a signature and the date follows; it cannot outlive one,
+  return stale, or disagree with the host's record.
+- `valuesOnRecord` derives those dates, so the canvas, the PDF, the executed
+  record and a host's server read one function. The signing view no longer
+  asks for a date at all.
 
 **Hardened by the review of the executed record (2026-11-14).**
 
