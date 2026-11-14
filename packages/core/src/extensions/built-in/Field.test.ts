@@ -837,7 +837,7 @@ describe("what a party completes before they sign", () => {
     expect(isFieldAnswered(terms, { kind: "choice", id: "net-90" }, kinds)).toBe(false);
     expect(isFieldAnswered(name, { kind: "text", text: "  " }, kinds)).toBe(false);
     expect(isFieldAnswered(name, undefined, kinds)).toBe(false);
-    expect(isFieldAnswered(field("sig", "signature"), { kind: "image", src: "data:image/png;base64,AA==" }, kinds)).toBe(true);
+    expect(isFieldAnswered(field("sig", "signature"), { kind: "image", src: "data:image/png;base64,iVBORw0KGgo=" }, kinds)).toBe(true);
   });
 
   it("counts only a value the field can show — what an executed record would print", () => {
@@ -852,13 +852,22 @@ describe("what a party completes before they sign", () => {
     const kinds = BUILT_IN_FIELD_KINDS;
     const png = "data:image/png;base64,iVBORw0KGgo=";
     expect(isFieldAnswered(field("sig", "signature"), { kind: "image", src: png }, kinds)).toBe(true);
-    expect(isFieldAnswered(field("sig", "signature"), { kind: "image", src: "data:image/jpeg;base64,/9j/" }, kinds)).toBe(true);
+    expect(isFieldAnswered(field("sig", "signature"), { kind: "image", src: "data:image/jpeg;base64,/9j/4AAQ" }, kinds)).toBe(true);
+    // A drawing that would print blank: no bytes, or bytes that are not the image named.
+    expect(isFieldAnswered(field("sig", "signature"), { kind: "image", src: "data:image/png;base64," }, kinds)).toBe(false);
+    expect(isFieldAnswered(field("sig", "signature"), { kind: "image", src: "data:image/png;base64,AAAA" }, kinds)).toBe(false);
     expect(isFieldAnswered(field("ini", "initials"), { kind: "image", src: png }, kinds)).toBe(true);
     // A link can change after signing, and an SVG cannot be printed.
     expect(isFieldAnswered(field("sig", "signature"), { kind: "image", src: "https://example.com/sig.png" }, kinds)).toBe(false);
     expect(isFieldAnswered(field("sig", "signature"), { kind: "image", src: "https://example.com/sig.svg" }, kinds)).toBe(false);
     // A name is words: a drawing would be squeezed into a line of text.
     expect(isFieldAnswered(name, { kind: "image", src: png }, kinds)).toBe(false);
+  });
+
+  it("takes a drawing on a host's own kind that declares itself drawn", () => {
+    const kinds = { ...BUILT_IN_FIELD_KINDS, witnessInitials: { label: "Witness initials", size: { width: 64, height: 36 }, drawn: true } } satisfies FieldKinds;
+
+    expect(isFieldAnswered(field("wi", "witnessInitials"), { kind: "image", src: "data:image/png;base64,iVBORw0KGgo=" }, kinds)).toBe(true);
   });
 });
 
@@ -873,6 +882,25 @@ describe("the values a record shows", () => {
 
     expect(valuesOnRecord(fields, signed, BUILT_IN_FIELD_KINDS)).toEqual(signed);
     expect(valuesOnRecord(fields, blanked, BUILT_IN_FIELD_KINDS)).toEqual({ sig: blanked.sig, name: blanked.name });
+  });
+});
+
+describe("a date signed, as Field shows it", () => {
+  const signerField = (nodeId: string, kind: string) => ({ type: "field", attrs: { nodeId, kind, fill: "signer", role: "client", required: false } });
+  const dateShown = (values: Record<string, FieldValue>) => {
+    const editor = new ServerEditor({
+      extensions: [StarterKit, Field.configure({ values })],
+      content: { type: "doc", content: [{ type: "paragraph", content: [signerField("a", "signature"), signerField("b", "signature"), signerField("d", "dateSigned")] }] },
+    });
+    const at = { box: { x: 0, y: 0, width: 110, height: 24 }, baselineY: 20, theme: editor.getResolvedTheme() };
+    return fieldDrawingAt(editor, 3, at)?.value;
+  };
+  const date: FieldValue = { kind: "text", text: "14 November 2026" };
+
+  it("shows beside any answered signature of its party, and nowhere else — however the values arrived", () => {
+    expect(dateShown({ a: { kind: "text", text: "Ada" }, b: { kind: "text", text: "  " }, d: date })).toEqual(date);
+    expect(dateShown({ a: { kind: "text", text: "  " }, d: date })).toBeUndefined();
+    expect(dateShown({ d: date })).toBeUndefined();
   });
 });
 

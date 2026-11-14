@@ -10,6 +10,7 @@ import {
   Field,
   StarterKit,
   defaultPageConfig,
+  fieldDrawingAt,
   fieldRoleColor,
   fieldValues,
   setFieldValue,
@@ -471,7 +472,10 @@ describe("FieldCompletion — the date a party signed", () => {
     requestField(e, signHere.id);
     await flush();
 
-    expect(fieldValues(e.getState())[signed.id]).toBeUndefined();
+    // The date the host gave is still held — the host's record is its own — but it shows nowhere.
+    const at = { box: { x: 0, y: 0, width: 110, height: 24 }, baselineY: 20, theme: e.getResolvedTheme() };
+    expect(fieldValues(e.getState())[signed.id]).toEqual(today);
+    expect(fieldDrawingAt(e, 3, at)?.value).toBeUndefined();
   });
 
   it("is asked for once while the host is still dating it, however often the party signs", async () => {

@@ -21,7 +21,6 @@ import {
   fieldRoleColor,
   fieldChoices,
   fieldValueLayout,
-  controlOfKind,
   isDatedWhenSigned,
   isSigningKind,
   setsLike,
@@ -36,7 +35,6 @@ import {
   type FieldOptions,
   type FieldValue,
 } from "./fieldKinds";
-import { safeImageUrl } from "../../model/safeUrl";
 import { COLLAB_SYNC_META } from "./UniqueId";
 import { getCachedImage, onImageLoad } from "./Image";
 import {
@@ -97,12 +95,13 @@ export interface SignerFieldDescriptor {
 
 /**
  * Whether a value answers its field — whether an executed record would print
- * it: a box ticked, a drawing the page may draw, or words (text that is not
- * blank, a choice the field still offers), each only where the field's
- * control can show it. `kinds` are the editor's own (`fieldKindsOf`).
+ * it: a box ticked, words (text that is not blank, a choice the field still
+ * offers), or on a signature or initials a drawing as an inline PNG or JPEG
+ * whose bytes open as one; each only where the field's control can show it.
+ * `kinds` are the editor's own (`fieldKindsOf`).
  */
 export function isFieldAnswered(field: SignerFieldDescriptor, value: FieldValue | undefined, kinds: FieldKinds): boolean {
-  const shown = shownValue(field.kind, controlOfKind(kinds, field.kind), value);
+  const shown = shownValue(kinds, field.kind, value);
   switch (shown?.kind) {
     case "checkbox":
       return shown.checked;
@@ -140,17 +139,17 @@ export function unansweredBeforeSigning(
 
 /**
  * The values as a signed record shows them: a date signed stands only beside
- * an answered signature of its party — a date with nothing signed is no date.
- * What the executed record prints, and what a host's server should keep.
+ * an answered signature of its party. `Field` shows values by this rule on
+ * screen and in print; a host's server can keep values by it too.
  */
 export function valuesOnRecord(
   fields: readonly SignerFieldDescriptor[],
   values: Readonly<Record<string, FieldValue>>,
   kinds: FieldKinds,
 ): Record<string, FieldValue> {
-  const signed = new Set(fields.filter((f) => isSigningKind(kinds, f.kind) && isFieldAnswered(f, values[f.id], kinds)).map((f) => f.role));
-  const unsigned = new Set(fields.filter((f) => isDatedWhenSigned(kinds, f.kind) && !signed.has(f.role)).map((f) => f.id));
-  return Object.fromEntries(Object.entries(values).filter(([id]) => !unsigned.has(id)));
+  const signedRoles = new Set(fields.filter((f) => isSigningKind(kinds, f.kind) && isFieldAnswered(f, values[f.id], kinds)).map((f) => f.role));
+  const datesWithoutSignature = new Set(fields.filter((f) => isDatedWhenSigned(kinds, f.kind) && !signedRoles.has(f.role)).map((f) => f.id));
+  return Object.fromEntries(Object.entries(values).filter(([id]) => !datesWithoutSignature.has(id)));
 }
 
 /**
@@ -303,9 +302,10 @@ export const fieldValues = (state: EditorState): FieldValues => fieldValuesKey.g
 
 /**
  * Give field `id` a value — `null` empties it; the document is untouched. A
- * signer's field is laid out, drawn and printed with it when its control can
- * show it (`shownValue`); otherwise it is held but shows nothing. Returns
- * false when the editor has no `Field`.
+ * signer's field is laid out, drawn and printed with it when it can show it
+ * (`isFieldAnswered` says which values those are); otherwise it is held but
+ * shows nothing. Returns false when the editor has no `Field`, or a plugin
+ * refuses the change.
  */
 export function setFieldValue(editor: IBaseEditor, id: string, value: FieldValue | null): boolean {
   const state = editor.getState();
@@ -329,10 +329,28 @@ const setupByEditor = new WeakMap<IBaseEditor, FieldSetup>();
 /** The kinds `editor`'s `Field` knows — the built-ins and the host's own — or the built-ins alone without one. */
 export const fieldKindsOf = (editor: IBaseEditor): FieldKinds => setupByEditor.get(editor)?.kinds ?? BUILT_IN_FIELD_KINDS;
 
+/** What each held set of values shows in a document, read again only when either changes. */
+const shownCache = new WeakMap<FieldValues, { doc: PmNode; shown: FieldValues }>();
+
+/**
+ * The values `state`'s fields show: as a record shows them (`valuesOnRecord`),
+ * so a date signed stands only beside an answered signature of its party —
+ * on screen, in print and in the executed record alike, however the values
+ * arrived.
+ */
+function valuesShown(kinds: FieldKinds, state: EditorState): FieldValues {
+  const values = fieldValues(state);
+  const cached = shownCache.get(values);
+  if (cached?.doc === state.doc) return cached.shown;
+  const shown = valuesOnRecord(listSignerFields(state.doc), values, kinds);
+  shownCache.set(values, { doc: state.doc, shown });
+  return shown;
+}
+
 /** The values a contribution resolved in `context` lays out and prints with. */
 const valuesIn = (context: object, options: FieldOptions): FieldValues => {
   const setup = setupByContext.get(context);
-  return setup ? fieldValues(setup.editor.getState()) : options.values;
+  return setup ? valuesShown(setup.kinds, setup.editor.getState()) : options.values;
 };
 
 /**
@@ -347,7 +365,7 @@ export function fieldDrawingAt(
   const setup = setupByEditor.get(editor);
   const node = editor.getState().doc.nodeAt(pos);
   if (!setup || node?.type.name !== "field") return null;
-  return drawingOf(setup.kinds, setup.options, fieldValues(editor.getState()), node, at);
+  return drawingOf(setup.kinds, setup.options, valuesShown(setup.kinds, editor.getState()), node, at);
 }
 
 /** A field as a host's own drawing is handed it. */
@@ -403,7 +421,7 @@ const fieldStrategy = (kinds: FieldKinds, options: FieldOptions, values: () => F
     const { ascent, descent } = measurer.getFontMetrics(font);
     const height = Math.round(ascent + descent);
     // Typed text is set as text, whatever the field: a typed signature too.
-    const like = text !== null ? "text" : setsLike(String(node.attrs["kind"]), controlOf(kinds, node));
+    const like = text !== null ? "text" : setsLike(kinds, String(node.attrs["kind"]));
     switch (like) {
       case "picture":
         return { width: Number(node.attrs["width"]), height: Number(node.attrs["height"]) };
@@ -499,8 +517,7 @@ function paintFieldValue(
     ctx.textBaseline = "alphabetic";
     ctx.fillText(text, set.x, set.baselineY);
   } else if (value?.kind === "image") {
-    const src = safeImageUrl(value.src);
-    const img = src ? getCachedImage(src) : null;
+    const img = getCachedImage(value.src);
     if (img) {
       const scale = Math.min(box.width / img.naturalWidth, box.height / img.naturalHeight);
       const w = img.naturalWidth * scale;
@@ -588,7 +605,7 @@ const pdfColor = (css: string): Rgb => {
 const valueOf = (kinds: FieldKinds, values: FieldValues, node: PmNode): FieldValue | undefined => {
   const id = node.attrs["nodeId"];
   if (typeof id !== "string" || !isSigner(node)) return undefined;
-  return shownValue(String(node.attrs["kind"]), controlOf(kinds, node), values[id]);
+  return shownValue(kinds, String(node.attrs["kind"]), values[id]);
 };
 
 /**
@@ -616,8 +633,7 @@ const fieldPdf =
       return;
     }
     if (value?.kind === "image") {
-      const src = safeImageUrl(value.src);
-      if (src) ctx.draw.image({ x, y, width, height, image: { src }, fit: "contain" });
+      ctx.draw.image({ x, y, width, height, image: { src: value.src }, fit: "contain" });
       return;
     }
     const text = valueText(value, fieldChoices(node.attrs["options"]));
@@ -894,7 +910,7 @@ export const Field = Extension.create<FieldOptions>({
         embeds: {
           field: (node: PmNode) => {
             const value = valueOf(kinds, valuesIn(this, this.options), node);
-            return value?.kind === "image" ? safeImageUrl(value.src) : null;
+            return value?.kind === "image" ? value.src : null;
           },
         },
       },

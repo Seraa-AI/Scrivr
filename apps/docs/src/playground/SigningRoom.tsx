@@ -11,6 +11,7 @@ import {
   isFieldAnswered,
   listSignerFields,
   unansweredBeforeSigning,
+  valuesOnRecord,
   verifySnapshot,
   type FieldValue,
   type SealedSnapshot,
@@ -92,7 +93,8 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
   const content = useMemo(() => JSON.parse(snapshot.content), [snapshot]);
   const mine = snapshot.fields.filter((f) => f.role === role);
 
-  // The editor a request is answered for: the one mounted now, not the one these options were made with.
+  // The options' closure captured the editor of the render that made them — null on first mount, or one
+  // since replaced — so a request reads the editor mounted now.
   const editorRef = useRef<Editor | null>(null);
   const editor = useScrivrEditor(
     {
@@ -155,11 +157,13 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
   }, [editor]);
   // The kinds this room's Field knows, read as the signing view reads them.
   const kinds = editor ? fieldKindsOf(editor) : BUILT_IN_FIELD_KINDS;
-  const missing = snapshot.fields.filter((f) => f.required && !isFieldAnswered(f, values[f.id], kinds));
+  // The room's values as the record shows them — a date only beside its signature.
+  const shown = valuesOnRecord(snapshot.fields, values, kinds);
+  const missing = snapshot.fields.filter((f) => f.required && !isFieldAnswered(f, shown[f.id], kinds));
   // What a signer owes before signing comes first, as the signing view asks for it.
   const nextOpen =
-    unansweredBeforeSigning(mine, values, role, kinds)[0] ??
-    mine.find((f) => !isDatedWhenSigned(kinds, f.kind) && !isFieldAnswered(f, values[f.id], kinds));
+    unansweredBeforeSigning(mine, shown, role, kinds)[0] ??
+    mine.find((f) => !isDatedWhenSigned(kinds, f.kind) && !isFieldAnswered(f, shown[f.id], kinds));
 
   const answer = (value: FieldValue | null) => {
     request?.resolve(value);
@@ -272,7 +276,7 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
         <Section title={`${ROLE_LABEL[role]}'s fields`}>
           <ul className="flex flex-col gap-1">
             {mine.map((f) => {
-              const value = values[f.id];
+              const value = shown[f.id];
               const answered = isFieldAnswered(f, value, kinds);
               return (
                 <li key={f.id}>

@@ -2,6 +2,7 @@ import type { Node as PmNode } from "prosemirror-model";
 import { z } from "zod";
 import type { ResolvedTheme } from "../../model/theme";
 import type { PdfNodeContext } from "../../exports/pdf";
+import { safeDrawingUrl } from "../../model/safeUrl";
 
 /** The control a field is: how it draws, whether it toggles, and what Word gets. */
 export type FieldControl = "signatureLine" | "checkbox" | "date" | "dropdown" | "text";
@@ -10,13 +11,20 @@ export type FieldControl = "signatureLine" | "checkbox" | "date" | "dropdown" | 
 export interface FieldKindSpec {
   /**
    * Shown on the empty box and as the control's name in Word. A checkbox's
-   * box says what it is, so its label names it in Word and in host drawings only.
+   * box says what it is, so its label names it in Word and in host drawings
+   * only. An empty label leaves a field unnamed — nothing on its box, no
+   * name in Word.
    */
   label: string;
   /** The box an inserted field reserves, in CSS pixels. */
   size: { width: number; height: number };
   /** Defaults to `"text"`. A `"signatureLine"` field is its party signing. */
   control?: FieldControl;
+  /**
+   * Completed by drawing, as initials are: it takes a drawn image. A
+   * `"signatureLine"` control is always drawn.
+   */
+  drawn?: boolean;
   /**
    * Dated by the host, through `onFieldRequest`, the moment its party's
    * signature is given — never pressed, never taken from Word, never holding
@@ -27,7 +35,7 @@ export interface FieldKindSpec {
 
 export const BUILT_IN_FIELD_KINDS = {
   signature: { label: "Signature", size: { width: 180, height: 44 }, control: "signatureLine" },
-  initials: { label: "Initials", size: { width: 64, height: 36 } },
+  initials: { label: "Initials", size: { width: 64, height: 36 }, drawn: true },
   date: { label: "Date", size: { width: 110, height: 24 }, control: "date" },
   dateSigned: { label: "Date signed", size: { width: 110, height: 24 }, control: "date", datedWhenSigned: true },
   text: { label: "Text", size: { width: 160, height: 24 } },
@@ -94,8 +102,11 @@ export interface FieldOptions {
   /**
    * Completed values by field id that the editor opens with; `setFieldValue`
    * gives one later. A signer's field is laid out, drawn and printed with a
-   * value its control can show (`shownValue`) — the executed document a
-   * signing ends with — yet values never enter the document, so its seal holds.
+   * value it can show — a tick on a checkbox, a choice on a dropdown, words,
+   * a drawing on a signature or initials as an inline PNG or JPEG — and a
+   * date signed only beside its party's answered signature: the executed
+   * document a signing ends with. Values never enter the document, so its
+   * seal holds.
    */
   values: Record<string, FieldValue>;
   /** A colour per role, by role name. A role left out takes one from Scrivr's palette. */
@@ -143,7 +154,7 @@ export const controlOfKind = (kinds: FieldKinds, kind: string): FieldControl => 
 /** The control a field's kind declares. */
 export const controlOf = (kinds: FieldKinds, node: PmNode): FieldControl => controlOfKind(kinds, String(node.attrs["kind"]));
 
-/** The words or marks each control shows. A drawing is a field's only when it is drawn — see `shownValue`. */
+/** The values each control shows besides a drawing, which `shownValue` decides by kind. */
 const SHOWN_BY: Record<FieldControl, ReadonlySet<FieldValue["kind"]>> = {
   signatureLine: new Set(["text"]),
   text: new Set(["text"]),
@@ -152,17 +163,18 @@ const SHOWN_BY: Record<FieldControl, ReadonlySet<FieldValue["kind"]>> = {
   checkbox: new Set(["checkbox"]),
 };
 
-/** An inline PNG or JPEG: printable in a PDF, and fixed — a link could change after signing. */
-const INLINE_RASTER = /^data:image\/(?:png|jpe?g);base64,/i;
-
 /**
- * The value a field shows: one its control can show, or none. A drawing
- * belongs only to a field that is drawn — a signature, initials — and only as
- * an inline PNG or JPEG; anything else shows nothing, so it is none.
+ * The value a field of `kind` shows: one its control can show, or none. A
+ * drawing belongs only to a kind that is drawn — a signature, initials — and
+ * only as a drawing a record can print (`safeDrawingUrl`); anything else
+ * shows nothing, so it is none.
  */
-export function shownValue(kind: string, control: FieldControl, value: FieldValue | undefined): FieldValue | undefined {
-  if (value?.kind === "image") return setsLike(kind, control) === "picture" && INLINE_RASTER.test(value.src) ? value : undefined;
-  return value && SHOWN_BY[control].has(value.kind) ? value : undefined;
+export function shownValue(kinds: FieldKinds, kind: string, value: FieldValue | undefined): FieldValue | undefined {
+  if (value?.kind === "image") {
+    const src = setsLike(kinds, kind) === "picture" ? safeDrawingUrl(value.src) : null;
+    return src === null ? undefined : { kind: "image", src };
+  }
+  return value && SHOWN_BY[controlOfKind(kinds, kind)].has(value.kind) ? value : undefined;
 }
 
 /** What a field is, as its label says it: "Signature". */
@@ -235,8 +247,11 @@ export function fieldRoleColor(role: string | null | undefined, overrides?: Read
  * at its own size on the baseline, as an inline image is: signatures and
  * initials, which are drawn. A checkbox is a glyph.
  */
-export const setsLike = (kind: string, control: FieldControl): "text" | "picture" | "glyph" =>
-  control === "checkbox" ? "glyph" : control === "signatureLine" || kind === "initials" ? "picture" : "text";
+export function setsLike(kinds: FieldKinds, kind: string): "text" | "picture" | "glyph" {
+  const control = controlOfKind(kinds, kind);
+  if (control === "checkbox") return "glyph";
+  return control === "signatureLine" || kinds[kind]?.drawn === true ? "picture" : "text";
+}
 
 /** What a signer does to complete a field — the word on its badge. */
 export function fieldVerb(kind: string, control: FieldControl): string {

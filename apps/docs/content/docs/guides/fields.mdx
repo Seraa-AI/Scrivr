@@ -213,7 +213,7 @@ Values live in `Field`, beside the document and never in it, so a sealed documen
     throw new Error("Complete every required field first");
   }
   ```
-- A date signed stands only beside its party's answered signature: clearing a signature clears its date, and `valuesOnRecord(fields, values, kinds)` gives the values as the record shows them, for your server to keep.
+- A date signed shows only beside its party's answered signature — on screen, in print and in the executed record, however the values arrived. A signature answered with nothing it can show (blank text, a drawing that cannot be printed) takes its date with it; declining (`null`) leaves both as they were. `valuesOnRecord(fields, values, kinds)` gives the values as the record shows them, for your server to keep.
 - A `dateSigned` field is never pressed. The moment its party's signature is given (initials on the way do not count), `onFieldRequest` is called for it with no press: answer with the date by your own clock and in your own format, and record it with the signature.
 
   ```ts
@@ -237,7 +237,7 @@ if (!result.ok) throw new Error(result.refusal.reason); // "snapshot-altered" | 
 const { pdf, artifactHash } = result; // keep both: the record, and the hash of exactly these bytes
 ```
 
-It refuses rather than print a record of something else: a snapshot that no longer matches its hash, or a required field still unanswered (`refusal.missing` names them). The values are printed, never written: the snapshot, and its `contentHash`, are the same before and after. Laying out a PDF needs a browser `Editor` — a page, or a server running a headless DOM with a canvas — since `ServerEditor` lays nothing out.
+It refuses rather than print a record of something else: a snapshot that no longer matches its hash, or a required field still unanswered (`refusal.missing` names them). It prints the values as the record shows them, so a date signed with no answered signature beside it is left out, and it throws when `Field` is not among `editorOptions.extensions`. The values are printed, never written: the snapshot, and its `contentHash`, are the same before and after. Laying out a PDF needs a browser `Editor` — a page, or a server running a headless DOM with a canvas — since `ServerEditor` lays nothing out.
 
 ## Values entered in Word
 

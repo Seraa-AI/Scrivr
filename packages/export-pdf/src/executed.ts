@@ -1,6 +1,8 @@
 import {
   Editor,
+  Field,
   fieldKindsOf,
+  flattenExtensions,
   fieldValues,
   hashArtifact,
   isFieldAnswered,
@@ -45,9 +47,9 @@ export type ExecutedPdfResult =
  * The fields are read from the verified content, not from what was stored
  * beside it, and are checked against the values as the printing editor holds
  * them, as a record shows them (`valuesOnRecord`) — what it prints is what
- * was checked. Throws when the editor cannot hold values: `Field` is missing
- * from `editorOptions`. Values are printed, never written: the snapshot and
- * its hash are unchanged.
+ * was checked. Throws when `Field` is not among `editorOptions.extensions`,
+ * or a plugin refuses a value. Values are printed, never written: the
+ * snapshot and its hash are unchanged.
  */
 export async function exportExecutedPdf(
   snapshot: Pick<SealedSnapshot, "content" | "contentHash">,
@@ -58,17 +60,19 @@ export async function exportExecutedPdf(
     return { ok: false, refusal: { reason: "snapshot-altered" } };
   }
   const { editorOptions, ...pdfOptions } = options;
+  if (!flattenExtensions(editorOptions.extensions ?? []).some((extension) => extension.name === Field.name)) {
+    throw new Error("exportExecutedPdf needs Field among editorOptions.extensions: only Field reads a field or holds its value");
+  }
   const editor = new Editor({ ...editorOptions, content: documentJson(snapshot.content), sealed: true });
   try {
     for (const [id, value] of Object.entries(values)) {
-      if (!setFieldValue(editor, id, value)) throw new Error("exportExecutedPdf needs Field among editorOptions.extensions to hold values");
+      // Field is present, so only another plugin filtering the change refuses a value.
+      if (!setFieldValue(editor, id, value)) throw new Error(`exportExecutedPdf could not hold the value of field "${id}": a plugin refused it`);
     }
     const kinds = fieldKindsOf(editor);
     const fields = listSignerFields(editor.getState().doc);
-    // What the record shows: a date signed with no signature beside it is dropped.
-    const held = fieldValues(editor.getState());
-    const onRecord = valuesOnRecord(fields, held, kinds);
-    for (const id of Object.keys(held)) if (!(id in onRecord)) setFieldValue(editor, id, null);
+    // Field prints by this same rule: a date signed shows only beside its party's signature.
+    const onRecord = valuesOnRecord(fields, fieldValues(editor.getState()), kinds);
     const missing = fields.filter((f) => f.required && !isFieldAnswered(f, onRecord[f.id], kinds));
     if (missing.length > 0) return { ok: false, refusal: { reason: "unanswered-fields", missing } };
     const pdf = await exportToPdf(editor, pdfOptions);
@@ -78,7 +82,7 @@ export async function exportExecutedPdf(
   }
 }
 
-/** A verified snapshot's document object, rebuilt as a typed record rather than cast. */
+/** The snapshot's document object: copied, not cast — content is untrusted until parsed. */
 function documentJson(content: string): Record<string, unknown> {
   const parsed: unknown = JSON.parse(content);
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new Error("A snapshot's content is a document object");

@@ -22,6 +22,7 @@ import {
   isSigningKind,
   listSignerFields,
   paintCheckbox,
+  safeDrawingUrl,
   setFieldValue,
   unansweredBeforeSigning,
   valuesOnRecord,
@@ -96,6 +97,7 @@ describe("what a signing host builds on", () => {
     expect(isFieldAnswered(terms, undefined, kinds)).toBe(false);
     expect(unansweredBeforeSigning([terms], {}, "client", kinds)).toEqual([terms]);
     expect(valuesOnRecord([terms], {}, kinds)).toEqual({});
+    expect(safeDrawingUrl("data:image/png;base64,iVBORw0KGgo=")).not.toBeNull();
     expect(WORD_PART_NAMESPACES["mc:Ignorable"]).toBe("w14");
     expect(isSigningKind(BUILT_IN_FIELD_KINDS, "signature") && isDatedWhenSigned(BUILT_IN_FIELD_KINDS, "dateSigned")).toBe(true);
     expect([control, insert.kind, range.kind, denied.reason, typeof gate, fields, refusal]).toEqual([

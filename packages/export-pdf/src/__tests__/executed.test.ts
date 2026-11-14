@@ -78,8 +78,8 @@ describe("exportExecutedPdf", () => {
     expect(!result.ok && result.refusal.reason === "unanswered-fields" && result.refusal.missing.map((f) => f.id)).toEqual(["sig"]);
   });
 
-  it("needs Field among the extensions to read a snapshot that has fields", async () => {
-    await expect(exportExecutedPdf(await sealed(), signed, { editorOptions: { extensions: [StarterKit], textMeasurer: measurer() } })).rejects.toThrow(/field/i);
+  it("needs Field among the extensions, and says so before reading the snapshot", async () => {
+    await expect(exportExecutedPdf(await sealed(), signed, { editorOptions: { extensions: [StarterKit], textMeasurer: measurer() } })).rejects.toThrow(/needs Field/);
   });
 
   it("checks the values it prints: a drawing the page may not draw is no signature", async () => {

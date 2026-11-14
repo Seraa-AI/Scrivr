@@ -511,7 +511,7 @@ no seal at all. Its pattern leaves four gaps, which these close:
 
 | Gap in a host's pattern | Function | Called from |
 |---|---|---|
-| no hash of what was sealed | `snapshotFromYDoc(ydoc, schema, { assignedRoles })` | the seal, inside the host's lock, after its flush |
+| no hash of what was sealed | `snapshotFromYDoc(ydoc, schema, { assignedRoles, kinds })` | the seal, inside the host's lock, after its flush |
 | writers keep writing until the re-check | `stampSeal(ydoc, …)` — the seal lives *in the room*, every client sees it on the next sync | the same transaction |
 | | `isSealed(ydoc)`, `readRevisionStamp(ydoc)` | `onAuthenticate`, `onStoreDocument` |
 | a room's cached state drifts from the seal (post-seal edits reach the cache, then persist on unseal) | `matchesSnapshot(ydoc, schema, contentHash)` + `resetToSnapshot(ydoc, schema, content)` | `onLoadDocument` |
@@ -611,7 +611,7 @@ this section says so rather than the proposal being quietly rewritten to match.
 - `ReadingProgress` and `FieldCompletion` (+ `setFieldValue`) in
   `@scrivr/plugins` under `sealed-viewer/`. The field manifest types
   (`SealedField`, `FieldValue`) live there until lane B produces them.
-- A drawn signature is a raster image, gated by `safeImageUrl`.
+- A drawn signature is a raster image, gated by `safeImageUrl` — since narrowed to an inline PNG or JPEG on a drawn field (`safeDrawingUrl`); see the review of the executed record.
 - Closing the viewer ends the reading record: `pageLeft` for every page
   still in view.
 - Not yet: phases 3–5; keyboard traversal between fields. (Phase 4 replaced the
@@ -708,7 +708,7 @@ so Seraa can retire its own signature extension against a complete set.
 
 **Phase 4 — snapshot and hashes.** Shipped on PR #256.
 
-- `createSnapshot(doc, { assignedRoles })` → `{ ok: true, snapshot: { content,
+- `createSnapshot(doc, { assignedRoles, kinds })` (`kinds` since the review of the executed record) → `{ ok: true, snapshot: { content,
   contentHash, fields } }` or `{ ok: false, refusal }`, refusal one of
   `pending-tracked-changes { count }`, `unassigned-roles { missing }`,
   `unknown-roles { unknown }`. A result, not an exception: every refusal is an
@@ -869,14 +869,18 @@ and today nothing of it reaches Scrivr.
   in the executed PDF. Only a signer's field shows a value now.
 - **Answered means printed.** A value counts only where its field can show
   it (`shownValue`): a tick on a checkbox, a choice on a dropdown, words, and
-  a drawing only on a field that is drawn — a signature, initials — given as
-  an inline PNG or JPEG, which a PDF can print and a link cannot change.
+  a drawing only on a field that is drawn — a signature line, or a kind that
+  declares `drawn`, as initials do — given as an inline PNG or JPEG whose
+  bytes open as one (`safeDrawingUrl`), which a PDF can print and a link
+  cannot change.
   Layout, the canvas, the PDF and `isFieldAnswered` read the one rule, so the
   executed record cannot vouch for a field it prints blank.
 - **A date signed stands only beside its signature.** `valuesOnRecord` drops a
-  party's date when no signature of theirs answers; the signing view clears
-  it when a signature is blanked; a seal refuses a required date signed whose
-  party has no required signature (`dates-without-signature`).
+  party's date when no signature of theirs answers, and `Field` shows values
+  by it — screen, print and executed record alike, however the values
+  arrived, with no copy of the rule anywhere else; a seal refuses a required
+  date signed whose party has no required signature
+  (`dates-without-signature`).
 - **Kinds are passed, never assumed.** `createSnapshot`, `isFieldAnswered` and
   `unansweredBeforeSigning` take the editor's kinds (`fieldKindsOf`), so a
   host's own signature kind is treated alike everywhere.
