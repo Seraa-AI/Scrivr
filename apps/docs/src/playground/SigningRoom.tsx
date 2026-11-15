@@ -9,16 +9,19 @@ import {
   isDatedWhenSigned,
   isDrawnKind,
   isFieldAnswered,
+  isSigningKind,
+  buildCompletionCertificate,
   listSignerFields,
   unansweredBeforeSigning,
   valuesOnRecord,
   verifySnapshot,
+  type CompletionEvent,
   type FieldValue,
   type SealedSnapshot,
   type SignerFieldDescriptor,
 } from "@scrivr/core";
 import { FieldCompletion, ReadingProgress, requestField, type ReadingEvent } from "@scrivr/plugins";
-import { exportExecutedPdf } from "@scrivr/export-pdf";
+import { exportCompletionCertificate, exportExecutedPdf } from "@scrivr/export-pdf";
 import { playgroundFonts } from "./fonts";
 import { PLAYGROUND_THEME } from "./theme";
 import { ROLE_LABEL, SIGNING_ROLES, type SigningRole } from "./signingDemo";
@@ -65,7 +68,14 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
   });
   const [request, setRequest] = useState<FieldRequest | null>(null);
   const [verified, setVerified] = useState<boolean | null>(null);
-  const [executed, setExecuted] = useState<{ hash: string; url: string } | null>(null);
+  // The executed PDF as issued: its bytes, and the values it printed — what a certificate describes.
+  const [executed, setExecuted] = useState<{ hash: string; url: string; pdf: Uint8Array; values: Record<string, FieldValue> } | null>(null);
+  const [certificate, setCertificate] = useState<{ hash: string; url: string } | null>(null);
+  // The room's own record of the signing, as a host keeps one: Scrivr prints it on the certificate as the room's word.
+  const [events, setEvents] = useState<CompletionEvent[]>(() => {
+    const sent = new Date().toISOString();
+    return SIGNING_ROLES.map((party) => ({ at: sent, kind: "sent", party }));
+  });
   const [exporting, setExporting] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
 
@@ -89,6 +99,16 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
   useEffect(() => () => {
     if (executed) URL.revokeObjectURL(executed.url);
   }, [executed]);
+  useEffect(() => () => {
+    if (certificate) URL.revokeObjectURL(certificate.url);
+  }, [certificate]);
+
+  // A party has viewed the document once it is opened as them.
+  useEffect(() => {
+    setEvents((all) =>
+      all.some((e) => e.kind === "viewed" && e.party === role) ? all : [...all, { at: new Date().toISOString(), kind: "viewed", party: role }],
+    );
+  }, [role]);
 
   const content = useMemo(() => JSON.parse(snapshot.content), [snapshot]);
   const mine = snapshot.fields.filter((f) => f.role === role);
@@ -121,6 +141,10 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
               // The room stamps each value it records with when it was given; on a signature, that dates its party.
               const value = answer && recordedNow(answer);
               if (value) setValues((all) => ({ ...all, [field.id]: value }));
+              if (value && "signedAt" in value && value.signedAt && isSigningKind(BUILT_IN_FIELD_KINDS, field.kind)) {
+                const at = value.signedAt;
+                setEvents((all) => [...all, { at, kind: "signed", party: field.role }]);
+              }
               return value;
             }),
           onSignatureBlocked: (_signature, missing) =>
@@ -185,13 +209,51 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
         return;
       }
       const url = URL.createObjectURL(new Blob([new Uint8Array(result.pdf)], { type: "application/pdf" }));
-      setExecuted({ hash: result.artifactHash, url });
+      setExecuted({ hash: result.artifactHash, url, pdf: result.pdf, values });
+      setCertificate(null);
       const link = document.createElement("a");
       link.href = url;
       link.download = "services-agreement-executed.pdf";
       link.click();
     } catch (error) {
       setProblem(`The executed PDF could not be made: ${error instanceof Error ? error.message : String(error)}. Try again.`);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const exportCertificate = async () => {
+    if (!executed) return;
+    setExporting(true);
+    setProblem(null);
+    // The certificate of completion: what Scrivr checks against the sealed
+    // snapshot and the executed PDF, then the room's record of the signing.
+    try {
+      const built = await buildCompletionCertificate({
+        snapshot,
+        values: executed.values,
+        executed: executed.pdf,
+        extensions: [StarterKit.configure({ table: true }), Field.configure({ formatSignedDate: signedDateInWords })],
+        record: {
+          issuer: "the Scrivr playground",
+          title: "Services Agreement",
+          parties: SIGNING_ROLES.map((party) => ({ role: party, name: ROLE_LABEL[party] })),
+          events: [...events, { at: new Date().toISOString(), kind: "completed" }],
+        },
+      });
+      if (!built.ok) {
+        setProblem(`No certificate: ${built.refusal.reason}.`);
+        return;
+      }
+      const issued = await exportCompletionCertificate(built.certificate, { editorOptions: { pageConfig: defaultPageConfig, fonts: playgroundFonts } });
+      const url = URL.createObjectURL(new Blob([new Uint8Array(issued.pdf)], { type: "application/pdf" }));
+      setCertificate({ hash: issued.certificateHash, url });
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "services-agreement-certificate.pdf";
+      link.click();
+    } catch (error) {
+      setProblem(`The certificate could not be made: ${error instanceof Error ? error.message : String(error)}. Try again.`);
     } finally {
       setExporting(false);
     }
@@ -324,6 +386,24 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
             <Row label="PDF hash">
               <a href={executed.url} target="_blank" rel="noreferrer">
                 <code title={executed.hash}>{shortHash(executed.hash)}</code>
+              </a>
+            </Row>
+          )}
+          {executed && (
+            <button
+              type="button"
+              disabled={exporting}
+              onClick={() => void exportCertificate()}
+              className="mt-2 h-8 w-full rounded-md border text-[12px] font-semibold disabled:opacity-50"
+              style={{ borderColor: "var(--app-border)", color: "var(--app-text)" }}
+            >
+              Download certificate of completion
+            </button>
+          )}
+          {certificate && (
+            <Row label="Certificate hash">
+              <a href={certificate.url} target="_blank" rel="noreferrer">
+                <code title={certificate.hash}>{shortHash(certificate.hash)}</code>
               </a>
             </Row>
           )}

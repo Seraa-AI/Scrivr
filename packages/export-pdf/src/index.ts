@@ -486,3 +486,5 @@ async function embedImages(
 
 export { exportExecutedPdf } from "./executed";
 export type { ExecutedPdfOptions, ExecutedPdfRefusal, ExecutedPdfResult } from "./executed";
+export { bundleCertificate, exportCompletionCertificate } from "./certificate";
+export type { CertificatePdfOptions } from "./certificate";

@@ -271,7 +271,40 @@ over the wrong file gets a certificate for that file, never a false match.
 
 ## What shipped
 
-Nothing yet — this section records the build as each part lands.
+Built as proposed, on `docs/completion-certificate-rfc`. Where the code
+departs from the text above:
+
+- **The builder takes the signers' `extensions`, not `kinds`.** It opens the
+  verified content in a headless sealed `ServerEditor` with them, as
+  `exportExecutedPdf` opens it in an `Editor`: the fields come from the
+  verified bytes, not the list stored beside them, and completeness is read
+  from `valuesOnRecordOf` — `Field`'s own kinds and date format — so a
+  certificate is issued complete exactly when the executed PDF printed
+  complete.
+- **A signature's day "as signed" is its `signedAt` read in its own offset**,
+  not run through `formatSignedDate`: the same instant and offset the date
+  signed field reads, so the two agree without the certificate depending on
+  a host's formatter.
+- **Two more refusals than drafted:** `undated-signature` (an answered
+  signature with no `signedAt` — the certificate could not say when) and
+  `events-out-of-order`. `unzoned-time` also covers a `signedAt` that names
+  no zone. Event times must be full timestamps; a bare day, which `Field`
+  accepts as a `signedAt`, is not an event's instant.
+- **The verified section names roles, not people.** A party's name is the
+  host's word, so it appears only in the record; a signature is headed by its
+  kind and role.
+- **No page count.** Core reads no PDF, and counting pages from the layout
+  would describe a layout, not the executed bytes; the hash already pins
+  those.
+- **The certificate document uses only StarterKit's headings, paragraphs,
+  bold and inline images**, so any editor setup can print it.
+- **Known gap:** a drawn signature is shown at its kind's box size, so a
+  drawing of other proportions is stretched slightly; the executed PDF fits
+  it (`fit: "contain"`). Fitting it here needs the drawing's own size.
+- **Guide:** `guides/sealing.mdx`, *The certificate of completion*. The
+  playground's signing room keeps a record as a host would — sent on
+  opening, viewed per party, signed per signature — and issues the
+  certificate from the executed PDF's bytes and the values it printed.
 
 ## Sources
 
