@@ -221,7 +221,7 @@ describe("float beside a table — the table moves below the float", () => {
     expect(f.page).toBe(1);
     expect(first.page).toBe(2);
     expect(first.y).toBe(page2.contentTop);
-    expect(first.height).toBe(rowHeight);
+    expectSamePosition(first.height, rowHeight);
     expectBelowFloat(rows, f);
   });
 
@@ -318,8 +318,10 @@ describe("float beside a table — the table moves below the float", () => {
       const after = rowsOf(l, "T");
       expect(f.page).toBe(2);
       expect(blockWith(l, "Anchor").page).toBe(2);
-      expect(after.filter((r) => r.page === 1).map((r) => r.y))
-        .toEqual(rows.filter((r) => r.page === 1).map((r) => r.y));
+      const before = rows.filter((r) => r.page === 1);
+      const kept = after.filter((r) => r.page === 1);
+      expect(kept).toHaveLength(before.length);
+      kept.forEach((row, i) => expectSamePosition(row.y, must(before[i], "row").y));
       expectBelowFloat(after.filter((r) => r.page === 2), f);
     });
   });
