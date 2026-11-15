@@ -9,6 +9,7 @@ export {
   renderSelection,
   renderGhostText,
   renderAiCaret,
+  renderLabelledCaret,
   renderTrackedInsert,
   renderTrackedDelete,
   renderTrackedConflict,

@@ -91,6 +91,7 @@ export interface BlockRenderContext {
    * when registering lines and glyphs, so click hit-testing works across blocks.
    */
   lineIndexOffset: number;
+  /** Device pixels per page unit: the display's ratio times the zoom. Snap to `1 / dpr`. */
   dpr: number;
   measurer: TextMeasurerLike;
   markDecorators?: Map<string, MarkDecorator>;

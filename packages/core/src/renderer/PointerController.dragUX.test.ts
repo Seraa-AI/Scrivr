@@ -760,5 +760,35 @@ describe("PointerController — drag UX", () => {
       const expected = computeNewSize("TL", SQUARE_RECT.width, SQUARE_RECT.height, -50, 0, pageWidth - margins.left - margins.right);
       expect(setup.controller.pendingResize).toMatchObject({ width: expected.width, height: expected.height });
     });
+
+    it.each([0.5, 2])("at %s an image dragged lands under its ghost, in page units", (zoom) => {
+      setup = makePointerControllerSetup({
+        content: {
+          type: "doc",
+          content: [
+            { type: "paragraph", content: [
+              { type: "text", text: "Lead " },
+              { type: "image", attrs: { src: "x", wrapMode: "square", xAlign: "left", width: 80, height: 60 } },
+            ] },
+            { type: "paragraph", content: [{ type: "text", text: "word ".repeat(40).trim() }] },
+          ],
+        },
+      });
+      setup.editor.setZoom(zoom);
+      const before = setup.editor.layout.anchoredObjects?.[0];
+      if (!before) throw new Error("no image");
+
+      // 40 screen pixels sideways and down is 40 / zoom page units.
+      const grabX = (before.x + 10) * zoom;
+      const grabY = (before.y + 10) * zoom;
+      mousedown(setup.container, grabX, grabY);
+      mousemove(grabX + 40, grabY + 40);
+      mouseup(grabX + 40, grabY + 40);
+
+      const after = setup.editor.layout.anchoredObjects?.[0];
+      if (!after) throw new Error("image vanished");
+      expect(after.x).toBeCloseTo(before.x + 40 / zoom, 6);
+      expect(after.globalY).toBeCloseTo(before.globalY + 40 / zoom, 6);
+    });
   });
 });

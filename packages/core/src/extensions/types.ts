@@ -347,8 +347,13 @@ export interface IEditor extends IBaseEditor {
    * Falls back to selection.moveCursorTo if the position is not selectable.
    */
   selectNode(docPos: number): void;
-  /** Get screen-space position of a page canvas. Null when not mounted. */
+  /**
+   * The screen position of a page's top-left corner. Null when not mounted.
+   * A page-unit offset from it is `offset × zoom` screen pixels.
+   */
   getPageScreenPosition(page: number): { screenLeft: number; screenTop: number } | null;
+  /** The factor the document is shown at: 1 is 100%. Screen pixels per page unit. */
+  readonly zoom: number;
   /**
    * Scroll so the doc range [from, to] is visible — centered when it fits
    * the viewport, top-pinned when taller. Completes a partial streamed

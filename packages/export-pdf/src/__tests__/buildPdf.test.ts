@@ -189,6 +189,7 @@ function makePagedLayout(pageCount: number): DocumentLayout {
 class ExportPdfEditorDouble extends ServerEditor implements IEditor {
   readonly surfaces = new SurfaceRegistry();
   readonly cursorManager = new CursorManager(() => {});
+  readonly zoom = 1;
   readonly selection: SelectionController;
   ensureFullLayoutCalls = 0;
   private currentLayout: DocumentLayout;

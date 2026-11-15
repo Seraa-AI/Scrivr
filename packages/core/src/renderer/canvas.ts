@@ -1,25 +1,43 @@
 /**
  * High-fidelity canvas setup.
  *
- * On retina / HiDPI displays window.devicePixelRatio is 2 or 3.
- * A canvas sized at 794×1123 CSS pixels is physically rendered at
- * 794×1123 device pixels, then stretched by the browser to fill the
- * actual 1588×2246 physical pixels — producing blurry output.
+ * On retina / HiDPI displays window.devicePixelRatio is 2 or 3, and a view
+ * may be zoomed. A canvas whose backing store matched its logical size would
+ * be stretched by the browser to fill the physical pixels — blurry.
  *
- * Fix: size the canvas backing store at (width * dpr) × (height * dpr),
- * keep the CSS display size at (width × height), and scale the drawing
- * context by dpr so all your coordinates remain in CSS pixel space.
- *
- * Every draw call you make is in CSS pixels. The scaling handles the rest.
+ * Fix: size the backing store at the logical size times the device pixels
+ * each logical unit covers (the display's ratio times the zoom), show it at
+ * the logical size times the zoom, and scale the context to match, so draw
+ * calls stay in logical units — page units, in Scrivr.
  */
 
+/** The most pixels a canvas may hold: iOS Safari paints a larger one blank. */
+export const MAX_CANVAS_PIXELS = 16_777_216;
+
+/**
+ * Device pixels per logical unit for a `width × height` canvas shown at
+ * `scale`: the display's ratio times the scale, lowered for a backing store
+ * that would pass `MAX_CANVAS_PIXELS` — the browser then stretches it, soft
+ * at an extreme zoom but never blank. (`+ 1` leaves room for rounding each
+ * side up.)
+ */
+export function pixelsPerUnit(
+  width: number,
+  height: number,
+  scale: number,
+  dpr: number = window.devicePixelRatio ?? 1,
+): number {
+  const ceiling = Math.sqrt(MAX_CANVAS_PIXELS / ((width + 1) * (height + 1)));
+  return Math.min(dpr * scale, ceiling);
+}
+
 export interface CanvasSetupOptions {
-  /** Logical width in CSS pixels (e.g. 794 for A4) */
+  /** Logical width (e.g. 794 for an A4 page) */
   width: number;
-  /** Logical height in CSS pixels (e.g. 1123 for A4) */
+  /** Logical height (e.g. 1123 for an A4 page) */
   height: number;
   /**
-   * Override the pixel ratio — useful in tests or for forcing 1x.
+   * Override the display's pixel ratio — useful in tests or for forcing 1x.
    * Defaults to window.devicePixelRatio.
    */
   dpr?: number;
@@ -33,42 +51,39 @@ export interface CanvasSetupOptions {
 
 export interface CanvasSetupResult {
   ctx: CanvasRenderingContext2D;
-  /** Device pixels per logical unit: the display's pixel ratio times `scale`. */
+  /** Device pixels per logical unit — see `pixelsPerUnit`. Pass it on as the paint's `dpr`. */
   dpr: number;
-  /** Logical width (CSS pixels) */
+  /** Logical width */
   width: number;
-  /** Logical height (CSS pixels) */
+  /** Logical height */
   height: number;
 }
 
 /**
  * Sets up a canvas element for high-DPI rendering.
  *
- * Call this once when mounting, and again whenever the canvas is resized
- * or the window moves to a display with a different pixel ratio.
+ * Call this once when mounting, and again whenever the canvas is resized,
+ * the zoom changes, or the window moves to a display with a different ratio.
  *
  * @example
  * const { ctx } = setupCanvas(canvasEl, { width: 794, height: 1123 })
- * ctx.fillText("crisp text", 40, 60) // coordinates are still in CSS pixels
+ * ctx.fillText("crisp text", 40, 60) // coordinates are in logical units
  */
 export function setupCanvas(
   canvas: HTMLCanvasElement,
   options: CanvasSetupOptions
 ): CanvasSetupResult {
   const { width, height, scale = 1 } = options;
-  const dpr = (options.dpr ?? window.devicePixelRatio ?? 1) * scale;
+  const dpr = pixelsPerUnit(width, height, scale, options.dpr);
 
-  // Physical backing store — sized up by dpr
   canvas.width = Math.round(width * dpr);
   canvas.height = Math.round(height * dpr);
 
-  // CSS display size — the logical size at the view's zoom
   canvas.style.width = `${width * scale}px`;
   canvas.style.height = `${height * scale}px`;
 
   const ctx = canvas.getContext("2d", { alpha: false })!;
 
-  // Scale all draw calls so you work in CSS pixel coordinates
   ctx.scale(dpr, dpr);
 
   // Consistent text rendering defaults
@@ -148,8 +163,9 @@ export function watchDpr(onChange: (dpr: number) => void): () => void {
 /**
  * Clears the entire canvas and resets the transform scale.
  *
- * Call at the start of every render pass.
- * Re-applies the dpr scale after clearing so draw calls remain in CSS pixels.
+ * Call at the start of every render pass. Re-applies the `dpr` scale — device
+ * pixels per logical unit, as `setupCanvas` returned it — after clearing, so
+ * draw calls stay in logical units.
  */
 export function clearCanvas(
   ctx: CanvasRenderingContext2D,

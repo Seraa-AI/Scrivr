@@ -19,7 +19,10 @@ import { isCellDescriptor } from "../table/cellSelectionSeam";
 
 /** Constants */
 
-const DEFAULT_SMALL_TILE_HEIGHT = 307; // pageless tile height in CSS pixels
+/** Pixels per wheel `deltaMode` unit: pixels, lines (Firefox's mouse wheel), pages. */
+const WHEEL_PIXELS_PER_UNIT = [1, 16, 800];
+
+const DEFAULT_SMALL_TILE_HEIGHT = 307; // pageless tile height, in page units
 
 /** Types */
 
@@ -28,7 +31,7 @@ export interface TileManagerOptions {
   smallTileHeight?: number;
   /** Extra tiles to keep above/below the viewport. Default: 1. */
   overscan?: number;
-  /** Gap in CSS pixels between pages in paged mode. Default: 24. */
+  /** Gap between pages in paged mode, in page units: it scales with the zoom. Default: 24. */
   gap?: number;
   /** Draw margin guide lines (dev aid). Default: false. */
   showMarginGuides?: boolean;
@@ -51,8 +54,8 @@ export interface TileEntry {
   wrapper: HTMLDivElement;
   contentCanvas: HTMLCanvasElement;
   overlayCanvas: HTMLCanvasElement;
-  /** Device pixels per page unit the tile was painted at: the display's ratio times the zoom. */
-  dpr: number;
+  /** Device pixels per page unit the tile was painted at — see `pixelsPerUnit`. */
+  pixelsPerUnit: number;
   /** pageless: slice index; paged: pageIndex (0-based). */
   tileIndex: number;
   lastPaintedVersion: number;
@@ -192,8 +195,17 @@ export class TileManager {
   private unwatchDpr: (() => void) | null = null;
   private readonly pointer: PointerController;
   private readonly offZoom: () => void;
-  /** Where a gesture zoomed about, in client coordinates; the view's top centre otherwise. */
+  /**
+   * Where a gesture zooms about, in client coordinates — set only for the
+   * length of its `setZoom`, which `handleZoom` runs inside. Null otherwise:
+   * the view's top centre stays put.
+   */
   private zoomAnchor: { x: number; y: number } | null = null;
+  private readonly zoomGestures: boolean;
+  /** Where Ctrl/Cmd + wheel is heard: the scrolling view, once found. */
+  private wheelTarget: HTMLElement | null = null;
+  /** The widest vertical scrollbar the scroll container has shown, in CSS pixels — see `viewportSize`. */
+  private widestScrollbar = 0;
 
   constructor(
     private readonly editor: Editor,
@@ -205,7 +217,7 @@ export class TileManager {
     this.showMarginGuides = options.showMarginGuides ?? false;
     this.smallTileHeight = options.smallTileHeight ?? DEFAULT_SMALL_TILE_HEIGHT;
     this.pageStyle = options.pageStyle ?? {};
-    if (options.zoomGestures ?? true) container.addEventListener("wheel", this.handleWheel, { passive: false });
+    this.zoomGestures = options.zoomGestures ?? true;
 
     // ── tiles container ──────────────────────────────────────────────────────
     this.tilesContainer = document.createElement("div");
@@ -263,11 +275,7 @@ export class TileManager {
 
     // ── DPR change detection (browser zoom, display switch, pinch-to-zoom) ──
     this.unwatchDpr = watchDpr(() => {
-      // Force full repaint of all tiles at the new DPR
-      for (const tile of this.pool) {
-        tile.lastPaintedVersion = -1;
-        tile.lastRenderGeneration = -1;
-      }
+      for (const tile of this.pool) this.forgetPaint(tile);
       this.scheduleUpdate();
     });
 
@@ -281,15 +289,22 @@ export class TileManager {
     return this.editor.zoom;
   }
 
-  /** The scroll container's content box — what a fit fills. Null before it is found. */
+  /**
+   * The scroll container's content box — what a fit fills. Null before it is
+   * found. Its width leaves out the widest scrollbar the container has shown:
+   * a fit that grew whenever a classic scrollbar left would make the page tall
+   * enough to bring it back, and refit forever.
+   */
   private viewportSize(): { width: number; height: number } | null {
     const el = this.scrollParent;
     if (!el) return null;
     const style = window.getComputedStyle(el);
-    const padding = (a: string, b: string) => (parseFloat(a) || 0) + (parseFloat(b) || 0);
+    const sum = (a: string, b: string) => (parseFloat(a) || 0) + (parseFloat(b) || 0);
+    const scrollbar = el.offsetWidth - el.clientWidth - sum(style.borderLeftWidth, style.borderRightWidth);
+    this.widestScrollbar = Math.max(this.widestScrollbar, scrollbar);
     return {
-      width: el.clientWidth - padding(style.paddingLeft, style.paddingRight),
-      height: el.clientHeight - padding(style.paddingTop, style.paddingBottom),
+      width: el.clientWidth + scrollbar - this.widestScrollbar - sum(style.paddingLeft, style.paddingRight),
+      height: el.clientHeight - sum(style.paddingTop, style.paddingBottom),
     };
   }
 
@@ -364,6 +379,12 @@ export class TileManager {
         this.editor.refitZoom();
       }
     }
+    if (this.zoomGestures && !this.wheelTarget) {
+      // The whole view, so the gutter beside the page zooms it too, rather
+      // than the browser zooming the app.
+      this.wheelTarget = this.scrollParent ?? this.container;
+      this.wheelTarget.addEventListener("wheel", this.handleWheel, { passive: false });
+    }
 
     const scrollEl = this.scrollParent;
     // In page units, so the tile math below needs no zoom.
@@ -406,9 +427,7 @@ export class TileManager {
         tile.assigned &&
         (tile.tileIndex < firstVisible || tile.tileIndex > lastVisible)
       ) {
-        this.activeTiles.delete(tile.tileIndex);
-        tile.assigned = false;
-        tile.wrapper.style.display = "none";
+        this.releaseTile(tile);
       }
     }
 
@@ -428,17 +447,14 @@ export class TileManager {
 
         tile.assigned = true;
         tile.tileIndex = idx;
-        tile.lastPaintedVersion = -1;
-        tile.lastRenderGeneration = -1;
+        this.forgetPaint(tile);
         tile.lastBlinkState = false;
         tile.lastCursorTile = -1;
         tile.lastSelectionKey = "";
         tile.lastPmState = null;
         tile.lastPendingResizeKey = "";
         tile.lastPendingAnchoredDragKey = "";
-        tile.lastOverlayContentKey = "";
-        tile.wrapper.style.top = `${idx * sh * this.zoom}px`;
-        tile.wrapper.style.height = `${this.tileHeight * this.zoom}px`;
+        this.placeTile(tile);
         tile.wrapper.style.display = "block";
         this.activeTiles.set(idx, tile);
       }
@@ -448,6 +464,25 @@ export class TileManager {
       this.paintContent(tile, layout, layout.version);
       this.paintOverlay(tile, layout);
     }
+  }
+
+  /** Puts the tile's wrapper over its slot, at the zoom. */
+  private placeTile(tile: TileEntry): void {
+    tile.wrapper.style.top = `${tile.tileIndex * this.slotHeight * this.zoom}px`;
+    tile.wrapper.style.height = `${this.tileHeight * this.zoom}px`;
+  }
+
+  private releaseTile(tile: TileEntry): void {
+    this.activeTiles.delete(tile.tileIndex);
+    tile.assigned = false;
+    tile.wrapper.style.display = "none";
+  }
+
+  /** Makes the next update paint the tile's content and overlay again, whatever changed. */
+  private forgetPaint(tile: TileEntry): void {
+    tile.lastPaintedVersion = -1;
+    tile.lastRenderGeneration = -1;
+    tile.lastOverlayContentKey = "";
   }
 
   /** The tiles container at the zoom: the whole column of pages, scaled as one. */
@@ -544,7 +579,7 @@ export class TileManager {
       height: pageConfig.pageHeight,
       scale: this.zoom,
     });
-    tile.dpr = dpr;
+    tile.pixelsPerUnit = dpr;
 
     // Size overlay canvas only after the content candidate is admitted, so a
     // rejected frame preserves both visible layers.
@@ -600,22 +635,15 @@ export class TileManager {
       ? fragmentsInTile(layout.fragments, tileTop, tileBottom)
       : [];
 
-    const dpr = (window.devicePixelRatio ?? 1) * this.zoom;
-    tile.dpr = dpr;
-
-    // Size canvases
     const w = pageConfig.pageWidth;
     const h = this.tileHeight;
-    tile.contentCanvas.width = Math.round(w * dpr);
-    tile.contentCanvas.height = Math.round(h * dpr);
-    tile.contentCanvas.style.width = `${w * this.zoom}px`;
-    tile.contentCanvas.style.height = `${h * this.zoom}px`;
+    const { ctx, dpr } = setupCanvas(tile.contentCanvas, { width: w, height: h, scale: this.zoom });
+    tile.pixelsPerUnit = dpr;
     this.sizeOverlay(tile, w, h);
 
-    const ctx = tile.contentCanvas.getContext("2d", { alpha: false })!;
     const theme = this.editor.getResolvedTheme();
     clearCanvas(ctx, w, h, dpr, theme.pageBg);
-    // After clearCanvas: transform = scale(dpr). Translate so block.y coords work naturally.
+    // Translate so the tile's slice of the column's page-unit y lands at its top.
     ctx.save();
     ctx.translate(0, -tileTop);
 
@@ -655,8 +683,8 @@ export class TileManager {
 
   /** The overlay canvas over a `width` × `height` page-unit tile, at the tile's pixel ratio. */
   private sizeOverlay(tile: TileEntry, width: number, height: number): void {
-    tile.overlayCanvas.width = Math.round(width * tile.dpr);
-    tile.overlayCanvas.height = Math.round(height * tile.dpr);
+    tile.overlayCanvas.width = Math.round(width * tile.pixelsPerUnit);
+    tile.overlayCanvas.height = Math.round(height * tile.pixelsPerUnit);
     tile.overlayCanvas.style.width = `${width * this.zoom}px`;
     tile.overlayCanvas.style.height = `${height * this.zoom}px`;
   }
@@ -753,13 +781,13 @@ export class TileManager {
     tile.lastPendingAnchoredDragKey = pendingAnchoredKey;
     tile.lastOverlayContentKey = contentKey;
 
-    const dpr = tile.dpr || (window.devicePixelRatio ?? 1) * this.zoom;
     const w = pageConfig.pageWidth;
     const h = this.tileHeight;
+    const dpr = tile.pixelsPerUnit;
 
     const overlayCtx = tile.overlayCanvas.getContext("2d")!;
     clearOverlay(overlayCtx, w, h, dpr, this.zoom);
-    // After clearOverlay: transform = scale(dpr). Apply tile translate for pageless.
+    // Pageless: translate so the tile's slice of the column lands at its top.
     if (isPageless) {
       overlayCtx.save();
       overlayCtx.translate(0, -tileTop);
@@ -920,7 +948,7 @@ export class TileManager {
       wrapper,
       contentCanvas,
       overlayCanvas,
-      dpr: 1,
+      pixelsPerUnit: 1,
       tileIndex: -1,
       lastPaintedVersion: -1,
       lastRenderGeneration: -1,
@@ -944,7 +972,10 @@ export class TileManager {
   private handleWheel = (e: WheelEvent): void => {
     if (!e.ctrlKey && !e.metaKey) return;
     e.preventDefault();
-    const delta = Math.max(-10, Math.min(10, e.deltaY));
+    // A sideways swipe asks for no zoom; setting one would end a fit.
+    if (e.deltaY === 0) return;
+    const pixels = e.deltaY * (WHEEL_PIXELS_PER_UNIT[e.deltaMode] ?? 1);
+    const delta = Math.max(-10, Math.min(10, pixels));
     this.zoomAnchor = { x: e.clientX, y: e.clientY };
     this.editor.setZoom(this.zoom * Math.exp(-delta * 0.02));
     this.zoomAnchor = null;
@@ -956,6 +987,8 @@ export class TileManager {
    * the view otherwise — stays where it was on screen.
    */
   private handleZoom(zoom: number, previous: number): void {
+    // A new request at the same factor: nothing on screen changes.
+    if (zoom === previous) return;
     const scrollEl = this.scrollParent;
     const before = this.tilesContainer.getBoundingClientRect();
     const view = scrollEl?.getBoundingClientRect();
@@ -969,13 +1002,14 @@ export class TileManager {
       scrollEl.scrollTop += after.top + page.y * zoom - anchor.y;
     }
 
-    // Every tile's place, size and pixels change: assign and paint them afresh.
-    for (const tile of this.pool) {
-      tile.assigned = false;
-      tile.wrapper.style.display = "none";
+    // Every shown tile's place, size and pixels change. Move and repaint them
+    // now, not on the next frame: a resize refits before the browser paints,
+    // and a tile hidden until then would leave the view blank for a frame.
+    for (const tile of this.activeTiles.values()) {
+      this.forgetPaint(tile);
+      this.placeTile(tile);
     }
-    this.activeTiles.clear();
-    this.scheduleUpdate();
+    this.update();
   }
 
   /** Scroll */
@@ -997,7 +1031,7 @@ export class TileManager {
     this.unsubscribe?.();
     this.unwatchDpr?.();
     this.offZoom();
-    this.container.removeEventListener("wheel", this.handleWheel);
+    this.wheelTarget?.removeEventListener("wheel", this.handleWheel);
     this.scrollParent?.removeEventListener("scroll", this.handleScroll);
     this.resizeObserver?.disconnect();
     this.pointer.detach();

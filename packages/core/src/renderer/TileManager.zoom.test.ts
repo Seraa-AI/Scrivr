@@ -5,6 +5,9 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TileManager } from "./TileManager";
+import { MAX_CANVAS_PIXELS } from "./canvas";
+import { MAX_ZOOM } from "./zoom";
+import { defaultPageConfig, defaultPagelessConfig } from "../layout/PageLayout";
 import { makeRendererTestSetup, type RendererTestSetup } from "../test-utils";
 
 const GAP = 24;
@@ -16,6 +19,12 @@ function wheel(target: HTMLElement, { ctrlKey = false, metaKey = false, ...init 
   Object.defineProperty(event, "metaKey", { value: metaKey });
   target.dispatchEvent(event);
   return event;
+}
+
+/** Gives the view a width with no scrollbar; happy-dom lays nothing out. */
+function viewWidth(view: HTMLElement, width: number): void {
+  Object.defineProperty(view, "offsetWidth", { value: width, configurable: true });
+  Object.defineProperty(view, "clientWidth", { value: width, configurable: true });
 }
 
 function shown(setup: RendererTestSetup): HTMLElement[] {
@@ -66,6 +75,28 @@ describe("TileManager at a zoom", () => {
     expect(canvas.width).toBe(Math.round(pageWidth * 1.5 * (window.devicePixelRatio || 1)));
   });
 
+  it.each([
+    ["a page", defaultPageConfig],
+    ["a pageless tile", defaultPagelessConfig],
+  ])("never sizes %s past what a browser will paint, however far it zooms", (_, pageConfig) => {
+    vi.stubGlobal("devicePixelRatio", 3);
+    tm?.destroy();
+    setup.cleanup();
+    setup = makeRendererTestSetup({ scrollParent: true, pageConfig });
+    setup.editor.setZoom(MAX_ZOOM);
+    tm = new TileManager(setup.editor, setup.container);
+    tm.update();
+
+    const canvases = shown(setup).flatMap((tile) => Array.from(tile.querySelectorAll("canvas")));
+    expect(canvases.length).toBeGreaterThan(0);
+    for (const canvas of canvases) {
+      expect(canvas.width * canvas.height).toBeLessThanOrEqual(MAX_CANVAS_PIXELS);
+      // Still shown at the zoom: the browser stretches the capped bitmap.
+      expect(canvas.style.width).toBe(`${pageConfig.pageWidth * MAX_ZOOM}px`);
+    }
+    vi.unstubAllGlobals();
+  });
+
   it("places what a host anchors to the document at the zoom, from the page's corner", () => {
     tm = new TileManager(setup.editor, setup.container);
     tm.update();
@@ -78,6 +109,42 @@ describe("TileManager at a zoom", () => {
     expect(at200.left - corner.screenLeft).toBeCloseTo((at100.left - corner.screenLeft) * 2, 6);
     expect(at200.top - corner.screenTop).toBeCloseTo((at100.top - corner.screenTop) * 2, 6);
     expect(at200.height).toBeCloseTo(at100.height * 2, 6);
+  });
+
+  it.each([0.5, 1, 2.37])("puts the caret where a click lands, at %s", (zoom) => {
+    setup.editor.setZoom(zoom);
+    tm = new TileManager(setup.editor, setup.container);
+    tm.update();
+    const target = 4; // in the first page's text, on screen at every zoom here
+    const rect = setup.editor.getViewportRect(target, target);
+    const canvas = shown(setup)[0]?.querySelector("canvas");
+    if (!rect || !canvas) throw new Error("not on screen");
+
+    const at = { clientX: rect.left, clientY: rect.top + rect.height / 2, bubbles: true, pointerId: 1, button: 0 };
+    canvas.dispatchEvent(new PointerEvent("pointerdown", at));
+    document.dispatchEvent(new PointerEvent("pointerup", at));
+
+    expect(setup.editor.getState().selection.head).toBe(target);
+  });
+
+  it("keeps the hidden input over the caret as the zoom changes, where the IME bar and the browser look for it", () => {
+    setup.editor.mount(setup.container);
+    tm = new TileManager(setup.editor, setup.container);
+    tm.update();
+    setup.editor.selection.moveCursorTo(4);
+    setup.editor.syncInputBridge(); // over the caret at 100%, as after any keystroke
+    const textarea = setup.container.querySelector("textarea");
+    if (!textarea) throw new Error("no input");
+    const at100 = textarea.style.left;
+
+    setup.editor.setZoom(2);
+
+    const caret = setup.editor.getViewportRect(4, 4);
+    if (!caret) throw new Error("no caret");
+    expect(textarea.style.left).not.toBe(at100);
+    expect(parseFloat(textarea.style.left)).toBeCloseTo(caret.left, 3);
+    expect(parseFloat(textarea.style.top)).toBeCloseTo(caret.top, 3);
+    expect(parseFloat(textarea.style.height)).toBeCloseTo(caret.height, 3);
   });
 
   it("changes nothing but the view: the layout is the one it was", () => {
@@ -93,16 +160,43 @@ describe("TileManager at a zoom", () => {
   it("fits the page's width to its view, and fits again when the view resizes", () => {
     const view = setup.scrollParent;
     if (!view) throw new Error("no view");
-    Object.defineProperty(view, "clientWidth", { value: setup.pageConfig.pageWidth / 2, configurable: true });
+    viewWidth(view, setup.pageConfig.pageWidth / 2);
     setup.editor.setZoom("fit-width");
     tm = new TileManager(setup.editor, setup.container);
     tm.update();
     expect(setup.editor.zoom).toBe(0.5);
 
-    Object.defineProperty(view, "clientWidth", { value: setup.pageConfig.pageWidth * 1.25, configurable: true });
+    viewWidth(view, setup.pageConfig.pageWidth * 1.25);
     setup.editor.refitZoom();
     expect(setup.editor.zoom).toBe(1.25);
     expect(setup.editor.zoomRequest).toBe("fit-width");
+  });
+
+  it("settles a fit when a scrollbar comes and goes, rather than refitting forever", () => {
+    const view = setup.scrollParent;
+    if (!view) throw new Error("no view");
+    const { pageWidth } = setup.pageConfig;
+    const SCROLLBAR = 15;
+    const scrollbar = (present: boolean) => {
+      Object.defineProperty(view, "offsetWidth", { value: pageWidth, configurable: true });
+      Object.defineProperty(view, "clientWidth", { value: present ? pageWidth - SCROLLBAR : pageWidth, configurable: true });
+    };
+    scrollbar(false);
+    setup.editor.setZoom("fit-width");
+    tm = new TileManager(setup.editor, setup.container);
+    tm.update();
+    expect(setup.editor.zoom).toBe(1);
+
+    // The page grew past the view: a classic scrollbar takes its width…
+    scrollbar(true);
+    setup.editor.refitZoom();
+    const fitted = setup.editor.zoom;
+    expect(fitted).toBeCloseTo((pageWidth - SCROLLBAR) / pageWidth, 6);
+
+    // …the smaller page no longer needs it, and it goes. The fit stays put.
+    scrollbar(false);
+    setup.editor.refitZoom();
+    expect(setup.editor.zoom).toBe(fitted);
   });
 
   it("keeps a factor through a resize", () => {
@@ -111,7 +205,7 @@ describe("TileManager at a zoom", () => {
     setup.editor.setZoom(1.5);
     tm = new TileManager(setup.editor, setup.container);
     tm.update();
-    Object.defineProperty(view, "clientWidth", { value: 300, configurable: true });
+    viewWidth(view, 300);
     setup.editor.refitZoom();
 
     expect(setup.editor.zoom).toBe(1.5);
@@ -133,6 +227,28 @@ describe("TileManager at a zoom", () => {
     expect(view.scrollTop).toBe(2000);
   });
 
+  it("never shows a blank view while the zoom changes: each page is redrawn at its new size at once", async () => {
+    const overlay = await import("./OverlayRenderer");
+    tm = new TileManager(setup.editor, setup.container);
+    tm.update();
+    const before = shown(setup).length;
+    const clearOverlay = vi.spyOn(overlay, "clearOverlay");
+
+    // A resize refits a fit before the browser paints, with no frame between.
+    setup.editor.setZoom(2);
+
+    const pages = shown(setup);
+    expect(pages.length).toBeGreaterThanOrEqual(Math.min(before, 1));
+    const { pageWidth } = setup.pageConfig;
+    for (const page of pages) {
+      expect(page.style.height).toBe(`${setup.pageConfig.pageHeight * 2}px`);
+      expect(page.querySelector("canvas")?.style.width).toBe(`${pageWidth * 2}px`);
+    }
+    // The overlay, cleared by its resize, draws the caret again too.
+    expect(clearOverlay.mock.calls.length).toBeGreaterThanOrEqual(pages.length);
+    clearOverlay.mockRestore();
+  });
+
   it("zooms about the pointer on Ctrl/Cmd + wheel or a pinch, and scrolls on a plain wheel", () => {
     tm = new TileManager(setup.editor, setup.container);
     tm.update();
@@ -146,6 +262,36 @@ describe("TileManager at a zoom", () => {
     wheel(setup.container, { deltaY: 100, metaKey: true });
     expect(setup.editor.zoom).toBeCloseTo(1, 6);
     expect(zoomedIn).toBeCloseTo(Math.exp(0.2), 6);
+  });
+
+  it("zooms on Ctrl/Cmd + wheel anywhere in the scrolling view, the gutter beside the page too", () => {
+    const view = setup.scrollParent;
+    if (!view) throw new Error("no view");
+    tm = new TileManager(setup.editor, setup.container);
+    tm.update();
+
+    expect(wheel(view, { deltaY: -100, ctrlKey: true }).defaultPrevented).toBe(true);
+    expect(setup.editor.zoom).toBeGreaterThan(1);
+  });
+
+  it("zooms as far for a wheel that counts in lines, as Firefox's does, as for one that counts in pixels", () => {
+    tm = new TileManager(setup.editor, setup.container);
+    tm.update();
+    wheel(setup.container, { deltaY: -100, ctrlKey: true });
+    const byPixels = setup.editor.zoom;
+    setup.editor.setZoom(1);
+    wheel(setup.container, { deltaY: -3, deltaMode: WheelEvent.DOM_DELTA_LINE, ctrlKey: true });
+
+    expect(setup.editor.zoom).toBeCloseTo(byPixels, 6);
+  });
+
+  it("keeps a fit through a sideways Ctrl/Cmd + wheel, which asks for no zoom", () => {
+    setup.editor.setZoom("fit-width");
+    tm = new TileManager(setup.editor, setup.container);
+    tm.update();
+    wheel(setup.container, { deltaX: 40, deltaY: 0, ctrlKey: true });
+
+    expect(setup.editor.zoomRequest).toBe("fit-width");
   });
 
   it("leaves the wheel to the browser when the host turns the gesture off", () => {

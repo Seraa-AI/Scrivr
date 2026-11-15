@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { snapRect, setActiveDpr, renderTrackedFormatting, renderTrackedInsert, renderTrackedMove, renderTrackedObject, renderTrackedRow } from "./OverlayRenderer";
+import { snapRect, setActiveDpr, clearOverlay, renderAiCaret, renderAnchoredDragCaret, renderAnchoredDragGhost, renderAnchoredDragSource, renderCursor, renderLabelledCaret, renderTrackedFormatting, renderTrackedInsert, renderTrackedMove, renderTrackedObject, renderTrackedRow } from "./OverlayRenderer";
 import type { GlyphEntry, LineEntry } from "../layout/CharacterMap";
 
 describe("snapRect — pixel-grid snapping", () => {
@@ -150,5 +150,40 @@ describe("a table row added or removed", () => {
 
   it("is framed with a dashed line when removed", () => {
     expect(painted(true)).toEqual(["wash", "dashed frame"]);
+  });
+});
+
+describe("the pointer's furniture", () => {
+  /** What each stroke and label measures on screen: its page-unit size times the zoom. */
+  const onScreen = (zoom: number, draw: (ctx: CanvasRenderingContext2D) => void) => {
+    const ctx = context();
+    clearOverlay(ctx, 100, 100, zoom, zoom);
+    const sizes: number[] = [];
+    const stroke = () => {
+      sizes.push(ctx.lineWidth * zoom, ...ctx.getLineDash().map((d) => d * zoom));
+    };
+    ctx.stroke = stroke;
+    ctx.strokeRect = stroke;
+    ctx.fillText = () => {
+      sizes.push(parseFloat(/(\d+(\.\d+)?)px/.exec(ctx.font)?.[1] ?? "0") * zoom);
+    };
+    draw(ctx);
+    return sizes;
+  };
+  const coords = { x: 20, y: 20, height: 16 };
+
+  it.each([
+    ["the caret", (ctx: CanvasRenderingContext2D) => renderCursor(ctx, coords, "#000")],
+    ["a collaborator's caret and name", (ctx: CanvasRenderingContext2D) => renderLabelledCaret(ctx, coords, { color: "#f00", label: "Ada" })],
+    ["the AI caret and label", (ctx: CanvasRenderingContext2D) => renderAiCaret(ctx, { ...coords, page: 1 })],
+    ["where a dragged object came from", (ctx: CanvasRenderingContext2D) => renderAnchoredDragSource(ctx, 10, 10, 40, 30)],
+    ["the dragged object's ghost", (ctx: CanvasRenderingContext2D) => renderAnchoredDragGhost(ctx, 10, 10, 40, 30, { disabled: true })],
+    ["where the dragged object will land", (ctx: CanvasRenderingContext2D) => renderAnchoredDragCaret(ctx, coords)],
+  ])("draws %s the same size on screen at every zoom", (_, draw) => {
+    const at100 = onScreen(1, draw);
+    expect(at100.length).toBeGreaterThan(0);
+    for (const zoom of [0.25, 2, 5]) {
+      onScreen(zoom, draw).forEach((size, i) => expect(size).toBeCloseTo(at100[i] ?? NaN, 6));
+    }
   });
 });

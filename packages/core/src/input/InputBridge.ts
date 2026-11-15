@@ -142,8 +142,9 @@ export class InputBridge {
   }
 
   /**
-   * A page-unit rect on `page`, in screen space at the view's zoom — the one
-   * place page units become screen pixels. Null while no page is on screen.
+   * A page-unit rect on `page`, in screen space at the view's zoom. Every
+   * editor API that answers in screen pixels goes through here. Null while
+   * no view is mounted.
    */
   pageToScreen(page: number, rect: { x: number; y: number; width: number; height: number }): DOMRect | null {
     const origin = this.pageScreenRectLookup?.(page);

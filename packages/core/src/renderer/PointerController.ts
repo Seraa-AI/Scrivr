@@ -925,14 +925,18 @@ export class PointerController {
 
     if (this.commitContainerChange(finalHit)) return;
 
-    const { docPos, startYOffset } = this.anchoredDrag;
-    const sourcePage = this.anchoredDrag.rect.page;
-    const samePage = finalHit.page === sourcePage;
+    const { docPos, startYOffset, grabOffsetX, grabOffsetY, rect } = this.anchoredDrag;
+    const samePage = finalHit.page === rect.page;
+    // The drop lands where the ghost was painted: the page point under the
+    // pointer less the grab offset, in page units at any zoom. The still
+    // tests above and below read screen pixels — jitter is a hand's size.
+    const ghostX = finalHit.x - grabOffsetX;
+    const ghostY = finalHit.y - grabOffsetY;
 
     // Resolve horizontal target X. For modes whose horizontal placement is
     // user-controlled (square / top-bottom / behind / front) this updates
     // structural attrs so layout reflows around the new rectangle.
-    const newX = this.resolveDragTargetX(dx);
+    const newX = this.resolveDragTargetX(dx, ghostX);
     const horizontallyStill =
       newX === null || Math.abs(newX - this.anchoredDrag.startImageX) < 1;
 
@@ -942,7 +946,7 @@ export class PointerController {
       // page (clamped by layout to the anchor's page bounds).
       // Matches the horizontal still threshold so a "pure horizontal" drag
       // with mouse jitter doesn't write a spurious yOffset.
-      const newYOffset = startYOffset + dy;
+      const newYOffset = startYOffset + ghostY - rect.y;
       const verticallyStill = Math.abs(dy) < AXIS_STILL_THRESHOLD_PX;
 
       if (horizontallyStill && verticallyStill) {
@@ -1043,13 +1047,12 @@ export class PointerController {
    * `null` when horizontal movement is too small to constitute a
    * structural change.
    *
-   * The new X is computed as the image's start X plus the cursor's
-   * horizontal delta, then clamped to *page* bounds (Word-aligned: an
-   * image dragged sideways may extend into the left/right margins but
+   * The new X is the ghost's page x, clamped to *page* bounds (Word-aligned:
+   * an image dragged sideways may extend into the left/right margins but
    * cannot escape the page). `xAlign` is set to `"custom"` by the caller
-   * so layout reads `x` directly.
+   * so layout reads `x` directly. `dx` is the pointer's screen travel.
    */
-  private resolveDragTargetX(dx: number): number | null {
+  private resolveDragTargetX(dx: number, ghostX: number): number | null {
     const { editor } = this.deps;
     if (!this.anchoredDrag) return null;
     const HORIZONTAL_THRESHOLD = 3;
@@ -1058,8 +1061,7 @@ export class PointerController {
     // The painted width snapshotted at pointerdown, as the rest of the drag
     // reads its geometry.
     const { pageWidth } = editor.layout.pageConfig;
-    const proposedX = this.anchoredDrag.startImageX + dx;
-    const clampedX = Math.max(0, Math.min(proposedX, pageWidth - this.anchoredDrag.rect.width));
+    const clampedX = Math.max(0, Math.min(ghostX, pageWidth - this.anchoredDrag.rect.width));
     return clampedX;
   }
 

@@ -131,7 +131,7 @@ control (presets 50–200%, Fit width, Fit page).
 | `layout/pagePoint` | `PagePointContext.zoom`; divide after subtracting the origin |
 | `renderer/TileManager` | column size, tile top/height and canvas CSS size × zoom; resolve fit on resize; keep the view's top point on a zoom change; gesture handling |
 | `renderer/canvas` | `setupCanvas({ scale })` sizes the backing store and context by `scale × dpr` |
-| `renderer/PageRenderer`, `OverlayRenderer` | take the render scale; snapping uses it; the caret keeps its width |
+| `renderer/OverlayRenderer` | snapping uses the render scale; the caret keeps its width |
 | `renderer/ResizeController`, `PointerController` | handle size and hit radius ÷ zoom; drag deltas (`clientX − startX`) ÷ zoom |
 | `react/useHeaderFooterRibbon` | page-unit offsets (`contentTop`, `footerTop`, `pageWidth`, the gap fallback) × zoom |
 | `extensions/types.ts` | overlay handler contract: context scaled by `zoom × dpr` |
@@ -170,21 +170,61 @@ Built as proposed, on `feat/zoom`. Where the code departs from the text above:
 
 - **The boundary lives in `InputBridge.pageToScreen`**, beside the page-corner
   lookup it already held, rather than in a new helper on `Editor`: the four
-  `get*ViewportRect` methods and `scrollCursorIntoView` all call it.
-- **The factor in effect is resolved by `Editor.refitZoom()`**, through
-  `setViewportSizeLookup`, which `TileManager` registers with the scroll
-  container's content box. `TileManager` calls it once it finds the container
-  and on every resize; the constructor resolves a factor at once, and a fit
-  shows 100% until a view mounts.
-- **`PointerController` reads `editor.zoom`** rather than a new dependency: the
-  handle hit radius and edge band are screen pixels; resize deltas are
-  divided into page units. The anchored-object and inline drags already go
-  through `resolvePagePoint`, so they needed nothing.
-- **Furniture sizes itself with `screenPixels(n)`**, exported from core and
-  backed by the zoom the overlay clear records for the paint under way. The
-  caret also snaps to device pixels (`dpr × zoom`) rather than CSS pixels.
-  Collaboration cursors and the AI caret are left to scale with the page;
-  they annotate the document rather than follow the pointer.
-- **React:** `useZoom(editor)`; `useScrivrEditor({ zoom })`;
-  `<Scrivr zoomGestures>`; the header/footer ribbon places itself in the gap
-  at the zoom. The playground opens at Fit width, with a zoom control.
+  `get*ViewportRect` methods and `scrollCursorIntoView` all call it. The
+  page-corner lookup `TileManager` registers is at the zoom already.
+- **The factor in effect is resolved by `Editor.refitZoom()`** (internal),
+  through `setViewportSizeLookup`, which `TileManager` registers with the
+  scroll container's content box. `TileManager` calls it once it finds the
+  container and on every resize. `resolveZoom` returns `null` for a fit with
+  nothing to measure — no view yet, or a hidden one — and the factor stays as
+  it was rather than snapping to 100%; a new editor shows 100% until a view
+  mounts. Fit-width reads only the width.
+- **The fit's width leaves out the widest scrollbar the container has shown.**
+  With classic scrollbars, a page whose height sits near the view's would
+  otherwise refit forever: the scrollbar comes, the fit shrinks, the page no
+  longer needs it, it goes, the fit grows.
+- **`"zoom"` fires when the request changes too**, not only the factor: a fit
+  chosen where it equals the factor already shown changes nothing on screen,
+  but a control must show the fit. `"viewport"` fires only for a new factor.
+  React gains `useZoomRequest(editor)` beside `useZoom`. A sideways
+  Ctrl/Cmd + wheel (`deltaY` 0) asks for no zoom, so it no longer ends a fit.
+- **A zoom change moves and repaints the shown pages at once**, rather than
+  hiding them for the next frame: a resize refits before the browser paints,
+  and hidden tiles would leave it a blank frame. It then re-places the hidden
+  textarea over the caret.
+- **The canvas resolution is capped.** A backing store is `page × dpr × zoom`
+  device pixels until that passes iOS Safari's 16.7M-pixel limit (about 140%
+  on a 3× phone), where Safari paints the canvas blank; past it the bitmap is
+  lowered and stretched. `canvas.pixelsPerUnit` computes it for paged and
+  pageless tiles alike; the `dpr` a paint receives means device pixels per
+  page unit. `PageRenderer` needed no change: it already drew in logical
+  units on whatever scale its context had.
+- **Drags.** Resize deltas are divided into page units. An anchored-object
+  drop commits the ghost's page position (`pointer page point − grab offset`)
+  — the first cut added raw screen-pixel deltas, landing the image `zoom`
+  times off its ghost. The click and still thresholds stay in screen pixels.
+  Inline drags resolve a document position from the page point and needed
+  nothing.
+- **Furniture sizes itself with `screenPixels(n)`**, valid inside an overlay
+  paint, backed by the zoom the overlay clear records. The caret, resize
+  handles and their hit radius, the anchored-drag source, ghost and drop
+  caret keep their screen size. So do collaborators' cursors and the AI
+  caret — reversing this RFC's first cut, which let them scale and left
+  names unreadable at 10%: both now draw through one primitive,
+  `renderLabelledCaret`.
+- **Ctrl/Cmd + wheel is heard on the scroll container**, so the gutter beside
+  the page zooms the document rather than the browser. A wheel that counts
+  in lines (Firefox's mouse wheel) is converted to pixels first.
+- **The page column sizes itself.** A host should not also set `<Scrivr />`'s
+  width from `useZoom`: that width lands a React render after the zoom has
+  re-anchored the scroll, and a centred column then drifts sideways. The
+  playground lets the column size its wrapper.
+- **`IEditor` gains `zoom`**, and `getPageScreenPosition` documents that a
+  page-unit offset from it is `offset × zoom`; the header/footer ribbon in
+  React places itself that way.
+- **Tests** cover each invariant above, including a click resolving to the
+  same document position at 50%, 100% and 237% through the real
+  `TileManager`, and the hidden textarea following a zoom change.
+- **React:** `useZoom(editor)`; `useZoomRequest(editor)`;
+  `useScrivrEditor({ zoom })`; `<Scrivr zoomGestures>`. The playground opens
+  at Fit width, with a zoom control.

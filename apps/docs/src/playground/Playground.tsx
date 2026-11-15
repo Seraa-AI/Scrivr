@@ -9,7 +9,6 @@ import {
   ImageMenu,
   TableMenu,
   HeaderFooterRibbon,
-  useZoom,
 } from "@scrivr/react";
 import { useEffect, useState, type ReactNode } from "react";
 import { useTheme } from "next-themes";
@@ -236,10 +235,9 @@ export function Playground() {
     // dark-class strategy drives canvas paint without a second toggle.
     themeRoot:
       typeof document !== "undefined" ? document.documentElement : undefined,
-    // The page fills the window's width, on a phone and a wide screen alike.
+    // The page fills its scroll view's width, on a phone and a wide screen alike.
     zoom: "fit-width",
   });
-  const zoom = useZoom(editor);
 
   // Debug helper — call window.inspectDoc() in the browser console to print
   // the full ProseMirror document JSON at the current moment.
@@ -406,10 +404,9 @@ export function Playground() {
         <main className="flex min-w-0 flex-1 overflow-hidden">
           <div className="min-w-0 flex-1 overflow-auto p-2 md:p-4">
             <div className="flex min-w-max justify-center">
-              <div className="relative shrink-0" style={{ width: pageInfo.pageWidth * zoom }}>
+              <div className="relative shrink-0">
                 <Scrivr
                   editor={editor}
-                  style={{ width: pageInfo.pageWidth * zoom }}
                   pageStyle={{
                     border: "1px solid var(--scrivr-page-border)",
                     background: "var(--scrivr-page-bg)",

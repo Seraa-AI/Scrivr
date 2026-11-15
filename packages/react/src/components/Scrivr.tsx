@@ -7,7 +7,7 @@ const DEFAULT_GAP = 24;
 export interface ScrivrProps {
   /** Editor instance from useScrivrEditor. Renders nothing when null. */
   editor: Editor | null;
-  /** Gap in pixels between pages in paged mode. Default: 24. */
+  /** Gap between pages in paged mode, in page units: it scales with the zoom. Default: 24. */
   gap?: number;
   /** Extra tiles to keep above/below the viewport. Default: 1. */
   overscan?: number;

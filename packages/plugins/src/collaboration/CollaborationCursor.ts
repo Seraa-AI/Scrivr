@@ -9,7 +9,7 @@
  *     user: { name: "Alice", color: "#ef4444" },
  *   })
  */
-import { Extension } from "@scrivr/core";
+import { Extension, renderLabelledCaret } from "@scrivr/core";
 import type { IEditor, OverlayRenderHandler } from "@scrivr/core";
 import { collaborationRegistry } from "./collaborationState";
 
@@ -69,38 +69,7 @@ export const CollaborationCursor = Extension.create<CollaborationCursorOptions>(
         const coords = charMap.coordsAtPos(cursor.head);
         if (!coords || coords.page !== pageNumber) return;
 
-        const x = Math.round(coords.x) + 0.5;
-        const { color, name } = remoteUser;
-
-        // Cursor line
-        ctx.save();
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 2;
-        ctx.lineCap = "round";
-        ctx.beginPath();
-        ctx.moveTo(x, coords.y + 1);
-        ctx.lineTo(x, coords.y + coords.height - 1);
-        ctx.stroke();
-        ctx.restore();
-
-        // Name label above the cursor
-        ctx.save();
-        ctx.font = "bold 11px system-ui, -apple-system, sans-serif";
-        const textMetrics = ctx.measureText(name);
-        const pad = 4;
-        const labelW = textMetrics.width + pad * 2;
-        const labelH = 16;
-        const labelX = coords.x;
-        const labelY = Math.max(0, coords.y - labelH - 2);
-
-        ctx.fillStyle = color;
-        ctx.beginPath();
-        ctx.roundRect?.(labelX, labelY, labelW, labelH, 3);
-        ctx.fill();
-
-        ctx.fillStyle = "#ffffff";
-        ctx.fillText(name, labelX + pad, labelY + labelH - 4);
-        ctx.restore();
+        renderLabelledCaret(ctx, coords, { color: remoteUser.color, label: remoteUser.name });
       });
 
       ctx.restore();

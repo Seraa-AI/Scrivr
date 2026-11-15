@@ -1,6 +1,6 @@
 import type { ChangeEvent } from "react";
 import type { Editor, ZoomRequest } from "@scrivr/core";
-import { useZoom } from "@scrivr/react";
+import { useZoom, useZoomRequest } from "@scrivr/react";
 
 const FACTORS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 const FITS: { value: Exclude<ZoomRequest, number>; label: string }[] = [
@@ -17,7 +17,7 @@ const percent = (zoom: number): string => `${Math.round(zoom * 100)}%`;
  */
 export function ZoomControl({ editor }: { editor: Editor | null }) {
   const zoom = useZoom(editor);
-  const request = editor?.zoomRequest ?? 1;
+  const request = useZoomRequest(editor);
   const selected = typeof request === "number" ? String(request) : request;
 
   const choose = (e: ChangeEvent<HTMLSelectElement>): void => {

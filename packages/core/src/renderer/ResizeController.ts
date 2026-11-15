@@ -27,7 +27,7 @@ const HIT_RADIUS = (HANDLE_SIZE + 5) / 2;
 
 /**
  * Returns the 8 handle descriptors for a rect defined by (x, y, w, h).
- * All coordinates are in canvas (logical CSS pixel) space.
+ * All coordinates are in page units.
  */
 export function getHandles(
   x: number,
@@ -56,7 +56,7 @@ export function hitHandle(
   canvasX: number,
   canvasY: number,
   handles: ResizeHandle[],
-  zoom = 1,
+  zoom: number,
 ): ResizeHandle | null {
   const radius = HIT_RADIUS / zoom;
   for (const h of handles) {
@@ -130,7 +130,7 @@ export function computeGhostRect(
 
 /**
  * Draws a selection border + 8 resize handles for the rect (x, y, w, h).
- * The ctx must already be scaled by dpr — draw in logical CSS pixels.
+ * The ctx must already be scaled to page units; the handles keep their screen size at every zoom.
  */
 export function renderHandles(
   ctx: CanvasRenderingContext2D,

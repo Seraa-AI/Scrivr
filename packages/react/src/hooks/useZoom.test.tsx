@@ -3,7 +3,8 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it } from "vitest";
 import { Editor, StarterKit, TextMeasurer, type TextMeasureContext } from "@scrivr/core";
-import { useZoom } from "./useZoom";
+// Through the package's barrel: these are what a host imports.
+import { useZoom, useZoomRequest } from "../index";
 
 /** Nothing here reads a width: every glyph is 8px wide. */
 const fixedWidthContext: TextMeasureContext = {
@@ -39,6 +40,28 @@ it("shows the factor the editor is zoomed to, as it changes", () => {
   expect(host.textContent).toBe("0.75");
 
   act(() => root.render(<Shown editor={null} />));
+  expect(host.textContent).toBe("1");
+  act(() => root.unmount());
+  editor.destroy();
+});
+
+function Asked({ editor }: { editor: Editor | null }) {
+  return <span>{String(useZoomRequest(editor))}</span>;
+}
+
+it("shows what was asked for, even when a new request shows the same factor", () => {
+  const editor = new Editor({ extensions: [StarterKit], textMeasurer: new TextMeasurer({ context: fixedWidthContext }) });
+  editor.setViewportSizeLookup(() => ({ width: editor.pageConfig.pageWidth, height: 800 }));
+  const host = document.createElement("div");
+  const root = createRoot(host);
+  act(() => root.render(<Asked editor={editor} />));
+  expect(host.textContent).toBe("1");
+
+  // Fit width is 100% in this view: the factor holds, the request does not.
+  act(() => editor.setZoom("fit-width"));
+  expect(host.textContent).toBe("fit-width");
+
+  act(() => root.render(<Asked editor={null} />));
   expect(host.textContent).toBe("1");
   act(() => root.unmount());
   editor.destroy();
