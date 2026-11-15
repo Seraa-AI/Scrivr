@@ -1,6 +1,7 @@
 // React adapter for @scrivr/core
 
 export { useScrivrEditor } from "./hooks/useScrivrEditor";
+export { useZoom, useZoomRequest } from "./hooks/useZoom";
 export { BubbleMenu } from "./components/BubbleMenu";
 export { useBubbleMenu } from "./hooks/useBubbleMenu";
 export { FloatingMenu } from "./components/FloatingMenu";

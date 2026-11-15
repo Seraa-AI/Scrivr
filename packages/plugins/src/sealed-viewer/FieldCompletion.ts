@@ -279,16 +279,13 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
     fieldStates.set(editor, state);
     byNavigator.set(editor.selection, state);
 
-    /** Whether the point is in the field's box — the same box the overlay paints. */
+    /** Whether the point is in the field's box — the same box the overlay paints, in page units at any zoom. */
     const isOver = (field: SignerFieldDescriptor, at: PagePoint): boolean => {
       const pos = positionOf(field.id);
-      const page = editor.getPageScreenPosition(at.page);
-      if (pos === undefined || !page) return false;
-      return editor.getNodeViewportRects(pos).some((rect) => {
-        const x = rect.left - page.screenLeft;
-        const y = rect.top - page.screenTop;
-        return at.x >= x && at.x <= x + rect.width && at.y >= y && at.y <= y + rect.height;
-      });
+      if (pos === undefined) return false;
+      return editor.getNodeRects(pos).some(
+        (box) => box.page === at.page && at.x >= box.x && at.x <= box.x + box.width && at.y >= box.y && at.y <= box.y + box.height,
+      );
     };
 
     const offPress = editor.on("press", ({ point, clickCount }) => {

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Editor, StarterKit } from "@scrivr/core";
-import type { Extension, PageConfig, EditorTheme, FontProvider } from "@scrivr/core";
+import type { Extension, PageConfig, EditorTheme, FontProvider, ZoomRequest } from "@scrivr/core";
 
 export interface UseCanvasEditorOptions {
   /** Extensions to load. Defaults to [StarterKit]. */
@@ -40,6 +40,12 @@ export interface UseCanvasEditorOptions {
    * `document.documentElement` so toggles are seen.
    */
   themeRoot?: HTMLElement;
+  /**
+   * How large the document is shown at first: a factor (1 is 100%), or
+   * `"fit-width"` / `"fit-page"` to follow the view as it resizes. Change it
+   * later with `editor.setZoom`. Default: 1.
+   */
+  zoom?: ZoomRequest;
   /**
    * Called on every document or selection change.
    * Mirrors TipTap's onUpdate.
@@ -92,6 +98,7 @@ export function useScrivrEditor(
       ...(opts.fonts ? { fonts: opts.fonts } : {}),
       ...(opts.theme ? { theme: opts.theme } : {}),
       ...(opts.themeRoot ? { themeRoot: opts.themeRoot } : {}),
+      ...(opts.zoom !== undefined ? { zoom: opts.zoom } : {}),
       onChange: (state) => {
         opts.onUpdate?.({ editor: instance });
         opts.onSelectionUpdate?.({ editor: instance });

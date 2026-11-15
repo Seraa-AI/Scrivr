@@ -15,6 +15,7 @@ import {
   fieldRoleColor,
   fieldValues,
   setFieldValue,
+  type ObjectRectEntry,
   type PagePoint,
   type SignerFieldDescriptor,
 } from "@scrivr/core";
@@ -58,11 +59,19 @@ const viewportRect = (x: number, y: number, width: number, height: number): DOMR
   toJSON: () => ({}),
 });
 
+/** Laid out as a mounted editor reports it: page-unit boxes, and the same boxes on screen at the zoom. */
 class LaidOutViewer extends ViewEditorDouble {
-  override getNodeViewportRects(docPos: number): DOMRect[] {
+  override readonly zoom = 2;
+  override getNodeRects(docPos: number): ObjectRectEntry[] {
     const id = this.getState().doc.nodeAt(docPos)?.attrs["nodeId"];
     const box = typeof id === "string" ? BOXES[id] : undefined;
-    return box ? [viewportRect(PAGE_ON_SCREEN.screenLeft + box.x, PAGE_ON_SCREEN.screenTop + box.y, box.width, box.height)] : [];
+    return box ? [{ docPos, ...box }] : [];
+  }
+  override getNodeViewportRects(docPos: number): DOMRect[] {
+    return this.getNodeRects(docPos).map((box) => {
+      const page = this.getPageScreenPosition(box.page);
+      return viewportRect(page.screenLeft + box.x * this.zoom, page.screenTop + box.y * this.zoom, box.width * this.zoom, box.height * this.zoom);
+    });
   }
   override getPageScreenPosition(page: number) {
     return page === 2 ? PAGE_ON_SCREEN : { screenLeft: 40, screenTop: 5000 };

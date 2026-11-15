@@ -4,18 +4,18 @@ description: Configuring page dimensions, the virtual scroll window, and program
 ---
 
 Scrivr renders the document as a sequence of fixed-size pages inside a scrollable container.
-The `<Scrivr />` component manages this layout automatically through `ViewManager`. Only the
-pages near the visible area are painted at any time — off-screen pages are represented by
-empty spacer elements.
+The `<Scrivr />` component mounts a `TileManager`, which paints only the pages near the
+visible area: it keeps a small pool of page tiles and moves them as you scroll, so the number
+of canvases follows the view, not the length of the document.
 
 ---
 
 ## How pages are displayed
 
-Each page in the `DocumentLayout` corresponds to a DOM `<div>` sized to
-`pageConfig.width × pageConfig.height`. These wrappers are stacked vertically inside the
-`<Scrivr />` container, separated by the `gap` value. Scrivr uses an `IntersectionObserver`
-to track which pages are visible and only paints those (plus overscan).
+A shown page is a `<div>` sized to `pageConfig.pageWidth × pageConfig.pageHeight` (times the
+zoom), placed in a column as tall as every page and the `gap` between them. On each scroll
+the tiles over the visible pages, plus `overscan` pages either side, are painted; the rest
+of the column is empty space.
 
 ```
 ┌───── scroll container ──────┐
@@ -23,7 +23,7 @@ to track which pages are visible and only paints those (plus overscan).
 │  │  <canvas> content      │ │  ← PageRenderer
 │  │  <canvas> overlay      │ │  ← OverlayRenderer
 │  └────────────────────────┘ │
-│     ← gap (24px default) →  │
+│     ← gap (24 default) →    │
 │  ┌── page-wrapper (div) ──┐ │
 │  │  <canvas> content      │ │
 │  │  <canvas> overlay      │ │
@@ -41,9 +41,9 @@ Page dimensions and margins are set once via `pageConfig` in `EditorOptions`:
 const editor = useScrivrEditor({
   extensions: [StarterKit],
   pageConfig: {
-    width: 816,   // px — US Letter at 96 dpi
-    height: 1056,
-    margin: { top: 96, right: 96, bottom: 96, left: 96 }, // 1 inch
+    pageWidth: 816, // US Letter at 96 dpi
+    pageHeight: 1056,
+    margins: { top: 96, right: 96, bottom: 96, left: 96 }, // 1 inch
   },
 });
 ```
@@ -58,23 +58,74 @@ fields and defaults.
 Control the visual gap between pages with the `gap` prop on `<Scrivr />`:
 
 ```tsx
-<Scrivr editor={editor} gap={40} />  {/* 40px between pages */}
+<Scrivr editor={editor} gap={40} />  {/* 40 page units between pages */}
 ```
 
-Default is `24px`. The gap is purely visual — it does not affect layout or pagination.
+Default is `24`, in page units like the page itself, so it scales with the zoom. The gap is
+purely visual — it does not affect layout or pagination.
+
+---
+
+## Zoom
+
+Zoom shows the document larger or smaller without changing it: lines break in the same
+places at every zoom, as in Word, because layout is in page units and zoom only scales
+the view. Each page is painted at the zoom's resolution, so text stays sharp at 400%.
+
+```tsx
+const editor = useScrivrEditor({ extensions: [StarterKit], zoom: "fit-width" });
+
+editor.setZoom(1.5);         // 150% — any factor from MIN_ZOOM (0.1) to MAX_ZOOM (5)
+editor.setZoom("fit-width"); // the page's width fills the view
+editor.setZoom("fit-page");  // the whole page fits the view
+editor.zoom;                 // the factor in effect, e.g. 0.47 for a fit on a phone
+editor.zoomRequest;          // what was asked: "fit-width"
+```
+
+A fit follows the scroll container as it resizes — a phone fits the width, and rotating
+it fits again — while a factor stays fixed. The default is `1`.
+
+When the zoom changes, the line at the top of the view stays at the top. Ctrl/Cmd + scroll
+and a trackpad pinch zoom about the pointer instead of zooming the whole page; turn that
+off with `<Scrivr zoomGestures={false} />`. Cmd/Ctrl + `=` / `−` / `0` stay the browser's.
+
+The page column sizes itself at the zoom, so let `<Scrivr />` take its width from its content
+rather than setting one: the column then grows in the same step that keeps your place.
+
+In React, `useZoom(editor)` gives the factor in effect and `useZoomRequest(editor)` what was
+asked for — a fit, or a factor — each re-rendering as it changes. A zoom control shows the
+request as chosen: picking Fit width when it equals the factor already shown changes no
+factor, but the fit now follows the view.
+
+```tsx
+const zoom = useZoom(editor);
+const request = useZoomRequest(editor);
+return <span>{request === "fit-width" ? "Fit width" : `${Math.round(zoom * 100)}%`}</span>;
+```
+
+Everything positioned with `getViewportRect` and its siblings follows the zoom, as do the
+built-in menus and popovers. `editor.on("zoom", …)` fires with the new and previous factor
+and the request; `"viewport"` fires with it when the factor changes. Page-unit values —
+`layout`, `charMap`, `getNodeRect` — are the same at every zoom. `getPageScreenPosition(page)`
+gives a page's corner on screen; a page-unit offset from it is `offset × editor.zoom` pixels.
+
+The caret, resize handles, collaborators' cursors and drag feedback keep their size on
+screen. An overlay handler that wants the same sizes itself with `screenPixels(n)`, which is
+valid only while an overlay paints.
 
 ---
 
 ## Virtual scrolling and overscan
 
-`ViewManager` only paints pages that intersect with the scroll viewport ± `overscan` pixels.
-Increase `overscan` if users report blank pages during fast scrolling:
+`TileManager` paints the pages in view plus `overscan` pages above and below. Increase it if
+users see blank pages during fast scrolling:
 
 ```tsx
-<Scrivr editor={editor} overscan={1000} />
+<Scrivr editor={editor} overscan={2} />
 ```
 
-Default is `500px`. Higher values keep more pages painted (smoother fast-scroll, more GPU usage).
+Default is `1`. Each step paints one more tile above and below the view, two canvases each
+(smoother fast scrolling, more memory).
 
 ---
 
@@ -111,15 +162,16 @@ editor.moveCursorTo(targetPos);
 editor.scrollCursorIntoView();
 ```
 
-To scroll to a specific page by pixel offset:
+To scroll a page's top to the top of the view — at any zoom, since the page's corner is where
+it is drawn now:
 
 ```ts
-const container = document.querySelector('.my-editor') as HTMLElement;
-const scrollParent = container.closest('[style*="overflow"]') ?? container;
-scrollParent.scrollTo({
-  top: (pageNumber - 1) * (pageHeight + gap),
-  behavior: 'smooth',
-});
+const scroller = document.querySelector(".my-editor-scroller"); // the editor's scroll container
+const corner = editor.getPageScreenPosition(pageNumber);
+const view = editor.getScrollContainerRect();
+if (scroller && corner && view) {
+  scroller.scrollBy({ top: corner.screenTop - view.top, behavior: "smooth" });
+}
 ```
 
 ---

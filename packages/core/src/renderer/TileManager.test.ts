@@ -942,6 +942,16 @@ describe("pagesInView — what a reader actually has on screen", () => {
     setup.cleanup();
   });
 
+  it("measures in page units at a zoom, the padding above the pages included", () => {
+    const { setup, seen, tm, scrollTo, slot } = mountScrolled(undefined, 300);
+    setup.editor.setZoom(2);
+    // 300 screen px of padding is 150 page units; the view's top is 100 into page 2.
+    scrollTo((slot + 100) * 2 + 300);
+    expect(seen.at(-1)).toEqual({ first: 2, last: 2 });
+    tm.destroy();
+    setup.cleanup();
+  });
+
   it("reports nothing while the viewport has no height", () => {
     const { setup, seen, tm } = mountScrolled();
     Object.defineProperty(setup.scrollParent!, "clientHeight", { value: 0, configurable: true });

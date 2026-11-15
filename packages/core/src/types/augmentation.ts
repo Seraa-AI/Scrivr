@@ -2,6 +2,7 @@ import type { Mappable } from "prosemirror-transform";
 import type { HoverEvent } from "../hover/types";
 import type { PagePoint } from "../layout/pagePoint";
 import type { MutationDenied } from "../mutationGate";
+import type { ZoomRequest } from "../renderer/zoom";
 /**
  * augmentation.ts
  *
@@ -124,8 +125,9 @@ export interface EditorEvents {
   update: { docChanged: boolean; mapping: Mappable };
   destroy: void;
   /**
-   * Fired when the viewport changes without a state update — i.e. the user
-   * scrolled or the scroll container was resized. Doc/selection are unchanged.
+   * Fired when the viewport changes without a state update — the user
+   * scrolled, the scroll container was resized, or the zoom changed.
+   * Doc/selection are unchanged.
    *
    * Anchored UI (popovers, bubble menus) subscribes to this so its
    * viewport-space position can follow the anchor as it scrolls. State-only
@@ -150,6 +152,13 @@ export interface EditorEvents {
    * being a document node (a sealed field); nodes use the hit-target registry.
    */
   press: { point: PagePoint; clickCount: number };
+  /**
+   * The zoom changed: a new factor — `setZoom`, a gesture, or a fit following
+   * its view — or a new request at the same factor, such as a fit that
+   * happens to equal the factor it replaces. `"viewport"` fires with a new
+   * factor, so anchored UI follows.
+   */
+  zoom: { zoom: number; previous: number; request: ZoomRequest };
   /** Fired when a click lands in a chrome band (header/footer area). */
   chromeClick: { page: number; x: number; y: number; band: "header" | "footer"; clickCount: number };
   /**

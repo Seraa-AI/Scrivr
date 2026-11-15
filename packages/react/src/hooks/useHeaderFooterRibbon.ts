@@ -8,6 +8,7 @@ import {
   type HeaderFooterState,
 } from "@scrivr/plugins";
 import { useScrivrState as useEditorState } from "./useScrivrState";
+import { useZoom } from "./useZoom";
 
 /**
  * Read the configured ribbon height from the editor's `HeaderFooter`
@@ -95,7 +96,9 @@ export function useHeaderFooterRibbon(
   // exact size of the space the layout reserved. Single source of
   // truth — change `HeaderFooter.configure({ activeEditingGap })` and
   // both the layout's reservation and the ribbon's height move together.
-  const ribbonHeight = readActiveEditingGap(editor);
+  // The gap is page units; on screen it is that at the view's zoom.
+  const zoom = useZoom(editor);
+  const ribbonHeight = readActiveEditingGap(editor) * zoom;
   const ribbons: HeaderFooterRibbonItem[] = [];
 
   if (editor && visible) {
@@ -117,7 +120,7 @@ export function useHeaderFooterRibbon(
       if (bandHeight <= 0) continue;
 
       const pageScreen = overlayRect ? editor.getPageScreenPosition(pageNum) : null;
-      const pageOffsetY = i * (pageConfig.pageHeight + gap);
+      const pageOffsetY = i * (pageConfig.pageHeight + gap) * zoom;
       const pageLeft = pageScreen && overlayRect ? pageScreen.screenLeft - overlayRect.left : 0;
       const pageTop = pageScreen && overlayRect
         ? pageScreen.screenTop - overlayRect.top
@@ -126,16 +129,14 @@ export function useHeaderFooterRibbon(
       // (header band) or above the footer's footerTop. `ribbonHeight`
       // matches the gap the extension reserved at layout time, so the
       // ribbon fits exactly without overlapping content above or below.
-      const top = isHeader
-        ? pageTop + metrics.contentTop - ribbonHeight
-        : pageTop + metrics.footerTop - ribbonHeight;
+      const top = pageTop + (isHeader ? metrics.contentTop : metrics.footerTop) * zoom - ribbonHeight;
 
       ribbons.push({
         pageNum,
         label,
         left: pageLeft,
         top,
-        width: pageConfig.pageWidth,
+        width: pageConfig.pageWidth * zoom,
         isFirstPage,
       });
     }
