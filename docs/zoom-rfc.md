@@ -182,38 +182,42 @@ Built as proposed, on `feat/zoom`. Where the code departs from the text above:
 - **The fit's width leaves out the widest scrollbar the container has shown.**
   With classic scrollbars, a page whose height sits near the view's would
   otherwise refit forever: the scrollbar comes, the fit shrinks, the page no
-  longer needs it, it goes, the fit grows.
+  longer needs it, it goes, the fit grows. The memory is per container
+  width, so a resize or browser zoom starts afresh.
 - **`"zoom"` fires when the request changes too**, not only the factor: a fit
   chosen where it equals the factor already shown changes nothing on screen,
   but a control must show the fit. `"viewport"` fires only for a new factor.
   React gains `useZoomRequest(editor)` beside `useZoom`. A sideways
-  Ctrl/Cmd + wheel (`deltaY` 0) asks for no zoom, so it no longer ends a fit.
+  Ctrl/Cmd + wheel (`deltaY` 0) asks for no zoom, so it keeps a fit. A
+  factor is stored as the range holds it: asking for 610% asks for 500%.
 - **A zoom change moves and repaints the shown pages at once**, rather than
   hiding them for the next frame: a resize refits before the browser paints,
   and hidden tiles would leave it a blank frame. It then re-places the hidden
   textarea over the caret.
 - **The canvas resolution is capped.** A backing store is `page × dpr × zoom`
-  device pixels until that passes iOS Safari's 16.7M-pixel limit (about 140%
-  on a 3× phone), where Safari paints the canvas blank; past it the bitmap is
+  device pixels until that passes iOS Safari's 16.7M-pixel limit (about 145%
+  for A4 on a 3× phone), where Safari paints the canvas blank; past it the bitmap is
   lowered and stretched. `canvas.pixelsPerUnit` computes it for paged and
   pageless tiles alike; the `dpr` a paint receives means device pixels per
   page unit. `PageRenderer` needed no change: it already drew in logical
   units on whatever scale its context had.
 - **Drags.** Resize deltas are divided into page units. An anchored-object
-  drop commits the ghost's page position (`pointer page point − grab offset`)
-  — the first cut added raw screen-pixel deltas, landing the image `zoom`
-  times off its ghost. The click and still thresholds stay in screen pixels.
-  Inline drags resolve a document position from the page point and needed
-  nothing.
+  drop commits the ghost's page position (`pointer page point − grab
+  offset`, one helper for the paint and every commit). Whether a drag moved
+  at all is asked on screen, of the ghost's own travel, so jitter is a
+  hand's size at every zoom and a view scrolled under a held pointer still
+  moves the drop. Inline drags resolve a document position from the page
+  point and needed nothing.
 - **Furniture sizes itself with `screenPixels(n)`**, valid inside an overlay
   paint, backed by the zoom the overlay clear records. The caret, resize
   handles and their hit radius, the anchored-drag source, ghost and drop
   caret keep their screen size. So do collaborators' cursors and the AI
-  caret — reversing this RFC's first cut, which let them scale and left
-  names unreadable at 10%: both now draw through one primitive,
-  `renderLabelledCaret`.
+  caret, whose names would be unreadable at 10% if they scaled: both draw
+  through one primitive, `renderLabelledCaret`.
 - **Ctrl/Cmd + wheel is heard on the scroll container**, so the gutter beside
-  the page zooms the document rather than the browser. A wheel that counts
+  the page zooms the document rather than the browser. Over an editor, only
+  that editor zooms; over the gutter of a view two editors share, the browser
+  keeps the gesture. A wheel that counts
   in lines (Firefox's mouse wheel) is converted to pixels first.
 - **The page column sizes itself.** A host should not also set `<Scrivr />`'s
   width from `useZoom`: that width lands a React render after the zoom has
@@ -222,7 +226,7 @@ Built as proposed, on `feat/zoom`. Where the code departs from the text above:
 - **`IEditor` gains `zoom`**, and `getPageScreenPosition` documents that a
   page-unit offset from it is `offset × zoom`; the header/footer ribbon in
   React places itself that way.
-- **Tests** cover each invariant above, including a click resolving to the
+- **Tests** cover the invariants above, including a click resolving to the
   same document position at 50%, 100% and 237% through the real
   `TileManager`, and the hidden textarea following a zoom change.
 - **React:** `useZoom(editor)`; `useZoomRequest(editor)`;

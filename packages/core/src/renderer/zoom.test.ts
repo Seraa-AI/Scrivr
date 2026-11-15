@@ -58,6 +58,17 @@ describe("an editor's zoom", () => {
     fitted.destroy();
   });
 
+  it("asks for no more than the range holds: past 500% is a request for 500%", () => {
+    const editor = createTestEditor({ zoom: 5 });
+    const zoom = vi.fn();
+    editor.on("zoom", zoom);
+    editor.setZoom(6.1);
+
+    expect(editor.zoomRequest).toBe(MAX_ZOOM);
+    expect(zoom).not.toHaveBeenCalled();
+    editor.destroy();
+  });
+
   it("keeps its factor while its view is hidden, and fits again when it shows", () => {
     const editor = createTestEditor({ zoom: "fit-width" });
     let view = { width: editor.pageConfig.pageWidth * 1.5, height: 800 };

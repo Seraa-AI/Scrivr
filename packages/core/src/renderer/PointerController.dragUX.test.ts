@@ -790,5 +790,31 @@ describe("PointerController — drag UX", () => {
       expect(after.x).toBeCloseTo(before.x + 40 / zoom, 6);
       expect(after.globalY).toBeCloseTo(before.globalY + 40 / zoom, 6);
     });
+
+    it("at 500% a small sideways drag still lands under its ghost", () => {
+      setup = makePointerControllerSetup({
+        content: {
+          type: "doc",
+          content: [{ type: "paragraph", content: [
+            { type: "text", text: "Lead " },
+            { type: "image", attrs: { src: "x", wrapMode: "square", xAlign: "left", width: 80, height: 60 } },
+          ] }],
+        },
+      });
+      setup.editor.setZoom(5);
+      const before = setup.editor.layout.anchoredObjects?.[0];
+      if (!before) throw new Error("no image");
+
+      // Past the 3px jitter threshold on screen, under one page unit.
+      const grabX = (before.x + 10) * 5;
+      const grabY = (before.y + 10) * 5;
+      mousedown(setup.container, grabX, grabY);
+      mousemove(grabX + 4, grabY);
+      mouseup(grabX + 4, grabY);
+
+      const after = setup.editor.layout.anchoredObjects?.[0];
+      if (!after) throw new Error("image vanished");
+      expect(after.x).toBeCloseTo(before.x + 4 / 5, 6);
+    });
   });
 });

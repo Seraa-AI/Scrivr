@@ -19,6 +19,9 @@ import { isCellDescriptor } from "../table/cellSelectionSeam";
 
 /** Constants */
 
+/** Marks the element an editor's view is mounted in, so a wheel event can tell whose it is. */
+const VIEW_ATTRIBUTE = "data-scrivr-view";
+
 /** Pixels per wheel `deltaMode` unit: pixels, lines (Firefox's mouse wheel), pages. */
 const WHEEL_PIXELS_PER_UNIT = [1, 16, 800];
 
@@ -54,7 +57,7 @@ export interface TileEntry {
   wrapper: HTMLDivElement;
   contentCanvas: HTMLCanvasElement;
   overlayCanvas: HTMLCanvasElement;
-  /** Device pixels per page unit the tile was painted at — see `pixelsPerUnit`. */
+  /** Device pixels per page unit the tile was painted at, as `setupCanvas` returned it. */
   pixelsPerUnit: number;
   /** pageless: slice index; paged: pageIndex (0-based). */
   tileIndex: number;
@@ -204,8 +207,8 @@ export class TileManager {
   private readonly zoomGestures: boolean;
   /** Where Ctrl/Cmd + wheel is heard: the scrolling view, once found. */
   private wheelTarget: HTMLElement | null = null;
-  /** The widest vertical scrollbar the scroll container has shown, in CSS pixels — see `viewportSize`. */
-  private widestScrollbar = 0;
+  /** The widest vertical scrollbar the scroll container has shown at its width, in CSS pixels — see `viewportSize`. */
+  private scrollbarSeenAt = { width: -1, scrollbar: 0 };
 
   constructor(
     private readonly editor: Editor,
@@ -227,6 +230,7 @@ export class TileManager {
       touchAction: "manipulation",
     });
     container.appendChild(this.tilesContainer);
+    container.setAttribute(VIEW_ATTRIBUTE, "");
 
     // ── tile pool ────────────────────────────────────────────────────────────
     // Pool starts with 1 tile and grows dynamically in update() to cover the
@@ -266,7 +270,7 @@ export class TileManager {
 
     // ── zoom ─────────────────────────────────────────────────────────────────
     // A fit fills the scroll container's content box; a new factor re-places
-    // and repaints every tile, keeping the reader's place.
+    // and repaints every shown tile, keeping the reader's place.
     editor.setViewportSizeLookup(() => this.viewportSize());
     this.offZoom = editor.on("zoom", ({ zoom, previous }) => this.handleZoom(zoom, previous));
 
@@ -291,19 +295,23 @@ export class TileManager {
 
   /**
    * The scroll container's content box — what a fit fills. Null before it is
-   * found. Its width leaves out the widest scrollbar the container has shown:
-   * a fit that grew whenever a classic scrollbar left would make the page tall
-   * enough to bring it back, and refit forever.
+   * found. Its width leaves out the widest scrollbar the container has shown
+   * at its present width: a fit that grew whenever a classic scrollbar left
+   * would make the page tall enough to bring it back, and refit forever.
+   * Records that scrollbar as it measures.
    */
   private viewportSize(): { width: number; height: number } | null {
     const el = this.scrollParent;
     if (!el) return null;
     const style = window.getComputedStyle(el);
     const sum = (a: string, b: string) => (parseFloat(a) || 0) + (parseFloat(b) || 0);
-    const scrollbar = el.offsetWidth - el.clientWidth - sum(style.borderLeftWidth, style.borderRightWidth);
-    this.widestScrollbar = Math.max(this.widestScrollbar, scrollbar);
+    const inside = el.offsetWidth - sum(style.borderLeftWidth, style.borderRightWidth);
+    // A new width — a resize, or the browser zooming its scrollbars' CSS size — starts afresh.
+    if (el.offsetWidth !== this.scrollbarSeenAt.width) this.scrollbarSeenAt = { width: el.offsetWidth, scrollbar: 0 };
+    const scrollbar = Math.max(this.scrollbarSeenAt.scrollbar, inside - el.clientWidth);
+    this.scrollbarSeenAt.scrollbar = scrollbar;
     return {
-      width: el.clientWidth + scrollbar - this.widestScrollbar - sum(style.paddingLeft, style.paddingRight),
+      width: inside - scrollbar - sum(style.paddingLeft, style.paddingRight),
       height: el.clientHeight - sum(style.paddingTop, style.paddingBottom),
     };
   }
@@ -379,11 +387,13 @@ export class TileManager {
         this.editor.refitZoom();
       }
     }
-    if (this.zoomGestures && !this.wheelTarget) {
-      // The whole view, so the gutter beside the page zooms it too, rather
-      // than the browser zooming the app.
-      this.wheelTarget = this.scrollParent ?? this.container;
-      this.wheelTarget.addEventListener("wheel", this.handleWheel, { passive: false });
+    // The whole scrolling view hears Ctrl/Cmd + wheel, so the gutter beside
+    // the page zooms it too — once that view is found; the editor until then.
+    const wheelTarget = this.scrollParent ?? this.container;
+    if (this.zoomGestures && this.wheelTarget !== wheelTarget) {
+      this.wheelTarget?.removeEventListener("wheel", this.handleWheel);
+      this.wheelTarget = wheelTarget;
+      wheelTarget.addEventListener("wheel", this.handleWheel, { passive: false });
     }
 
     const scrollEl = this.scrollParent;
@@ -971,20 +981,36 @@ export class TileManager {
    */
   private handleWheel = (e: WheelEvent): void => {
     if (!e.ctrlKey && !e.metaKey) return;
+    if (!this.isUnderPointer(e)) return;
     e.preventDefault();
     // A sideways swipe asks for no zoom; setting one would end a fit.
     if (e.deltaY === 0) return;
     const pixels = e.deltaY * (WHEEL_PIXELS_PER_UNIT[e.deltaMode] ?? 1);
     const delta = Math.max(-10, Math.min(10, pixels));
     this.zoomAnchor = { x: e.clientX, y: e.clientY };
-    this.editor.setZoom(this.zoom * Math.exp(-delta * 0.02));
-    this.zoomAnchor = null;
+    try {
+      this.editor.setZoom(this.zoom * Math.exp(-delta * 0.02));
+    } finally {
+      // A host's throwing "zoom" listener must not leave a later zoom anchored here.
+      this.zoomAnchor = null;
+    }
   };
 
   /**
-   * Re-place every tile at the new factor, and scroll so the point of the
-   * document under the anchor — the pointer for a gesture, the top centre of
-   * the view otherwise — stays where it was on screen.
+   * Whether a wheel event is this editor's: over it, or over the gutter of a
+   * scrolling view it has to itself. With two editors in one view the gutter
+   * belongs to neither, and the browser keeps the gesture.
+   */
+  private isUnderPointer(e: WheelEvent): boolean {
+    const over = e.target instanceof Element ? e.target.closest(`[${VIEW_ATTRIBUTE}]`) : null;
+    if (over) return over === this.container;
+    return this.wheelTarget?.querySelectorAll(`[${VIEW_ATTRIBUTE}]`).length === 1;
+  }
+
+  /**
+   * Re-place every shown tile at the new factor, and scroll so the point of
+   * the document under the anchor — the pointer for a gesture, the top centre
+   * of the view otherwise — stays where it was on screen.
    */
   private handleZoom(zoom: number, previous: number): void {
     // A new request at the same factor: nothing on screen changes.
@@ -1037,6 +1063,7 @@ export class TileManager {
     this.pointer.detach();
     this.activeTiles.clear();
     this.tilesContainer.remove();
+    this.container.removeAttribute(VIEW_ATTRIBUTE);
     this.editor.setPageTopLookup(null);
     this.editor.setScrollContainerLookup(null);
     this.editor.setViewportSizeLookup(null);

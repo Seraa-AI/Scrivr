@@ -8,7 +8,7 @@ import { TileManager } from "./TileManager";
 import { MAX_CANVAS_PIXELS } from "./canvas";
 import { MAX_ZOOM } from "./zoom";
 import { defaultPageConfig, defaultPagelessConfig } from "../layout/PageLayout";
-import { makeRendererTestSetup, type RendererTestSetup } from "../test-utils";
+import { createTestEditor, makeRendererTestSetup, type RendererTestSetup } from "../test-utils";
 
 const GAP = 24;
 
@@ -42,6 +42,7 @@ describe("TileManager at a zoom", () => {
   });
 
   afterEach(() => {
+    vi.unstubAllGlobals();
     tm.destroy();
     setup.cleanup();
     vi.useRealTimers();
@@ -80,7 +81,6 @@ describe("TileManager at a zoom", () => {
     ["a pageless tile", defaultPagelessConfig],
   ])("never sizes %s past what a browser will paint, however far it zooms", (_, pageConfig) => {
     vi.stubGlobal("devicePixelRatio", 3);
-    tm?.destroy();
     setup.cleanup();
     setup = makeRendererTestSetup({ scrollParent: true, pageConfig });
     setup.editor.setZoom(MAX_ZOOM);
@@ -94,7 +94,6 @@ describe("TileManager at a zoom", () => {
       // Still shown at the zoom: the browser stretches the capped bitmap.
       expect(canvas.style.width).toBe(`${pageConfig.pageWidth * MAX_ZOOM}px`);
     }
-    vi.unstubAllGlobals();
   });
 
   it("places what a host anchors to the document at the zoom, from the page's corner", () => {
@@ -199,6 +198,22 @@ describe("TileManager at a zoom", () => {
     expect(setup.editor.zoom).toBe(fitted);
   });
 
+  it("forgets a scrollbar once the view is resized, so a fit fills the new width", () => {
+    const view = setup.scrollParent;
+    if (!view) throw new Error("no view");
+    const { pageWidth } = setup.pageConfig;
+    Object.defineProperty(view, "offsetWidth", { value: pageWidth, configurable: true });
+    Object.defineProperty(view, "clientWidth", { value: pageWidth - 15, configurable: true });
+    setup.editor.setZoom("fit-width");
+    tm = new TileManager(setup.editor, setup.container);
+    tm.update();
+
+    // Wider, and no scrollbar now: say the browser zoomed out.
+    viewWidth(view, pageWidth * 2);
+    setup.editor.refitZoom();
+    expect(setup.editor.zoom).toBe(2);
+  });
+
   it("keeps a factor through a resize", () => {
     const view = setup.scrollParent;
     if (!view) throw new Error("no view");
@@ -272,6 +287,43 @@ describe("TileManager at a zoom", () => {
 
     expect(wheel(view, { deltaY: -100, ctrlKey: true }).defaultPrevented).toBe(true);
     expect(setup.editor.zoom).toBeGreaterThan(1);
+  });
+
+  it("hears the gutter once a scrolling view appears around an editor mounted before it", () => {
+    setup.cleanup();
+    setup = makeRendererTestSetup();
+    tm = new TileManager(setup.editor, setup.container);
+    tm.update();
+    const view = document.createElement("div");
+    view.style.overflowY = "auto";
+    document.body.appendChild(view);
+    view.appendChild(setup.container);
+    tm.update();
+
+    expect(wheel(view, { deltaY: -100, ctrlKey: true }).defaultPrevented).toBe(true);
+    expect(setup.editor.zoom).toBeGreaterThan(1);
+    view.remove();
+  });
+
+  it("zooms only the editor under the pointer when two share a scrolling view", () => {
+    const view = setup.scrollParent;
+    if (!view) throw new Error("no view");
+    const otherContainer = document.createElement("div");
+    view.appendChild(otherContainer);
+    const other = createTestEditor({ pageConfig: setup.pageConfig });
+    const otherTm = new TileManager(other, otherContainer);
+    tm = new TileManager(setup.editor, setup.container);
+    tm.update();
+    otherTm.update();
+
+    wheel(setup.container, { deltaY: -100, ctrlKey: true });
+    expect(setup.editor.zoom).toBeGreaterThan(1);
+    expect(other.zoom).toBe(1);
+
+    // Over the gutter there is no telling which: the browser keeps the gesture.
+    expect(wheel(view, { deltaY: -100, ctrlKey: true }).defaultPrevented).toBe(false);
+    otherTm.destroy();
+    other.destroy();
   });
 
   it("zooms as far for a wheel that counts in lines, as Firefox's does, as for one that counts in pixels", () => {

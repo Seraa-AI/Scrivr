@@ -21,7 +21,7 @@ export const MAX_CANVAS_PIXELS = 16_777_216;
  * at an extreme zoom but never blank. (`+ 1` leaves room for rounding each
  * side up.)
  */
-export function pixelsPerUnit(
+function pixelsPerUnit(
   width: number,
   height: number,
   scale: number,
@@ -43,8 +43,8 @@ export interface CanvasSetupOptions {
   dpr?: number;
   /**
    * The view's zoom. The canvas is shown at `width × scale` CSS pixels and
-   * its backing store rasterised at that size, so text stays crisp at every
-   * zoom while draw calls keep using logical units. Default: 1.
+   * its backing store rasterised at that size, up to `MAX_CANVAS_PIXELS`, so
+   * text stays crisp while draw calls keep using logical units. Default: 1.
    */
   scale?: number;
 }

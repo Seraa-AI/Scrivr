@@ -72,7 +72,6 @@ export function renderLabelledCaret(
   options: { color: string; label: string; labelColor?: string; visible?: boolean },
 ): void {
   const { color, label, labelColor = "#ffffff", visible = true } = options;
-  const px = screenPixels;
   const x = onPixelCentre(coords.x);
 
   ctx.save();
@@ -80,25 +79,25 @@ export function renderLabelledCaret(
   if (visible) {
     // Slightly thicker than the user's own caret, to tell them apart.
     ctx.strokeStyle = color;
-    ctx.lineWidth = px(2);
+    ctx.lineWidth = screenPixels(2);
     ctx.lineCap = "round";
     ctx.beginPath();
-    ctx.moveTo(x, coords.y + px(1));
-    ctx.lineTo(x, coords.y + coords.height - px(1));
+    ctx.moveTo(x, coords.y + screenPixels(1));
+    ctx.lineTo(x, coords.y + coords.height - screenPixels(1));
     ctx.stroke();
   }
 
-  ctx.font = `bold ${px(11)}px system-ui, -apple-system, sans-serif`;
-  const pad = px(4);
+  ctx.font = `bold ${screenPixels(11)}px system-ui, -apple-system, sans-serif`;
+  const pad = screenPixels(4);
   const labelW = ctx.measureText(label).width + pad * 2;
-  const labelH = px(16);
+  const labelH = screenPixels(16);
   const labelX = coords.x;
-  const labelY = Math.max(0, coords.y - labelH - px(2));
+  const labelY = Math.max(0, coords.y - labelH - screenPixels(2));
 
   ctx.fillStyle = color;
   ctx.beginPath();
   if (ctx.roundRect) {
-    ctx.roundRect(labelX, labelY, labelW, labelH, px(3));
+    ctx.roundRect(labelX, labelY, labelW, labelH, screenPixels(3));
   } else {
     ctx.rect(labelX, labelY, labelW, labelH);
   }
@@ -473,8 +472,8 @@ export function renderAnchoredDragCaret(
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
 /**
- * Device pixels per page unit in the overlay paint under way — the display's
- * ratio times the zoom — used for pixel-grid snapping. Set by clearOverlay at
+ * Device pixels per page unit in the overlay paint under way, as
+ * `setupCanvas` returned it — used for pixel-grid snapping. Set by clearOverlay at
  * the start of each paint so every draw in it snaps alike without threading
  * the value through every API.
  */

@@ -23,7 +23,7 @@ of the column is empty space.
 │  │  <canvas> content      │ │  ← PageRenderer
 │  │  <canvas> overlay      │ │  ← OverlayRenderer
 │  └────────────────────────┘ │
-│     ← gap (24px default) →  │
+│     ← gap (24 default) →    │
 │  ┌── page-wrapper (div) ──┐ │
 │  │  <canvas> content      │ │
 │  │  <canvas> overlay      │ │
@@ -124,8 +124,8 @@ users see blank pages during fast scrolling:
 <Scrivr editor={editor} overscan={2} />
 ```
 
-Default is `1`. Each extra page keeps two more canvases painted (smoother fast scrolling, more
-memory).
+Default is `1`. Each step paints one more tile above and below the view, two canvases each
+(smoother fast scrolling, more memory).
 
 ---
 
@@ -166,10 +166,11 @@ To scroll a page's top to the top of the view — at any zoom, since the page's 
 it is drawn now:
 
 ```ts
+const scroller = document.querySelector(".my-editor-scroller"); // the editor's scroll container
 const corner = editor.getPageScreenPosition(pageNumber);
 const view = editor.getScrollContainerRect();
-if (corner && view) {
-  scrollParent.scrollBy({ top: corner.screenTop - view.top, behavior: "smooth" });
+if (scroller && corner && view) {
+  scroller.scrollBy({ top: corner.screenTop - view.top, behavior: "smooth" });
 }
 ```
 

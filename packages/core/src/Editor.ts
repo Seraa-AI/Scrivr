@@ -575,7 +575,6 @@ export class Editor extends BaseEditor implements IEditor {
 			? resolveTheme(this.theme, this.themeRoot)
 			: Object.freeze({ ...defaultEditorTheme });
 
-		this.zoomAsked = zoom;
 		this.onChangeHandler = onChange;
 		this.onFocusChangeHandler = onFocusChange;
 
@@ -586,8 +585,9 @@ export class Editor extends BaseEditor implements IEditor {
 			builtConfig && pageConfig
 				? { ...builtConfig, ...pageConfig }
 				: (builtConfig ?? pageConfig ?? defaultPageConfig);
+		this.zoomAsked = this.zoomAskable(zoom);
 		// A fit has no view to fit until TileManager mounts one: 100% until then.
-		this.zoomShown = resolveZoom(zoom, null, this.pageConfig) ?? 1;
+		this.zoomShown = resolveZoom(this.zoomAsked, null, this.pageConfig) ?? 1;
 
 		this.fontConfig = this.manager.buildBlockStyles();
 		this.measurer =
@@ -1793,8 +1793,13 @@ export class Editor extends BaseEditor implements IEditor {
 	 */
 	setZoom(request: ZoomRequest): void {
 		const asked = this.zoomAsked;
-		this.zoomAsked = request;
-		this.applyZoom(request !== asked);
+		this.zoomAsked = this.zoomAskable(request);
+		this.applyZoom(this.zoomAsked !== asked);
+	}
+
+	/** A factor as the range holds it — 6.1 asks for 5 — so a request past an end changes nothing. */
+	private zoomAskable(request: ZoomRequest): ZoomRequest {
+		return typeof request === "number" ? (resolveZoom(request, null, this.pageConfig) ?? 1) : request;
 	}
 
 	/**
