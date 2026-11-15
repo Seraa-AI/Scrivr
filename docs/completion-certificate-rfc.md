@@ -1,6 +1,6 @@
 # RFC: Certificate of completion
 
-Status: draft (2026-11-15) — see [Open questions](#open-questions--answer-before-building).
+Status: path locked (2026-11-15) — open questions answered; see [Decided](#decided-2026-11-15).
 Builds on [Sealed Revisions](./sealed-revisions-rfc.md).
 
 ## Problem
@@ -91,14 +91,15 @@ A library does not, so it must.
 
 2. **Issued only for a complete signing.** It is a certificate of
    *completion*: issuing refuses while a required field is unanswered, as
-   `exportExecutedPdf` does. (An interim report is an open question.)
+   `exportExecutedPdf` does. No interim report.
 
 3. **A separate PDF that names the executed one by hash.** The certificate
    quotes the executed PDF's `artifactHash`, so it cannot be inside the bytes
    that hash covers. It is its own PDF with its own `certificateHash`. The
    executed record stays exactly the artifact the signers' values were
-   printed into, verifiable alone. (Appending, as Adobe and Documenso do, is
-   an open question.)
+   printed into, verifiable alone. A host that wants one file, as Adobe and
+   Documenso deliver, bundles the two with `bundleCertificate`: the executed
+   pages, then the certificate's, under a `bundleHash` of their own.
 
 4. **A Scrivr document, printed by the same exporter.** The certificate is
    built as an ordinary document — headings, a table per party, the drawn
@@ -154,6 +155,7 @@ const built = await buildCompletionCertificate({
     ],
     events: [
       { at: "2026-11-15T09:12:03Z", kind: "sent", party: "client-authorized-signatory" },
+      { at: "2026-11-15T09:30:00Z", kind: "custom", label: "Identity verified", party: "client-authorized-signatory" },
       { at: "2026-11-15T09:40:51+03:00", kind: "viewed", party: "client-authorized-signatory" },
       { at: "2026-11-15T09:44:10+03:00", kind: "signed", party: "client-authorized-signatory" },
       { at: "2026-11-15T09:44:12Z", kind: "completed" },
@@ -167,7 +169,16 @@ const built = await buildCompletionCertificate({
 // @scrivr/export-pdf
 const issued = await exportCompletionCertificate(built.certificate, { editorOptions, ...pdfOptions });
 // { pdf: Uint8Array, certificateHash: "sha256:…" }
+
+// One file, when the host wants it
+const bundled = await bundleCertificate(executedPdfBytes, issued.pdf);
+// { pdf: Uint8Array, bundleHash: "sha256:…" }
 ```
+
+**Events** are one of `sent`, `viewed`, `consented`, `signed`, `declined`,
+`completed` — checked for order and labelled through the table — or
+`{ kind: "custom", label }`, a host's own step, printed as given and placed
+by its time.
 
 `VerifiedFacts` is the checked section as data — `contentHash`,
 `artifactHash`, and per role the answered signatures with `signedAt` — so a
@@ -186,6 +197,7 @@ each is an answer the host shows someone.
 | `missing-party { role }` | a role with fields has no party in the record |
 | `unzoned-time { at }` | an event time or a `signedAt` names no zone |
 | `signed-after-completed` | a signature's `signedAt` is later than the `completed` event |
+| `events-out-of-order { event }` | a party's `signed` precedes its `sent` or `viewed`, or `completed` is not last |
 
 The executed bytes are hashed, not compared to a stored hash: the
 certificate quotes the hash of the bytes it was given, so a host that hands
@@ -208,7 +220,7 @@ over the wrong file gets a certificate for that file, never a false match.
 |---|---|
 | `core/src/sealing/certificate.ts` (new) | `buildCompletionCertificate`, `CompletionRecord`, `VerifiedFacts`, refusals, default labels |
 | `core/src/sealing/snapshot.ts` | nothing — reused |
-| `export-pdf/src/certificate.ts` (new) | `exportCompletionCertificate` — the exporter, then `hashArtifact` |
+| `export-pdf/src/certificate.ts` (new) | `exportCompletionCertificate` — the exporter, then `hashArtifact`; `bundleCertificate` — copies both documents' pages into one |
 | `docs/guides/sealing.mdx` | the certificate step after the executed PDF |
 | playground *Signing* demo | "Download certificate" beside the executed PDF |
 
@@ -243,24 +255,19 @@ over the wrong file gets a certificate for that file, never a false match.
   the host already receives them and decides what its record keeps.
 - An audit log of every event in a separate PDF (Documenso's second file).
 
-## Open questions — answer before building
+## Decided (2026-11-15)
 
-1. **Separate, or appended?** Decision 3 keeps the certificate a separate PDF
-   so the executed record's hash is untouched. Adobe and Documenso append by
-   default; a host that wants one file could get `bundleCertificate(executed,
-   certificate)` → `{ pdf, bundleHash }`, the certificate inside still
-   naming the executed record's hash. Ship the helper now, later, or never?
-2. **Interim reports.** Adobe issues interim reports marked as such while an
-   agreement is in progress. Issue only on completion (Decision 2), or also
-   an interim certificate with its own refusal set?
-3. **`documentId`.** This RFC takes the host's id as an opaque string. The
-   next PR, Word-signature import, introduces a document id of Scrivr's own;
-   should the certificate print both, or should Scrivr's become the default
-   when the host gives none?
-4. **Event kinds.** A closed set (`sent`, `viewed`, `consented`, `signed`,
-   `declined`, `completed`) labelled through the table, or any string the
-   host likes? Closed lets Scrivr check order and translate; open fits hosts
-   with their own steps.
+1. **Separate, with a bundle helper.** The certificate is its own PDF;
+   `bundleCertificate` makes one file for hosts that want it, under its own
+   `bundleHash`, the certificate inside still naming the executed record's
+   `artifactHash`.
+2. **Completion only.** No interim certificate.
+3. **The host's `documentId` only, for now.** Printed as an opaque string.
+   When the Word-signature import PR introduces Scrivr's own document id, the
+   certificate gains it then.
+4. **A closed set of events, plus custom.** The six kinds are checked for
+   order and translated; `{ kind: "custom", label }` carries a host's own
+   step, printed as given.
 
 ## What shipped
 
