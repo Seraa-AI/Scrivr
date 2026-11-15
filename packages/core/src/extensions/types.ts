@@ -114,7 +114,8 @@ export type ScrivrNodeSpec = NodeSpec & {
  * additional content on the overlay canvas for a specific page.
  *
  * Called once per visible page after the built-in cursor/selection are drawn.
- * The ctx is already scaled by dpr — draw in logical CSS pixels.
+ * The ctx is already scaled to draw in page units, at the view's zoom. Something that should keep its size on screen at every
+ * zoom, as the caret and resize handles do, sizes itself with `screenPixels`.
  *
  * @example
  * // CollaborationCursor uses this to draw remote users' cursors
@@ -345,8 +346,13 @@ export interface IEditor extends IBaseEditor {
    * Falls back to selection.moveCursorTo if the position is not selectable.
    */
   selectNode(docPos: number): void;
-  /** Get screen-space position of a page canvas. Null when not mounted. */
+  /**
+   * The screen position of a page's top-left corner. Null when not mounted.
+   * A page-unit offset from it is `offset × zoom` screen pixels.
+   */
   getPageScreenPosition(page: number): { screenLeft: number; screenTop: number } | null;
+  /** The factor the document is shown at: 1 is 100%. Screen pixels per page unit. */
+  readonly zoom: number;
   /**
    * Scroll so the doc range [from, to] is visible — centered when it fits
    * the viewport, top-pinned when taller. Completes a partial streamed

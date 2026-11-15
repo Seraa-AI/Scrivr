@@ -27,6 +27,7 @@ const EMPTY_LAYOUT: DocumentLayout = {
 export class ViewEditorDouble extends ServerEditor implements IEditor {
   readonly surfaces = new SurfaceRegistry();
   readonly cursorManager = new CursorManager(() => {});
+  readonly zoom = 1;
   readonly selection: SelectionController;
   /** The overlay painters extensions registered, in order. */
   readonly painters: OverlayRenderHandler[] = [];

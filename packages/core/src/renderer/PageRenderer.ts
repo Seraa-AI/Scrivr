@@ -41,6 +41,7 @@ export interface RenderPageOptions {
    */
   renderVersion: number;
   currentVersion: () => number;
+  /** Device pixels per page unit, as `setupCanvas` returned it. */
   dpr: number;
   measurer: TextMeasurerLike;
   map: CharacterMap;

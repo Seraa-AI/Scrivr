@@ -9,6 +9,7 @@ export {
   renderSelection,
   renderGhostText,
   renderAiCaret,
+  renderLabelledCaret,
   renderTrackedInsert,
   renderTrackedDelete,
   renderTrackedConflict,
@@ -20,4 +21,5 @@ export {
 } from "./OverlayRenderer";
 export { CursorManager } from "./CursorManager";
 export { TileManager } from "./TileManager";
+export { MAX_ZOOM, MIN_ZOOM, resolveZoom, screenPixels, type ZoomRequest, type ZoomViewport } from "./zoom";
 export type { TileManagerOptions } from "./TileManager";
