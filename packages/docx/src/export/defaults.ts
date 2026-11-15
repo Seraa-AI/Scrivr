@@ -14,6 +14,7 @@
  *     this when page-size is wired through `doc.attrs`.
  */
 
+import { WORD_PART_NAMESPACES } from "@scrivr/core";
 import { xml, serializeXml } from "./xml";
 import type { DocxPackage, XmlNode } from "./context";
 import { PAGE_HEIGHT_TWIPS, PAGE_MARGIN_TWIPS, PAGE_WIDTH_TWIPS } from "./section";
@@ -25,7 +26,6 @@ import type {
 } from "./createContext";
 
 const W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
-const R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 const PKG_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships";
 const PKG_CT_NS = "http://schemas.openxmlformats.org/package/2006/content-types";
 
@@ -145,7 +145,7 @@ export function buildDocumentRoot(body: XmlNode[]): XmlNode {
   const bodyChildren = body.length > 0 ? body : [xml("w:p")];
   return xml(
     "w:document",
-    { "xmlns:w": W_NS, "xmlns:r": R_NS },
+    { ...WORD_PART_NAMESPACES },
     [
       xml("w:body", undefined, [
         ...bodyChildren,

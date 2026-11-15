@@ -92,7 +92,7 @@ React is a thin shell. The engine owns layout and rendering.
 
 - Environment: `happy-dom` (core), `node` (plugins)
 - `vitest.setup.ts` wires **real** Skia font metrics (`@napi-rs/canvas`) into `getContext("2d")`. Measurement is never mocked — see `createMeasurer()` / `createTestEditor()` in `src/test-utils.ts`
-- **Text measures differently on different machines.** Linux CI fonts are not macOS fonts, so a string can wrap to a different number of lines there. Never assert a layout value that depends on wrap count, and never assert a real-font width tighter than ~1px. Assert relationships between measured values (`float.y === anchor.y`) or derive the expected value from the same measurer the code uses
+- **Text measures differently on different machines.** Linux CI fonts are not macOS fonts, so a string can wrap to a different number of lines there. Never assert a layout value that depends on wrap count, and never assert a real-font width tighter than ~1px. Assert relationships between measured values (`expectSamePosition(float.y, anchor.y)` from `test-utils`, which agrees to a millionth of a pixel — never `toBe` on a sum of measured values, whose last bits differ by machine) or derive the expected value from the same measurer the code uses. A text span's width includes its trailing space, which may hang past a margin or float: measure `span.text.trimEnd()` for where its ink ends
 - ~1590 tests in core across ~90 test files
 
 ## Key Conventions

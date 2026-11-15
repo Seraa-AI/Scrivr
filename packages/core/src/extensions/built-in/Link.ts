@@ -260,13 +260,13 @@ export const Link = Extension.create({
       }),
     });
 
-    const wrap: DocxRunWrapper = (run, mark, ctx) => {
+    const wrap: DocxRunWrapper = (runs, mark, ctx) => {
       const href = mark.attrs["href"];
       // A link with no usable href is styled text, not a broken relationship:
       // emitting `r:id` for a rel that was never registered produces a file
       // Word refuses to open.
-      if (typeof href !== "string" || href.length === 0) return run;
-      return xml("w:hyperlink", { "r:id": ctx.rels.addHyperlink(href) }, [run]);
+      if (typeof href !== "string" || href.length === 0) return runs;
+      return xml("w:hyperlink", { "r:id": ctx.rels.addHyperlink(href) }, [...runs]);
     };
 
     // Blue because it is a link, not because anyone chose blue — so an

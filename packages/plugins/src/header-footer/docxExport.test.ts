@@ -46,6 +46,8 @@ describe("header/footer DOCX export", () => {
     // Parts exist with the walked content.
     expect(zip["word/header1.xml"]).toContain("<w:hdr");
     expect(zip["word/header1.xml"]).toContain("My Header");
+    // The same root as the body's: Word 2010's checkbox, ignorable by older Word.
+    expect(zip["word/header1.xml"]).toMatch(/<w:hdr [^>]*mc:Ignorable="w14"/);
     expect(zip["word/footer1.xml"]).toContain("<w:ftr");
     expect(zip["word/footer1.xml"]).toContain("My Footer");
 

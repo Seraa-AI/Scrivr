@@ -92,11 +92,13 @@ const make = (content: DocNode[], userID: string, tracked: boolean) => new Edito
 });
 
 // Gestures take the live editor, so positions come from what is there.
-const sel = (e: Editor, from: number, to = from) =>
+const sel = (e: Editor, from: number, to = from): void => {
   e.applyTransaction(e.getState().tr.setSelection(TextSelection.create(e.getState().doc, from, to)));
+};
 const key = (e: Editor, name: string) => e.press(name);
-const tr = (e: Editor, f: (t: Transaction, s: EditorState) => Transaction) =>
+const tr = (e: Editor, f: (t: Transaction, s: EditorState) => Transaction): void => {
   e.applyTransaction(f(e.getState().tr, e.getState()));
+};
 
 /** Where `needle` starts in a block's text, struck or not. Text can be split across nodes. */
 function at(e: Editor, needle: string, offset = 0) {

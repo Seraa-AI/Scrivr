@@ -5,3 +5,17 @@ export type { CollabState } from "./collaborationState";
 export { seedDocAttrs, readDocAttrs } from "./docAttrs";
 export { DOC_ATTRS_MAP_NAME, isDocAttrEnvelope } from "./YBinding";
 export type { DocAttrEnvelope } from "./YBinding";
+export {
+  REVISION_MAP_NAME,
+  docFromYDoc,
+  isSealed,
+  matchesSnapshot,
+  readRevisionStamp,
+  resetToSnapshot,
+  snapshotFromYDoc,
+  stampEditable,
+  stampSeal,
+} from "./revision";
+export type { EditableStamp, RevisionStamp, SealedStamp } from "./revision";
+export { watchRevision } from "./watchRevision";
+export type { RevisionCallbacks, RevisionWatcher } from "./watchRevision";

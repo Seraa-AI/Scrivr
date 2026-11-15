@@ -313,18 +313,20 @@ export type DocxNodeHandler = (
  * `DocxMarkHandler` contributes run properties — bold, colour, size — which is
  * all most marks need. A hyperlink is not one of them: OOXML expresses it as a
  * `<w:hyperlink>` element around the runs, carrying a relationship id, so no
- * amount of `<w:rPr>` can produce one. A wrapper receives the finished run and
- * returns whatever should stand in its place; returning the run unchanged
- * declines.
+ * amount of `<w:rPr>` can produce one.
  *
- * Wrappers run outermost-last, in the order the marks appear on the text, so
- * two wrapping marks nest predictably rather than by registration accident.
+ * A wrapper receives every consecutive run the mark covers — differently
+ * formatted text is several runs — and returns what stands in their place;
+ * returning `runs` unchanged declines. One element per stretch is what Word
+ * writes, and for a content control it matters: a field split across several
+ * controls comes back as several pieces sharing one id, read as copies. Where
+ * wrapping marks overlap, the one covering the longest stretch is outermost.
  */
 export type DocxRunWrapper = (
-  run: XmlNode,
+  runs: readonly XmlNode[],
   mark: PmMark,
   ctx: DocxContext,
-) => XmlNode;
+) => XmlNode | readonly XmlNode[];
 
 export type DocxMarkHandler = (
   props: DocxRunProps,
@@ -349,6 +351,22 @@ export interface DocxHandlers {
   onBuildTreeComplete?(ctx: DocxContext): void | Promise<void>;
   onFinalize?(ctx: DocxContext): DocxPackage | Promise<DocxPackage>;
 }
+
+// ── Part roots ───────────────────────────────────────────────────────────────
+
+/**
+ * The namespaces every story part's root declares — the body's `<w:document>`,
+ * a `<w:hdr>`, a `<w:ftr>` — so content written into any of them reads the
+ * same. Word 2010's additions (a content-control checkbox) are marked
+ * ignorable, as Word marks them, so an older Word reads past them.
+ */
+export const WORD_PART_NAMESPACES: Readonly<XmlAttrs> = {
+  "xmlns:w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+  "xmlns:r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+  "xmlns:mc": "http://schemas.openxmlformats.org/markup-compatibility/2006",
+  "xmlns:w14": "http://schemas.microsoft.com/office/word/2010/wordml",
+  "mc:Ignorable": "w14",
+};
 
 // ── Unit conversion (px ↔ OOXML units) ──────────────────────────────────────
 
@@ -460,11 +478,40 @@ export interface DocxFieldInline {
   marks: DocxMark[];
 }
 
+/** One `w:listItem`: what is stored (`w:value`) and what is shown (`w:displayText`). */
+export interface DocxSdtListItem {
+  value: string;
+  displayText: string;
+}
+
+/**
+ * An inline content control (`<w:sdt>` inside a paragraph). Several owners
+ * store things in one, each recognising its own by `tag`. An `inlines.sdt`
+ * handler may claim it whole; otherwise its content is imported with an `sdt`
+ * mark (`attrs: { tag, placeholder }`) a `marks.sdt` handler can claim. A
+ * prompt no handler claims is left out — it is Word's text, not the document's.
+ */
+export interface DocxSdtInline {
+  type: "sdt";
+  /** `w:tag/@w:val` — who the control belongs to. */
+  tag: string | null;
+  /** `w:showingPlcHdr` — the content is placeholder text, not a value. */
+  placeholder: boolean;
+  /** A dropdown or combo box's choices, in order. */
+  listItems: DocxSdtListItem[];
+  content: DocxInline[];
+  marks: DocxMark[];
+}
+
 export type DocxInline =
   | { type: "text"; text: string; marks: DocxMark[] }
   | { type: "hardBreak"; marks: DocxMark[] }
   | DocxImageInline
-  | DocxFieldInline;
+  | DocxFieldInline
+  | DocxSdtInline;
+
+/** ECMA-376 caps `w:tag/@w:val` (ST_String) at 255 characters. */
+export const DOCX_TAG_MAX_LENGTH = 255;
 
 export interface DocxParagraphAttrs {
   /** Paragraph style ID (`Heading1`, `Normal`, …) — resolved from `styles.xml`. */

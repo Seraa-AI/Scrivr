@@ -6,6 +6,54 @@ export { KeymapPriority, DEFAULT_SLASH_ORDER } from "./types";
 // Built-in extensions — individually importable
 export { Document } from "./built-in/Document";
 export { HardBreak } from "./built-in/HardBreak";
+export {
+  Field,
+  fieldDrawingAt,
+  fieldKindsOf,
+  fieldValues,
+  isFieldAnswered,
+  listSignerFields,
+  paintCheckbox,
+  paintFieldInk,
+  paintFieldTag,
+  roleName,
+  replaceFieldValues,
+  setFieldValue,
+  unansweredBeforeSigning,
+  valuesOnRecord,
+  valuesOnRecordOf,
+} from "./built-in/Field";
+export { importedFieldValues } from "./built-in/fieldDocx";
+export type { FieldFill, FieldValues, InsertFieldOptions, SignerFieldDescriptor } from "./built-in/Field";
+export {
+  BUILT_IN_FIELD_KINDS,
+  FieldChoiceSchema,
+  checkboxTick,
+  defaultSignedDate,
+  fieldIconStrokes,
+  fieldInk,
+  fieldRoleColor,
+  fieldValueLayout,
+  fieldVerb,
+  isDatedWhenSigned,
+  isDrawnKind,
+  isSigningKind,
+  parseSignedAt,
+  signedAtOf,
+} from "./built-in/fieldKinds";
+export type {
+  BuiltInFieldKind,
+  FieldBox,
+  FieldChoice,
+  FieldControl,
+  FieldDrawing,
+  FieldKind,
+  FieldKindSpec,
+  FieldKinds,
+  FieldOptions,
+  FieldValue,
+} from "./built-in/fieldKinds";
+export type { FieldRangeKind, InsertFieldRangeOptions } from "./built-in/fieldRange";
 export { Paragraph } from "./built-in/Paragraph";
 export { Heading } from "./built-in/Heading";
 export { Bold } from "./built-in/Bold";
@@ -83,6 +131,7 @@ export type {
   SlashCommandContribution,
   SlashCommandResolver,
   OverlayRenderHandler,
+  PointerCursorResolver,
   CloneHandler,
   CloneHandlerContext,
 } from "./types";

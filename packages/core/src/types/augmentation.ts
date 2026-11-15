@@ -1,5 +1,7 @@
 import type { Mappable } from "prosemirror-transform";
 import type { HoverEvent } from "../hover/types";
+import type { PagePoint } from "../layout/pagePoint";
+import type { MutationDenied } from "../mutationGate";
 import type { ZoomRequest } from "../renderer/zoom";
 /**
  * augmentation.ts
@@ -133,6 +135,24 @@ export interface EditorEvents {
    */
   viewport: void;
   /**
+   * The range of pages on screen changed (paged mode; 1-based, inclusive, no
+   * overscan). Reading telemetry builds on this: the canvas has no DOM a host
+   * could observe instead.
+   */
+  pagesInView: {
+    first: number;
+    last: number;
+    pageCount: number;
+    /** False while a long document is still being laid out, so more pages may follow. */
+    complete: boolean;
+  };
+  /**
+   * A primary press landed on the page — fired for every one, before routing,
+   * read-only and sealed included. For what is painted over a page without
+   * being a document node (a sealed field); nodes use the hit-target registry.
+   */
+  press: { point: PagePoint; clickCount: number };
+  /**
    * The zoom changed: a new factor — `setZoom`, a gesture, or a fit following
    * its view — or a new request at the same factor, such as a fit that
    * happens to equal the factor it replaces. `"viewport"` fires with a new
@@ -146,6 +166,11 @@ export interface EditorEvents {
    * never in editor state, never sent to collaborators. Mouse and pen only.
    */
   hover: HoverEvent;
+  /**
+   * The editor refused a change: read-only to an edit made on this client, or
+   * sealed. The document is exactly as it was before the attempt.
+   */
+  mutationDenied: MutationDenied;
 }
 
 /**

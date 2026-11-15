@@ -464,6 +464,16 @@ export class LayoutCoordinator {
   }
 
   /**
+   * Measure every block again on the next layout: something a strategy
+   * measures from, outside the document, changed.
+   */
+  remeasure(): void {
+    this.measureCache = new WeakMap();
+    this.cancelIdleLayout();
+    this.dirty = true;
+  }
+
+  /**
    * Recompute the layout if it is stale (dirty). No-op when clean.
    *
    * Called by Editor's RAF flush and by the `editor.layout` getter.

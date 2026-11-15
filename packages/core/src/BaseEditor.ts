@@ -1,4 +1,4 @@
-import { EditorState, Transaction } from "prosemirror-state";
+import { EditorState, Plugin, Transaction } from "prosemirror-state";
 import type { FontProvider } from "./fonts/types";
 import type { FontConfig } from "./layout/FontConfig";
 import type { InlineRegistry } from "./layout/BlockRegistry";
@@ -21,6 +21,7 @@ import { DEFAULT_SLASH_ORDER } from "./extensions/types";
 import type { ExportContributionMap, ImportContributionMap } from "./extensions/export";
 import type { SafeFlatCommands, EditorEvents, ExtensionStorage } from "./types/augmentation";
 import { parseMarkdownToDoc } from "./model/parseMarkdown";
+import { holdStill, lockOn, mutationDenial } from "./mutationGate";
 import {
   normalizeDocument,
   type NormalizeResult,
@@ -40,6 +41,8 @@ export type DeferredEditAbandonment =
   | "anchor-removed"
   /** The editor stopped accepting writes before the work finished. */
   | "read-only"
+  /** The document was sealed before the work finished. */
+  | "sealed"
   /** The editor was destroyed before the work finished. */
   | "destroyed"
   /** The work succeeded and `edit` threw. */
@@ -151,6 +154,9 @@ export class BaseEditor implements IBaseEditor {
   protected editorState: EditorState;
 
   private readOnlyValue = false;
+  private sealedValue = false;
+  /** True only while the gate applies a caret move to a locked document. */
+  private holdingStill = false;
   private destroyed = false;
   /**
    * Anchors for edits whose work has not finished. Mapped on every document
@@ -295,7 +301,7 @@ export class BaseEditor implements IBaseEditor {
 
     this.editorState = EditorState.create({
       schema: this.manager.schema,
-      plugins: this.manager.buildPlugins(),
+      plugins: this.buildStatePlugins(),
       ...(initialDoc ? { doc: initialDoc } : {}),
     });
 
@@ -440,20 +446,38 @@ export class BaseEditor implements IBaseEditor {
     return this.editorState;
   }
 
-  /** True when the editor is in read-only / view mode. */
+  /** True when this viewer may not author — set by the host, or by a seal. */
   get readOnly(): boolean {
-    return this.readOnlyValue;
+    return this.readOnlyValue || this.sealedValue;
+  }
+
+  /** True once the document is sealed. A sealed document never changes again. */
+  get sealed(): boolean {
+    return this.sealedValue;
   }
 
   /**
-   * Enable or disable read-only mode. When true, all document mutations are
-   * blocked and the cursor is hidden. Notifies subscribers so UI can react.
+   * Enable or disable read-only mode. A read-only editor refuses edits made on
+   * this client but still receives a collaborator's, and the cursor is hidden.
+   * Has no effect on a sealed editor's writability. Notifies subscribers so UI
+   * can react.
    *
    * Subclasses (Editor) override this to also gate InputBridge + CursorManager.
    */
   setReadOnly(value: boolean): void {
     if (this.readOnlyValue === value) return;
     this.readOnlyValue = value;
+    this.notifyListeners();
+  }
+
+  /**
+   * Seal the document: from now on it refuses every change, from this client
+   * and from collaborators alike. Selection still moves. There is no unseal —
+   * a change to a sealed revision is a new revision.
+   */
+  seal(): void {
+    if (this.sealedValue) return;
+    this.sealedValue = true;
     this.notifyListeners();
   }
 
@@ -479,9 +503,12 @@ export class BaseEditor implements IBaseEditor {
    * Subclasses override this to layer view side-effects on top (Editor's
    * override routes through the view-aware dispatch). `BaseEditor`'s
    * implementation runs the headless apply pipeline only.
+   *
+   * Returns `false` when the editor refused the change — read-only to a local
+   * edit, or sealed — and emits `"mutationDenied"` saying why.
    */
-  applyTransaction(tr: Transaction): void {
-    this.applyState(tr);
+  applyTransaction(tr: Transaction): boolean {
+    return this.applyState(tr);
   }
 
   getMarkdown(): string {
@@ -706,13 +733,44 @@ export class BaseEditor implements IBaseEditor {
 
   /**
    * Apply a transaction to state, emit "update", and notify subscribers.
-   * Called by `applyTransaction` (base) and `dispatch` (in Editor).
+   * Called by `applyTransaction` (base) and `dispatch` (in Editor). Every
+   * change to the body document passes here, so this is where a refusal is
+   * decided; a refused transaction leaves state exactly as it was.
    */
-  protected applyState(tr: Transaction): void {
-    this.editorState = this.editorState.apply(tr);
+  protected applyState(tr: Transaction): boolean {
+    const state = this.applyThroughGate(this.editorState, tr);
+    if (!state) return false;
+    this.editorState = state;
     if (tr.docChanged) this.mapThroughEdit(tr);
     this.emit("update", { docChanged: tr.docChanged, mapping: tr.mapping });
     this.notifyListeners();
+    return true;
+  }
+
+  /**
+   * Applies `tr` to `state` as the locks allow — the body's and every
+   * surface's. Returns `null` when it is refused, reported through
+   * `"mutationDenied"`. A caret move or a selection is never refused.
+   */
+  protected applyThroughGate(state: EditorState, tr: Transaction): EditorState | null {
+    const locks = { readOnly: this.readOnlyValue, sealed: this.sealedValue };
+    this.holdingStill = !tr.docChanged && lockOn(tr, locks) !== null;
+    let result: { state: EditorState; transactions: readonly Transaction[] };
+    try {
+      result = state.applyTransaction(tr);
+    } finally {
+      this.holdingStill = false;
+    }
+    // A plugin's filter turned it away: nothing was applied.
+    if (result.transactions.length === 0) return null;
+    const denied = mutationDenial(tr, result.transactions, locks);
+    if (denied) this.emit("mutationDenied", denied);
+    return denied ? null : result.state;
+  }
+
+  /** The body's plugins, and the gate's own. */
+  protected buildStatePlugins(): Plugin[] {
+    return [...this.manager.buildPlugins(), holdStill(() => this.holdingStill)];
   }
 
   /**
@@ -753,6 +811,7 @@ export class BaseEditor implements IBaseEditor {
       (result) => {
         this.pendingAnchors.delete(anchor);
         if (this.destroyed) return abandon("destroyed");
+        if (this.sealedValue) return abandon("sealed");
         if (this.readOnlyValue) return abandon("read-only");
         if (anchor.pos === null) return abandon("anchor-removed");
         try {
@@ -793,8 +852,8 @@ export class BaseEditor implements IBaseEditor {
    * `BaseEditor` routes through `applyTransaction` (no view side-effects).
    * `Editor` overrides this to route through `dispatch()` (full view updates).
    */
-  protected dispatchToActive(tr: Transaction): void {
-    this.applyTransaction(tr);
+  protected dispatchToActive(tr: Transaction): boolean {
+    return this.applyTransaction(tr);
   }
 
   // ── Private ──────────────────────────────────────────────────────────────────
@@ -809,7 +868,7 @@ export class BaseEditor implements IBaseEditor {
     for (const [name, factory] of Object.entries(rawCommands)) {
       this.boundCommands[name] = (...args: unknown[]) => {
         // Read-only is a refusal like any other, not an absent answer.
-        if (this.readOnlyValue) return false;
+        if (this.readOnly) return false;
         const cmd = factory(...args);
         return cmd(this.getActiveState(), (tr) => this.dispatchToActive(tr));
       };

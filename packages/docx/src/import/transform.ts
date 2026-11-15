@@ -126,7 +126,8 @@ function transformInlines(
     } else if (item.type === "hardBreak") {
       const hb = ctx.schema.nodes["hardBreak"];
       if (hb) {
-        out.push(hb.create());
+        // Marked like its run, so a break inside a field stays inside it.
+        out.push(hb.create(null, null, transformMarks(layer(inherited, item.marks), ctx, handlers)));
       } else {
         ctx.diagnostics.warn({
           code: "schema-missing-hardBreak",
@@ -147,6 +148,20 @@ function transformInlines(
           nodeType: "image",
         });
       }
+    } else if (item.type === "sdt") {
+      const marks = transformMarks(layer(inherited, item.marks), ctx, handlers);
+      const claimed = handlers.inlines["sdt"]?.(item, marks, ctx);
+      if (claimed) {
+        out.push(claimed);
+        continue;
+      }
+      // Unclaimed: its content stays, under a mark an owner may claim.
+      const control: DocxMark[] = handlers.marks["sdt"]
+        ? [{ kind: "sdt", attrs: { tag: item.tag, placeholder: item.placeholder } }]
+        : [];
+      // A prompt nobody owns is Word's, not the document's text.
+      if (item.placeholder && transformMarks(control, ctx, handlers).length === 0) continue;
+      out.push(...transformInlines(item.content, ctx, handlers, layer(inherited, [...item.marks, ...control])));
     } else if (item.type === "field") {
       const marks = transformMarks(layer(inherited, item.marks), ctx, handlers);
       const handler = handlers.inlines["field"];

@@ -58,16 +58,29 @@ export function walkNode(
 ): XmlNode[] {
   // Text nodes own their mark stack — emit a single <w:r> with merged props,
   // then let any wrapping marks (hyperlinks) enclose it.
-  if (node.isText) {
-    const run = renderRun(node.text ?? "", mergeMarks(node.marks, ctx, handlers));
-    return [wrapRun(run, node.marks, ctx, handlers)];
-  }
+  if (node.isText) return wrapRuns([textRun(node, ctx, handlers)], ctx, handlers);
 
+  // Consecutive runs under one wrapping mark are wrapped together, so they
+  // are gathered before anything else interrupts them.
   const children: XmlNode[] = [];
+  let runs: PendingRun[] = [];
   node.forEach((child) => {
+    if (child.isText) {
+      runs.push(textRun(child, ctx, handlers));
+      return;
+    }
+    // A line break inside a link or a field belongs to its stretch.
+    if (child.isInline) {
+      const wrapping = wrappingMarks(child, handlers);
+      runs.push(...walkNode(child, ctx, handlers, { inline: true }).map((xml) => ({ xml, wrapping })));
+      return;
+    }
+    children.push(...wrapRuns(runs, ctx, handlers));
+    runs = [];
     const childMeta: DocxNodeMeta = { inline: child.isInline };
     children.push(...walkNode(child, ctx, handlers, childMeta));
   });
+  children.push(...wrapRuns(runs, ctx, handlers));
 
   const handler = handlers.nodes[node.type.name];
   if (!handler) {
@@ -86,6 +99,8 @@ function mergeMarks(
   let props: DocxRunProps = {};
   for (const mark of marks) {
     const handler = handlers.marks[mark.type.name];
+    // A mark that wraps its runs has said how it exports.
+    if (!handler && handlers.markWrappers?.[mark.type.name]) continue;
     if (!handler) {
       ctx.diagnostics.warn({
         code: "unsupported-mark",
@@ -99,28 +114,69 @@ function mergeMarks(
   return props;
 }
 
-/**
- * Enclose a run in whatever its wrapping marks produce.
- *
- * A mark with no wrapper is not a gap — `mergeMarks` already warned about
- * marks with no handler at all, and most marks legitimately have nothing to
- * wrap with.
- */
-function wrapRun(
-  run: XmlNode,
-  marks: readonly Mark[],
-  ctx: DocxContext,
-  handlers: WalkerHandlers,
-): XmlNode {
-  const wrappers = handlers.markWrappers;
-  if (!wrappers) return run;
+/** A rendered run and the marks that still have to wrap it. */
+interface PendingRun {
+  xml: XmlNode;
+  wrapping: readonly Mark[];
+}
 
-  let wrapped = run;
-  for (const mark of marks) {
-    const wrapper = wrappers[mark.type.name];
-    if (wrapper) wrapped = wrapper(wrapped, mark, ctx);
+/** A text node's run, with the marks that will wrap it. */
+function textRun(node: Node, ctx: DocxContext, handlers: WalkerHandlers): PendingRun {
+  return {
+    xml: renderRun(node.text ?? "", mergeMarks(node.marks, ctx, handlers)),
+    wrapping: wrappingMarks(node, handlers),
+  };
+}
+
+/**
+ * The marks on `node` that wrap their runs. One with no wrapper is not a gap:
+ * `mergeMarks` warns about a mark with neither, and most legitimately have
+ * nothing to wrap with.
+ */
+function wrappingMarks(node: Node, handlers: WalkerHandlers): readonly Mark[] {
+  const wrappers = handlers.markWrappers;
+  return wrappers ? node.marks.filter((mark) => wrappers[mark.type.name]) : [];
+}
+
+/**
+ * Wrap consecutive runs once per stretch of each wrapping mark. Where marks
+ * overlap, the one covering the most runs goes outermost, so a content
+ * control around a link stays one element.
+ */
+function wrapRuns(runs: readonly PendingRun[], ctx: DocxContext, handlers: WalkerHandlers): XmlNode[] {
+  const out: XmlNode[] = [];
+  let i = 0;
+  while (i < runs.length) {
+    const stretch = (mark: Mark) => {
+      let end = i;
+      while (end < runs.length && mark.isInSet(runs[end]!.wrapping)) end++;
+      return end;
+    };
+    let outer: Mark | null = null;
+    let end = i + 1;
+    for (const mark of runs[i]!.wrapping) {
+      const reach = stretch(mark);
+      if (outer === null || reach > end) {
+        outer = mark;
+        end = reach;
+      }
+    }
+    if (outer === null) {
+      out.push(runs[i]!.xml);
+      i++;
+      continue;
+    }
+    const without = outer;
+    const inner = wrapRuns(
+      runs.slice(i, end).map((run) => ({ xml: run.xml, wrapping: without.removeFromSet(run.wrapping) })),
+      ctx,
+      handlers,
+    );
+    const wrapped = handlers.markWrappers![outer.type.name]!(inner, outer, ctx);
+    out.push(...(Array.isArray(wrapped) ? wrapped : [wrapped]));
+    i = end;
   }
-  return wrapped;
+  return out;
 }
 
 function renderRun(text: string, props: DocxRunProps): XmlNode {

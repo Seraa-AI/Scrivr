@@ -32,6 +32,7 @@ import type {
   DocxMark,
   DocxParagraphAttrs,
   DocxSectionRef,
+  DocxSdtListItem,
   DocxTableCell,
   DocxTableRow,
 } from "@scrivr/core";
@@ -418,6 +419,8 @@ function parseParagraphInlines(el: OoxmlElement, diag: ParserDiagnostics): DocxI
       // since the field regenerates it.
       const instr = attr(child, "w:instr");
       if (instr !== undefined) content.push({ type: "field", instr, marks: [] });
+    } else if (child.name === "w:sdt") {
+      content.push(parseInlineSdt(child, diag));
     } else if (child.name === "w:hyperlink") {
       // Preserve hyperlink identity by attaching a `link` mark to every
       // inline produced by its inner runs. Stage 2 (Link extension)
@@ -434,6 +437,34 @@ function parseParagraphInlines(el: OoxmlElement, diag: ParserDiagnostics): DocxI
     }
   }
   return content;
+}
+
+function parseInlineSdt(el: OoxmlElement, diag: ParserDiagnostics): DocxInline {
+  const sdtPr = findChild(el, "w:sdtPr");
+  const tagEl = sdtPr ? findChild(sdtPr, "w:tag") : undefined;
+  const contentEl = findChild(el, "w:sdtContent");
+  return {
+    type: "sdt",
+    tag: (tagEl && attr(tagEl, "w:val")) ?? null,
+    placeholder: sdtPr ? findChild(sdtPr, "w:showingPlcHdr") !== undefined : false,
+    listItems: sdtPr ? sdtListItems(sdtPr) : [],
+    content: contentEl ? parseParagraphInlines(contentEl, diag) : [],
+    marks: [],
+  };
+}
+
+function sdtListItems(sdtPr: OoxmlElement): DocxSdtListItem[] {
+  const list = findChild(sdtPr, "w:dropDownList") ?? findChild(sdtPr, "w:comboBox");
+  if (!list) return [];
+  const items: DocxSdtListItem[] = [];
+  for (const item of list.children) {
+    if (typeof item === "string" || item.name !== "w:listItem") continue;
+    // Word writes both; either alone stands for the other.
+    const value = attr(item, "w:value") ?? attr(item, "w:displayText");
+    const displayText = attr(item, "w:displayText") ?? value;
+    if (value !== undefined && displayText !== undefined) items.push({ value, displayText });
+  }
+  return items;
 }
 
 function buildHyperlinkMark(hyperlink: OoxmlElement): DocxMark {

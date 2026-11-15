@@ -11,7 +11,7 @@
  * a fake. See `feedback_no_canvas_mocking.md` for the rationale.
  */
 
-import { vi } from "vitest";
+import { expect, vi } from "vitest";
 import { ExtensionManager, getSchema } from "./extensions/ExtensionManager";
 import { StarterKit } from "./extensions/StarterKit";
 import { TextMeasurer } from "./layout/TextMeasurer";
@@ -92,6 +92,17 @@ export function createTestEditor(options: Partial<EditorOptions> = {}): Editor {
  * Measure a string with the same backend the engine uses in tests. Use this
  * to drive `toBeCloseTo` assertions instead of hardcoding pixel constants.
  */
+/**
+ * Two layout positions that should meet — one row's bottom and the next row's
+ * top. Each is a sum of measured, fractional widths and heights, and the same
+ * sum taken in another order differs in its last bits: on Linux CI's fonts a
+ * row's `y + height` and the next row's `y` disagree by 1e-13. So they agree
+ * to a millionth of a pixel, never bit for bit.
+ */
+export function expectSamePosition(actual: number | undefined, expected: number): void {
+  expect(actual).toBeCloseTo(expected, 6);
+}
+
 export function measureTextWidth(text: string, font = DEFAULT_TEST_FONT): number {
   const ctx = createNapiCanvasContext();
   ctx.font = font;
@@ -216,6 +227,8 @@ export interface RendererTestSetupOptions {
   pageCount?: number;
   /** Extra extensions appended to StarterKit (e.g. chrome contributions). */
   extraExtensions?: Extension[];
+  /** How far below the top of the scroll parent's content the editor sits — its padding, a toolbar. */
+  offsetInScrollParent?: number;
 }
 
 export interface RendererTestSetup {
@@ -244,6 +257,12 @@ export function makeRendererTestSetup(
     scrollParent.style.overflowY = "scroll";
     Object.defineProperty(scrollParent, "clientHeight", { value: 800, configurable: true });
     Object.defineProperty(scrollParent, "scrollTop", { value: 0, configurable: true, writable: true });
+    // happy-dom does no layout: place the editor where a browser would, below
+    // the parent's own top by its offset and moved up by the scroll.
+    const parent = scrollParent;
+    const offset = opts.offsetInScrollParent ?? 0;
+    parent.getBoundingClientRect = () => new DOMRect(0, 0, 0, 800);
+    container.getBoundingClientRect = () => new DOMRect(0, offset - parent.scrollTop, 0, 0);
     scrollParent.appendChild(container);
     document.body.appendChild(scrollParent);
   } else {

@@ -476,8 +476,14 @@ describe("a first word that does not fit after its number (Word leaves the numbe
       for (const line of block.lines) {
         const beside = top < f.y + f.height && top + line.lineHeight > f.y;
         for (const span of line.spans) {
-          // Text keeps clear of the image's wrap margin, not just its pixels.
-          if (beside && span.kind === "text") expect(block.x + span.x + span.width).toBeLessThanOrEqual(f.x - ANCHORED_OBJECT_MARGIN + 0.5);
+          // Text keeps clear of the image's wrap margin, not just its pixels. Its
+          // trailing space may hang past the margin, as it does past the page's.
+          // Lines are broken on word widths summed, and the run is measured here
+          // whole: the two differ by a pixel or so of shaping, font by font. A
+          // first word that ran into the float would overshoot by all of itself.
+          if (beside && span.kind === "text") {
+            expect(block.x + span.x + measureTextWidth(span.text.trimEnd(), span.font)).toBeLessThanOrEqual(f.x - ANCHORED_OBJECT_MARGIN + 2);
+          }
         }
         top += line.lineHeight;
       }
