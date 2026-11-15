@@ -10,11 +10,13 @@ import {
   isDrawnKind,
   isFieldAnswered,
   isSigningKind,
+  signedAtOf,
   buildCompletionCertificate,
   listSignerFields,
   unansweredBeforeSigning,
   valuesOnRecord,
   verifySnapshot,
+  type CertificateRefusal,
   type CompletionEvent,
   type FieldValue,
   type SealedSnapshot,
@@ -68,12 +70,12 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
   });
   const [request, setRequest] = useState<FieldRequest | null>(null);
   const [verified, setVerified] = useState<boolean | null>(null);
-  // The executed PDF as issued: its bytes, and the values it printed — what a certificate describes.
-  const [executed, setExecuted] = useState<{ hash: string; url: string; pdf: Uint8Array; values: Record<string, FieldValue> } | null>(null);
+  // The executed PDF as issued — its bytes, the values it printed, and the room's record up to its completion: what a certificate describes.
+  const [executed, setExecuted] = useState<{ hash: string; url: string; pdf: Uint8Array; values: Record<string, FieldValue>; events: CompletionEvent[] } | null>(null);
   const [certificate, setCertificate] = useState<{ hash: string; url: string } | null>(null);
   // The room's own record of the signing, as a host keeps one: Scrivr prints it on the certificate as the room's word.
   const [events, setEvents] = useState<CompletionEvent[]>(() => {
-    const sent = new Date().toISOString();
+    const sent = signersTimestamp(new Date());
     return SIGNING_ROLES.map((party) => ({ at: sent, kind: "sent", party }));
   });
   const [exporting, setExporting] = useState(false);
@@ -106,7 +108,7 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
   // A party has viewed the document once it is opened as them.
   useEffect(() => {
     setEvents((all) =>
-      all.some((e) => e.kind === "viewed" && e.party === role) ? all : [...all, { at: new Date().toISOString(), kind: "viewed", party: role }],
+      all.some((e) => e.kind === "viewed" && e.party === role) ? all : [...all, { at: signersTimestamp(new Date()), kind: "viewed", party: role }],
     );
   }, [role]);
 
@@ -141,9 +143,9 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
               // The room stamps each value it records with when it was given; on a signature, that dates its party.
               const value = answer && recordedNow(answer);
               if (value) setValues((all) => ({ ...all, [field.id]: value }));
-              if (value && "signedAt" in value && value.signedAt && isSigningKind(BUILT_IN_FIELD_KINDS, field.kind)) {
-                const at = value.signedAt;
-                setEvents((all) => [...all, { at, kind: "signed", party: field.role }]);
+              const signedAt = signedAtOf(value ?? undefined);
+              if (signedAt !== null && isSigningKind(BUILT_IN_FIELD_KINDS, field.kind)) {
+                setEvents((all) => [...all, { at: signedAt, kind: "signed", party: field.role }]);
               }
               return value;
             }),
@@ -198,7 +200,7 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
     // printed in their fields, laid out with the setup the signers used.
     try {
       const result = await exportExecutedPdf(snapshot, values, {
-        editorOptions: { pageConfig: defaultPageConfig, fonts: playgroundFonts, extensions: [StarterKit.configure({ table: true }), Field.configure({ formatSignedDate: signedDateInWords })] },
+        editorOptions: { pageConfig: defaultPageConfig, fonts: playgroundFonts, extensions: signersSetup() },
       });
       if (!result.ok) {
         setProblem(
@@ -209,7 +211,9 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
         return;
       }
       const url = URL.createObjectURL(new Blob([new Uint8Array(result.pdf)], { type: "application/pdf" }));
-      setExecuted({ hash: result.artifactHash, url, pdf: result.pdf, values });
+      // Completed as it is executed; the certificate describes the record to here.
+      const completed: CompletionEvent = { at: signersTimestamp(new Date()), kind: "completed" };
+      setExecuted({ hash: result.artifactHash, url, pdf: result.pdf, values: result.values, events: [...events, completed] });
       setCertificate(null);
       const link = document.createElement("a");
       link.href = url;
@@ -231,18 +235,18 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
     try {
       const built = await buildCompletionCertificate({
         snapshot,
-        values: executed.values,
-        executed: executed.pdf,
-        extensions: [StarterKit.configure({ table: true }), Field.configure({ formatSignedDate: signedDateInWords })],
+        // Exactly what the executed PDF printed, in the setup it printed with.
+        executed: { pdf: executed.pdf, values: executed.values },
+        extensions: signersSetup(),
         record: {
           issuer: "the Scrivr playground",
           title: "Services Agreement",
           parties: SIGNING_ROLES.map((party) => ({ role: party, name: ROLE_LABEL[party] })),
-          events: [...events, { at: new Date().toISOString(), kind: "completed" }],
+          events: executed.events,
         },
       });
       if (!built.ok) {
-        setProblem(`No certificate: ${built.refusal.reason}.`);
+        setProblem(`No certificate: ${CERTIFICATE_REFUSAL[built.refusal.reason]}`);
         return;
       }
       const issued = await exportCompletionCertificate(built.certificate, { editorOptions: { pageConfig: defaultPageConfig, fonts: playgroundFonts } });
@@ -423,6 +427,23 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
     </div>
   );
 }
+
+/** The setup the signers saw and the executed PDF printed with — one list, so the certificate reads it the same way. */
+function signersSetup() {
+  return [StarterKit.configure({ table: true }), Field.configure({ formatSignedDate: signedDateInWords })];
+}
+
+/** Why the room could not issue a certificate, in words. */
+const CERTIFICATE_REFUSAL: Record<CertificateRefusal["reason"], string> = {
+  "snapshot-altered": "the sealed snapshot no longer matches its hash.",
+  "unanswered-fields": "a required field is still unanswered.",
+  "unknown-party": "the record names a party the room does not know.",
+  "missing-party": "a party who signed is missing from the record.",
+  "unzoned-time": "a time in the record names no zone.",
+  "undated-signature": "a signature carries no time.",
+  "signed-after-completed": "a signature is dated after completion.",
+  "events-out-of-order": "the record's events are out of order.",
+};
 
 /**
  * The day a signature names, in the room's own words — "November 14, 2026". Read from the

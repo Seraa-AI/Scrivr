@@ -19,7 +19,7 @@ import {
   type FieldValue,
   type TextMeasureContext,
 } from "@scrivr/core";
-import { bundleCertificate, exportCompletionCertificate, exportExecutedPdf } from "../index";
+import { bundleCertificate, exportCompletionCertificate, exportExecutedPdf, type CertificatePdfOptions } from "../index";
 import { recordDrawOps } from "./opLog";
 
 const measureContext = (ctx: { font: string; measureText: (text: string) => TextMetrics }): TextMeasureContext => ctx;
@@ -44,8 +44,8 @@ async function signing(): Promise<{ executed: Uint8Array; certificate: Completio
   if (!executed.ok) throw new Error(executed.refusal.reason);
   const built = await buildCompletionCertificate({
     snapshot: sealed.snapshot,
-    values,
-    executed: executed.pdf,
+    // Issued from exactly what the executed PDF printed.
+    executed,
     extensions: [StarterKit, Field],
     record: {
       issuer: "Acme Sign",
@@ -61,7 +61,7 @@ async function signing(): Promise<{ executed: Uint8Array; certificate: Completio
   return { executed: executed.pdf, certificate: built.certificate };
 }
 
-const printing = () => ({ editorOptions: { extensions: [StarterKit], textMeasurer: measurer() } });
+const printing = (): CertificatePdfOptions => ({ editorOptions: { extensions: [StarterKit], textMeasurer: measurer() } });
 
 describe("exportCompletionCertificate", () => {
   it("prints the certificate, with the hash of the bytes it returns", async () => {

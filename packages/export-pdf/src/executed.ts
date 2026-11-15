@@ -7,6 +7,7 @@ import {
   isFieldAnswered,
   listSignerFields,
   safeDrawingUrl,
+  snapshotDocument,
   replaceFieldValues,
   valuesOnRecordOf,
   verifySnapshot,
@@ -37,7 +38,11 @@ export type ExecutedPdfRefusal =
   | { reason: "unanswered-fields"; missing: SignerFieldDescriptor[] };
 
 export type ExecutedPdfResult =
-  | { ok: true; pdf: Uint8Array; artifactHash: string }
+  /**
+   * `values` are the ones printed: a drawing as embedded, none the PDF could
+   * not embed — what a certificate of completion is issued from.
+   */
+  | { ok: true; pdf: Uint8Array; artifactHash: string; values: Record<string, FieldValue> }
   | { ok: false; refusal: ExecutedPdfRefusal };
 
 /**
@@ -68,16 +73,20 @@ export async function exportExecutedPdf(
   if (!flattenExtensions(editorOptions.extensions ?? []).some((extension) => extension.name === Field.name)) {
     throw new Error("exportExecutedPdf needs Field among editorOptions.extensions: only Field reads a field or holds its value");
   }
-  const editor = new Editor({ ...editorOptions, content: documentJson(snapshot.content), sealed: true });
+  const editor = new Editor({ ...editorOptions, content: snapshotDocument(snapshot.content), sealed: true });
   try {
     // So the drawing checked is the drawing printed.
     const resolveImage = resolveOnce(pdfOptions.resolveImage ?? createDefaultImageResolver(pdfOptions.onImageRefused));
     const scratch = await PDFDocument.create();
     const printable: Record<string, FieldValue> = {};
     for (const [id, value] of Object.entries(values)) {
+      if (value.kind !== "image") {
+        printable[id] = value;
+        continue;
+      }
       // A drawing the PDF cannot embed is no value: the record would print it blank, and it dates no one.
-      if (value.kind === "image" && !(await embedsAsDrawing(scratch, resolveImage, value.src))) continue;
-      printable[id] = value;
+      const drawing = await embeddedDrawing(scratch, resolveImage, value.src);
+      if (drawing !== null) printable[id] = { ...value, src: drawing };
     }
     // One authoritative record, including an empty one: configured values
     // cannot fill omissions or stand in for drawings that could not embed.
@@ -89,21 +98,14 @@ export async function exportExecutedPdf(
     const missing = fields.filter((f) => f.required && !isFieldAnswered(f, onRecord[f.id], kinds));
     if (missing.length > 0) return { ok: false, refusal: { reason: "unanswered-fields", missing } };
     const pdf = await exportToPdf(editor, { ...pdfOptions, resolveImage });
-    return { ok: true, pdf, artifactHash: await hashArtifact(pdf) };
+    return { ok: true, pdf, artifactHash: await hashArtifact(pdf), values: printable };
   } finally {
     editor.destroy();
   }
 }
 
-/** Whether a drawing embeds as this PDF will embed it: through `safeDrawingUrl`, then the PDF's own embedding. */
-async function embedsAsDrawing(scratch: PDFDocument, resolveImage: ImageResolver, src: string): Promise<boolean> {
+/** A drawing as this PDF embeds it — through `safeDrawingUrl`, then the PDF's own embedding — or `null` when it cannot. */
+async function embeddedDrawing(scratch: PDFDocument, resolveImage: ImageResolver, src: string): Promise<string | null> {
   const drawing = safeDrawingUrl(src);
-  return drawing !== null && (await embedImage(scratch, resolveImage, drawing)) !== null;
-}
-
-/** The snapshot's document object: copied, not cast — content is untrusted until parsed. */
-function documentJson(content: string): Record<string, unknown> {
-  const parsed: unknown = JSON.parse(content);
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new Error("A snapshot's content is a document object");
-  return Object.fromEntries(Object.entries(parsed));
+  return drawing !== null && (await embedImage(scratch, resolveImage, drawing)) !== null ? drawing : null;
 }

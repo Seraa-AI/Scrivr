@@ -9,8 +9,9 @@ export interface CertificatePdfOptions extends PdfExportOptions {
 
 /**
  * A certificate of completion as its own PDF, and `certificateHash`, the
- * hash of exactly the bytes returned. Printed by the same exporter as the
- * executed record, so the two share their fonts and page setup.
+ * hash of exactly the bytes returned. Printed by the exporter that printed
+ * the executed record: pass that record's `editorOptions` and the two share
+ * their fonts and page setup.
  */
 export async function exportCompletionCertificate(
   certificate: CompletionCertificate,

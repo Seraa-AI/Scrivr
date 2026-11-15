@@ -73,6 +73,21 @@ async function printed(snapshot: SealedSnapshot, values: Values, printing: Execu
 const textsOf = (ops: DrawOp[]): unknown[] => ops.filter((op) => op.op === "text").map((op) => op["value"]);
 
 describe("exportExecutedPdf", () => {
+  it("returns the values it printed: a drawing as it embedded it, and none it could not embed", async () => {
+    const drawing = samplePng();
+    const snapshot = await sealedOf([
+      paragraph(signer("sig", "signature")),
+      paragraph(signer("initials", "initials", false)),
+    ]);
+    const { result } = await printed(snapshot, {
+      sig: { kind: "image", src: `  ${drawing}\n`, signedAt: "2026-11-15T09:00:00Z" },
+      initials: { kind: "image", src: brokenPng },
+    });
+
+    if (!result.ok) throw new Error("refused");
+    expect(result.values).toEqual({ sig: { kind: "image", src: drawing, signedAt: "2026-11-15T09:00:00Z" } });
+  });
+
   it("prints every party's values into the sealed document, with the hash of the bytes it returns", async () => {
     const { result, ops } = await printed(await sealed(), signed);
 

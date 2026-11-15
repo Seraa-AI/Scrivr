@@ -9,7 +9,21 @@ import { Field } from "../extensions/built-in/Field";
 import { BUILT_IN_FIELD_KINDS, type FieldValue } from "../extensions/built-in/fieldKinds";
 import { createSnapshot, hashArtifact } from "./snapshot";
 // Through the package barrel: what a host imports.
-import { buildCompletionCertificate, type CertificateInput, type CompletionEvent, type CompletionRecord } from "../index";
+import {
+  DEFAULT_CERTIFICATE_LABELS,
+  buildCompletionCertificate,
+  type CertificateInput,
+  type CertificateLabels,
+  type CertificateRefusal,
+  type CertificateResult,
+  type CompletionCertificate,
+  type CompletionEvent,
+  type CompletionParty,
+  type CompletionRecord,
+  type StandardEventKind,
+  type VerifiedFacts,
+  type VerifiedSignature,
+} from "../index";
 
 const field = (id: string, role: string, kind: string, required = true) => ({
   type: "field",
@@ -29,7 +43,7 @@ const contract = new ServerEditor({
 }).getState().doc;
 
 const drawing = "data:image/png;base64,iVBORw0KGgo=";
-const executed = new TextEncoder().encode("%PDF-1.7 the executed record");
+const executedPdf = new TextEncoder().encode("%PDF-1.7 the executed record");
 
 const signed: Record<string, FieldValue> = {
   "client-sig": { kind: "image", src: drawing, signedAt: "2026-11-15T01:30:00+03:00" },
@@ -46,6 +60,7 @@ const record = (overrides: Partial<CompletionRecord> = {}): CompletionRecord => 
   ],
   events: [
     { at: "2026-11-14T20:00:00Z", kind: "sent", party: "client" },
+    { at: "2026-11-14T20:00:00Z", kind: "sent", party: "vendor" },
     { at: "2026-11-14T21:00:00Z", kind: "custom", label: "Identity verified", party: "client" },
     { at: "2026-11-15T01:29:00+03:00", kind: "signed", party: "client" },
     { at: "2026-11-15T09:00:00Z", kind: "signed", party: "vendor" },
@@ -54,10 +69,13 @@ const record = (overrides: Partial<CompletionRecord> = {}): CompletionRecord => 
   ...overrides,
 });
 
+/** The executed PDF as `exportExecutedPdf` returns it: its bytes, and the values it printed. */
+const printed = (values: Record<string, FieldValue>) => ({ pdf: executedPdf, values });
+
 async function input(overrides: Partial<CertificateInput> = {}): Promise<CertificateInput> {
   const sealed = await createSnapshot(contract, { kinds: BUILT_IN_FIELD_KINDS, assignedRoles: ["client", "vendor"] });
   if (!sealed.ok) throw new Error(`refused: ${sealed.refusal.reason}`);
-  return { snapshot: sealed.snapshot, values: signed, executed, record: record(), extensions: [StarterKit, Field], ...overrides };
+  return { snapshot: sealed.snapshot, executed: printed(signed), record: record(), extensions: [StarterKit, Field], ...overrides };
 }
 
 async function issued(overrides: Partial<CertificateInput> = {}) {
@@ -87,10 +105,10 @@ describe("buildCompletionCertificate", () => {
     const { snapshot } = await input();
 
     expect(certificate.verified.contentHash).toBe(snapshot.contentHash);
-    expect(certificate.verified.artifactHash).toBe(await hashArtifact(executed));
+    expect(certificate.verified.artifactHash).toBe(await hashArtifact(executedPdf));
     const verified = section(linesOf(certificate.content), "Verified at issue", "Signing record — as recorded by Acme Sign");
     expect(verified.join("\n")).toContain(snapshot.contentHash);
-    expect(verified.join("\n")).toContain(await hashArtifact(executed));
+    expect(verified.join("\n")).toContain(await hashArtifact(executedPdf));
   });
 
   it("lists each signature from the values the record printed, with when it was given", async () => {
@@ -143,11 +161,30 @@ describe("buildCompletionCertificate", () => {
 
     expect(events).toEqual([
       "2026-11-14 20:00:00 UTC — Sent — Ada Lovelace",
+      "2026-11-14 20:00:00 UTC — Sent — Grace Hopper",
       "2026-11-14 21:00:00 UTC — Identity verified — Ada Lovelace",
       "2026-11-14 22:29:00 UTC — Signed — Ada Lovelace",
       "2026-11-15 09:00:00 UTC — Signed — Grace Hopper",
       "2026-11-15 09:00:05 UTC — Completed",
     ]);
+  });
+
+  it("takes a record as signing tools keep one: a party viewing again after signing, a copy viewed after completion", async () => {
+    const events: CompletionEvent[] = [
+      ...record().events,
+      { at: "2026-11-15T08:00:00Z", kind: "viewed", party: "client" },
+      { at: "2026-11-16T10:00:00Z", kind: "viewed", party: "vendor" },
+    ];
+    expect((await issued({ record: record({ events }) })).verified.signatures).toHaveLength(2);
+  });
+
+  it("lists a party with no fields of their own — a copy sent to someone who does not sign", async () => {
+    const parties: CompletionParty[] = [...record().parties, { role: "cc", name: "Legal team", email: "legal@example.com" }];
+    const events: CompletionEvent[] = [{ at: "2026-11-14T20:00:00Z", kind: "sent", party: "cc" }, ...record().events];
+    const lines = linesOf((await issued({ record: record({ parties, events }) })).content);
+
+    expect(lines).toContain("Legal team");
+    expect(lines).toContain("2026-11-14 20:00:00 UTC — Sent — Legal team");
   });
 
   it("speaks the host's language when given its labels", async () => {
@@ -170,14 +207,16 @@ describe("buildCompletionCertificate refuses", () => {
   });
 
   it("a signing that is not complete", async () => {
-    const result = await refusal({ values: { "client-sig": signed["client-sig"]! } });
+    const client = signed["client-sig"];
+    if (!client) throw new Error("no client signature");
+    const result = await refusal({ executed: printed({ "client-sig": client }) });
     expect(result?.reason).toBe("unanswered-fields");
     expect(result?.reason === "unanswered-fields" && result.missing.map((f) => f.id)).toEqual(["vendor-sig"]);
   });
 
-  it("a party whose role carries no field", async () => {
-    const parties = [...record().parties, { role: "notary", name: "Someone" }];
-    expect(await refusal({ record: record({ parties }) })).toEqual({ reason: "unknown-party", role: "notary" });
+  it("an event naming a role no party plays", async () => {
+    const events: CompletionEvent[] = [...record().events.slice(0, -1), { at: "2026-11-15T09:00:01Z", kind: "viewed", party: "notary" }, ...record().events.slice(-1)];
+    expect(await refusal({ record: record({ events }) })).toEqual({ reason: "unknown-party", role: "notary" });
   });
 
   it("a role with fields and no party", async () => {
@@ -190,22 +229,55 @@ describe("buildCompletionCertificate refuses", () => {
     expect(await refusal({ record: record({ events }) })).toEqual({ reason: "unzoned-time", at: "2026-11-14T20:00:00" });
   });
 
+  it("a signature dated with a day and no time — the certificate would invent the instant", async () => {
+    const vendor: FieldValue = { kind: "text", text: "Grace Hopper", signedAt: "2026-11-15" };
+    expect(await refusal({ executed: printed({ ...signed, "vendor-sig": vendor }) })).toEqual({ reason: "unzoned-time", at: "2026-11-15" });
+  });
+
   it("a signature with no time given", async () => {
     const vendor: FieldValue = { kind: "text", text: "Grace Hopper" };
     const values = { ...signed, "vendor-sig": vendor };
-    expect(await refusal({ values })).toEqual({ reason: "undated-signature", fieldId: "vendor-sig" });
+    expect(await refusal({ executed: printed(values) })).toEqual({ reason: "undated-signature", fieldId: "vendor-sig" });
   });
 
   it("a signature given after the signing was completed", async () => {
     const vendor: FieldValue = { kind: "text", text: "Grace Hopper", signedAt: "2026-11-15T10:00:00Z" };
     const values = { ...signed, "vendor-sig": vendor };
-    expect(await refusal({ values })).toEqual({ reason: "signed-after-completed", fieldId: "vendor-sig" });
+    expect(await refusal({ executed: printed(values) })).toEqual({ reason: "signed-after-completed", fieldId: "vendor-sig" });
   });
 
-  it("a party signing before they were sent the document, or an event after completion", async () => {
-    const early: CompletionEvent[] = [{ at: "2026-11-14T19:00:00Z", kind: "signed", party: "client" }, ...record().events];
-    expect((await refusal({ record: record({ events: early }) }))?.reason).toBe("events-out-of-order");
-    const late: CompletionEvent[] = [...record().events, { at: "2026-11-16T00:00:00Z", kind: "viewed", party: "vendor" }];
-    expect((await refusal({ record: record({ events: late }) }))?.reason).toBe("events-out-of-order");
+  it("a party whose first sight of the document comes after they signed it", async () => {
+    // The record says the client first saw it hours after the signature Scrivr checked.
+    const events: CompletionEvent[] = [
+      { at: "2026-11-15T08:00:00Z", kind: "sent", party: "client" },
+      { at: "2026-11-15T09:00:00Z", kind: "signed", party: "vendor" },
+      { at: "2026-11-15T09:00:05Z", kind: "completed" },
+    ];
+    expect(await refusal({ record: record({ events }) })).toEqual({ reason: "events-out-of-order", event: events[0] });
+  });
+
+  it("a signing recorded after completion", async () => {
+    const events: CompletionEvent[] = [...record().events, { at: "2026-11-16T00:00:00Z", kind: "signed", party: "vendor" }];
+    expect(await refusal({ record: record({ events }) })).toEqual({ reason: "events-out-of-order", event: events.at(-1) });
+  });
+});
+
+describe("the certificate's contract", () => {
+  it("keeps its default labels as they are: a host overrides them per certificate, never for everyone", () => {
+    expect(Object.isFrozen(DEFAULT_CERTIFICATE_LABELS)).toBe(true);
+    expect(Object.isFrozen(DEFAULT_CERTIFICATE_LABELS.eventKinds)).toBe(true);
+  });
+
+  it("names every shape a host handles, through the package", async () => {
+    const result: CertificateResult = await buildCompletionCertificate(await input());
+    if (!result.ok) throw new Error("refused");
+    const certificate: CompletionCertificate = result.certificate;
+    const verified: VerifiedFacts = certificate.verified;
+    const signature: VerifiedSignature | undefined = verified.signatures[0];
+    const kind: StandardEventKind = "sent";
+    const labels: CertificateLabels = DEFAULT_CERTIFICATE_LABELS;
+    const refusal: CertificateRefusal = { reason: "snapshot-altered" };
+
+    expect([signature?.role, labels.eventKinds[kind], refusal.reason]).toEqual(["client", "Sent", "snapshot-altered"]);
   });
 });

@@ -10,10 +10,10 @@ import {
   valuesOnRecordOf,
   type SignerFieldDescriptor,
 } from "../extensions/built-in/Field";
-import { isSigningKind, parseSignedAt, signedAtOf, type FieldKinds, type FieldValue } from "../extensions/built-in/fieldKinds";
-import { hashArtifact, verifySnapshot, type SealedSnapshot } from "./snapshot";
+import { isSigningKind, parseSignedAt, type FieldKinds, type FieldKindSpec, type FieldValue } from "../extensions/built-in/fieldKinds";
+import { hashArtifact, snapshotDocument, verifySnapshot, type SealedSnapshot } from "./snapshot";
 
-/** The steps every signing has, which a certificate orders and labels itself. */
+/** The steps a certificate labels itself; whether a party saw the document before signing, and when it completed, are checked. */
 export type StandardEventKind = "sent" | "viewed" | "consented" | "signed" | "declined" | "completed";
 
 /** One line of the host's record: when, what, and whose. A `custom` step is the host's own, shown by its label. */
@@ -21,9 +21,13 @@ export type CompletionEvent =
   | { at: string; kind: StandardEventKind; party?: string }
   | { at: string; kind: "custom"; label: string; party?: string };
 
-/** A party as the host identified them. Only `role` and `name` are needed; nothing absent is printed. */
+/**
+ * A party as the host identified them. Only `role` and `name` are needed;
+ * nothing absent is printed. A party whose role carries no field — someone
+ * sent a copy — is listed like any other.
+ */
 export interface CompletionParty {
-  /** The role the party completed fields for, as the snapshot's fields name it. */
+  /** The role the party completed fields for, as the snapshot's fields name it, or one of the host's own. */
   role: string;
   name: string;
   email?: string;
@@ -60,13 +64,15 @@ export interface CertificateLabels {
   ip: string;
   userAgent: string;
   events: string;
-  eventKinds: Record<StandardEventKind, string>;
+  eventKinds: Readonly<Record<StandardEventKind, string>>;
 }
 
-export const DEFAULT_CERTIFICATE_LABELS: CertificateLabels = {
+/** The English labels a certificate uses unless given others — a base to spread for a full translation. */
+export const DEFAULT_CERTIFICATE_LABELS: Readonly<CertificateLabels> = Object.freeze({
   title: "Certificate of completion",
   verified: "Verified at issue",
-  verifiedNote: "Each line in this section was checked against the document when this certificate was issued.",
+  verifiedNote:
+    "Checked when this certificate was issued: the agreed content against its hash, and each signature as the executed document printed it — the document with the hash below.",
   contentHash: "Agreed content (SHA-256)",
   artifactHash: "Executed document (SHA-256)",
   signed: "Signed",
@@ -79,19 +85,24 @@ export const DEFAULT_CERTIFICATE_LABELS: CertificateLabels = {
   ip: "IP address",
   userAgent: "User agent",
   events: "Events",
-  eventKinds: { sent: "Sent", viewed: "Viewed", consented: "Consented", signed: "Signed", declined: "Declined", completed: "Completed" },
-};
+  eventKinds: Object.freeze({ sent: "Sent", viewed: "Viewed", consented: "Consented", signed: "Signed", declined: "Declined", completed: "Completed" }),
+});
 
+/** What a certificate is issued from. */
 export interface CertificateInput {
   /** The sealed snapshot the signing was over; its fields are read from its verified content. */
   snapshot: Pick<SealedSnapshot, "content" | "contentHash">;
-  /** The values the executed PDF printed. */
-  values: Readonly<Record<string, FieldValue>>;
-  /** The executed PDF's bytes — hashed here, so the certificate names the file it was given. */
-  executed: Uint8Array;
+  /**
+   * The executed PDF as `exportExecutedPdf` returned it: its bytes, hashed
+   * here, and the values it printed. Taken together, so the signatures a
+   * certificate shows are the ones that document holds.
+   */
+  executed: { pdf: Uint8Array; values: Readonly<Record<string, FieldValue>> };
+  /** The host's record, printed under its issuer's name. */
   record: CompletionRecord;
-  /** The setup the signers saw: `Field` with the same kinds and date format, as `exportExecutedPdf` was given. */
+  /** The setup the executed PDF was printed with: `Field` with the same kinds and date format. */
   extensions: Extension[];
+  /** Labels to use instead of the English defaults; any left out stay English. */
   labels?: Partial<Omit<CertificateLabels, "eventKinds">> & { eventKinds?: Partial<Record<StandardEventKind, string>> };
 }
 
@@ -114,51 +125,54 @@ export interface VerifiedFacts {
 /** Why no certificate was issued. */
 export type CertificateRefusal =
   | { reason: "snapshot-altered" }
-  /** Not complete: required fields the executed record would print blank. */
+  /** Not complete: required fields the executed record printed blank. */
   | { reason: "unanswered-fields"; missing: SignerFieldDescriptor[] }
-  /** A party or an event names a role no field carries. */
+  /** An event names a role no party in the record plays. */
   | { reason: "unknown-party"; role: string }
-  /** A role with fields has no party in the record. */
+  /** A role that answered or must answer a field has no party in the record. */
   | { reason: "missing-party"; role: string }
-  /** A time that is not an instant with a zone — read elsewhere, it would name another moment. */
+  /** A time that is not an instant with a zone — a bare day included: the certificate would have to invent the moment. */
   | { reason: "unzoned-time"; at: string }
   /** A signature with no `signedAt`: the certificate could not say when it was given. */
   | { reason: "undated-signature"; fieldId: string }
   | { reason: "signed-after-completed"; fieldId: string }
-  /** A party's signing before they were sent or viewed it, or anything after completion. */
+  /** A party first sent, viewing or consenting only after it signed, or a signing recorded after completion. */
   | { reason: "events-out-of-order"; event: CompletionEvent };
 
-/** A certificate as a Scrivr document, ready to show or print, with what it checked. */
+/** A certificate, ready to show in a viewer or print with `exportCompletionCertificate`. */
 export interface CompletionCertificate {
+  /** The certificate as a document's JSON, built from StarterKit's nodes. */
   content: Record<string, unknown>;
   verified: VerifiedFacts;
 }
 
+/** A certificate, or why none was issued — an answer the host shows someone, not an exception. */
 export type CertificateResult = { ok: true; certificate: CompletionCertificate } | { ok: false; refusal: CertificateRefusal };
 
 /**
  * A certificate of completion for a signing, as a document. Its first section
  * holds only what was checked in this call — the snapshot against its hash,
- * the executed PDF's bytes hashed, every signature answered with its time —
+ * the executed PDF's bytes hashed, every signature it printed with its time —
  * and the host's record follows under the issuer's name, printed as given.
  *
  * Reads the fields and the values on record as `exportExecutedPdf` does: from
- * the verified content, in an editor with the signers' extensions, so what is
- * checked complete is what printed. Refuses rather than certify an altered
- * snapshot, an incomplete signing, or a record that disagrees with the
- * document or with time. Throws when `Field` is not among `extensions`.
+ * the verified content, in an editor with the signers' extensions, holding
+ * the values that PDF printed — so what is checked complete is what printed.
+ * Refuses rather than certify an altered snapshot, an incomplete signing, or
+ * a record that disagrees with the document or with time. Throws when
+ * `Field` is not among `extensions`.
  */
 export async function buildCompletionCertificate(input: CertificateInput): Promise<CertificateResult> {
-  const { snapshot, record } = input;
+  const { snapshot, executed, record } = input;
   if (!(await verifySnapshot(snapshot.content, snapshot.contentHash))) return refuse({ reason: "snapshot-altered" });
   // Matched by name, as the extension manager identifies extensions.
   if (!flattenExtensions(input.extensions).some((extension) => extension.name === Field.name)) {
     throw new Error("buildCompletionCertificate needs Field among extensions: only Field reads a field or holds its value");
   }
 
-  const editor = new ServerEditor({ extensions: input.extensions, content: documentJson(snapshot.content), sealed: true });
+  const editor = new ServerEditor({ extensions: input.extensions, content: snapshotDocument(snapshot.content), sealed: true });
   try {
-    if (!replaceFieldValues(editor, { ...input.values })) throw new Error("buildCompletionCertificate could not hold the field values: a plugin refused them");
+    if (!replaceFieldValues(editor, executed.values)) throw new Error("buildCompletionCertificate could not hold the field values: a plugin refused them");
     const kinds = fieldKindsOf(editor);
     const fields = listSignerFields(editor.getState().doc);
     const onRecord = valuesOnRecordOf(editor);
@@ -166,50 +180,41 @@ export async function buildCompletionCertificate(input: CertificateInput): Promi
     const missing = fields.filter((f) => f.required && !isFieldAnswered(f, onRecord[f.id], kinds));
     if (missing.length > 0) return refuse({ reason: "unanswered-fields", missing });
 
-    const partyRefusal = checkParties(fields, onRecord, kinds, record);
-    if (partyRefusal) return refuse(partyRefusal);
-
-    const signatures: VerifiedSignature[] = [];
+    const signatures: Signature[] = [];
     for (const f of fields) {
       const value = onRecord[f.id];
-      if (!isSigningKind(kinds, f.kind) || !isFieldAnswered(f, value, kinds)) continue;
-      const given = value && "signedAt" in value ? value.signedAt : undefined;
-      if (given === undefined) return refuse({ reason: "undated-signature", fieldId: f.id });
-      const signedAt = signedAtOf(value);
-      const at = signedAt === null ? null : parseSignedAt(signedAt);
-      if (signedAt === null || at === null) return refuse({ reason: "unzoned-time", at: given });
-      signatures.push({ fieldId: f.id, role: f.role, kind: f.kind, signedAt, utc: isoUtc(at) });
+      const spec = kinds[f.kind];
+      if (!spec || !isSigningKind(kinds, f.kind) || !isFieldAnswered(f, value, kinds)) continue;
+      if (value?.kind !== "text" && value?.kind !== "image") continue;
+      if (value.signedAt === undefined) return refuse({ reason: "undated-signature", fieldId: f.id });
+      const at = instantOf(value.signedAt);
+      if (at === null) return refuse({ reason: "unzoned-time", at: value.signedAt });
+      signatures.push({ field: f, spec, value, signedAt: value.signedAt, at });
     }
 
     const timeline = timelineOf(record.events);
-    if (!Array.isArray(timeline)) return refuse(timeline);
-    const orderRefusal = checkOrder(timeline, signatures);
-    if (orderRefusal) return refuse(orderRefusal);
+    if ("reason" in timeline) return refuse(timeline);
+    const recordRefusal = checkParties(fields, onRecord, kinds, record) ?? checkOrder(timeline, signatures);
+    if (recordRefusal) return refuse(recordRefusal);
 
-    const verified: VerifiedFacts = { contentHash: snapshot.contentHash, artifactHash: await hashArtifact(input.executed), signatures };
-    const labels = labelsOf(input.labels);
-    return { ok: true, certificate: { content: certificateDocument(verified, onRecord, kinds, record, timeline, labels), verified } };
+    const verified: VerifiedFacts = {
+      contentHash: snapshot.contentHash,
+      artifactHash: await hashArtifact(executed.pdf),
+      signatures: signatures.map(({ field, signedAt, at }) => ({ fieldId: field.id, role: field.role, kind: field.kind, signedAt, utc: isoUtc(at) })),
+    };
+    return { ok: true, certificate: { content: certificateDocument(verified, signatures, record, timeline, labelsOf(input.labels)), verified } };
   } finally {
     editor.destroy();
   }
 }
 
-const refuse = (refusal: CertificateRefusal): CertificateResult => ({ ok: false, refusal });
-
-/** Every party names a role the document carries, and every role that signed or must sign has a party. */
-function checkParties(
-  fields: readonly SignerFieldDescriptor[],
-  onRecord: Readonly<Record<string, FieldValue>>,
-  kinds: FieldKinds,
-  record: CompletionRecord,
-): CertificateRefusal | null {
-  const roles = new Set(fields.map((f) => f.role));
-  const named = [...record.parties.map((p) => p.role), ...record.events.flatMap((e) => (e.party === undefined ? [] : [e.party]))];
-  const unknown = named.find((role) => !roles.has(role));
-  if (unknown !== undefined) return { reason: "unknown-party", role: unknown };
-  const parties = new Set(record.parties.map((p) => p.role));
-  const unrepresented = fields.find((f) => (f.required || isFieldAnswered(f, onRecord[f.id], kinds)) && !parties.has(f.role));
-  return unrepresented ? { reason: "missing-party", role: unrepresented.role } : null;
+/** A signature found answered on record, its kind and its instant read once. */
+interface Signature {
+  field: SignerFieldDescriptor;
+  spec: FieldKindSpec;
+  value: Extract<FieldValue, { kind: "text" | "image" }>;
+  signedAt: string;
+  at: number;
 }
 
 interface TimedEvent {
@@ -217,33 +222,70 @@ interface TimedEvent {
   at: number;
 }
 
-/** The events by time, or the first whose time is not an instant with a zone — a bare day is not one. */
+const refuse = (refusal: CertificateRefusal): CertificateResult => ({ ok: false, refusal });
+
+/**
+ * The instant a time names, or `null` unless it is a full timestamp with a
+ * zone. A bare day is refused too: printing it, or ordering by it, would
+ * stand an invented midnight in for the moment.
+ */
+const instantOf = (at: string): number | null => (at.includes("T") ? parseSignedAt(at) : null);
+
+/** The events by time — ties in the host's order — or the first whose time is not an instant. */
 function timelineOf(events: readonly CompletionEvent[]): TimedEvent[] | CertificateRefusal {
   const timed: TimedEvent[] = [];
   for (const event of events) {
-    const at = event.at.includes("T") ? parseSignedAt(event.at) : null;
+    const at = instantOf(event.at);
     if (at === null) return { reason: "unzoned-time", at: event.at };
     timed.push({ event, at });
   }
   return timed.sort((a, b) => a.at - b.at);
 }
 
-/** A party signs only after it was sent, viewed or consented to; nothing — no signature either — follows completion. */
-function checkOrder(timeline: readonly TimedEvent[], signatures: readonly VerifiedSignature[]): CertificateRefusal | null {
-  const firstSigned = new Map<string, number>();
-  for (const { event, at } of timeline) {
-    if (event.kind === "signed" && event.party !== undefined && !firstSigned.has(event.party)) firstSigned.set(event.party, at);
+/** Every event names a party in the record, and every role that answered or must answer a field has one. */
+function checkParties(
+  fields: readonly SignerFieldDescriptor[],
+  onRecord: Readonly<Record<string, FieldValue>>,
+  kinds: FieldKinds,
+  record: CompletionRecord,
+): CertificateRefusal | null {
+  const parties = new Set(record.parties.map((p) => p.role));
+  const unrepresented = fields.find((f) => (f.required || isFieldAnswered(f, onRecord[f.id], kinds)) && !parties.has(f.role));
+  if (unrepresented) return { reason: "missing-party", role: unrepresented.role };
+  const unknown = record.events.find((e) => e.party !== undefined && !parties.has(e.party));
+  return unknown?.party !== undefined ? { reason: "unknown-party", role: unknown.party } : null;
+}
+
+/** The events by which a party first comes to the document: one of them, when recorded, comes before its first signing. */
+const COMES_TO_THE_DOCUMENT: ReadonlySet<StandardEventKind | "custom"> = new Set(["sent", "viewed", "consented"]);
+
+/**
+ * A party comes to the document before it signs — its first signing being
+ * the earlier of its checked signatures and the host's `signed` events — and
+ * nothing is signed after completion. Views after signing, or after
+ * completion, are what signing tools record, and pass.
+ */
+function checkOrder(timeline: readonly TimedEvent[], signatures: readonly Signature[]): CertificateRefusal | null {
+  const firstSigning = new Map<string, number>();
+  const signedAt = (party: string, at: number) => firstSigning.set(party, Math.min(at, firstSigning.get(party) ?? Infinity));
+  for (const { field, at } of signatures) signedAt(field.role, at);
+  for (const { event, at } of timeline) if (event.kind === "signed" && event.party !== undefined) signedAt(event.party, at);
+
+  const firstCame = new Map<string, TimedEvent>();
+  for (const timed of timeline) {
+    const { party, kind } = timed.event;
+    if (party !== undefined && COMES_TO_THE_DOCUMENT.has(kind) && !firstCame.has(party)) firstCame.set(party, timed);
   }
-  const before = ["sent", "viewed", "consented"];
-  const early = timeline.find(({ event, at }) => before.includes(event.kind) && event.party !== undefined && at > (firstSigned.get(event.party) ?? Infinity));
-  if (early) return { reason: "events-out-of-order", event: early.event };
+  for (const [party, came] of firstCame) {
+    if (came.at > (firstSigning.get(party) ?? Infinity)) return { reason: "events-out-of-order", event: came.event };
+  }
 
   const completed = timeline.find(({ event }) => event.kind === "completed");
   if (!completed) return null;
-  const after = timeline.find(({ at }) => at > completed.at);
-  if (after) return { reason: "events-out-of-order", event: after.event };
-  const late = signatures.find((s) => (parseSignedAt(s.signedAt) ?? -Infinity) > completed.at);
-  return late ? { reason: "signed-after-completed", fieldId: late.fieldId } : null;
+  const late = signatures.find(({ at }) => at > completed.at);
+  if (late) return { reason: "signed-after-completed", fieldId: late.field.id };
+  const signedLate = timeline.find(({ event, at }) => event.kind === "signed" && at > completed.at);
+  return signedLate ? { reason: "events-out-of-order", event: signedLate.event } : null;
 }
 
 function labelsOf(overrides: CertificateInput["labels"]): CertificateLabels {
@@ -257,11 +299,10 @@ const isoUtc = (at: number): string => new Date(at).toISOString().replace(/\.\d{
 /** An instant as a reader reads it in UTC: `2026-11-14 22:30:00 UTC`. */
 const readableUtc = (at: number): string => `${isoUtc(at).replace("T", " ").replace("Z", "")} UTC`;
 
-/** A `signedAt` as its signer gave it, in their own offset: `2026-11-15 01:30:00 (UTC+03:00)`; a bare day as itself. */
+/** A full `signedAt` as its signer gave it, in their own offset: `2026-11-15 01:30:00 (UTC+03:00)`. */
 function asSigned(signedAt: string): string {
-  const [day, time] = signedAt.split("T");
-  if (time === undefined) return signedAt;
-  const zone = /(Z|[+-]\d{2}:\d{2})$/.exec(time)?.[0] ?? "Z";
+  const [day = "", time = ""] = signedAt.split("T");
+  const zone = /(Z|[+-]\d{2}:\d{2})$/.exec(time)?.[0] ?? "";
   return `${day} ${time.slice(0, time.length - zone.length)} (UTC${zone === "Z" ? "+00:00" : zone})`;
 }
 
@@ -276,28 +317,21 @@ const line = (label: string, value: string): Json => paragraph(text(`${label}: `
 
 function certificateDocument(
   verified: VerifiedFacts,
-  onRecord: Readonly<Record<string, FieldValue>>,
-  kinds: FieldKinds,
+  signatures: readonly Signature[],
   record: CompletionRecord,
   timeline: readonly TimedEvent[],
   labels: CertificateLabels,
 ): Json {
   const nameOf = (role: string): string => record.parties.find((p) => p.role === role)?.name ?? role;
 
-  const signatureBlocks = verified.signatures.flatMap((signature) => {
-    const value = onRecord[signature.fieldId];
-    const kind = kinds[signature.kind];
-    const shown =
-      value?.kind === "image"
-        ? paragraph({ type: "image", attrs: { src: value.src, width: kind?.size.width ?? 180, height: kind?.size.height ?? 44 } })
-        : paragraph(text(value?.kind === "text" ? value.text : ""));
-    const at = parseSignedAt(signature.signedAt) ?? 0;
-    return [
-      heading(3, `${kind?.label ?? signature.kind} — ${signature.role}`),
-      shown,
-      line(labels.signed, `${asSigned(signature.signedAt)} · ${readableUtc(at)}`),
-    ];
-  });
+  // Headed by kind and role, never a person: a name is the host's word, kept to the record.
+  const signatureBlocks = signatures.flatMap(({ field, spec, value, signedAt, at }) => [
+    heading(3, `${spec.label} — ${field.role}`),
+    value.kind === "image"
+      ? paragraph({ type: "image", attrs: { src: value.src, width: spec.size.width, height: spec.size.height } })
+      : paragraph(text(value.text)),
+    line(labels.signed, `${asSigned(signedAt)} · ${readableUtc(at)}`),
+  ]);
 
   const partyBlocks = record.parties.flatMap((party) => [
     heading(3, party.name),
@@ -333,11 +367,4 @@ function certificateDocument(
       ...eventLines,
     ],
   };
-}
-
-/** The snapshot's document object: copied, not cast — content is untrusted until parsed. */
-function documentJson(content: string): Record<string, unknown> {
-  const parsed: unknown = JSON.parse(content);
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new Error("A snapshot's content is a document object");
-  return Object.fromEntries(Object.entries(parsed));
 }

@@ -182,17 +182,20 @@ The whole flow, end to end: block writes → check every part of the document �
 
 ## The certificate of completion
 
-Every signing tool ends with a certificate beside the signed document — DocuSign's Certificate of Completion, Adobe Sign's Audit Report. Scrivr issues one from the signing's own chain, and keeps apart what it checked from what your record says:
+Signing tools end with a certificate beside the signed document — DocuSign's Certificate of Completion, Adobe Sign's Audit Report. Scrivr issues one from the signing's own chain, and keeps apart what it checked from what your record says:
 
 ```ts
-import { buildCompletionCertificate } from "@scrivr/core";
-import { exportCompletionCertificate, bundleCertificate } from "@scrivr/export-pdf";
+import { Field, StarterKit, buildCompletionCertificate } from "@scrivr/core";
+import { bundleCertificate, exportCompletionCertificate, exportExecutedPdf } from "@scrivr/export-pdf";
+
+const extensions = [StarterKit, Field];
+const executed = await exportExecutedPdf(snapshot, values, { editorOptions: { extensions, fonts } });
+if (!executed.ok) throw new Error(executed.refusal.reason);
 
 const built = await buildCompletionCertificate({
-  snapshot,                        // the sealed snapshot
-  values,                          // the values the executed PDF printed — not the latest
-  executed: executedPdf,           // the executed PDF's bytes
-  extensions: [StarterKit, Field], // as the executed PDF was printed with
+  snapshot,   // the sealed snapshot: { content, contentHash, … } from the seal
+  executed,   // the executed PDF's result: its bytes, and the values it printed
+  extensions, // as the executed PDF was printed with
   record: {
     issuer: "Acme Sign",
     documentId: "AGR-2026-0042",
@@ -208,13 +211,13 @@ if (!built.ok) throw new Error(built.refusal.reason);
 
 const { pdf, certificateHash } = await exportCompletionCertificate(built.certificate, { editorOptions: { fonts } });
 // One file, if you want it: the executed pages, then the certificate's.
-const { pdf: bundle, bundleHash } = await bundleCertificate(executedPdf, pdf);
+const { pdf: bundle, bundleHash } = await bundleCertificate(executed.pdf, pdf);
 ```
 
 - **Verified at issue** holds only what was checked in that call: the snapshot against `contentHash`, the executed PDF's bytes hashed, and every signature answered, with its `signedAt` as the signer gave it and in UTC. `built.certificate.verified` is the same section as data, to store beside it.
-- **Signing record — as recorded by** your issuer holds your parties and events, printed as you gave them. Scrivr checks only that they fit the document — every party's role carries fields, every role that signed has a party — and time: every time names its zone, nobody signs before being sent or viewing it, and nothing follows `completed`.
-- It is issued only for a complete signing; anything else is a refusal you can show: `snapshot-altered`, `unanswered-fields`, `unknown-party`, `missing-party`, `unzoned-time`, `undated-signature`, `signed-after-completed`, `events-out-of-order`.
-- Pass the values **the executed PDF printed**. A value changed after printing would put a signature on the certificate that the PDF does not hold.
+- **Signing record — as recorded by** your issuer holds your parties and events, printed as you gave them. Scrivr checks only that they fit the document and time: every role that answered or must answer a field has a party, every event names one of your parties, every time is a full timestamp with its zone, a party first comes to the document (sent, viewed or consented) before it signs, and nothing is signed after `completed`. Views after signing are fine, and so is a party with no fields — someone sent a copy.
+- It is issued only for a complete signing; anything else is a refusal you can show: `snapshot-altered`, `unanswered-fields`, `missing-party`, `unknown-party`, `unzoned-time`, `undated-signature`, `signed-after-completed`, `events-out-of-order`.
+- Pass `exportExecutedPdf`'s result as it came: its `values` are the ones it printed — a drawing it could not embed is not among them — so the certificate shows only signatures the PDF holds. A signature's `signedAt` must be a full timestamp; a bare day is refused rather than printed as midnight.
 - Events are `sent`, `viewed`, `consented`, `signed`, `declined` and `completed`, or `{ kind: "custom", label }` for a step of your own. Every heading comes from `labels`, so a certificate can be issued in your signers' language.
 - The certificate is not a digital signature. To seal it, or the bundle, with your certificate (PAdES), sign the bytes you are given.
 
