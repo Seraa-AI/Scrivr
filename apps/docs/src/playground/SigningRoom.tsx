@@ -148,7 +148,7 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
               return value;
             }),
           onSignatureBlocked: (_signature, missing) =>
-            setProblem(`Complete ${missing.map((f) => KIND_LABEL[f.kind] ?? f.kind).join(", ")} before you sign.`),
+            setProblem(`You sign last. First: ${missing.map((f) => KIND_LABEL[f.kind] ?? f.kind).join(", ")}.`),
           onFieldRequestError: (field, error) =>
             setProblem(`${KIND_LABEL[field.kind] ?? field.kind} could not be completed: ${error instanceof Error ? error.message : String(error)}. Try again.`),
         }),
@@ -179,6 +179,12 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
   const nextOpen =
     unansweredBeforeSigning(mine, shown, role, kinds)[0] ??
     mine.find((f) => !isDatedWhenSigned(kinds, f.kind) && !isFieldAnswered(f, shown[f.id], kinds));
+
+  // An unanswered field's status: a signature says how many fields come first, as its tag on the page does.
+  const statusOf = (field: SignerFieldDescriptor): string => {
+    const first = isSigningKind(kinds, field.kind) ? unansweredBeforeSigning(mine, shown, role, kinds).length : 0;
+    return first > 0 ? `After ${first} field${first === 1 ? "" : "s"}` : "Open";
+  };
 
   const answer = (value: FieldValue | null) => {
     request?.resolve(value);
@@ -235,9 +241,17 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
             This copy is not what was sealed — its hash or its fields differ. Signing and the executed PDF are off.
           </div>
         )}
+        {/* Pinned to the window, so it is seen wherever the signer has scrolled to. */}
         {problem && (
-          <div role="alert" className="mx-auto mb-3 max-w-[794px] rounded-md border px-3 py-2 text-[13px]" style={{ borderColor: "var(--app-border)", color: "var(--app-text)" }}>
-            {problem}
+          <div
+            role="alert"
+            className="fixed bottom-6 left-1/2 z-40 flex max-w-[560px] -translate-x-1/2 items-start gap-3 rounded-lg border px-4 py-3 text-[13px] shadow-lg"
+            style={{ borderColor: "var(--app-border)", background: "var(--app-surface)", color: "var(--app-text)" }}
+          >
+            <span>{problem}</span>
+            <button type="button" aria-label="Dismiss" onClick={() => setProblem(null)} style={{ color: "var(--app-text-muted)" }}>
+              ×
+            </button>
           </div>
         )}
         <div className="flex min-w-max justify-center">
@@ -310,7 +324,7 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
                       {!f.required && <span style={{ color: "var(--app-text-muted)" }}> (optional)</span>}
                     </span>
                     <span style={{ color: answered ? "var(--app-accent)" : "var(--app-text-muted)" }}>
-                      {answered && value ? describe(value, f) : isDatedWhenSigned(kinds, f.kind) ? "When you sign" : "Open"}
+                      {answered && value ? describe(value, f) : isDatedWhenSigned(kinds, f.kind) ? "When you sign" : statusOf(f)}
                     </span>
                   </button>
                 </li>
