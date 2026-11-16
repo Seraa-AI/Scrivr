@@ -690,9 +690,11 @@ export function parseRunProperties(rPr: OoxmlElement): DocxMark[] {
       // paragraph style may supply the same formatting and this is what
       // outranks it. Stage 2 resolves it away before making editor marks.
       const cancelled = (kind === "u" && val === "none") || !parseOnOff(val);
-      // Drop the val attr for toggles since "on" is the absence of any
-      // value semantically.
-      marks.push(cancelled ? { kind, attrs: {}, off: true } : { kind, attrs: {} });
+      // Once a toggle is on, its val says nothing more — except an underline's,
+      // which names its style (double, dotted, wave) for the handler to keep
+      // or report.
+      const attrs = kind === "u" && !cancelled && val !== undefined ? { val } : {};
+      marks.push(cancelled ? { kind, attrs: {}, off: true } : { kind, attrs });
       continue;
     }
 

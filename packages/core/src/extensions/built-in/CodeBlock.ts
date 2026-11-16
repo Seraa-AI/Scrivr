@@ -205,13 +205,18 @@ export const CodeBlock = Extension.create<CodeBlockOptions>({
       const t = ctx.schema.nodes["codeBlock"];
       if (!t) return null;
       const pieces: string[] = [];
+      let formatted = false;
       for (const child of content) {
         if (child.isText) {
           pieces.push(child.text ?? "");
+          formatted ||= child.marks.length > 0;
         } else if (child.type.name === "hardBreak") {
           pieces.push("\n");
+        } else {
+          ctx.report.dropped(child.type.name, "a code block holds only text");
         }
       }
+      if (formatted) ctx.report.changed("paragraph", "formatting removed: a code block holds plain text");
       const text = pieces.join("");
       return text.length > 0 ? t.create(null, ctx.schema.text(text)) : t.create();
     };

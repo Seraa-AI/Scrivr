@@ -235,15 +235,19 @@ export const Link = Extension.create({
     // needs a wrapper as well as a mark handler. Without both, a link reached
     // Word as ordinary text and the export logged an unsupported-mark warning
     // no UI surfaces.
-    const style: DocxMarkHandler = (props, _mark, ctx) => ({
-      ...props,
-      // Word's built-in Hyperlink character style: blue and underlined, and
-      // the thing readers recognise as a link.
-      styleId: ctx.styles.character.getOrCreate("Hyperlink", {
-        color: "0563C1",
-        underline: true,
-      }),
-    });
+    const style: DocxMarkHandler = (props, mark, ctx) => {
+      const title = mark.attrs["title"];
+      if (typeof title === "string" && title.length > 0) ctx.report.changed(mark.type.name, "title not written");
+      return {
+        ...props,
+        // Word's built-in Hyperlink character style: blue and underlined, and
+        // the thing readers recognise as a link.
+        styleId: ctx.styles.character.getOrCreate("Hyperlink", {
+          color: "0563C1",
+          underline: true,
+        }),
+      };
+    };
 
     const wrap: DocxRunWrapper = (run, mark, ctx) => {
       const href = mark.attrs["href"];
@@ -312,6 +316,7 @@ export const Link = Extension.create({
           }`,
           markType: "hyperlink",
         });
+        ctx.report.dropped(mark.kind, href === null ? "no usable target" : "the schema has no link mark");
         return null;
       }
       return type.create({ href });

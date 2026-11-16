@@ -99,9 +99,15 @@ export const FontSize = Extension.create<FontSizeOptions>({
   },
 
   addExports() {
-    const handler: DocxMarkHandler = (props, mark) => {
+    const handler: DocxMarkHandler = (props, mark, ctx) => {
       const v = mark.attrs["size"];
-      return typeof v === "number" ? { ...props, fontSize: v } : props;
+      if (typeof v !== "number") {
+        ctx.report.dropped(mark.type.name, "no size");
+        return props;
+      }
+      // Word sizes text in half points, and 1px is 0.75pt.
+      if (!Number.isInteger(v * 1.5)) ctx.report.changed(mark.type.name, "rounded to a half point");
+      return { ...props, fontSize: v };
     };
     return { docx: { marks: { fontSize: handler } } };
   },
@@ -111,12 +117,16 @@ export const FontSize = Extension.create<FontSizeOptions>({
     // half-points ÷ 1.5 = px (exporter does px × 1.5).
     const handler: DocxMarkTransform = (mark, ctx) => {
       const raw = mark.attrs?.["val"];
-      if (typeof raw !== "string" || raw.length === 0) return null;
-      const halfPoints = Number(raw);
-      if (!Number.isFinite(halfPoints) || halfPoints <= 0) return null;
+      const halfPoints = typeof raw === "string" && raw.length > 0 ? Number(raw) : NaN;
+      if (!Number.isFinite(halfPoints) || halfPoints <= 0) {
+        ctx.report.dropped(mark.kind, "not a valid size");
+        return null;
+      }
       const t = ctx.schema.marks["fontSize"];
       if (!t) return null;
-      return t.create({ size: Math.round(halfPoints / 1.5) });
+      const px = halfPoints / 1.5;
+      if (!Number.isInteger(px)) ctx.report.changed(mark.kind, "rounded to a whole pixel");
+      return t.create({ size: Math.round(px) });
     };
     return { docx: { marks: { sz: handler } } };
   },

@@ -209,7 +209,11 @@ export interface DocxReporter {
    * a whole number is ignored with a warning.
    */
   kept(kind: string, count?: number): void;
-  /** One `kind` did not make it across, and why. */
+  /**
+   * One `kind` did not make it across, and why. Reported for content the
+   * handler was handed inside its item — an image a code block leaves out —
+   * it also takes that one back out of what was counted kept.
+   */
   dropped(kind: string, reason: string): void;
   /**
    * One `kind` made it across, but not as the source had it ("spacing

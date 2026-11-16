@@ -18,7 +18,7 @@
 import { compositeColor, parseCssColor, toHex6 } from "../model/cssColor";
 import { cellBackground, cellGridSpan, cellVMerge } from "./attrs";
 import type { Node } from "prosemirror-model";
-import { xml, pxToTwips, type DocxNodeHandler, type XmlNode } from "../exports/docx";
+import { xml, pxToTwips, type DocxNodeHandler, type DocxReporter, type XmlNode } from "../exports/docx";
 
 const BORDER_SIZE = "4"; // eighths of a point → 0.5pt, matching the canvas hairline.
 const BORDER_COLOR = "9CA3AF"; // neutral gray, same as the canvas row painter.
@@ -28,11 +28,12 @@ const BORDER_COLOR = "9CA3AF"; // neutral gray, same as the canvas row painter.
  * literal its source wrote — a name, a hex triple, `rgb(...)`, with or without
  * alpha. Resolving it is what keeps those from being dropped.
  */
-function readHexFill(value: string | null): string | null {
+function readHexFill(value: string | null, report: DocxReporter, kind: string): string | null {
   if (value === null) return null;
   const colour = parseCssColor(value);
   if (!colour || colour.alpha === 0) return null;
   // DOCX cell shading has no alpha; these documents use an unshaded white page.
+  if (colour.alpha < 1) report.changed(kind, "translucent background blended onto white");
   const opaque = compositeColor(colour, { r: 255, g: 255, b: 255 });
   return toHex6(opaque).toUpperCase();
 }
@@ -92,7 +93,7 @@ const tableRowHandler: DocxNodeHandler = (node, children) => {
   return xml("w:tr", undefined, rowChildren);
 };
 
-const cellHandler: DocxNodeHandler = (node, children) => {
+const cellHandler: DocxNodeHandler = (node, children, ctx) => {
   const props: XmlNode[] = [];
 
   const gridSpan = cellGridSpan(node);
@@ -102,7 +103,13 @@ const cellHandler: DocxNodeHandler = (node, children) => {
   if (vMerge === "restart") props.push(xml("w:vMerge", { "w:val": "restart" }));
   else if (vMerge === "continue") props.push(xml("w:vMerge"));
 
-  const fill = readHexFill(cellBackground(node));
+  // `cellBackground` passes on only a colour it can read, so one it cannot is
+  // reported here, from the attr as written.
+  const written = node.attrs["background"];
+  if (typeof written === "string" && written.length > 0 && parseCssColor(written) === null) {
+    ctx.report.changed(node.type.name, "background not written: not a color");
+  }
+  const fill = readHexFill(cellBackground(node), ctx.report, node.type.name);
   if (fill) props.push(xml("w:shd", { "w:val": "clear", "w:color": "auto", "w:fill": fill }));
 
   const tcChildren: XmlNode[] = [];

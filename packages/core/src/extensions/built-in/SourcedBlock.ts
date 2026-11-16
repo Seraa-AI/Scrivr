@@ -1126,6 +1126,7 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 						`${DOCX_TAG_MAX_LENGTH}-character OOXML limit for w:tag. The block was ` +
 						`exported as plain content, without its source link.`,
 				});
+				ctx.report.changed("sourcedBlock", `source link not written: over ${DOCX_TAG_MAX_LENGTH} characters`);
 				return children;
 			}
 			// Use the 'kind' attribute as the label for MS Word, fallback to "Sourced Block"

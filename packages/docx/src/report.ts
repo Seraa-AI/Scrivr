@@ -214,6 +214,15 @@ export function createReportRecorder(options: ReportRecorderOptions = {}): DocxR
     },
     dropped(kind, reason) {
       addEntry("dropped", kind, reason, ownerNow());
+      // Content of the item being handled was counted kept as it was built. A
+      // handler that leaves some of it out — a code block keeping only text —
+      // takes it back, so the report never claims what is not in the output.
+      const open = subtrees[subtrees.length - 1];
+      const keptInside = open?.kept.get(kind) ?? 0;
+      if (open && innermost()?.kind !== kind && keptInside > 0) {
+        open.kept.set(kind, keptInside - 1);
+        countOf(kind).kept -= 1;
+      }
       markDecided(kind, false);
     },
     changed(kind, reason) {

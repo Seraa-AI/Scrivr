@@ -121,6 +121,32 @@ describe("importDocx — trackUnread", () => {
   });
 });
 
+describe("importDocx — trackUnread on a real Word letter", () => {
+  const administrative = () =>
+    new Uint8Array(readFileSync(join(__dirname, "../wordTestFiles/01-administrative-f9355274cbfe.docx")));
+  const outcomesOf = (unread: DocxUnreadElement[], name: string) =>
+    [...new Set(unread.filter((u) => u.path.endsWith(`/${name}`)).map((u) => u.outcome))];
+
+  it("tells what the import reads, matches, skips on purpose and never looks at", async () => {
+    const { report } = await importDocx(new ServerEditor(), administrative(), { trackUnread: true });
+    const unread = report.unread ?? [];
+
+    // Read: alignment, and a run's tab.
+    expect(outcomesOf(unread, "w:jc")).toEqual([]);
+    expect(outcomesOf(unread, "w:tab")).toEqual([]);
+    // Matched by name, nothing in them read: the page size and margins.
+    expect(outcomesOf(unread, "w:pgSz")).toEqual(["examined"]);
+    expect(outcomesOf(unread, "w:pgMar")).toEqual(["examined"]);
+    // Dropped on purpose.
+    expect(outcomesOf(unread, "w:szCs")).toEqual([]);
+    expect(outcomesOf(unread, "w:proofErr")).toEqual([]);
+    // Never looked at.
+    for (const name of ["w:ind", "w:keepNext", "w:tabs", "w:pPrDefault"]) {
+      expect(outcomesOf(unread, name), name).toEqual(["unread"]);
+    }
+  });
+});
+
 describe("importDocx — the ignored list", () => {
   it("does not warn about a property dropped on purpose", async () => {
     const { diagnostics, report } = await importDocx(new ServerEditor(), letter());

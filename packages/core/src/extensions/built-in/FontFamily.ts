@@ -141,11 +141,11 @@ export const FontFamily = Extension.create<FontFamilyOptions>({
   },
 
   addExports() {
-    const handler: DocxMarkHandler = (props, mark) => {
+    const handler: DocxMarkHandler = (props, mark, ctx) => {
       const f = mark.attrs["family"];
-      return typeof f === "string" && f.length > 0
-        ? { ...props, fontFamily: f }
-        : props;
+      if (typeof f === "string" && f.length > 0) return { ...props, fontFamily: f };
+      ctx.report.dropped(mark.type.name, "no font named");
+      return props;
     };
     return { docx: { marks: { fontFamily: handler } } };
   },
@@ -164,11 +164,20 @@ export const FontFamily = Extension.create<FontFamilyOptions>({
         // applies — so there is nothing to carry and nothing lost. A theme
         // reference (`w:asciiTheme`) does name a face; it is not resolved
         // yet, so it stays a drop.
-        if (Object.keys(attrs).every((name) => name === "hint")) ctx.report.kept(mark.kind);
+        const named = Object.keys(attrs).filter((name) => name !== "hint");
+        if (named.length === 0) ctx.report.kept(mark.kind);
+        else if (named.some((name) => name.endsWith("Theme"))) ctx.report.dropped(mark.kind, "theme font not resolved");
+        else ctx.report.dropped(mark.kind, "no Latin font named");
         return null;
       }
       const t = ctx.schema.marks["fontFamily"];
       if (!t) return null;
+      // Word can name a face per script; the editor draws one. East Asian or
+      // complex-script text set in another face is drawn in this one.
+      const otherFaces = [attrs["hAnsi"], attrs["eastAsia"], attrs["cs"]]
+        .map(readFontFamilyAttr)
+        .filter((face) => face !== undefined && face !== family);
+      if (otherFaces.length > 0) ctx.report.changed(mark.kind, "only the Latin font kept");
       return t.create({ family });
     };
     return { docx: { marks: { rFonts: handler } } };
