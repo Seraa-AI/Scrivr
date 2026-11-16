@@ -1,13 +1,17 @@
 /**
  * createImageMenu — framework-agnostic controller for an image toolbar popover.
  *
- * Shows when the active selection's descriptor kind is "image" (the kind the
- * Image extension's SelectionBehavior reports).
- * Passes the image node, its doc position, and a viewport DOMRect to the
- * callbacks so the consumer can render resize / wrapping / margin controls.
+ * Shows in two presentations:
+ *   - "full" when the active selection's descriptor kind is "image" (the kind
+ *     the Image extension's SelectionBehavior reports) — the consumer renders
+ *     resize / wrapping / margin controls.
+ *   - "peek" when the pointer rests on an image, with `hover` on — compact and
+ *     read-only. Off by default: Word, Docs and Pages show no card on hover.
+ * Selection wins: while an image is selected, hover is ignored.
  *
- * The DOMRect covers the full visual bounds of the image (not cursor-sized),
- * so `rect.bottom` is a reliable anchor for a popover below the image.
+ * Passes the image node, its doc position, and a viewport DOMRect to the
+ * callbacks. The DOMRect covers the full visual bounds of the image (not
+ * cursor-sized), so `rect.bottom` is a reliable anchor for a popover below it.
  *
  * @example — vanilla JS
  *   const cleanup = createImageMenu(editor, {
@@ -23,24 +27,34 @@
  *   });
  */
 import type { Node } from "prosemirror-model";
+import { NodeSelection } from "prosemirror-state";
 import type { IEditor } from "../extensions/types";
 import { subscribeViewUpdates } from "./subscribeViewUpdates";
 import { subscribeEditorFocusOutside } from "./subscribeEditorFocusOutside";
 import { isAnchorInsideContainer } from "./anchorVisibility";
+import { trackShownRange } from "./shownRange";
+import type { HoverTarget } from "../hover/types";
+import {
+  subscribeHoverTarget,
+  type HoverOption,
+  type PopoverPresentation,
+} from "./subscribeHoverTarget";
 
 export interface ImageMenuInfo {
-  /** The selected image ProseMirror node (access attrs via info.node.attrs). */
+  /** The image ProseMirror node (access attrs via info.node.attrs). */
   node: Node;
   /** Doc position of the image node — use with editor.selectNode() or transactions. */
   docPos: number;
+  /** "peek" when shown from hover, "full" when the image is selected. */
+  presentation: PopoverPresentation;
 }
 
 export interface ImageMenuCallbacks {
-  /** Called when an image is first selected. Position the popover using rect. */
+  /** Called when an image is selected, or hovered with `hover` on. Position the popover using rect. */
   onShow(rect: DOMRect, info: ImageMenuInfo): void;
-  /** Called when the selection leaves the image — hide the popover. */
+  /** Called when the selection leaves the image, or a peek's pointer does — hide the popover. */
   onHide(): void;
-  /** Called when the image moves (layout reflow, scroll) — reposition the popover. */
+  /** Called when the image moves (layout reflow, scroll) or a peek becomes full — reposition the popover. */
   onMove(rect: DOMRect, info: ImageMenuInfo): void;
 }
 
@@ -49,63 +63,99 @@ export interface ImageMenuOptions extends ImageMenuCallbacks {
    * Accessor returning the popover's root DOM element (or null if unmounted).
    * Threaded into the focus-outside check; see createBubbleMenu for context.
    */
-  getPopoverElement?: () => HTMLElement | null;
+  getPopoverElement?: (() => HTMLElement | null) | undefined;
+  /** Hover peeks. Default false; true or delays peek a hovered image. */
+  hover?: HoverOption | undefined;
 }
 
 export function createImageMenu(editor: IEditor, options: ImageMenuOptions): () => void {
   const { onShow, onHide, onMove } = options;
 
   let visible = false;
-  let lastDocPos = -1;
   let rafId: number | null = null;
+  let hovered: HoverTarget | null = null;
+  /** The shown image, mapped through edits. */
+  const shown = trackShownRange(editor);
+
+  function hide() {
+    shown.set(null);
+    if (visible) { visible = false; onHide(); }
+  }
+
+  /** The selected image — the full presentation. */
+  function selected(): { node: Node; docPos: number } | null {
+    const descriptor = editor.getSelectionDescriptor();
+    if (descriptor.kind !== "image") return null;
+    const state = editor.surfaces.activeSurface?.state ?? editor.getState();
+    const node = state.doc.nodeAt(descriptor.from);
+    return node ? { node, docPos: descriptor.from } : null;
+  }
+
+  /** The hovered image, re-resolved against current state — the peek. */
+  function hoveredImage(): { node: Node; docPos: number } | null {
+    if (!hovered) return null;
+    const doc = editor.getState().doc;
+    if (hovered.pos >= doc.content.size) return null;
+    const node = doc.nodeAt(hovered.pos);
+    if (!node) return null;
+    // An edit can replace what sits at the position without moving it.
+    const kind = editor.describeSelection(NodeSelection.create(doc, hovered.pos)).kind;
+    return kind === "image" ? { node, docPos: hovered.pos } : null;
+  }
 
   function update() {
-    const actions = editor.getNodeActions();
-    const descriptor = editor.getSelectionDescriptor();
-    const state = editor.surfaces.activeSurface?.state ?? editor.getState();
-    const docPos = descriptor.from;
-    const node = state.doc.nodeAt(docPos);
-
-    // If there are no actions for this node, or the node doesn't exist, hide the menu.
-    if (actions.length === 0 || !node) {
-      if (visible) { visible = false; lastDocPos = -1; onHide(); }
-      return;
-    }
+    const full = selected();
+    // Selection wins: a selected image shows full and hover is ignored.
+    const target = full ?? hoveredImage();
+    if (!target) { hide(); return; }
+    const { node, docPos } = target;
 
     const rect = editor.getNodeViewportRect(docPos);
     if (!rect || !isAnchorInsideContainer(rect, editor.getScrollContainerRect())) {
-      if (visible) { visible = false; lastDocPos = -1; onHide(); }
+      hide();
       return;
     }
 
-    const info: ImageMenuInfo = { node, docPos };
+    const info: ImageMenuInfo = { node, docPos, presentation: full ? "full" : "peek" };
 
-    if (visible && lastDocPos === docPos) {
+    const same = visible && shown.is(docPos, docPos + node.nodeSize);
+    shown.set({ from: docPos, to: docPos + node.nodeSize });
+    if (same) {
       onMove(rect, info);
     } else {
       visible = true;
-      lastDocPos = docPos;
       onShow(rect, info);
     }
   }
 
-  const unsubscribe = subscribeViewUpdates(editor, () => {
+  function scheduleUpdate() {
     if (rafId !== null) return;
     rafId = requestAnimationFrame(() => { rafId = null; update(); });
-  });
+  }
+
+  const unsubscribe = subscribeViewUpdates(editor, scheduleUpdate);
+  const offHover = subscribeHoverTarget(
+    editor,
+    "image",
+    (target) => { hovered = target; scheduleUpdate(); },
+    { hover: options.hover ?? false, getPopoverElement: options.getPopoverElement },
+  );
   const offFocusOutside = subscribeEditorFocusOutside(
     editor,
     () => {
+      if (hovered && !selected()) return;
       if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
-      if (visible) { visible = false; lastDocPos = -1; onHide(); }
+      hide();
     },
     options.getPopoverElement ? { getPopoverElement: options.getPopoverElement } : {},
   );
 
   return () => {
     unsubscribe();
+    shown.dispose();
+    offHover();
     offFocusOutside();
     if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
-    if (visible) { visible = false; lastDocPos = -1; onHide(); }
+    hide();
   };
 }

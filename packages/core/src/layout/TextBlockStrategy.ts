@@ -59,11 +59,23 @@ export const TextBlockStrategy: BlockStrategy = {
           const strategy = inlineRegistry?.get(span.node.type.name);
           if (strategy) {
             paintInSpanStyle(ctx, atomStyle(span, spanX, objY, markDecorators, theme, ctx), () => {
-              strategy.render(ctx, spanX, objY, span.width, span.height, span.node, theme);
+              strategy.render(ctx, spanX, objY, span.width, span.height, span.node, theme, {
+                baselineY: baseline,
+                ...(span.font !== undefined ? { font: span.font } : {}),
+              });
             });
           }
           // Store the full visual rect so the overlay can draw resize handles.
-          map.registerObjectRect({ docPos: span.docPos, x: spanX, y: objY, width: span.width, height: span.height, page: pageNumber });
+          map.registerObjectRect({
+            docPos: span.docPos,
+            x: spanX,
+            y: objY,
+            width: span.width,
+            height: span.height,
+            page: pageNumber,
+            baseline,
+            ...(span.font !== undefined ? { font: span.font } : {}),
+          });
           // y = textY so cursor draws at the text baseline, not the image top.
           // Full-width glyph: midpoint at image center → 50/50 click split.
           if (!map.hasGlyph(span.docPos)) {

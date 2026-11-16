@@ -93,8 +93,14 @@ export type SemanticCellInput = z.infer<typeof SemanticCellInputSchema>;
 const structuralOp = <Op extends string, Shape extends z.ZodRawShape>(op: Op, shape: Shape) =>
   z.strictObject({ kind: z.literal("structural"), op: z.literal(op), ...shape });
 
-/** Placement relative to a named neighbour — `strictObject` refuses `index`. */
-const anchored = { position: EditPositionSchema, anchorNodeId: z.string().min(1) };
+/**
+ * Placement relative to a named neighbour — `strictObject` refuses `index`.
+ * `anchorContentHash` is the anchor's unit hash as the agent read it; when the
+ * anchor has changed since, the op is reported stale.
+ */
+const anchored = { position: EditPositionSchema, anchorNodeId: z.string().min(1), anchorContentHash: z.string().min(1).optional() };
+/** The op's own block, and its unit hash as the agent read it (stale when it has changed since). */
+const target = { nodeId: z.string().min(1), expectedContentHash: z.string().min(1).optional() };
 
 /**
  * Structural edits — the document's shape rather than a leaf's content. Each is
@@ -106,9 +112,9 @@ const anchored = { position: EditPositionSchema, anchorNodeId: z.string().min(1)
  */
 export const StructuralSemanticEditSchema = z.discriminatedUnion("op", [
   structuralOp("insertBlock", { ...anchored, block: SemanticBlockInputSchema }),
-  structuralOp("deleteBlock", { nodeId: z.string().min(1) }),
+  structuralOp("deleteBlock", target),
   // A top-level block; moved once per batch.
-  structuralOp("moveBlock", { ...anchored, nodeId: z.string().min(1) }),
+  structuralOp("moveBlock", { ...anchored, ...target }),
   structuralOp("insertListItem", {
     ...anchored,
     item: z.strictObject({
@@ -116,11 +122,11 @@ export const StructuralSemanticEditSchema = z.discriminatedUnion("op", [
       attrs: z.record(z.string(), z.unknown()).optional(),
     }),
   }),
-  structuralOp("deleteListItem", { nodeId: z.string().min(1) }),
+  structuralOp("deleteListItem", target),
   // Named by the item or its text; stays in its own list, moved once per batch.
-  structuralOp("moveListItem", { ...anchored, nodeId: z.string().min(1) }),
+  structuralOp("moveListItem", { ...anchored, ...target }),
   structuralOp("insertTableRow", { ...anchored, cells: z.array(SemanticCellInputSchema).optional() }),
-  structuralOp("deleteTableRow", { nodeId: z.string().min(1) }),
+  structuralOp("deleteTableRow", target),
 ]);
 export type StructuralSemanticEdit = z.infer<typeof StructuralSemanticEditSchema>;
 

@@ -38,6 +38,8 @@ export interface PointOwnershipInput {
   anchoredObjects: readonly AnchoredObjectPlacement[];
   /** Is a line of text painted at this point? */
   hasTextAt(x: number, y: number, page: number): boolean;
+  /** Is a composite's region painted at this point — a table cell, blank or not? */
+  regionAt(x: number, y: number, page: number): boolean;
   /** The object rectangle registered at this point, if any. */
   objectRectAt(x: number, y: number, page: number): ObjectRectEntry | undefined;
 }
@@ -93,8 +95,9 @@ export function resolvePointOwner(
   }
 
   // Document content is painted between the front and behind layers. A behind
-  // object is selectable only through unpainted gaps in that content.
-  if (hasText) return { kind: "text" };
+  // object is selectable only through unpainted gaps in that content; a
+  // region (a table cell) is painted content all over, glyph or not.
+  if (hasText || input.regionAt(x, y, page)) return { kind: "text" };
 
   for (const object of behind) {
     if (contains(object, x, y)) return { kind: "anchored", object };

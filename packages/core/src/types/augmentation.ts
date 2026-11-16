@@ -1,3 +1,8 @@
+import type { Mappable } from "prosemirror-transform";
+import type { HoverEvent } from "../hover/types";
+import type { PagePoint } from "../layout/pagePoint";
+import type { MutationDenied } from "../mutationGate";
+import type { ZoomRequest } from "../renderer/zoom";
 /**
  * augmentation.ts
  *
@@ -105,26 +110,67 @@ export interface MarkAttributes {} // augmented by extensions
  *   interface EditorEvents {
  *     focus: void;
  *     blur: void;
- *     update: { docChanged: boolean };
+ *     update: { docChanged: boolean; mapping: Mappable };
  *   }
  * }
  */
 export interface EditorEvents {
   focus: void;
   blur: void;
-  update: { docChanged: boolean };
+  /**
+   * The state changed. `mapping` carries a position held from before the
+   * transaction onto the new document — how a popover keeps showing the same
+   * link after a collaborator types above it.
+   */
+  update: { docChanged: boolean; mapping: Mappable };
   destroy: void;
   /**
-   * Fired when the viewport changes without a state update — i.e. the user
-   * scrolled or the scroll container was resized. Doc/selection are unchanged.
+   * Fired when the viewport changes without a state update — the user
+   * scrolled, the scroll container was resized, or the zoom changed.
+   * Doc/selection are unchanged.
    *
    * Anchored UI (popovers, bubble menus) subscribes to this so its
    * viewport-space position can follow the anchor as it scrolls. State-only
    * listeners should stick with `"update"` to avoid needless work on scroll.
    */
   viewport: void;
+  /**
+   * The range of pages on screen changed (paged mode; 1-based, inclusive, no
+   * overscan). Reading telemetry builds on this: the canvas has no DOM a host
+   * could observe instead.
+   */
+  pagesInView: {
+    first: number;
+    last: number;
+    pageCount: number;
+    /** False while a long document is still being laid out, so more pages may follow. */
+    complete: boolean;
+  };
+  /**
+   * A primary press landed on the page — fired for every one, before routing,
+   * read-only and sealed included. For what is painted over a page without
+   * being a document node (a sealed field); nodes use the hit-target registry.
+   */
+  press: { point: PagePoint; clickCount: number };
+  /**
+   * The zoom changed: a new factor — `setZoom`, a gesture, or a fit following
+   * its view — or a new request at the same factor, such as a fit that
+   * happens to equal the factor it replaces. `"viewport"` fires with a new
+   * factor, so anchored UI follows.
+   */
+  zoom: { zoom: number; previous: number; request: ZoomRequest };
   /** Fired when a click lands in a chrome band (header/footer area). */
   chromeClick: { page: number; x: number; y: number; band: "header" | "footer"; clickCount: number };
+  /**
+   * Fired when what is under the pointer changes — see `HoverEvent`. Transient:
+   * never in editor state, never sent to collaborators. Mouse and pen only.
+   */
+  hover: HoverEvent;
+  /**
+   * The editor refused a change: read-only to an edit made on this client, or
+   * sealed. The document is exactly as it was before the attempt.
+   */
+  mutationDenied: MutationDenied;
 }
 
 /**

@@ -22,8 +22,9 @@ import type { FontProvider } from "../fonts/types";
 /**
  * Named keybinding precedences. Higher wins first refusal for a key.
  *
- * The ladder is "most specific context first": a binding only applies inside a
- * table, then inside a code block, then inside a list, then anywhere. Each
+ * The ladder is "most specific context first": a binding only applies right
+ * beside an inline object, then inside a table, then inside a code block,
+ * then inside a list, then anywhere. Each
  * declines by returning `false`, delegating down the chain.
  *
  * Extensions may use any number; these names exist so built-ins read as intent
@@ -31,6 +32,8 @@ import type { FontProvider } from "../fonts/types";
  * them (e.g. `KeymapPriority.list + 10`).
  */
 export const KeymapPriority = {
+  /** Bindings that only apply right beside an inline object, wherever it sits. */
+  inlineObject: 500,
   /** Bindings that only apply inside a table cell. */
   table: 400,
   /** Bindings that only apply inside a code block. */
@@ -47,7 +50,8 @@ import type { Command, Plugin, Transaction, EditorState, Selection } from "prose
 import type { EditorEvents, SafeFlatCommands } from "../types/augmentation";
 import type { DeferredEditOptions } from "../BaseEditor";
 import type { InputRule } from "prosemirror-inputrules";
-import type { CharacterMap } from "../layout/CharacterMap";
+import type { CharacterMap, ObjectRectEntry } from "../layout/CharacterMap";
+import type { PagePoint } from "../layout/pagePoint";
 import type { PageConfig, DocumentLayout } from "../layout/PageLayout";
 import type { BlockStrategy, InlineStrategy, NodeLayout } from "../layout/BlockRegistry";
 import type { AnchoredSpec } from "../layout/AnchoredObjects";
@@ -62,6 +66,7 @@ import type { SelectionController } from "../SelectionController";
 import type { CursorManager } from "../renderer/CursorManager";
 import type { ResolvedTheme } from "../model/theme";
 import type { CloneIdMap } from "../model/assignBlockIds";
+import type { HoverResolver, HoverTarget } from "../hover/types";
 import type {
   SelectionBehavior,
   HitTester,
@@ -113,7 +118,8 @@ export type ScrivrNodeSpec = NodeSpec & {
  * additional content on the overlay canvas for a specific page.
  *
  * Called once per visible page after the built-in cursor/selection are drawn.
- * The ctx is already scaled by dpr — draw in logical CSS pixels.
+ * The ctx is already scaled to draw in page units, at the view's zoom. Something that should keep its size on screen at every
+ * zoom, as the caret and resize handles do, sizes itself with `screenPixels`.
  *
  * @example
  * // CollaborationCursor uses this to draw remote users' cursors
@@ -150,10 +156,14 @@ export interface IBaseEditor {
   on<K extends keyof EditorEvents>(event: K, handler: (payload: EditorEvents[K]) => void): () => void;
   /** Current ProseMirror state. */
   getState(): EditorState;
-  /** True when the editor is in read-only / view mode. */
+  /** True when this viewer may not author — set by the host, or by a seal. */
   get readOnly(): boolean;
   /** Enable or disable read-only / view mode. Notifies subscribers. */
   setReadOnly(value: boolean): void;
+  /** True once the document is sealed and refuses every change. */
+  get sealed(): boolean;
+  /** Seal the document. One-way: there is no unseal. */
+  seal(): void;
   /**
    * Update the attrs of the node at docPos, merging with its current attrs.
    * No-op if there is no node at that position.
@@ -166,9 +176,10 @@ export interface IBaseEditor {
    * remote sync or AI suggestions). Routes through the same path as
    * command-dispatched transactions: plugin appendTransaction hooks run,
    * layout is invalidated, subscribers are notified, and (in `Editor`) a
-   * render flush is scheduled.
+   * render flush is scheduled. Returns `false` when the editor refused the
+   * change (read-only to a local edit, or sealed).
    */
-  applyTransaction(tr: Transaction): void;
+  applyTransaction(tr: Transaction): boolean;
   /** The merged ProseMirror Schema built from all extensions. */
   readonly schema: Schema;
   /** Typed old→new identity map produced during document cloning. */
@@ -286,6 +297,12 @@ export interface IEditor extends IBaseEditor {
   /** Register a canvas draw function for the overlay layer. Returns unregister. */
   addOverlayRenderHandler(handler: OverlayRenderHandler): () => void;
   /**
+   * Say what the pointer looks like at a point — over something an extension
+   * paints or owns, such as a field a viewer can complete. The first resolver
+   * to answer wins; answer `null` to defer. Returns unregister.
+   */
+  addPointerCursor(resolve: PointerCursorResolver): () => void;
+  /**
    * The kind-tagged, capability-carrying view of the active selection. UI reads
    * this instead of `instanceof`-ing the ProseMirror selection.
    */
@@ -319,13 +336,32 @@ export interface IEditor extends IBaseEditor {
    */
   getViewportRect(from: number, to: number): DOMRect | null;
   /**
-   * Returns the full visual viewport rect of the inline object at docPos
-   * (image, widget). Unlike getViewportRect, this uses the actual object
-   * render bounds — not the cursor-sized glyph — so the rect height matches
-   * the real image height and rect.bottom is the correct anchor for a popover.
-   * Returns null if the object has not been rendered yet.
+   * The first of `getNodeViewportRects(docPos)`, or null when the node has no
+   * fragment on a mounted page. For an image this is its full render bounds —
+   * not the cursor-sized glyph `getViewportRect` gives — so rect.bottom is the
+   * correct anchor for a popover.
    */
   getNodeViewportRect(docPos: number): DOMRect | null;
+  /**
+   * Viewport rects for every painted fragment of the node at `docPos`, in page
+   * order — a table split across pages has one per page. Image-like nodes have
+   * one. Empty when the node is not laid out.
+   */
+  getNodeViewportRects(docPos: number): DOMRect[];
+  /**
+   * The same fragments in page units, each with its page — what to test a
+   * `PagePoint` (a `"press"`, say) against, at any zoom.
+   */
+  getNodeRects(docPos: number): ObjectRectEntry[];
+  /**
+   * Viewport rects for each line the range `[from, to)` paints on, in page and
+   * line order — `Range.getClientRects()` for the canvas. A link wrapped onto
+   * two lines, or across a page, has one per line. Empty when nothing in the
+   * range is painted on a mounted page.
+   */
+  getRangeViewportRects(from: number, to: number): DOMRect[];
+  /** What the pointer is over, innermost first. Empty when over nothing. */
+  getHoverTargets(): readonly HoverTarget[];
   /**
    * Current viewport DOMRect of the scrollable container, or null when no
    * scroll container is attached. Popover controllers use this to hide when
@@ -337,8 +373,13 @@ export interface IEditor extends IBaseEditor {
    * Falls back to selection.moveCursorTo if the position is not selectable.
    */
   selectNode(docPos: number): void;
-  /** Get screen-space position of a page canvas. Null when not mounted. */
+  /**
+   * The screen position of a page's top-left corner. Null when not mounted.
+   * A page-unit offset from it is `offset × zoom` screen pixels.
+   */
   getPageScreenPosition(page: number): { screenLeft: number; screenTop: number } | null;
+  /** The factor the document is shown at: 1 is 100%. Screen pixels per page unit. */
+  readonly zoom: number;
   /**
    * Scroll so the doc range [from, to] is visible — centered when it fits
    * the viewport, top-pinned when taller. Completes a partial streamed
@@ -348,8 +389,12 @@ export interface IEditor extends IBaseEditor {
   scrollRangeIntoView(from: number, to?: number): boolean;
   /** Trigger a redraw without a state change (e.g. on awareness update). */
   redraw(): void;
-  /** Invalidate the layout cache and trigger a re-layout on next paint. */
-  invalidateLayout(): void;
+  /**
+   * Invalidate the layout cache and trigger a re-layout on next paint.
+   * `remeasure` measures every block again — what a strategy measures from
+   * changed outside the document.
+   */
+  invalidateLayout(options?: { remeasure?: boolean }): void;
   /**
    * Synchronously complete any streamed partial layout.
    * Serialization paths should call this before reading `layout.pages`.
@@ -747,6 +792,12 @@ export interface EditorNavigator {
  */
 export type InputHandler = (nav: EditorNavigator, e: KeyboardEvent) => boolean;
 
+/**
+ * A CSS cursor for a point on a page, or `null` to defer. `objectPos` is the
+ * document position of the inline object under the point, if any.
+ */
+export type PointerCursorResolver = (at: { point: PagePoint; objectPos: number | null }) => string | null;
+
 // ── Extension context ─────────────────────────────────────────────────────────
 
 /**
@@ -1124,6 +1175,13 @@ export interface ExtensionConfig<Options = object> {
   addHitTester?(this: Phase1Context<Options>): HitTester[];
 
   /**
+   * Hover resolvers — claim a mark (link) or a node (table cell) under the
+   * pointer as a `HoverTarget`. Unlike hit testers, every claim is kept: the
+   * pointer over a link in a cell is over the link, the cell and the table.
+   */
+  addHoverResolvers?(this: Phase1Context<Options>): HoverResolver[];
+
+  /**
    * Pointer-gesture providers — begin a drag for a `HitTarget` this extension
    * owns (e.g. cell drag-select). Kept separate from `addSelectionBehavior` so
    * non-pointer selection kinds need not implement one.
@@ -1309,6 +1367,7 @@ export interface ResolvedExtension {
   nodeActions: NodeActionContribution[];
   selectionBehaviors: SelectionBehavior[];
   hitTesters: HitTester[];
+  hoverResolvers: HoverResolver[];
   selectionGestures: SelectionGestureProvider[];
   inputHandlers: Record<string, InputHandler>;
   pasteTransforms: PasteTransform[];

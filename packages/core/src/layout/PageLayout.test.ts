@@ -16,7 +16,7 @@ import { ANCHORED_OBJECT_MARGIN } from "./AnchoredObjects";
 import { computePageMetrics, createPageGeometry, EMPTY_RESOLVED_CHROME, type PageMetrics } from "./PageMetrics";
 import type { LayoutBlock } from "./BlockLayout";
 import { defaultFontConfig, applyPageFont } from "./FontConfig";
-import { buildStarterKitContext, createMeasurer, paragraph as p, heading, doc, pageBreak, sectionBreak } from "../test-utils";
+import { buildStarterKitContext, createMeasurer, expectSamePosition, paragraph as p, heading, doc, pageBreak, sectionBreak } from "../test-utils";
 
 /**
  * Default-paragraph line height as the real Skia-backed measurer reports it.
@@ -295,7 +295,7 @@ describe("runPipeline — horizontal rule", () => {
     });
     const [para, hrBlock] = layout.pages[0]!.blocks;
     const expectedGap = Math.max(10, HR_SPACE); // 16
-    expect(hrBlock!.y).toBe(para!.y + para!.height + expectedGap);
+    expectSamePosition(hrBlock!.y, para!.y + para!.height + expectedGap);
   });
 
   it("HR before paragraph: para y accounts for HR height and collapsed margin", () => {
@@ -307,7 +307,7 @@ describe("runPipeline — horizontal rule", () => {
     });
     const [hrBlock, para] = layout.pages[0]!.blocks;
     const expectedGap = Math.max(HR_SPACE, 0); // 16
-    expect(para!.y).toBe(hrBlock!.y + HR_HEIGHT + expectedGap);
+    expectSamePosition(para!.y, hrBlock!.y + HR_HEIGHT + expectedGap);
   });
 
   it("HR block lines is empty (leaf node — no inline content)", () => {

@@ -109,7 +109,8 @@ type CacheEntry = HTMLImageElement | "loading" | "error";
 const imageCache = new Map<string, CacheEntry>();
 const redrawCallbacks = new Set<() => void>();
 
-function getCachedImage(src: string): HTMLImageElement | null {
+/** The loaded image at `src`, or null while it loads — `onImageLoad` hears when it lands. */
+export function getCachedImage(src: string): HTMLImageElement | null {
   const entry = imageCache.get(src);
   if (entry instanceof HTMLImageElement) return entry;
   if (entry === "loading" || entry === "error") return null;
@@ -126,6 +127,14 @@ function getCachedImage(src: string): HTMLImageElement | null {
   img.crossOrigin = "anonymous";
   img.src = src;
   return null;
+}
+
+/** Hear each image `getCachedImage` started loading land. Returns the unsubscribe. */
+export function onImageLoad(cb: () => void): () => void {
+  redrawCallbacks.add(cb);
+  return () => {
+    redrawCallbacks.delete(cb);
+  };
 }
 
 // ── Inline image strategy ─────────────────────────────────────────────────────
@@ -740,11 +749,7 @@ export const Image = Extension.create({
   onViewReady(editor: IEditor) {
     // View-only: when an `<img>` load fires, request a repaint so the
     // image swaps in. Headless editors don't run this hook at all.
-    const cb = () => editor.redraw();
-    redrawCallbacks.add(cb);
-    return () => {
-      redrawCallbacks.delete(cb);
-    };
+    return onImageLoad(() => editor.redraw());
   },
 
   addToolbarItems() {

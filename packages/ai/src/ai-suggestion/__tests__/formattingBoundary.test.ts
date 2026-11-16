@@ -23,7 +23,8 @@ describe("semantic formatting and review ownership", () => {
     propose(editor, [{ text: "term", marks: [{ type: "bold" }] }]);
     applyAiSuggestion(editor, { mode: "tracked" });
     expect(changes(editor)).toHaveLength(1);
-    expect(changes(editor)[0]!.dataTracked.authorID).toBe("ai:assistant");
+    // The author the suggestion was computed for.
+    expect(changes(editor)[0]!.dataTracked.authorID).toBe("AI");
     expect(trackChangesPluginKey.getState(editor.getState())!.status).toBe(enabled ? TrackChangesStatus.enabled : TrackChangesStatus.disabled);
     editor.commands.setChangeStatuses("rejected", changes(editor).map(c => c.id));
     expect(bold(editor)).toBeUndefined();

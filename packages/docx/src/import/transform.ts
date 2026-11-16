@@ -257,7 +257,9 @@ function transformInlines(
     } else if (item.type === "hardBreak") {
       const hb = ctx.schema.nodes["hardBreak"];
       if (hb) {
-        out.push(hb.create());
+        // Marked like its run, so a break inside a field stays inside it.
+        const marks = transformMarks(layer(inherited, item.marks), ctx, handlers, recorder);
+        out.push(hb.create(null, null, marks));
         recorder.carried("hardBreak");
       } else {
         dropUnhandled(ctx, recorder, "hardBreak", noSchemaNode("hardBreak"), {
@@ -266,12 +268,61 @@ function transformInlines(
           nodeType: "hardBreak",
         });
       }
+    } else if (item.type === "sdt") {
+      out.push(...transformControl(item, inherited, ctx, handlers, recorder));
     } else {
       const node = transformAtom(item, inherited, ctx, handlers, recorder);
       if (node) out.push(node);
     }
   }
   return out;
+}
+
+/**
+ * An inline content control. The extension that owns its tag builds it; one
+ * nobody builds keeps its content, under an `sdt` mark an extension may claim
+ * instead. The control is lost only when neither claims it.
+ */
+function transformControl(
+  item: DocxInline & { type: "sdt" },
+  inherited: readonly DocxMark[],
+  ctx: DocxImportContext,
+  handlers: ResolvedImportHandlers,
+  recorder: DocxReportRecorder,
+): PmNode[] {
+  const handler = entryOf(handlers.inlines, "sdt");
+  if (handler) {
+    const marks = transformMarks(layer(inherited, item.marks), ctx, handlers, recorder);
+    // A `null` is "not my tag", not a loss: the content below still lands.
+    const claimed = recorder.handle(
+      ownerOf(handlers.owners.inlines, "sdt"),
+      "sdt",
+      () => handler(item, marks, ctx),
+      built,
+      null,
+    );
+    if (claimed) return [claimed];
+  }
+
+  // Each run under the mark records whether the control crossed with it, so
+  // the control itself is recorded here only when no mark can carry it.
+  if (!entryOf(handlers.marks, "sdt")) {
+    dropUnhandled(ctx, recorder, "sdt", NO_HANDLER, null);
+    // A prompt nobody owns is Word's, not the document's text.
+    if (item.placeholder) return [];
+    return transformInlines(item.content, ctx, handlers, recorder, layer(inherited, item.marks));
+  }
+  const control: DocxMark[] = [
+    { kind: "sdt", attrs: { tag: item.tag, placeholder: item.placeholder } },
+  ];
+  if (item.placeholder && transformMarks(control, ctx, handlers, recorder).length === 0) return [];
+  return transformInlines(
+    item.content,
+    ctx,
+    handlers,
+    recorder,
+    layer(inherited, [...item.marks, ...control]),
+  );
 }
 
 /**

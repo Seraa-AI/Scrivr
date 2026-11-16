@@ -7,7 +7,7 @@ const DEFAULT_GAP = 24;
 export interface ScrivrProps {
   /** Editor instance from useScrivrEditor. Renders nothing when null. */
   editor: Editor | null;
-  /** Gap in pixels between pages in paged mode. Default: 24. */
+  /** Gap between pages in paged mode, in page units: it scales with the zoom. Default: 24. */
   gap?: number;
   /** Extra tiles to keep above/below the viewport. Default: 1. */
   overscan?: number;
@@ -18,6 +18,11 @@ export interface ScrivrProps {
    * e.g. `pageStyle={{ boxShadow: "none", border: "1px solid #e8eaed" }}`
    */
   pageStyle?: Partial<CSSStyleDeclaration>;
+  /**
+   * Ctrl/Cmd + wheel and a trackpad pinch zoom the document about the pointer,
+   * instead of the browser zooming the whole page. Default: true.
+   */
+  zoomGestures?: boolean;
   className?: string;
   style?: React.CSSProperties;
 }
@@ -38,6 +43,7 @@ export function Scrivr({
   overscan = 1,
   showMarginGuides = false,
   pageStyle = {},
+  zoomGestures = true,
   className,
   style,
 }: ScrivrProps) {
@@ -47,7 +53,7 @@ export function Scrivr({
     if (!editor || !containerRef.current) return;
 
     editor.mount(containerRef.current);
-    const tm = new TileManager(editor, containerRef.current, { gap, overscan, showMarginGuides, pageStyle });
+    const tm = new TileManager(editor, containerRef.current, { gap, overscan, showMarginGuides, pageStyle, zoomGestures });
 
     return () => {
       tm.destroy();
@@ -57,7 +63,7 @@ export function Scrivr({
   // time only. Adding it would recreate the entire engine on every parent render
   // (inline object props always have a new reference), causing scroll-to-top.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editor, gap, overscan, showMarginGuides]);
+  }, [editor, gap, overscan, showMarginGuides, zoomGestures]);
 
   return (
     <div

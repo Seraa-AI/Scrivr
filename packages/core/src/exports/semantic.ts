@@ -33,11 +33,15 @@ export type SemanticUnitType =
 export type SemanticRole = "body" | "header" | "footer";
 
 /**
- * Text view exported by the semantic lane. In v1 this is the proposed review
- * view: pending inserts are included, pending deletes are excluded from text
- * and preserved in `changes`.
+ * Which document the semantic lane reads.
+ *
+ * - `"proposed"` (default): every pending proposal as if accepted — pending
+ *   inserts in the text, pending deletes out of it and kept in `changes`.
+ * - `"original"`: the document as agreed before any pending proposal, as
+ *   rejecting all of them would leave it. It carries no `changes`; there is
+ *   nothing pending in it. Only the proposed view is editable.
  */
-export type SemanticTextView = "proposed";
+export type SemanticTextView = "proposed" | "original";
 
 /** A block that heads a section, as a unit holds it. */
 export interface SemanticHeading {
@@ -394,6 +398,12 @@ export interface SemanticHandlers {
    * proposed for removal. Spans then read the text as it would be.
    */
   isMarkRemoved?: (mark: PmMark) => boolean;
+  /**
+   * The document as `view` reads it, or null when this contribution has
+   * nothing to change for it. Review records contribute the original view:
+   * the document their own Reject of every pending proposal leaves.
+   */
+  documentIn?: (doc: PmNode, view: SemanticTextView) => PmNode | null;
 }
 
 // ── Producer context ─────────────────────────────────────────────────────────
@@ -439,4 +449,6 @@ export interface SemanticExportOptions {
    * @default true
    */
   groupBlocks?: boolean;
+  /** Which document to read. @default "proposed" */
+  view?: SemanticTextView;
 }

@@ -23,6 +23,8 @@ import {
   type PageConfig,
 } from "../layout/PageLayout";
 
+import { pageRegionAt, type PagePoint } from "../layout/pagePoint";
+import type { Editor } from "../Editor";
 import { Extension } from "../extensions/Extension";
 import type { FontModifier } from "../extensions/types";
 
@@ -561,11 +563,22 @@ describe("TileManager — body click deactivates surface", () => {
     tm.update();
 
     // y=500 is well below contentTop (~132) — body area, not chrome.
-    const consumed = routePageClick(setup.editor, 1, 400, 500, 1);
+    const consumed = routePageClick(setup.editor, pointAt(setup.editor, 500), 1);
     expect(consumed).toBe(false);
     expect(activateSpy).toHaveBeenCalledWith(null);
 
     tm.destroy();
+    setup.cleanup();
+  });
+
+  it("clicking outside the pages deactivates an active surface, as a body click does", () => {
+    const setup = makeRendererTestSetup({ scrollParent: true });
+    registerActiveSurface(setup.editor);
+    const activateSpy = vi.spyOn(setup.editor.surfaces, "activate");
+
+    expect(routePageClick(setup.editor, { page: 1, x: 400, y: 5000, region: "outside" }, 1)).toBe(false);
+    expect(activateSpy).toHaveBeenCalledWith(null);
+
     setup.cleanup();
   });
 
@@ -584,15 +597,20 @@ describe("TileManager — body click deactivates surface", () => {
     // y=90 is inside the header band (margins.top=72 + headerHeight=60 → contentTop=132).
     // All click counts in the chrome band with an active surface fall through —
     // they don't deactivate.
-    expect(routePageClick(setup.editor, 1, 400, 90, 1)).toBe(false);
-    expect(routePageClick(setup.editor, 1, 400, 90, 2)).toBe(false);
-    expect(routePageClick(setup.editor, 1, 400, 90, 3)).toBe(false);
+    expect(routePageClick(setup.editor, pointAt(setup.editor, 90), 1)).toBe(false);
+    expect(routePageClick(setup.editor, pointAt(setup.editor, 90), 2)).toBe(false);
+    expect(routePageClick(setup.editor, pointAt(setup.editor, 90), 3)).toBe(false);
     expect(activateSpy).not.toHaveBeenCalledWith(null);
 
     tm.destroy();
     setup.cleanup();
   });
 });
+
+/** A page-1 point at `y`, classified as the pointer controller classifies it. */
+function pointAt(editor: Editor, y: number): PagePoint {
+  return { page: 1, x: 400, y, region: pageRegionAt(editor.layout, 1, 400, y) ?? "outside" };
+}
 
 describe("TileManager — margin click activation (no policy)", () => {
   beforeEach(() => {
@@ -611,7 +629,7 @@ describe("TileManager — margin click activation (no policy)", () => {
     // y=40 is inside margins.top (72) — the potential header strip. With no
     // headerFooter policy, headerHeight=0, but the widened hit-test still
     // treats the margin strip as the header band.
-    const consumed = routePageClick(setup.editor, 1, 400, 40, 2);
+    const consumed = routePageClick(setup.editor, pointAt(setup.editor, 40), 2);
     expect(consumed).toBe(true);
     expect(emitSpy).toHaveBeenCalledWith(
       "chromeClick",
@@ -627,7 +645,7 @@ describe("TileManager — margin click activation (no policy)", () => {
     const pageConfig = setup.editor.layout.pageConfig;
 
     const footerY = pageConfig.pageHeight - pageConfig.margins.bottom + 20;
-    const consumed = routePageClick(setup.editor, 1, 400, footerY, 2);
+    const consumed = routePageClick(setup.editor, pointAt(setup.editor, footerY), 2);
     expect(consumed).toBe(true);
     expect(emitSpy).toHaveBeenCalledWith(
       "chromeClick",
@@ -637,12 +655,25 @@ describe("TileManager — margin click activation (no policy)", () => {
     setup.cleanup();
   });
 
+  it("does not emit chromeClick on a double-click in the gap between pages", () => {
+    const setup = makeRendererTestSetup({ scrollParent: true });
+    const emitSpy = vi.spyOn(setup.editor, "emit");
+    const { pageHeight } = setup.editor.layout.pageConfig;
+
+    // The pointer controller clamps a gap point to the page bottom; its region still says gap.
+    const consumed = routePageClick(setup.editor, { page: 1, x: 400, y: pageHeight, region: "gap" }, 2);
+    expect(consumed).toBe(false);
+    expect(emitSpy).not.toHaveBeenCalledWith("chromeClick", expect.anything());
+
+    setup.cleanup();
+  });
+
   it("does not emit chromeClick on body double-click (between margins)", () => {
     const setup = makeRendererTestSetup({ scrollParent: true });
     const emitSpy = vi.spyOn(setup.editor, "emit");
 
     // y=400 is well inside the body (between margins.top=72 and footer strip).
-    const consumed = routePageClick(setup.editor, 1, 400, 400, 2);
+    const consumed = routePageClick(setup.editor, pointAt(setup.editor, 400), 2);
     expect(consumed).toBe(false);
     expect(emitSpy).not.toHaveBeenCalledWith("chromeClick", expect.anything());
 
@@ -663,7 +694,7 @@ describe("TileManager — margin click activation (no policy)", () => {
 
     // y=100 sits between margins.top (72) and the band-resolved contentTop (132).
     // With bands present, that's still inside the header — must emit chromeClick.
-    expect(routePageClick(setup.editor, 1, 400, 100, 2)).toBe(true);
+    expect(routePageClick(setup.editor, pointAt(setup.editor, 100), 2)).toBe(true);
     expect(emitSpy).toHaveBeenCalledWith(
       "chromeClick",
       expect.objectContaining({ band: "header" }),
@@ -865,5 +896,96 @@ describe("what chrome painting is given", () => {
       tiles.destroy();
       setup.cleanup();
     }
+  });
+});
+
+describe("pagesInView — what a reader actually has on screen", () => {
+  const GAP = 20;
+  const mountScrolled = (pageConfig?: PageConfig, offsetInScrollParent = 0) => {
+    const setup = makeRendererTestSetup({ scrollParent: true, offsetInScrollParent, ...(pageConfig ? { pageConfig } : {}) });
+    const seen: Array<{ first: number; last: number }> = [];
+    setup.editor.on("pagesInView", ({ first, last }) => seen.push({ first, last }));
+    const tm = new TileManager(setup.editor, setup.container, { gap: GAP });
+    const scrollTo = (top: number) => {
+      setup.scrollParent!.scrollTop = top;
+      tm.update();
+    };
+    return { setup, seen, tm, scrollTo, slot: setup.pageConfig.pageHeight + GAP };
+  };
+
+  it("reports the first page on the first paint, and how many there are", () => {
+    const { setup, seen, tm } = mountScrolled();
+    const counts: number[] = [];
+    setup.editor.on("pagesInView", ({ pageCount }) => counts.push(pageCount));
+    tm.update();
+    expect(seen).toEqual([{ first: 1, last: 1 }]);
+    expect(counts).toEqual([setup.editor.layout.pages.length]);
+    tm.destroy();
+    setup.cleanup();
+  });
+
+  it("reports every page the viewport overlaps, without overscan", () => {
+    const { setup, seen, tm, scrollTo, slot } = mountScrolled();
+    // Viewport is 800px: starts 500px into page 2, ends past the top of page 3.
+    scrollTo(slot + 500);
+    expect(seen.at(-1)).toEqual({ first: 2, last: 3 });
+    tm.destroy();
+    setup.cleanup();
+  });
+
+  it("measures from where the pages begin, below the scroll parent's padding", () => {
+    const { setup, seen, tm, scrollTo, slot } = mountScrolled(undefined, 300);
+    // 300px of padding above page 1: the viewport ends 100px short of page 3.
+    scrollTo(slot + 600);
+    expect(seen.at(-1)).toEqual({ first: 2, last: 2 });
+    tm.destroy();
+    setup.cleanup();
+  });
+
+  it("measures in page units at a zoom, the padding above the pages included", () => {
+    const { setup, seen, tm, scrollTo, slot } = mountScrolled(undefined, 300);
+    setup.editor.setZoom(2);
+    // 300 screen px of padding is 150 page units; the view's top is 100 into page 2.
+    scrollTo((slot + 100) * 2 + 300);
+    expect(seen.at(-1)).toEqual({ first: 2, last: 2 });
+    tm.destroy();
+    setup.cleanup();
+  });
+
+  it("reports nothing while the viewport has no height", () => {
+    const { setup, seen, tm } = mountScrolled();
+    Object.defineProperty(setup.scrollParent!, "clientHeight", { value: 0, configurable: true });
+    tm.update();
+    expect(seen).toEqual([]);
+    tm.destroy();
+    setup.cleanup();
+  });
+
+  it("does not count a page whose bottom is above the viewport", () => {
+    const { setup, seen, tm, scrollTo } = mountScrolled();
+    // The viewport starts in the gap under page 1.
+    scrollTo(setup.pageConfig.pageHeight + 5);
+    expect(seen.at(-1)).toEqual({ first: 2, last: 2 });
+    tm.destroy();
+    setup.cleanup();
+  });
+
+  it("stays quiet while the range does not change", () => {
+    const { setup, seen, tm, scrollTo } = mountScrolled();
+    tm.update();
+    scrollTo(10);
+    scrollTo(20);
+    expect(seen).toHaveLength(1);
+    tm.destroy();
+    setup.cleanup();
+  });
+
+  it("reports nothing in pageless mode, which has no pages", () => {
+    const { setup, seen, tm, scrollTo } = mountScrolled(defaultPagelessConfig);
+    tm.update();
+    scrollTo(500);
+    expect(seen).toEqual([]);
+    tm.destroy();
+    setup.cleanup();
   });
 });

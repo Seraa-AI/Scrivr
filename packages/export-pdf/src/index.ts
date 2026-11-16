@@ -51,6 +51,7 @@ import {
   markerAnchorOf,
 } from "@scrivr/core";
 import { createDefaultImageResolver } from "./fetchImage";
+import { embedImage } from "./embedImage";
 import type { ImageResolver } from "./fetchImage";
 import type { PdfNodeHandler, PdfChromeHandler } from "./augmentation";
 import { PT_PER_PX, createDrawHelpers, parseCssColor } from "./context";
@@ -479,25 +480,9 @@ async function embedImages(
   collectFromBlocks(chromeBlocks(layout.chromePayloads));
 
   const result = new Map<string, PDFImage | null>();
-
-  await Promise.all(
-    Array.from(srcs).map(async (src) => {
-      const fetched = await resolveImage(src);
-      if (!fetched) {
-        result.set(src, null);
-        return;
-      }
-      try {
-        const image =
-          fetched.format === "png"
-            ? await pdfDoc.embedPng(fetched.bytes)
-            : await pdfDoc.embedJpg(fetched.bytes);
-        result.set(src, image);
-      } catch {
-        result.set(src, null);
-      }
-    }),
-  );
-
+  await Promise.all(Array.from(srcs).map(async (src) => result.set(src, await embedImage(pdfDoc, resolveImage, src))));
   return result;
 }
+
+export { exportExecutedPdf } from "./executed";
+export type { ExecutedPdfOptions, ExecutedPdfRefusal, ExecutedPdfResult } from "./executed";

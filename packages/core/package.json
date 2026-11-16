@@ -1,6 +1,6 @@
 {
   "name": "@scrivr/core",
-  "version": "1.0.22",
+  "version": "1.0.23",
   "description": "High-performance canvas-based document editor engine",
   "license": "Apache-2.0",
   "author": "Seraa AI <hello@seraa.ai>",
@@ -79,6 +79,7 @@
     "prosemirror-model": "^1.25.4",
     "prosemirror-schema-list": "^1.5.1",
     "prosemirror-state": "^1.4.4",
-    "prosemirror-transform": "^1.11.0"
+    "prosemirror-transform": "^1.11.0",
+    "zod": "^4.3.6"
   }
 }

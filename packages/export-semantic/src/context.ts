@@ -219,8 +219,7 @@ function extractContent(node: PmNode, readers: Readers, ctx: UnitCtx): Extracted
  * Build the producer context: the bridge to the editor's markdown serializer
  * (reuse, don't reinvent) plus the mark-aware inline extractor.
  */
-export function createUnitCtx(editor: IBaseEditor, handlers: Partial<Readers> = {}): UnitCtx {
-  const doc = editor.getState().doc;
+export function createUnitCtx(editor: IBaseEditor, handlers: Partial<Readers> = {}, doc: PmNode = editor.getState().doc): UnitCtx {
   const schema = doc.type.schema;
   const serializer = editor.getMarkdownSerializer();
   const readers: Readers = {

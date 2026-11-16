@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { Node } from "prosemirror-model";
 import { ExtensionManager } from "../extensions/ExtensionManager";
 import { StarterKit } from "../extensions/StarterKit";
-import { createMeasurer } from "../test-utils";
+import { createMeasurer, expectSamePosition } from "../test-utils";
 import { runPipeline, defaultPageConfig } from "./PageLayout";
 import type { DocumentLayout } from "./PageLayout";
 import type { AnchoredObjectPlacement } from "./AnchoredObjects";
@@ -191,7 +191,7 @@ describe("an image anchored in a table cell", () => {
     const below = rowBlock(l, "B").block;
     expect(above.y).toBe(rowBlock(plain, "A").block.y);
     expect(r.y).toBe(rowBlock(plain, "R").block.y);
-    expect(below.y).toBe(r.y + r.height);
+    expectSamePosition(below.y, r.y + r.height);
     const plainSecond = cellOf(rowBlock(plain, "R").block, 1);
     expect(cellOf(r, 1).x).toBe(plainSecond.x);
     expect(cellOf(r, 1).width).toBe(plainSecond.width);

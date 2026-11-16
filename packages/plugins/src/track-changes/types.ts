@@ -253,9 +253,18 @@ export type RootChange = TrackedChange[];
 
 // ── Plugin options / state ────────────────────────────────────────────────────
 
+/**
+ * How tracked changes show on the canvas: `"all"` paints every change in its
+ * author's colour; `"none"` paints nothing, for a host that draws its own
+ * review UI. Changes are recorded either way.
+ */
+export type TrackChangesRenderMode = "all" | "none";
+
 export interface TrackChangesOptions {
   debug?: boolean;
   userID: string;
+  /** Default `"all"`. */
+  renderMode?: TrackChangesRenderMode;
   skipTrsWithMetas?: (PluginKey | string)[];
   initialStatus?: TrackChangesStatus;
   canAcceptReject?: boolean;

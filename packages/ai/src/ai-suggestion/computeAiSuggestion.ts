@@ -216,6 +216,7 @@ export function computeAiSuggestion(
   if (resultBlocks.length === 0) return null;
 
   return {
+    author: options.authorID,
     blocks: resultBlocks,
   };
 }

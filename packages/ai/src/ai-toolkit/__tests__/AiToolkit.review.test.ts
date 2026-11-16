@@ -87,7 +87,7 @@ describe("an agent sees structural changes", () => {
     const { editor, ai } = build([para("p", "Alpha"), para("p", "Beta")]);
     editor.applyTransaction(editor.getState().tr.delete(0, editor.getState().doc.child(0).nodeSize));
     const before = editor.getState().doc;
-    expect(ai.applyRichEdit(ai.getRichBlocks())).toEqual({ applied: false, changed: [], stale: [], notFound: [], rejected: [] });
+    expect(ai.applyRichEdit(ai.getRichBlocks())).toEqual({ applied: false, changed: [], stale: [], notFound: [], rejected: [], wrongView: [] });
     expect(editor.getState().doc.eq(before)).toBe(true);
   });
 
@@ -97,7 +97,7 @@ describe("an agent sees structural changes", () => {
     const firstItem = editor.getState().doc.child(0).child(0);
     editor.applyTransaction(editor.getState().tr.delete(1, 1 + firstItem.nodeSize));
     const before = editor.getState().doc;
-    expect(ai.applyRichEdit(ai.getRichBlocks())).toEqual({ applied: false, changed: [], stale: [], notFound: [], rejected: [] });
+    expect(ai.applyRichEdit(ai.getRichBlocks())).toEqual({ applied: false, changed: [], stale: [], notFound: [], rejected: [], wrongView: [] });
     expect(editor.getState().doc.eq(before)).toBe(true);
   });
 
@@ -139,7 +139,7 @@ describe("an agent sees structural changes", () => {
     }));
     expect(units[0]?.parts?.length).toBe(2);
     const result = ai.applyRichEdit(units);
-    expect(result).toEqual({ applied: false, changed: [], stale: [], notFound: [], rejected: [] });
+    expect(result).toEqual({ applied: false, changed: [], stale: [], notFound: [], rejected: [], wrongView: [] });
   });
 
   it("nor a returned table whose cells left out their changes", () => {
@@ -164,7 +164,7 @@ describe("an agent sees structural changes", () => {
       ...(unit.cells ? { cells: { rows: unit.cells.rows.map((row) => ({ cells: row.cells.map(({ changes: _cellChanges, ...c }) => c) })) } } : {}),
     }));
     expect(units[0]?.cells?.rows[0]?.cells[0]?.text).toBe("NEW a1");
-    expect(ai.applyRichEdit(units)).toEqual({ applied: false, changed: [], stale: [], notFound: [], rejected: [] });
+    expect(ai.applyRichEdit(units)).toEqual({ applied: false, changed: [], stale: [], notFound: [], rejected: [], wrongView: [] });
   });
 });
 

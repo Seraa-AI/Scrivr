@@ -89,7 +89,6 @@ Update this list as each item lands.
 
 | Where | What it knows by name | Next step |
 |---|---|---|
-| `input/InputBridge.ts` cut | `instanceof CellSelection` → the Table's `clearSelectedCellsTr` | the selection's own `replace()`, so `deleteSelection` clears cells (**next PR**) |
 | `model/sanitizeDocUrls.ts` | per-node URL gates (`image` → `safeImageUrl`, `link` → `safeUrl`) | a URL-attr declaration on the spec |
 | `export-semantic` walker | editable part types (`paragraph`, `heading`, `codeBlock`) and list/table container labels | part declarations, after tables |
 | `layout/FontConfig.ts` `getBlockStyle` | falls back to the `paragraph` style for a node with none | the schema's default textblock |
