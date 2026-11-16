@@ -44,7 +44,7 @@ export function alignToJc(align: unknown): string | null {
 /**
  * Report the textblock attrs the Paragraph and Heading export handlers do not
  * write yet, so a file that loses them says so. Shared because both nodes
- * carry the same attrs and both handlers write only `align`.
+ * carry the same attrs and neither handler writes these.
  */
 export function reportUnwrittenTextblockAttrs(node: PmNode, ctx: DocxContext): void {
   const kind = node.type.name;

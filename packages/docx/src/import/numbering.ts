@@ -14,7 +14,7 @@
  * ordinal-style formats to `"ordered"`; everything else to `"bullet"`.
  */
 
-import { parseOoxml, findChild, findChildren, attr, type OoxmlElement, type ReadTracker } from "./xml";
+import { parsePart, findChild, findChildren, attr, type OoxmlElement, type ReadTracker } from "./xml";
 
 export type ListType = "bullet" | "ordered";
 
@@ -36,7 +36,7 @@ function intAttr(el: OoxmlElement | undefined, name: string): number | undefined
 
 export function readNumberingMap(xml: string | undefined, tracker?: ReadTracker): NumberingResolver {
   if (!xml) return NONE;
-  const root = parseOoxml(xml, tracker && { tracker, part: "word/numbering.xml" });
+  const root = parsePart(xml, "word/numbering.xml", tracker);
   if (!root || root.name !== "w:numbering") return NONE;
 
   // abstractNumId → ilvl → w:start

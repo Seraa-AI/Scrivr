@@ -166,18 +166,19 @@ export const FontFamily = Extension.create<FontFamilyOptions>({
         // yet, so it stays a drop.
         const named = Object.keys(attrs).filter((name) => name !== "hint");
         if (named.length === 0) ctx.report.kept(mark.kind);
-        else if (named.some((name) => name.endsWith("Theme"))) ctx.report.dropped(mark.kind, "theme font not resolved");
+        // OOXML spells one of them `cstheme`.
+        else if (named.some((name) => name.toLowerCase().endsWith("theme"))) ctx.report.dropped(mark.kind, "theme font not resolved");
         else ctx.report.dropped(mark.kind, "no Latin font named");
         return null;
       }
       const t = ctx.schema.marks["fontFamily"];
       if (!t) return null;
-      // Word can name a face per script; the editor draws one. East Asian or
-      // complex-script text set in another face is drawn in this one.
+      // Word can name a face per range of characters; the editor draws one, so
+      // text Word would set in any other face is drawn in this one.
       const otherFaces = [attrs["hAnsi"], attrs["eastAsia"], attrs["cs"]]
         .map(readFontFamilyAttr)
         .filter((face) => face !== undefined && face !== family);
-      if (otherFaces.length > 0) ctx.report.changed(mark.kind, "only the Latin font kept");
+      if (otherFaces.length > 0) ctx.report.changed(mark.kind, "one font kept of several named");
       return t.create({ family });
     };
     return { docx: { marks: { rFonts: handler } } };

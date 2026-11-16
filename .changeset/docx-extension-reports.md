@@ -17,8 +17,8 @@ The built-in extensions report what their DOCX handlers could not carry across, 
   - Underline notes a style other than single (`"double" underline imported as single`); the parser now keeps an underline's `w:val` so it can.
   - FontSize notes a size rounded to a whole pixel and drops one that is not a size.
   - Highlight notes a colour it cannot keep when the editor has one highlight colour, and a shading pattern drawn as its fill alone.
-  - FontFamily notes a run whose East Asian or complex-script face differs from the one kept. It drops a theme font as `"theme font not resolved"` and an `rFonts` with no Latin face as `"no Latin font named"`, where both were `"handler returned nothing"` before.
+  - FontFamily notes a run that names several faces, of which the editor keeps one (`"one font kept of several named"`). It drops a theme font as `"theme font not resolved"` and an `rFonts` with no Latin face as `"no Latin font named"`, where both were `"handler returned nothing"` before.
   - Link drops a hyperlink with no usable target as `"no usable target"`.
-  - Image drops one it cannot find as `"image part not found"`, or `"media option is drop"` under that option.
-  - CodeBlock drops an inline object a code block cannot hold and notes the formatting it removes.
-- **`report.dropped(kind, reason)` takes content back out of what was counted kept** when a handler leaves out something it was handed inside its item, so an image a code block discards is counted dropped, not kept.
+  - Image drops one it cannot find as `"image part not found"`, one with no reference as `"no image reference"`, or `"media option is drop"` under that option.
+  - CodeBlock drops the run properties and inline objects a code block cannot hold, in Word's vocabulary (`b`, `image`, `field`). The code block style's own font is what the node draws and is not reported.
+- **`report.dropped(kind, reason)` takes content back out of what was counted kept** when a handler leaves out something of another kind it was handed inside its item, so bold or an image a code block discards is counted dropped, not kept. Content already counted dropped where it was built is not dropped twice.

@@ -836,7 +836,10 @@ export const Image = Extension.create({
             : "Image inline had neither src nor relId",
           nodeType: "image",
         });
-        ctx.report.dropped("image", ctx.options.media === "drop" ? "media option is drop" : "image part not found");
+        ctx.report.dropped(
+          "image",
+          !i.relId ? "no image reference" : ctx.options.media === "drop" ? "media option is drop" : "image part not found",
+        );
         return null;
       }
 

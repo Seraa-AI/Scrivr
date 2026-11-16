@@ -29,7 +29,7 @@ import type {
   DocxReport,
 } from "@scrivr/core";
 import { readDocxPackage, resolveOpcTarget } from "./opc";
-import { parseOoxml, findChild, attr, ReadTracker } from "./xml";
+import { parsePart, findChild, attr, ReadTracker, type OoxmlElement } from "./xml";
 import {
   parseDocumentBody,
   parseBlockContainer,
@@ -130,7 +130,7 @@ export async function importDocx(
         ctx.diagnostics.list(),
       );
     }
-    const root = parseOoxml(documentXml, tracker && { tracker, part: "word/document.xml" });
+    const root = parsePart(documentXml, "word/document.xml", tracker);
     if (!root || root.name !== "w:document") {
       throw new DocxImportError(
         "Invalid DOCX: word/document.xml does not start with <w:document>",
@@ -154,6 +154,30 @@ export async function importDocx(
     // Installed with the handler set, before the lifecycle hooks below, so a
     // contribution can walk blocks from `onBeforeImport` as it can `walkPart`.
     ctx.walkBlocks = createBlockWalker(ctx, handlers);
+
+    // One tree per part: a part two section slots share is parsed, and
+    // tracked, once.
+    const partTrees = new Map<string, OoxmlElement | null>();
+    const partTree = (path: string, xml: string): OoxmlElement | null => {
+      if (!partTrees.has(path)) partTrees.set(path, parsePart(xml, path, tracker));
+      return partTrees.get(path) ?? null;
+    };
+    if (tracker) {
+      // Every header and footer the document references, and the parts the
+      // import never opens, so a part lost whole shows up as unread whether or
+      // not an extension walks it.
+      for (const rel of rels.list()) {
+        if ((rel.type !== "header" && rel.type !== "footer") || rel.targetMode === "External") continue;
+        const path = resolveOpcTarget("word/document.xml", rel.target);
+        const xml = pkg.readText(path);
+        if (xml !== undefined) partTree(path, xml);
+      }
+      for (const path of UNOPENED_CONTENT_PARTS) {
+        const xml = pkg.readText(path);
+        if (xml !== undefined) parsePart(xml, path, tracker);
+      }
+    }
+
     ctx.walkPart = (relId: string): PmNode | null => {
       const rel = rels.get(relId);
       if (!rel) {
@@ -181,7 +205,7 @@ export async function importDocx(
         });
         return null;
       }
-      const partRoot = parseOoxml(partXml, tracker && { tracker, part: path });
+      const partRoot = partTree(path, partXml);
       if (!partRoot) return null;
       const expectedRoot = rel.type === "header" ? "w:hdr" : "w:ftr";
       if (partRoot.name !== expectedRoot) {
@@ -307,6 +331,9 @@ function isUnsupportedCode(code: string): boolean {
   return UNSUPPORTED_CODES.has(code);
 }
 
+/** Word content parts the import does not read, tracked so what they hold is reported. */
+const UNOPENED_CONTENT_PARTS = ["word/footnotes.xml", "word/endnotes.xml", "word/comments.xml"];
+
 /** `word/header1.xml` → `word/_rels/header1.xml.rels`. */
 function partRelsPath(partPath: string): string {
   const slash = partPath.lastIndexOf("/");
@@ -314,9 +341,9 @@ function partRelsPath(partPath: string): string {
 }
 
 /** Read `<w:evenAndOddHeaders/>` from settings.xml — activates even-page slots. */
-function readEvenAndOddHeaders(settingsXml: string | undefined, tracker: ReadTracker | undefined): boolean {
+function readEvenAndOddHeaders(settingsXml: string | undefined, tracker?: ReadTracker): boolean {
   if (settingsXml === undefined) return false;
-  const root = parseOoxml(settingsXml, tracker && { tracker, part: "word/settings.xml" });
+  const root = parsePart(settingsXml, "word/settings.xml", tracker);
   if (!root) return false;
   const el = findChild(root, "w:evenAndOddHeaders");
   return el ? isOoxmlOn(attr(el, "w:val")) : false;

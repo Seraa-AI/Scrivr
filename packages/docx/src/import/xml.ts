@@ -37,15 +37,17 @@ const parser = new XMLParser({
  * with `preserveOrder: true` emits the declaration as its own pseudo-node
  * keyed by `?xml`.
  */
-export function parseOoxml(
-  xml: string,
-  tracking?: { tracker: ReadTracker; part: string },
-): OoxmlElement | null {
+export function parseOoxml(xml: string): OoxmlElement | null {
   const raw = parser.parse(xml);
   if (!Array.isArray(raw)) return null;
   const normalized = normalizeArray(raw);
-  const root = normalized.find((el) => !el.name.startsWith("?")) ?? null;
-  return root && tracking ? tracking.tracker.track(tracking.part, root) : root;
+  return normalized.find((el) => !el.name.startsWith("?")) ?? null;
+}
+
+/** `parseOoxml` for one package part, watched by `tracker` when there is one. */
+export function parsePart(xml: string, part: string, tracker: ReadTracker | undefined): OoxmlElement | null {
+  const root = parseOoxml(xml);
+  return root && tracker ? tracker.track(part, root) : root;
 }
 
 // ── Read tracking ──────────────────────────────────────────────────────────
@@ -61,10 +63,16 @@ const trackedElements = new WeakMap<object, { tracker: ReadTracker; target: Ooxm
  * report what it never looked at without the parser saying so: the parser
  * walks the tree it is given, and that tree notices.
  *
- * Reading an element's `attrs` or `children` reads it. Matching its `name`
- * examines it, which reads all of it when it has nothing but a name. The
- * search helpers below look through the untracked tree and mark only what
- * they return, so the siblings a search passed over stay unread.
+ * Reading an element's `attrs` or `children` reads it. Reading its `name`
+ * only examines it: a proxy cannot tell a name that was matched and acted on
+ * from one compared and passed over, so an element whose name is all it says
+ * is read only when the import marks it handled (`markRead`). The search
+ * helpers below look through the untracked tree: the element searched is
+ * read, a hit is examined like any matched name, and the siblings a search
+ * passed over stay unread.
+ *
+ * Read means looked at, not kept: a property the import reads and then
+ * decides not to use is still read.
  */
 export class ReadTracker {
   private readonly roots: Array<{ part: string; root: OoxmlElement }> = [];
@@ -78,26 +86,39 @@ export class ReadTracker {
     return this.wrap(root);
   }
 
-  /** `element`, as handed back by a search: read. */
-  returned(element: OoxmlElement): OoxmlElement {
+  /** `element`'s content was read. */
+  read(element: OoxmlElement): void {
     this.states.set(element, "read");
+  }
+
+  /** `element`'s name was matched; returns it tracked, for the caller to read on. */
+  matched(element: OoxmlElement): OoxmlElement {
+    this.examine(element);
     return this.wrap(element);
   }
 
-  /** What nobody read, in the order the parts were tracked and then document order. */
+  /**
+   * What nobody read, in the order the parts were tracked and then document
+   * order, with what is dropped on purpose listed as `ignored`.
+   */
   unread(): DocxUnreadElement[] {
     const entries = new Map<string, DocxUnreadElement>();
     const record = (part: string, path: string, outcome: DocxUnreadElement["outcome"]) => {
-      const key = `${part}\n${path}\n${outcome}`;
+      const key = `${part}
+${path}
+${outcome}`;
       const entry = entries.get(key);
       if (entry) entry.count += 1;
       else entries.set(key, { part, path, outcome, count: 1 });
     };
     const visit = (part: string, element: OoxmlElement, parent: string | undefined, path: string) => {
-      if (isIgnored(parent, element.name)) return;
+      if (isIgnored(parent, element.name)) {
+        record(part, path, "ignored");
+        return;
+      }
       const state = this.states.get(element);
       if (state !== "read") {
-        record(part, path, state === "examined" ? "examined" : "unread");
+        record(part, path, state ?? "unread");
         return;
       }
       for (const child of element.children) {
@@ -114,9 +135,9 @@ export class ReadTracker {
     const proxy = new Proxy(element, {
       get: (target, key, receiver) => {
         if (key === "name") this.examine(target);
-        else if (key === "attrs") this.states.set(target, "read");
+        else if (key === "attrs") this.read(target);
         else if (key === "children") {
-          this.states.set(target, "read");
+          this.read(target);
           return this.childrenOf(target);
         }
         return Reflect.get(target, key, receiver);
@@ -128,9 +149,7 @@ export class ReadTracker {
   }
 
   private examine(element: OoxmlElement): void {
-    if (this.states.get(element) === "read") return;
-    const bare = element.children.length === 0 && Object.keys(element.attrs).length === 0;
-    this.states.set(element, bare ? "read" : "examined");
+    if (this.states.get(element) !== "read") this.states.set(element, "examined");
   }
 
   private childrenOf(element: OoxmlElement): OoxmlChild[] {
@@ -143,18 +162,34 @@ export class ReadTracker {
 }
 
 /**
- * The children a search should look through, and a way to hand back what it
- * found. Searching an element reads it; for a tracked one the search runs over
- * its untracked children, so the ones it passes over stay unread.
+ * Mark an element whose name is all it says — a run's `<w:tab/>` — as read,
+ * where the import handles it. Does nothing to an untracked element.
+ */
+export function markRead(el: OoxmlElement): void {
+  const tracked = trackedElements.get(el);
+  if (tracked) tracked.tracker.read(tracked.target);
+}
+
+/**
+ * The children a search should look through, and how to hand back what it
+ * found or went through. Searching an element reads it; for a tracked one the
+ * search runs over its untracked children, so the ones it passes over stay
+ * unread.
  */
 function searchable(el: OoxmlElement): {
   children: OoxmlChild[];
   found: (element: OoxmlElement) => OoxmlElement;
+  searchedIn: (element: OoxmlElement) => void;
 } {
   const tracked = trackedElements.get(el);
-  if (!tracked) return { children: el.children, found: (element) => element };
-  tracked.tracker.returned(tracked.target);
-  return { children: tracked.target.children, found: (element) => tracked.tracker.returned(element) };
+  if (!tracked) return { children: el.children, found: (element) => element, searchedIn: () => {} };
+  const { tracker, target } = tracked;
+  tracker.read(target);
+  return {
+    children: target.children,
+    found: (element) => tracker.matched(element),
+    searchedIn: (element) => tracker.read(element),
+  };
 }
 
 // fast-xml-parser preserveOrder emits each node as an object with one
@@ -213,6 +248,17 @@ export function findChild(el: OoxmlElement, name: string): OoxmlElement | undefi
   return undefined;
 }
 
+/**
+ * Whether a direct child with the given name is there — for an element whose
+ * presence is all the import takes from it, such as `<w:tblHeader/>`, so
+ * finding it reads it.
+ */
+export function hasChild(el: OoxmlElement, name: string): boolean {
+  const child = findChild(el, name);
+  if (child) markRead(child);
+  return child !== undefined;
+}
+
 /** All direct children with the given name. */
 export function findChildren(el: OoxmlElement, name: string): OoxmlElement[] {
   const { children, found } = searchable(el);
@@ -229,8 +275,8 @@ export function findChildren(el: OoxmlElement, name: string): OoxmlElement[] {
  * misses it.
  */
 export function findDescendant(el: OoxmlElement, name: string): OoxmlElement | undefined {
-  const { children, found } = searchable(el);
-  // The elements from `el` down to the hit, which the hit was read through.
+  const { children, found, searchedIn } = searchable(el);
+  // The elements from `el` down to the hit: the search looked inside each.
   const search = (siblings: OoxmlChild[]): OoxmlElement[] | undefined => {
     for (const child of siblings) {
       if (typeof child === "string") continue;
@@ -241,9 +287,10 @@ export function findDescendant(el: OoxmlElement, name: string): OoxmlElement | u
     return undefined;
   };
   const path = search(children);
-  if (!path) return undefined;
-  const hits = path.map(found);
-  return hits[hits.length - 1];
+  const hit = path?.pop();
+  if (!path || !hit) return undefined;
+  path.forEach(searchedIn);
+  return found(hit);
 }
 
 /** Read an attribute value, or `undefined` if absent. */

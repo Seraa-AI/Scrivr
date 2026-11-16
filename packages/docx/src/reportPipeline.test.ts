@@ -36,6 +36,7 @@ import {
   type DocxReportCount,
   type DocxReportEntry,
   type DocxReporter,
+  type DocxUnreadElement,
   type HandlerOwner,
   type WalkerHandlerOwners,
   type WalkerHandlers,
@@ -720,7 +721,7 @@ describe("importDocx — what each extension says it could not keep", () => {
       `shd: pattern "pct25" not kept`,
       "shd: color not kept: the editor has one highlight color",
     ]);
-    expect(changesBy(report, "fontFamily")).toEqual(["rFonts: only the Latin font kept"]);
+    expect(changesBy(report, "fontFamily")).toEqual(["rFonts: one font kept of several named"]);
   });
 
   it("says why it built nothing for formatting it cannot read", async () => {
@@ -754,8 +755,35 @@ describe("importDocx — what each extension says it could not keep", () => {
     const { report, doc } = await importDocx(new ServerEditor(), zipSync(entries));
 
     expect(doc.child(0).type.name).toBe("codeBlock");
-    expect(report.counts["image"]).toEqual({ kept: 0, dropped: 1, changed: 0 });
-    expect(report.entries).toContainEqual({ outcome: "dropped", kind: "image", reason: "a code block holds only text", owner: "codeBlock", count: 1 });
-    expect(changesBy(report, "codeBlock")).toEqual(["paragraph: formatting removed: a code block holds plain text"]);
+    for (const kind of ["image", "b"]) {
+      expect(report.counts[kind], kind).toEqual({ kept: 0, dropped: 1, changed: 0 });
+      expect(report.entries).toContainEqual({ outcome: "dropped", kind, reason: "a code block holds only text", owner: "codeBlock", count: 1 });
+    }
+  });
+
+  it("reports nothing lost for a code block Scrivr wrote", async () => {
+    const editor = new ServerEditor();
+    editor.setContent({ type: "doc", content: [{ type: "codeBlock", content: [{ type: "text", text: "let x = 1;" }] }] });
+    const { report, doc } = await importDocx(new ServerEditor(), await exportDocxBytes(editor));
+
+    expect(doc.child(0).type.name).toBe("codeBlock");
+    expect(report.entries.filter((entry) => entry.owner === "codeBlock")).toEqual([]);
+  });
+
+  it("does not count a field twice when a code block leaves behind one nothing built", async () => {
+    const bytes = await docWithBody(
+      `<w:p><w:pPr><w:pStyle w:val="CodeBlock"/></w:pPr><w:r><w:t>page </w:t></w:r><w:fldSimple w:instr=" PAGE "/></w:p>`,
+    );
+    const { report } = await importDocx(new ServerEditor(), bytes);
+    expect(report.counts["field"]).toEqual({ kept: 0, dropped: 1, changed: 0 });
+  });
+});
+
+describe("importDocx — unread, as a consumer imports it", () => {
+  it("lists what the import never read, from the package entry", async () => {
+    const bytes = await docWithBody(`<w:p><w:pPr><w:keepNext/></w:pPr><w:r><w:t>x</w:t></w:r></w:p>`);
+    const { report } = await importDocx(new ServerEditor(), bytes, { trackUnread: true });
+    const keepNext: DocxUnreadElement | undefined = report.unread?.find((u) => u.path.endsWith("/w:pPr/w:keepNext"));
+    expect(keepNext).toEqual({ part: "word/document.xml", path: "w:document/w:body/w:p/w:pPr/w:keepNext", outcome: "unread", count: 1 });
   });
 });

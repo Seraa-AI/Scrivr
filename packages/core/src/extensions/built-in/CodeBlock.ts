@@ -196,27 +196,33 @@ export const CodeBlock = Extension.create<CodeBlockOptions>({
   },
 
   addImports() {
+    const PLAIN_TEXT_ONLY = "a code block holds only text";
     // Exporter writes the "Code Block" paragraph style (sanitized to
     // "CodeBlock"). Import flips that back: paragraph with that pStyle →
     // codeBlock node. CodeBlock's schema is content="text*" with marks="",
     // so we flatten any marked text children to a single text run and
     // turn hard breaks into literal newlines.
-    const importer: DocxParagraphStyleTransform = (_block, content, ctx) => {
+    const importer: DocxParagraphStyleTransform = (block, content, ctx) => {
       const t = ctx.schema.nodes["codeBlock"];
       if (!t) return null;
+      // What the runs carried beyond their text is left behind, named as the
+      // converter counted it: Word's run properties and inline objects. The
+      // code block style's own font is what the node draws, so only what the
+      // runs set themselves is a loss.
+      for (const inline of block.content) {
+        for (const mark of inline.marks) {
+          if (!mark.off) ctx.report.dropped(mark.kind, PLAIN_TEXT_ONLY);
+        }
+        if (inline.type === "image" || inline.type === "field") ctx.report.dropped(inline.type, PLAIN_TEXT_ONLY);
+      }
       const pieces: string[] = [];
-      let formatted = false;
       for (const child of content) {
         if (child.isText) {
           pieces.push(child.text ?? "");
-          formatted ||= child.marks.length > 0;
         } else if (child.type.name === "hardBreak") {
           pieces.push("\n");
-        } else {
-          ctx.report.dropped(child.type.name, "a code block holds only text");
         }
       }
-      if (formatted) ctx.report.changed("paragraph", "formatting removed: a code block holds plain text");
       const text = pieces.join("");
       return text.length > 0 ? t.create(null, ctx.schema.text(text)) : t.create();
     };
