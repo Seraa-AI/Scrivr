@@ -95,9 +95,33 @@ export const DEFAULT_CERTIFICATE_LABELS: Readonly<CertificateLabels> = Object.fr
   eventKinds: Object.freeze({ sent: "Sent", viewed: "Viewed", consented: "Consented", signed: "Signed", declined: "Declined", completed: "Completed" }),
 });
 
+/** What a host's `content` is handed: the record section Scrivr would print, and the facts behind the certificate. */
+export interface CertificateParts {
+  /** The body of the record section as Scrivr lays it out — to keep, change, or replace. */
+  record: DocumentBlock[];
+  /** What was checked, as data. */
+  verified: VerifiedFacts;
+  /** The host's record as it was given. */
+  signingRecord: CompletionRecord;
+}
+
+/** A host's own content: blocks above the title, a record body of its own, blocks at the end. Any left out stays as Scrivr's. */
+export interface CertificateContent {
+  before?: DocumentBlock[];
+  record?: DocumentBlock[];
+  after?: DocumentBlock[];
+}
+
 export interface CompletionCertificateOptions extends ExecutedPdfOptions {
   /** The host's record, printed under its issuer's name. */
   record: CompletionRecord;
+  /**
+   * The host's own content around the certificate: a logo or intro before
+   * it, a disclosure after it, the record section's body laid out its own
+   * way. *Verified at issue*, and the record's title naming its issuer,
+   * stay Scrivr's — only what was checked is ever printed as checked.
+   */
+  content?: (parts: CertificateParts) => CertificateContent;
   /** Labels to use instead of the English defaults; any left out, or blank, stay English. */
   labels?: Partial<Omit<CertificateLabels, "eventKinds">> & { eventKinds?: Partial<Record<StandardEventKind, string>> };
 }
@@ -164,12 +188,12 @@ export async function exportCompletionCertificate(
   values: Readonly<Record<string, FieldValue>>,
   options: CompletionCertificateOptions,
 ): Promise<CompletionCertificateResult> {
-  const { record, labels, ...executedOptions } = options;
+  const { record, labels, content, ...executedOptions } = options;
   const printed = await printExecuted(snapshot, values, executedOptions);
   if (!printed.ok) return printed;
   const { print } = printed;
 
-  const issued = certificateOf(snapshot.contentHash, print, record, labelsOf(labels));
+  const issued = certificateOf(snapshot.contentHash, print, record, labelsOf(labels), content);
   if ("reason" in issued) return { ok: false, refusal: issued };
 
   const { editorOptions, ...pdfOptions } = executedOptions;
@@ -223,6 +247,7 @@ function certificateOf(
   print: ExecutedPrint,
   record: CompletionRecord,
   labels: CertificateLabels,
+  content: CompletionCertificateOptions["content"],
 ): { content: Record<string, unknown>; verified: VerifiedFacts } | CertificateRefusal {
   const { fields, kinds, onRecord } = print;
   const unknownKind = fields.find((f) => kinds[f.kind] === undefined);
@@ -240,7 +265,19 @@ function certificateOf(
     artifactHash: print.artifactHash,
     signatures: signatures.map(({ field }) => ({ fieldId: field.id, role: field.role, kind: field.kind })),
   };
-  return { content: certificateDocument(verified, signatures, print.drawings, record, timeline, labels), verified };
+  const recordBody = recordBlocks(signatures, record, timeline, labels);
+  const host = content?.({ record: recordBody, verified, signingRecord: record }) ?? {};
+  return {
+    content: documentFromBlocks([
+      ...(host.before ?? []),
+      { title: labels.title, level: 1 },
+      ...verifiedBlocks(verified, signatures, print.drawings, labels),
+      { title: `${labels.record} ${record.issuer}`.trim(), level: 2 },
+      ...(host.record ?? recordBody),
+      ...(host.after ?? []),
+    ]),
+    verified,
+  };
 }
 
 /** The signatures the record printed, each dated by its full `signedAt`. */
@@ -374,24 +411,33 @@ function asSigned(signedAt: string): string {
   return moment ? `${moment.day} ${moment.clock ?? ""} (UTC${moment.zone ?? ""})` : signedAt;
 }
 
-function certificateDocument(
+/** *Verified at issue*: only what was checked, headed by kind and role — never a person, whose name is the host's word. */
+function verifiedBlocks(
   verified: VerifiedFacts,
   signatures: readonly Signature[],
   drawings: ExecutedPrint["drawings"],
-  record: CompletionRecord,
-  timeline: readonly TimedEvent[],
   labels: CertificateLabels,
-): Record<string, unknown> {
-  const nameOf = (role: string): string => given(record.parties.find((p) => p.role === role)?.name) ?? role;
+): DocumentBlock[] {
+  return [
+    { title: labels.verified, level: 2 },
+    { paragraph: labels.verifiedNote },
+    { label: labels.contentHash, value: verified.contentHash },
+    { label: labels.artifactHash, value: verified.artifactHash },
+    ...signatures.flatMap(({ field, spec, value }): DocumentBlock[] => {
+      const size = drawings.get(field.id);
+      return [
+        { title: `${spec.label} — ${field.role}`, level: 3 },
+        value.kind === "image" ? { image: value.src, ...(size ? containedSize(size, spec.size) : spec.size) } : { paragraph: value.text },
+      ];
+    }),
+  ];
+}
 
-  // Headed by kind and role, never a person: a name is the host's word, kept to the record.
-  const signatureBlocks = signatures.flatMap(({ field, spec, value }): DocumentBlock[] => {
-    const size = drawings.get(field.id);
-    return [
-      { title: `${spec.label} — ${field.role}`, level: 3 },
-      value.kind === "image" ? { image: value.src, ...(size ? containedSize(size, spec.size) : spec.size) } : { paragraph: value.text },
-    ];
-  });
+/** The record section's body as Scrivr lays it out: the document, each party with its signing times, the events. */
+function recordBlocks(signatures: readonly Signature[], record: CompletionRecord, timeline: readonly TimedEvent[], labels: CertificateLabels): DocumentBlock[] {
+  const nameOf = (role: string): string => given(record.parties.find((p) => p.role === role)?.name) ?? role;
+  const title = given(record.title);
+  const documentId = given(record.documentId);
 
   const partyBlocks = record.parties.flatMap((party): DocumentBlock[] => [
     { title: given(party.name) ?? party.role, level: 3 },
@@ -417,20 +463,11 @@ function certificateDocument(
     return { paragraph: `${readableUtc(at)} — ${what}${who}` };
   });
 
-  const title = given(record.title);
-  const documentId = given(record.documentId);
-  return documentFromBlocks([
-    { title: labels.title, level: 1 },
-    { title: labels.verified, level: 2 },
-    { paragraph: labels.verifiedNote },
-    { label: labels.contentHash, value: verified.contentHash },
-    { label: labels.artifactHash, value: verified.artifactHash },
-    ...signatureBlocks,
-    { title: `${labels.record} ${record.issuer}`.trim(), level: 2 },
+  return [
     ...(title === null ? [] : [{ label: labels.documentTitle, value: title }]),
     ...(documentId === null ? [] : [{ label: labels.documentId, value: documentId }]),
     ...partyBlocks,
     { title: labels.events, level: 3 },
     ...eventBlocks,
-  ]);
+  ];
 }

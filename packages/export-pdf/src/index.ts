@@ -488,7 +488,9 @@ export { exportExecutedPdf } from "./executed";
 export type { ExecutedPdfOptions, ExecutedPdfRefusal, ExecutedPdfResult } from "./executed";
 export { bundleCertificate, exportCompletionCertificate, DEFAULT_CERTIFICATE_LABELS } from "./certificate";
 export type {
+  CertificateContent,
   CertificateLabels,
+  CertificateParts,
   CertificateRefusal,
   CompletionCertificateOptions,
   CompletionCertificateResult,

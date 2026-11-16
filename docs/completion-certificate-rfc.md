@@ -138,6 +138,14 @@ A library does not, so it must.
    from one table with English defaults a host overrides; a signature is
    headed by its field kind's own label, a party by its name.
 
+10. **The host's own content, everywhere but what was checked.** `content`
+    hands a host the record body Scrivr would print, the verified facts and
+    its record, and takes blocks `before` the certificate (a logo, an
+    intro), `after` it (a disclosure), or a `record` body of its own.
+    *Verified at issue*, and the record's title naming its issuer, stay
+    Scrivr's: a host can place anything around what was checked, and nothing
+    in it. The checks run on the record data whatever is printed.
+
 ## API
 
 ```ts
@@ -282,6 +290,9 @@ come first.
 6. **A signature's time is in the record (2026-11-16).** It is the host's
    stamp — the executed PDF never prints it — so it moved out of *Verified
    at issue*.
+7. **A host overrides everything but what was verified (2026-11-16).** See
+   decision 10. Full control was weighed and declined: nothing would stop a
+   host printing "verified" over what was not checked.
 
 ## What shipped
 

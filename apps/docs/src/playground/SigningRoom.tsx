@@ -213,6 +213,13 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
           // Completed as it is executed.
           events: [...events, { at: signersTimestamp(new Date()), kind: "completed" }],
         },
+        // The room's own words after the record, as a signing service adds its disclosure.
+        content: () => ({
+          after: [
+            { title: "Electronic record and signature disclosure", level: 3 },
+            { paragraph: "Each party agreed to sign this agreement electronically in the Scrivr playground. This demo records no identity." },
+          ],
+        }),
       });
       if (!result.ok) {
         const { refusal } = result;

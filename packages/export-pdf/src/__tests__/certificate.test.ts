@@ -274,6 +274,58 @@ describe("exportCompletionCertificate", () => {
   });
 });
 
+describe("a host's own content on the certificate", () => {
+  const logo = drawingOf(120, 40);
+
+  it("adds the host's blocks above the title and after the record, and leaves what was verified as it was", async () => {
+    const plain = linesOf((await issued()).certificate.content);
+    const { certificate } = await issued(signed, {
+      content: () => ({
+        before: [{ image: logo, width: 120, height: 40 }, { paragraph: "Acme Sign — completion record" }],
+        after: [{ title: "Electronic record and signature disclosure", level: 3 }, { paragraph: "The parties agreed to sign electronically." }],
+      }),
+    });
+    const lines = linesOf(certificate.content);
+
+    expect(lines.indexOf("Acme Sign — completion record")).toBeLessThan(lines.indexOf("Certificate of completion"));
+    expect(lines.at(-1)).toBe("The parties agreed to sign electronically.");
+    expect(imagesOf(certificate.content)[0]?.["src"]).toBe(logo);
+    expect(section(lines, VERIFIED, RECORD)).toEqual(section(plain, VERIFIED, RECORD));
+  });
+
+  it("lets the host replace the record's body, still under its own name — given Scrivr's blocks to change", async () => {
+    const { certificate } = await issued(signed, {
+      // Drop the IP address lines; keep the rest as Scrivr laid it out.
+      content: ({ record }) => ({ record: record.filter((block) => !("label" in block && block.label === "IP address")) }),
+    });
+    const lines = linesOf(certificate.content);
+
+    expect(lines).toContain(RECORD);
+    expect(lines.join("\n")).not.toContain("203.0.113.7");
+    expect(lines.join("\n")).toContain("ada@example.com");
+  });
+
+  it("hands the host the facts it checked and the host's own record, to lay out its own way", async () => {
+    let seen: { contentHash: string; issuer: string } | null = null;
+    const { certificate } = await issued(signed, {
+      content: ({ verified, signingRecord }) => {
+        seen = { contentHash: verified.contentHash, issuer: signingRecord.issuer };
+        return { record: [{ paragraph: `${signingRecord.parties.length} parties signed.` }] };
+      },
+    });
+
+    expect(seen).toEqual({ contentHash: certificate.verified.contentHash, issuer: "Acme Sign" });
+    expect(linesOf(certificate.content)).toContain("2 parties signed.");
+  });
+
+  it("still refuses a record that does not fit the document, whatever the host prints", async () => {
+    const parties = record().parties.filter((p) => p.role !== "vendor");
+    const refusal = await refusalOf(signed, { record: record({ parties }), content: () => ({ record: [] }) });
+
+    expect(refusal).toEqual({ reason: "missing-party", role: "vendor" });
+  });
+});
+
 describe("exportCompletionCertificate refuses", () => {
   it("as the executed PDF does: an altered snapshot, an incomplete signing", async () => {
     const snapshot = await sealed();

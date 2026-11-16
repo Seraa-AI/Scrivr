@@ -213,4 +213,14 @@ const { pdf: bundle, bundleHash } = await bundleCertificate(executed.pdf, certif
 - **Signing record — as recorded by** your issuer holds your word: your parties, your events in time order and in UTC, and when each signature was given — its `signedAt` is your stamp, not something the PDF prints. Scrivr checks only that the record fits the document and time: every role that answered or must answer a field has a party, every event names one of your parties, every time is a full timestamp with its zone (a bare day is refused rather than printed as midnight), a party first comes to the document (sent, viewed or consented) before it signs, and nothing is signed after `completed`. Views after signing are fine, and so is a party with no fields — someone sent a copy. A detail you leave blank is left out.
 - It is issued only for a complete signing; anything else is a refusal you can show: the executed PDF's own (`snapshot-altered`, `unanswered-fields`), then `unknown-field-kind`, `missing-party`, `unknown-party`, `unzoned-time`, `undated-signature`, `signed-after-completed`, `events-out-of-order`.
 - Events are `sent`, `viewed`, `consented`, `signed`, `declined` and `completed`, or `{ kind: "custom", label }` for a step of your own. Every fixed heading comes from `labels`, so a certificate can be issued in your signers' language; a signature is headed by its field kind's own label.
+- Add your own content with `content`: blocks `before` the certificate (a logo, an intro), `after` it (a disclosure, consent text), or a `record` body laid out your own way — you are handed Scrivr's blocks to change, the checked facts and your record. *Verified at issue*, and the record's title naming your issuer, stay Scrivr's: only what was checked is ever printed as checked.
+
+```ts
+content: ({ record }) => ({
+  before: [{ image: logoDataUrl, width: 120, height: 40 }],
+  record: record.filter((block) => !("label" in block && block.label === "IP address")),
+  after: [{ title: "Electronic record disclosure", level: 3 }, { paragraph: disclosureText }],
+}),
+```
+
 - The certificate is not a digital signature. To seal it, or the bundle, with your certificate (PAdES), sign the bytes you are given.
