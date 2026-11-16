@@ -139,7 +139,7 @@ Field.configure({
 });
 ```
 
-`FieldCompletion` takes a `paint` of its own for the signing view. It is also told whether the field is this viewer's (`own`), whether it is under the pointer or keyboard focus (`active`, `focused`), and whether its value is being captured (`pending`).
+`FieldCompletion` takes a `paint` of its own for the signing view. It is also told whether the field is this viewer's (`own`), whether it is under the pointer or keyboard focus (`active`, `focused`), whether its value is being captured (`pending`), and, for a signature held back, how many of the viewer's fields come first (`waitingOn`, 0 otherwise) — so your own look can show that a signature waits.
 
 ## Reading the fields in a document
 
@@ -205,7 +205,7 @@ Use `replaceFieldValues(editor, values)` from `@scrivr/core` when loading a comp
 
 - The signing view draws your own kinds and colours as `Field` was given them, so a kind of your own completes as the control it declares there too.
 - `onFieldRequestError(field, error)` is called when your `onFieldRequest` throws or rejects, or the editor refuses the returned value. The field stays as it was; tell the signer and let them try again. This does not roll back anything your host already recorded. Resolving `null` is declining, not failing.
-- A signature comes last, as on DocuSign or Adobe Sign. Until the viewer's other required fields are answered (a box ticked, a choice made, text given), going to sign moves focus to the first of them — it never answers one for them — and `onSignatureBlocked(signature, missing)` tells you which, so you can say "Choose payment terms before you sign". Optional fields never hold a signature back, and a kind of your own whose control is `"signatureLine"` is held back like the built-in signature. The view only guides the signer: check the same rule on your server, over the whole role, when you record a signature, with the function the view uses and your editor's kinds:
+- A signature comes last, as on DocuSign or Adobe Sign. Until the viewer's other required fields are answered (a box ticked, a choice made, text given), the signature says so — its tag reads "After 3 fields" instead of "Sign" — and pressing it takes the signer to the first field they owe, scrolled into view and opened. A checkbox is only focused, never ticked for them: ticking it is their consent. `onSignatureBlocked(signature, missing)` tells you which fields are owed, so you can say "You sign last. First: payment terms" somewhere the signer will see it, wherever they have scrolled. Optional fields never hold a signature back, and a kind of your own whose control is `"signatureLine"` is held back like the built-in signature. The view only guides the signer: check the same rule on your server, over the whole role, when you record a signature, with the function the view uses and your editor's kinds:
 
   ```ts
   import { fieldKindsOf, unansweredBeforeSigning } from "@scrivr/core";
@@ -243,6 +243,8 @@ const { pdf, artifactHash } = result; // keep both: the record, and the hash of 
 `allSignedValues` is the complete record for this export. It replaces any initial values configured in `Field`, including when it is empty. A drawing the PDF cannot embed is omitted from that record; it cannot fall back to an earlier signature. The exporter submits the complete record in one transaction and throws if a plugin refuses it.
 
 It refuses rather than print a record of something else: a snapshot that no longer matches its hash, or a required field still unanswered (`refusal.missing` names them). It prints the values as the record shows them, so each date signed shows when its party signed, and nothing where no signature of theirs answers, and it throws when `Field` is not among `editorOptions.extensions`. The values are printed, never written: the snapshot, and its `contentHash`, are the same before and after. Laying out a PDF needs a browser `Editor` — a page, or a server running a headless DOM with a canvas — since `ServerEditor` lays nothing out.
+
+To issue the executed PDF together with its certificate of completion — what Scrivr checked, beside your record of the signing — use `exportCompletionCertificate` instead; see [Certificate of completion](/docs/guides/certificate).
 
 ## Values entered in Word
 
