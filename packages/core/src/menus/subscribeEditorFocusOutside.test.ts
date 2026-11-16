@@ -12,6 +12,9 @@ import type { Editor } from "../Editor";
 
 let editor: Editor | null = null;
 
+/** After the browser has finished moving focus — the next task, not a microtask. */
+const afterFocusMoves = () => new Promise((resolve) => setTimeout(resolve, 0));
+
 afterEach(() => {
   editor?.destroy();
   editor = null;
@@ -31,8 +34,22 @@ describe("subscribeEditorFocusOutside", () => {
     outside.focus();
 
     editor.emit("blur", undefined);
-    await Promise.resolve(); // flush microtask
+    await afterFocusMoves();
     expect(onHide).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not fire onHide once unsubscribed, even for a blur already being judged", async () => {
+    editor = createTestEditor();
+    const onHide = vi.fn();
+    const off = subscribeEditorFocusOutside(editor, onHide);
+    const outside = document.createElement("button");
+    document.body.appendChild(outside);
+    outside.focus();
+
+    editor.emit("blur", undefined);
+    off();
+    await afterFocusMoves();
+    expect(onHide).not.toHaveBeenCalled();
   });
 
   it("does not fire onHide when focus moves into a popover-marked element", async () => {
@@ -48,7 +65,27 @@ describe("subscribeEditorFocusOutside", () => {
     input.focus();
 
     editor.emit("blur", undefined);
+    await afterFocusMoves();
+    expect(onHide).not.toHaveBeenCalled();
+  });
+
+  it("does not fire onHide when focus reaches a popover's text box only after the editor blurs", async () => {
+    // A browser blurs the editor first and focuses the clicked box after: in
+    // between, nothing is focused. Judging then closed a popover on its own input.
+    editor = createTestEditor();
+    const onHide = vi.fn();
+    subscribeEditorFocusOutside(editor, onHide);
+    const popover = document.createElement("div");
+    popover.setAttribute("data-scrivr-popover", "test-popover");
+    const input = document.createElement("input");
+    popover.appendChild(input);
+    document.body.appendChild(popover);
+
+    editor.emit("blur", undefined);
     await Promise.resolve();
+    input.focus();
+    await afterFocusMoves();
+
     expect(onHide).not.toHaveBeenCalled();
   });
 
@@ -70,7 +107,7 @@ describe("subscribeEditorFocusOutside", () => {
     deeper.focus();
 
     editor.emit("blur", undefined);
-    await Promise.resolve();
+    await afterFocusMoves();
     expect(onHide).not.toHaveBeenCalled();
   });
 
@@ -83,7 +120,7 @@ describe("subscribeEditorFocusOutside", () => {
 
     editor.emit("blur", undefined);
     editor.emit("focus", undefined); // re-focused before microtask runs
-    await Promise.resolve();
+    await afterFocusMoves();
     expect(onHide).not.toHaveBeenCalled();
   });
 
@@ -97,14 +134,14 @@ describe("subscribeEditorFocusOutside", () => {
 
     outside.focus();
     editor.emit("blur", undefined);
-    await Promise.resolve();
+    await afterFocusMoves();
     expect(onHide).toHaveBeenCalledTimes(1);
 
     // Re-focus the editor (logically), then blur again.
     editor.emit("focus", undefined);
     outside.focus();
     editor.emit("blur", undefined);
-    await Promise.resolve();
+    await afterFocusMoves();
     expect(onHide).toHaveBeenCalledTimes(2);
   });
 
@@ -119,7 +156,7 @@ describe("subscribeEditorFocusOutside", () => {
     outside.focus();
 
     editor.emit("blur", undefined);
-    await Promise.resolve();
+    await afterFocusMoves();
     expect(onHide).not.toHaveBeenCalled();
   });
 
@@ -141,7 +178,7 @@ describe("subscribeEditorFocusOutside", () => {
 
     button.focus();
     editor.emit("blur", undefined);
-    await Promise.resolve();
+    await afterFocusMoves();
     expect(onHide).not.toHaveBeenCalled();
   });
 
@@ -161,7 +198,7 @@ describe("subscribeEditorFocusOutside", () => {
 
     outside.focus();
     editor.emit("blur", undefined);
-    await Promise.resolve();
+    await afterFocusMoves();
     expect(onHide).toHaveBeenCalledTimes(1);
   });
 
@@ -184,7 +221,7 @@ describe("subscribeEditorFocusOutside", () => {
 
     input.focus();
     editor.emit("blur", undefined);
-    await Promise.resolve();
+    await afterFocusMoves();
     expect(onHide).not.toHaveBeenCalled();
   });
 
@@ -202,7 +239,7 @@ describe("subscribeEditorFocusOutside", () => {
     editor.emit("blur", undefined);
     editor.emit("blur", undefined);
     editor.emit("blur", undefined);
-    await Promise.resolve();
+    await afterFocusMoves();
     expect(onHide).toHaveBeenCalledTimes(1);
   });
 });

@@ -18,7 +18,7 @@ import {
   StarterKit,
   SurfaceRegistry,
 } from "@scrivr/core";
-import type { DocumentLayout, IEditor, LayoutBlock, LayoutLine, Selection } from "@scrivr/core";
+import type { DocumentLayout, HoverTarget, IEditor, LayoutBlock, LayoutLine, ObjectRectEntry, Selection } from "@scrivr/core";
 
 // buildPdf now requires an editor (it collects PDF handlers from extensions).
 // A ServerEditor satisfies the contract; table is enabled so the table handler
@@ -189,6 +189,7 @@ function makePagedLayout(pageCount: number): DocumentLayout {
 class ExportPdfEditorDouble extends ServerEditor implements IEditor {
   readonly surfaces = new SurfaceRegistry();
   readonly cursorManager = new CursorManager(() => {});
+  readonly zoom = 1;
   readonly selection: SelectionController;
   ensureFullLayoutCalls = 0;
   private currentLayout: DocumentLayout;
@@ -218,6 +219,10 @@ class ExportPdfEditorDouble extends ServerEditor implements IEditor {
   }
 
   addOverlayRenderHandler(): () => void {
+    return () => {};
+  }
+
+  addPointerCursor(): () => void {
     return () => {};
   }
 
@@ -251,6 +256,22 @@ class ExportPdfEditorDouble extends ServerEditor implements IEditor {
 
   getNodeViewportRect(): DOMRect | null {
     return null;
+  }
+
+  getNodeViewportRects(): DOMRect[] {
+    return [];
+  }
+
+  getNodeRects(): ObjectRectEntry[] {
+    return [];
+  }
+
+  getRangeViewportRects(): DOMRect[] {
+    return [];
+  }
+
+  getHoverTargets(): readonly HoverTarget[] {
+    return [];
   }
 
   getScrollContainerRect(): DOMRect | null {

@@ -17,6 +17,7 @@
  * Dynamic tokens export as Word field codes so they stay live in the document.
  */
 import {
+  WORD_PART_NAMESPACES,
   xml,
   prepareDocxImages,
   type DocxContext,
@@ -26,9 +27,6 @@ import {
 import type { Node } from "@scrivr/core/pm";
 import { getHeaderFooterPolicy } from "./getPolicy";
 import type { HeaderFooterDefinition, HeaderFooterPolicy } from "./types";
-
-const W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
-const R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 
 /** A `<w:fldSimple>` field with a fallback run (what Word shows until it recalcs). */
 function field(instr: string, fallback: string): XmlNode {
@@ -93,7 +91,7 @@ function addSlot(ctx: DocxContext, spec: SlotSpec, refs: SlotRef[]): void {
       const body = ctx.walkContent(doc);
       return xml(
         kind === "header" ? "w:hdr" : "w:ftr",
-        { "xmlns:w": W_NS, "xmlns:r": R_NS },
+        { ...WORD_PART_NAMESPACES },
         body.length > 0 ? body : [xml("w:p")],
       );
     },

@@ -16,6 +16,7 @@ import type {
 	ToolbarItemSpec,
 	ToolbarState,
 	OverlayRenderHandler,
+	PointerCursorResolver,
 	IEditor,
 } from "./extensions/types";
 import type { Mark, Node as PmNode, Schema } from "prosemirror-model";
@@ -50,13 +51,20 @@ import type {
 	SelectionGesture,
 	SelectionGestureProvider,
 } from "./selection/types";
+import type { HoverEvent, HoverResolver, HoverTarget } from "./hover/types";
+import { mapHoverTarget, sameHoverTargets } from "./hover/types";
+import { resolveHoverTargets } from "./hover/resolveHoverTargets";
+import type { PagePoint } from "./layout/pagePoint";
+import { resolvePointOwner, type PointOwner } from "./layout/pointOwnership";
+import { regionAtCoords } from "./layout/regionHitTest";
+import { nodeFragmentRects } from "./layout/nodeRects";
 import { TextMeasurer, type TextMeasurerLike } from "./layout/TextMeasurer";
 import { defaultPageConfig } from "./layout/PageLayout";
 import type { RecloneOptions } from "./model/assignBlockIds";
 import type { PageConfig, DocumentLayout } from "./layout/PageLayout";
 import type { FontConfig } from "./layout/FontConfig";
 import { LayoutCoordinator } from "./layout/LayoutCoordinator";
-import type { CharacterMap, ObjectRectEntry } from "./layout/CharacterMap";
+import type { CharacterMap, ObjectRectEntry, RangeRect } from "./layout/CharacterMap";
 import { InputBridge } from "./input/InputBridge";
 import { PasteTransformer } from "./input/PasteTransformer";
 import { BaseEditor } from "./BaseEditor";
@@ -70,6 +78,7 @@ import {
 	type DragDebugConfig,
 } from "./renderer/DragDebugOverlay";
 import { installAnchoredObjectDebugOverlay } from "./renderer/AnchoredObjectDebugOverlay";
+import { resolveZoom, type ZoomRequest, type ZoomViewport } from "./renderer/zoom";
 import {
 	defaultEditorTheme,
 	mergeEditorTheme,
@@ -196,6 +205,14 @@ export interface EditorOptions {
 	 */
 	readOnly?: boolean;
 	/**
+	 * Start sealed: the content loads, then the document refuses every change,
+	 * from this client and collaborators alike. There is no unseal. Leave it
+	 * off for an editor joining a room — the room's content would be refused;
+	 * `Collaboration` seals the editor when the room is sealed.
+	 * Defaults to false.
+	 */
+	sealed?: boolean;
+	/**
 	 * Diagnostic flags. Currently only `drag` — when true, PointerController
 	 * console.debugs structured drag events and DragDebugOverlay paints anchored
 	 * vs charMap rects on every page. Mutable at runtime via `editor.debug`;
@@ -235,6 +252,14 @@ export interface EditorOptions {
 	 * and no lane can say what it got — so an export has to guess a second time.
 	 */
 	fonts?: FontProvider;
+	/**
+	 * How large the document is shown: a factor (1 is 100%, clamped to
+	 * `MIN_ZOOM`–`MAX_ZOOM`), or a fit to the view the editor scrolls in —
+	 * `"fit-width"` or `"fit-page"` — that follows the view as it resizes. A view
+	 * scale only: layout and the document are the same at every zoom. 1 by
+	 * default.
+	 */
+	zoom?: ZoomRequest;
 }
 
 /**
@@ -486,6 +511,10 @@ export class Editor extends BaseEditor implements IEditor {
 
 	/** Extension-registered semantic hit testers (highest priority first). */
 	private readonly hitTesters: HitTester[];
+	private readonly hoverResolvers: HoverResolver[];
+	/** What the pointer is over — transient, never editor state. */
+	private hoverTargets: readonly HoverTarget[] = [];
+	private hoverPoint: PagePoint | null = null;
 	/** Extension-registered pointer-gesture providers. */
 	private readonly selectionGestures: SelectionGestureProvider[];
 
@@ -506,6 +535,7 @@ export class Editor extends BaseEditor implements IEditor {
 	 * Called by TileManager.paintOverlay() for each visible page.
 	 */
 	private readonly overlayRenderHandlers = new Set<OverlayRenderHandler>();
+	private readonly pointerCursors = new Set<PointerCursorResolver>();
 
 	/**
 	 * Diagnostic flags. Mutable — flip `editor.debug.drag = true; editor.redraw()`
@@ -529,11 +559,13 @@ export class Editor extends BaseEditor implements IEditor {
 		uploadPastedImage,
 		startReady = true,
 		readOnly = false,
+		sealed = false,
 		debug = {},
 		theme,
 		themeRoot,
 		textMeasurer,
 		fonts,
+		zoom = 1,
 	}: EditorOptions) {
 		// BaseEditor handles: manager, state, commands, storage, event emitter
 		super({
@@ -564,6 +596,9 @@ export class Editor extends BaseEditor implements IEditor {
 			builtConfig && pageConfig
 				? { ...builtConfig, ...pageConfig }
 				: (builtConfig ?? pageConfig ?? defaultPageConfig);
+		this.zoomAsked = this.zoomAskable(zoom);
+		// A fit has no view to fit until TileManager mounts one: 100% until then.
+		this.zoomShown = resolveZoom(this.zoomAsked, null, this.pageConfig) ?? 1;
 
 		this.fontConfig = this.manager.buildBlockStyles();
 		this.measurer =
@@ -586,6 +621,7 @@ export class Editor extends BaseEditor implements IEditor {
 			defaultSelectionBehavior,
 		);
 		this.hitTesters = this.manager.buildHitTesters();
+		this.hoverResolvers = this.manager.buildHoverResolvers();
 		this.selectionGestures = this.manager.buildSelectionGestures();
 		this.blockRegistry = this.manager.buildBlockRegistry();
 		this.pageChromeContributions =
@@ -597,7 +633,7 @@ export class Editor extends BaseEditor implements IEditor {
 		});
 
 		// ── Surface registry — plugins register their own surfaces lazily.
-		this.surfaces = new SurfaceRegistry();
+		this.surfaces = new SurfaceRegistry((state, tr) => this.applyThroughGate(state, tr));
 		const owners = this.manager.getSurfaceOwners();
 		this.surfaces.setOwnerMediator({
 			commit: s => {
@@ -689,6 +725,7 @@ export class Editor extends BaseEditor implements IEditor {
 			dispatch: routedDispatch,
 			getSchema: () => this.manager.schema,
 			copyHtmlTransforms: this.getCopyHtmlTransforms(),
+			getZoom: () => this.zoom,
 			getViewportRect: (from, to) => this.getViewportRect(from, to),
 			// TODO(pr7): getViewportRect still resolves positions against the flow
 			// layout. When a surface is active, `from`/`to` are surface-doc positions
@@ -722,6 +759,7 @@ export class Editor extends BaseEditor implements IEditor {
 
 		// Apply initial read-only state after infrastructure is ready.
 		if (readOnly) this.setReadOnly(true);
+		if (sealed) this.seal();
 
 		// Debug overlays — always installed; self-gate on the corresponding
 		// `this.debug.<flag>` at paint time so toggling at runtime requires no
@@ -767,8 +805,8 @@ export class Editor extends BaseEditor implements IEditor {
 	 * the viewport where the caller put it — e.g. `revealCitation` sets the
 	 * highlight here, then scrolls the cited range into view itself.
 	 */
-	override applyTransaction(tr: Transaction): void {
-		this.viewDispatch(tr, tr.scrolledIntoView);
+	override applyTransaction(tr: Transaction): boolean {
+		return this.viewDispatch(tr, tr.scrolledIntoView);
 	}
 
 	/**
@@ -779,13 +817,9 @@ export class Editor extends BaseEditor implements IEditor {
 		return this.surfaces.activeSurface?.state ?? this.editorState;
 	}
 
-	protected override dispatchToActive(tr: Transaction): void {
+	protected override dispatchToActive(tr: Transaction): boolean {
 		const active = this.surfaces.activeSurface;
-		if (active) {
-			active.dispatch(tr);
-		} else {
-			this.viewDispatch(tr);
-		}
+		return active ? active.dispatch(tr) : this.viewDispatch(tr);
 	}
 
 	/**
@@ -793,14 +827,15 @@ export class Editor extends BaseEditor implements IEditor {
 	 * setting the flag and notifying subscribers.
 	 */
 	override setReadOnly(value: boolean): void {
-		if (this.readOnly === value) return;
+		const wasReadOnly = this.readOnly;
 		super.setReadOnly(value);
-		this.ib.setReadOnly(value);
-		if (value) {
-			this.cursorManager.stop();
-		} else if (this.ib.isFocused) {
-			this.cursorManager.start();
-		}
+		if (this.readOnly !== wasReadOnly) this.syncInputToWritability();
+	}
+
+	override seal(): void {
+		const wasReadOnly = this.readOnly;
+		super.seal();
+		if (this.readOnly !== wasReadOnly) this.syncInputToWritability();
 	}
 
 	/** Override to route through active surface when one is set. */
@@ -839,8 +874,7 @@ export class Editor extends BaseEditor implements IEditor {
 			);
 			tr = tr.insert(finalInsertPos, node);
 			tr = tr.setSelection(NodeSelection.create(tr.doc, finalInsertPos));
-			this.dispatchToActive(tr);
-			return true;
+			return this.dispatchToActive(tr);
 		} catch {
 			return false;
 		}
@@ -891,8 +925,7 @@ export class Editor extends BaseEditor implements IEditor {
 			);
 			tr = tr.insert(finalInsertPos, updated);
 			tr = tr.setSelection(NodeSelection.create(tr.doc, finalInsertPos));
-			this.dispatchToActive(tr);
-			return true;
+			return this.dispatchToActive(tr);
 		} catch {
 			return false;
 		}
@@ -1149,14 +1182,7 @@ export class Editor extends BaseEditor implements IEditor {
 		const fromCoords = this.lc.charMap.coordsAtPos(from);
 		if (!fromCoords) return null;
 
-		const pageScreenRect = this.ib.lookupPageScreenRect(fromCoords.page);
-		if (!pageScreenRect) return null;
-
 		const toCoords = this.lc.charMap.coordsAtPos(to);
-
-		const left = pageScreenRect.screenLeft + fromCoords.x;
-		const top = pageScreenRect.screenTop + fromCoords.y;
-		const height = fromCoords.height;
 
 		const sameLine =
 			toCoords &&
@@ -1165,20 +1191,46 @@ export class Editor extends BaseEditor implements IEditor {
 		const width =
 			sameLine && toCoords ? Math.abs(toCoords.x - fromCoords.x) : 1;
 
-		return new DOMRect(left, top, Math.max(1, width), height);
+		return this.ib.pageToScreen(fromCoords.page, { x: fromCoords.x, y: fromCoords.y, width: Math.max(1, width), height: fromCoords.height });
 	}
 
 	getNodeViewportRect(docPos: number): DOMRect | null {
-		const rect = this.getNodeRect(docPos);
-		if (!rect) return null;
-		const pageScreenRect = this.ib.lookupPageScreenRect(rect.page);
-		if (!pageScreenRect) return null;
-		return new DOMRect(
-			pageScreenRect.screenLeft + rect.x,
-			pageScreenRect.screenTop + rect.y,
-			rect.width,
-			rect.height,
-		);
+		return this.getNodeViewportRects(docPos)[0] ?? null;
+	}
+
+	/**
+	 * Every painted fragment of the node at `docPos`, in page order: one rect
+	 * for an image, one per page for a paragraph or table split across pages,
+	 * the cell's own rect for a table cell. `getNodeRect` stays the
+	 * image-only lookup.
+	 *
+	 * In page units, the same at every zoom — the boxes overlays paint and a
+	 * `PagePoint` is tested against. Read from the body's layout, so they
+	 * place body positions only; see `getNodeRect`.
+	 */
+	getNodeRects(docPos: number): ObjectRectEntry[] {
+		if (this.surfaces?.activeSurface) return [];
+		const object = this.getNodeRect(docPos);
+		if (object) return [object];
+		return nodeFragmentRects(this.layout.pages, this.getState().doc, docPos);
+	}
+
+	getRangeViewportRects(from: number, to: number): DOMRect[] {
+		// Body geometry places body positions only, as `getNodeRect` says.
+		if (this.surfaces?.activeSurface) return [];
+		this.lc.ensureLayout();
+		const rects: RangeRect[] = this.lc.charMap.rangeRects(from, to);
+		// A floating image is painted off its line: its box is its placement,
+		// as a DOM range gives a replaced element's.
+		for (const object of this.lc.current.anchoredObjects ?? []) {
+			if (object.docPos >= from && object.docPos < to) rects.push(object);
+		}
+		rects.sort((a, b) => a.page - b.page || a.y - b.y);
+		return rects.flatMap((rect) => this.ib.pageToScreen(rect.page, rect) ?? []);
+	}
+
+	getNodeViewportRects(docPos: number): DOMRect[] {
+		return this.getNodeRects(docPos).flatMap((rect) => this.ib.pageToScreen(rect.page, rect) ?? []);
 	}
 
 	/**
@@ -1195,6 +1247,10 @@ export class Editor extends BaseEditor implements IEditor {
 	 * resize drag pivots on the wrong corner.
 	 */
 	getNodeRect(docPos: number): ObjectRectEntry | undefined {
+		// Body layout places body positions only. While a header or footer is
+		// edited a position is that surface's, and the body image sharing its
+		// number is not it — its handles, drag and menu must not land there.
+		if (this.surfaces?.activeSurface) return undefined;
 		this.lc.ensureLayout();
 		const anchored = this.lc.current.anchoredObjects?.find(
 			o => o.docPos === docPos,
@@ -1505,6 +1561,27 @@ export class Editor extends BaseEditor implements IEditor {
 		return () => this.overlayRenderHandlers.delete(handler);
 	}
 
+	addPointerCursor(resolve: PointerCursorResolver): () => void {
+		this.pointerCursors.add(resolve);
+		return () => this.pointerCursors.delete(resolve);
+	}
+
+	/**
+	 * The cursor an extension asked for at `point`, or null.
+	 *
+	 * @internal — the pointer controller's.
+	 */
+	pointerCursorAt(point: PagePoint): string | null {
+		if (this.pointerCursors.size === 0) return null;
+		const owner = this.pointOwnerAt(point.x, point.y, point.page);
+		const objectPos = owner.kind === "inlineObject" ? owner.rect.docPos : null;
+		for (const resolve of this.pointerCursors) {
+			const cursor = resolve({ point, objectPos });
+			if (cursor !== null) return cursor;
+		}
+		return null;
+	}
+
 	/**
 	 * Resolve a pointer position to a semantic `HitTarget` via extension hit
 	 * testers (highest priority first), or null when none claims it — in which
@@ -1527,6 +1604,88 @@ export class Editor extends BaseEditor implements IEditor {
 			if (hit) return hit;
 		}
 		return null;
+	}
+
+	/**
+	 * What is under `point`, innermost first — `[link, table-cell, table]` for a
+	 * link in a cell. Click routing keeps `resolveHitTarget`'s first-wins chain;
+	 * hover wants every layer. Empty while a header/footer surface is being
+	 * edited: hover resolves against the body only, which is dimmed then.
+	 *
+	 * @internal — the pointer controller's; read `getHoverTargets` or the
+	 * `"hover"` event instead.
+	 */
+	resolveHoverTargets(point: PagePoint): HoverTarget[] {
+		if (this.surfaces?.activeSurface) return [];
+		const state = this.getState();
+		return resolveHoverTargets({
+			point,
+			state,
+			surfaceId: "body",
+			owner: this.pointOwnerAt(point.x, point.y, point.page),
+			glyphAt: (x, y, p) => this.charMap.glyphAtPoint(x, y, p),
+			hitTarget: () => this.resolveHitTarget(point.x, point.y, point.page),
+			resolvers: this.hoverResolvers,
+			nodeKind: (pos) => {
+				try {
+					return this.describeSelection(NodeSelection.create(state.doc, pos)).kind;
+				} catch {
+					return state.doc.nodeAt(pos)?.type.name ?? "node";
+				}
+			},
+		});
+	}
+
+	/**
+	 * Who owns a point on a body page — the one answer click routing, hover,
+	 * the hover cursor and drags read, so they cannot disagree. See
+	 * `resolvePointOwner`.
+	 *
+	 * @internal — the pointer controller's and hover's.
+	 */
+	pointOwnerAt(x: number, y: number, page: number): PointOwner {
+		return resolvePointOwner(x, y, page, {
+			anchoredObjects: this.layout.anchoredObjects ?? [],
+			hasTextAt: (px, py, p) => this.charMap.hasTextAt(px, py, p),
+			regionAt: (px, py, p) => regionAtCoords(this.layout.pages, px, py, p) !== null,
+			objectRectAt: (px, py, p) => this.charMap.objectRectAtPoint(px, py, p),
+		});
+	}
+
+	/** The current hover stack, innermost first. Empty when over nothing. */
+	getHoverTargets(): readonly HoverTarget[] {
+		return this.hoverTargets;
+	}
+
+	/**
+	 * Record what the pointer is over and emit `"hover"` when the stack changed.
+	 *
+	 * @internal — the pointer controller's; read `getHoverTargets` or the
+	 * `"hover"` event instead.
+	 */
+	reportHover(event: HoverEvent): void {
+		const changed = !sameHoverTargets(this.hoverTargets, event.targets);
+		// Kept even when unchanged: where in each target the pointer now rests.
+		this.hoverTargets = event.targets;
+		this.hoverPoint = event.point;
+		// A dismissal is news even when nothing was hovered: a peek may be open.
+		if (changed || event.dismissed) this.emit("hover", event);
+	}
+
+	/**
+	 * Carry the hover stack through an edit made while the pointer rests, so a
+	 * collaborator typing above a link does not leave its peek on the old
+	 * range. A target whose range the edit deleted drops out.
+	 */
+	protected override mapThroughEdit(tr: Transaction): void {
+		super.mapThroughEdit(tr);
+		if (this.hoverTargets.length === 0) return;
+		const targets: HoverTarget[] = [];
+		for (const target of this.hoverTargets) {
+			const mapped = mapHoverTarget(target, tr.mapping);
+			if (mapped) targets.push(mapped);
+		}
+		this.reportHover({ targets, point: this.hoverPoint, fromEdit: true });
 	}
 
 	/**
@@ -1584,8 +1743,10 @@ export class Editor extends BaseEditor implements IEditor {
 	}
 
 	/**
-	 * Get the screen-space position of a page. Returns null if the page
-	 * lookup is not registered (editor not mounted) or the page doesn't exist.
+	 * The screen position of a page's top-left corner. Null when the editor
+	 * is not mounted or the page doesn't exist. A page-unit offset from it is
+	 * `offset × zoom` screen pixels — `getViewportRect` and its siblings do
+	 * that for a document range.
 	 */
 	getPageScreenPosition(
 		page: number,
@@ -1596,17 +1757,20 @@ export class Editor extends BaseEditor implements IEditor {
 	/**
 	 * Invalidate the layout cache so the next paint triggers a full re-layout.
 	 * Use when external factors change chrome heights (e.g. live surface editing
-	 * grows the header band).
+	 * grows the header band). `remeasure` measures every block again too — for
+	 * a change to what a strategy measures that the document doesn't show.
 	 */
-	invalidateLayout(): void {
-		this.lc.invalidate();
+	invalidateLayout(options: { remeasure?: boolean } = {}): void {
+		if (options.remeasure) this.lc.remeasure();
+		else this.lc.invalidate();
 		this.redraw();
 	}
 
 	/**
 	 * Register a function that returns the screen-space top-left corner of
-	 * page N. Used by scrollCursorIntoView, getViewportRect, and
-	 * getNodeViewportRect — no DOM element per page needed.
+	 * page N, at the zoom: where the page is drawn now. Used by
+	 * scrollCursorIntoView, getViewportRect, and getNodeViewportRect — no DOM
+	 * element per page needed.
 	 */
 	setPageTopLookup(
 		fn:
@@ -1637,6 +1801,67 @@ export class Editor extends BaseEditor implements IEditor {
 	 */
 	getScrollContainerRect(): DOMRect | null {
 		return this.scrollContainerLookup?.() ?? null;
+	}
+
+	private zoomAsked: ZoomRequest;
+	private zoomShown = 1;
+	private viewportSizeLookup: (() => ZoomViewport | null) | null = null;
+
+	/** The factor the document is shown at: 1 is 100%. A fit resolves to the factor that fits. */
+	get zoom(): number {
+		return this.zoomShown;
+	}
+
+	/** The zoom asked for — a factor, or a fit the view follows as it resizes. */
+	get zoomRequest(): ZoomRequest {
+		return this.zoomAsked;
+	}
+
+	/**
+	 * Show the document at `request`: a factor, or `"fit-width"` / `"fit-page"`.
+	 * Repaints, never re-lays-out. Fires `"zoom"` when the request or the
+	 * factor changes, and `"viewport"` when the factor does.
+	 */
+	setZoom(request: ZoomRequest): void {
+		const asked = this.zoomAsked;
+		this.zoomAsked = this.zoomAskable(request);
+		this.applyZoom(this.zoomAsked !== asked);
+	}
+
+	/** A factor as the range holds it — 6.1 asks for 5 — so a request past an end changes nothing. */
+	private zoomAskable(request: ZoomRequest): ZoomRequest {
+		return typeof request === "number" ? (resolveZoom(request, null, this.pageConfig) ?? 1) : request;
+	}
+
+	/**
+	 * @internal Register the size, in CSS pixels, of the view a fit fills — the scroll
+	 * container's content box. TileManager wires this on construction, and
+	 * calls `refitZoom` once it finds the view and whenever it resizes.
+	 */
+	setViewportSizeLookup(fn: (() => ZoomViewport | null) | null): void {
+		this.viewportSizeLookup = fn;
+	}
+
+	/**
+	 * @internal Fit the zoom asked for to the view as it is now: a fit follows
+	 * the view, a factor stays. TileManager calls it as its view mounts and resizes.
+	 */
+	refitZoom(): void {
+		this.applyZoom(false);
+	}
+
+	private applyZoom(requestChanged: boolean): void {
+		const previous = this.zoomShown;
+		// A fit with no view to measure — hidden, say — keeps the factor it had.
+		const zoom = resolveZoom(this.zoomAsked, this.viewportSizeLookup?.() ?? null, this.pageConfig) ?? previous;
+		if (zoom === previous && !requestChanged) return;
+		this.zoomShown = zoom;
+		this.emit("zoom", { zoom, previous, request: this.zoomAsked });
+		if (zoom === previous) return;
+		this.emit("viewport", undefined);
+		// After the view has moved for the zoom: the hidden input follows the
+		// caret, where the IME bar and the browser's scroll-to-input look for it.
+		this.syncInputBridge();
 	}
 
 	/**
@@ -1694,7 +1919,7 @@ export class Editor extends BaseEditor implements IEditor {
 	 *
 	 * All transaction paths in Editor (commands, input, external) converge here.
 	 */
-	private viewDispatch(tr: Transaction, scrollToCursor = true): void {
+	private viewDispatch(tr: Transaction, scrollToCursor = true): boolean {
 		// Stale first, publish second. applyState emits "update" and notifies
 		// listeners synchronously, so anything it wakes reads the new document —
 		// and would read the old layout with it, because a coordinator that still
@@ -1703,14 +1928,24 @@ export class Editor extends BaseEditor implements IEditor {
 		// matches the stale layout it came from, so the geometry looks coherent
 		// while describing text that has already moved.
 		this.lc.invalidate();
-		// applyState is in BaseEditor: applies tr, emits "update", notifyListeners
-		this.applyState(tr);
+		if (!this.applyState(tr)) return false;
 		// resetSilent: reset blink state WITHOUT calling onTick (which fires notifyListeners).
 		// Calling reset() here was the root cause of O(N²) repaints during Y.js initial sync.
 		this.cursorManager.resetSilent();
 		this.onChangeHandler?.(this.editorState);
 		if (scrollToCursor) this.pendingScrollToCursor = true;
 		this.scheduleFlush();
+		return true;
+	}
+
+	/** Input and caret follow `readOnly`, which a seal also makes true. */
+	private syncInputToWritability(): void {
+		this.ib.setReadOnly(this.readOnly);
+		if (this.readOnly) {
+			this.cursorManager.stop();
+		} else if (this.ib.isFocused) {
+			this.cursorManager.start();
+		}
 	}
 
 	/**

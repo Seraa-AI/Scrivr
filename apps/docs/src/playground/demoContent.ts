@@ -1,6 +1,7 @@
 import { DefaultContent } from "@scrivr/core";
 
 import { TRACK_CHANGES_DEMO_DOC } from "./trackChangesDemo";
+import { SIGNING_DEMO_DOC } from "./signingDemo";
 
 // ── Table builders ────────────────────────────────────────────────────────────
 // Compact helpers so the demo table stays readable. Each cell holds one
@@ -1031,22 +1032,33 @@ function performancePages(pageCount: number): Record<string, unknown>[] {
 
 const performancePageCount = requestedPageCount();
 
-/** `?demo=track-changes` loads the document for exercising review by hand. */
+/** `?demo=track-changes` or `?demo=signing` loads a document for exercising review or signing by hand. */
 function requestedDemo(): string | null {
   if (typeof window === "undefined") return null;
   return new URLSearchParams(window.location.search).get("demo");
 }
 
-/** Which demo the playground shows: everyday editing, or suggestions to review. */
-export type DemoKind = "editing" | "track-changes";
+/** Which demo the playground shows: everyday editing, suggestions to review, or an agreement to sign. */
+export type DemoKind = "editing" | "track-changes" | "signing";
 
-export const startingDemo = (): DemoKind => requestedDemo() === "track-changes" ? "track-changes" : "editing";
+const DEMO_DOCS: Record<DemoKind, Record<string, unknown>> = {
+  editing: DEMO_DOC,
+  "track-changes": TRACK_CHANGES_DEMO_DOC,
+  signing: SIGNING_DEMO_DOC,
+};
+
+const isDemoKind = (value: string | null): value is DemoKind => value !== null && Object.hasOwn(DEMO_DOCS, value);
+
+export const startingDemo = (): DemoKind => {
+  const requested = requestedDemo();
+  return isDemoKind(requested) ? requested : "editing";
+};
 
 /** The document for a demo, as JSON the editor can load. */
-export const demoDoc = (kind: DemoKind) => kind === "track-changes" ? TRACK_CHANGES_DEMO_DOC : DEMO_DOC;
+export const demoDoc = (kind: DemoKind) => DEMO_DOCS[kind];
 
 function startingDoc() {
-  if (startingDemo() === "track-changes") return TRACK_CHANGES_DEMO_DOC;
+  if (startingDemo() !== "editing") return demoDoc(startingDemo());
   if (performancePageCount > 0) {
     return {
       ...DEMO_DOC,

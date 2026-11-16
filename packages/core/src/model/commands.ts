@@ -30,10 +30,11 @@ export function insertText(state: EditorState, text: string): Transaction | null
   return state.tr.insertText(text, sel.from, sel.to);
 }
 
+/** Delete the selection; null when there was nothing to delete — empty cells, say. */
 export function deleteSelection(state: EditorState): Transaction | null {
-  const { empty } = state.selection;
-  if (empty) return null;
-  return state.tr.deleteSelection();
+  if (state.selection.empty) return null;
+  const tr = state.tr.deleteSelection();
+  return tr.docChanged ? tr : null;
 }
 
 /**

@@ -171,6 +171,11 @@ export interface PdfEllipseOp {
 
 export interface PdfImageOp extends PdfBox {
   image: PdfImageHandle;
+  /**
+   * `"fill"` (default) stretches the image to the box. `"contain"` keeps its
+   * proportions, as large as fits, centred — a drawn signature in its field.
+   */
+  fit?: "fill" | "contain";
   /** Opacity of the image, or the entire placeholder when it cannot be resolved. */
   opacity?: number;
 }
@@ -248,6 +253,8 @@ export interface PdfNodeContext {
    * canvas the atom is painted in it.
    */
   font?: PdfFontHandle;
+  /** The baseline of the line an inline atom stands in, present when the block is one. */
+  baselineY?: number;
   /**
    * The fill the atom's own marks resolve to — always present when the block
    * is an inline atom, falling back to the document's text colour just as

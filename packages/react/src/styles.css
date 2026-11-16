@@ -8,7 +8,7 @@
   padding: 6px;
 }
 
-:where(.scrivr-image-menu, .scrivr-link-popover, .scrivr-track-popover, .scrivr-ai-popover) {
+:where(.scrivr-image-menu, .scrivr-link-popover, .scrivr-table-menu, .scrivr-track-popover, .scrivr-ai-popover) {
   padding: 8px 10px;
 }
 
@@ -111,4 +111,18 @@
   border-top: 1px solid var(--scrivr-react-border, #e2e8f0);
   margin-top: 8px;
   padding-top: 8px;
+}
+
+/* Hover peeks are compact and read-only; the full card is what selection opens. */
+:where(.scrivr-menu[data-presentation="peek"]) {
+  padding: 6px 10px;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.12);
+}
+
+:where(.scrivr-table-menu [data-part="divider"]) {
+  background: var(--scrivr-react-border, #e2e8f0);
+}
+
+:where(.scrivr-menu-item[data-danger]) {
+  color: var(--scrivr-react-danger, #dc2626);
 }

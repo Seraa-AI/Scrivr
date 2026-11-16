@@ -21,7 +21,15 @@
  */
 
 import type { Node as PmNode } from "@scrivr/core/pm";
-import { applyPageFont, assignBlockIds, prepareDocumentFonts, type FontKey, type FontSynthesis } from "@scrivr/core";
+import {
+  applyPageFont,
+  assignBlockIds,
+  importedFieldValues,
+  prepareDocumentFonts,
+  type FieldValue,
+  type FontKey,
+  type FontSynthesis,
+} from "@scrivr/core";
 import type {
   DocxImports,
   IBaseEditor,
@@ -54,8 +62,11 @@ import { DocxImportError } from "./error";
 import type { ParserDiagnostics } from "./parser";
 import {
   assignOwned,
+  entryOf,
   ownedBundles,
+  ownerOf,
   reportRecorderOf,
+  type DocxReportRecorder,
   type HandlerOwner,
   type OwnedHook,
 } from "../report";
@@ -65,6 +76,12 @@ export interface DocxImportResult {
   diagnostics: DocxDiagnostic[];
   /** What the import built and what it could not — see `DocxReporter`. */
   report: DocxReport;
+  /**
+   * What signers entered into fields' controls in Word, by field id — kept out
+   * of `doc`, as a signer's value always is. Pass on to `Field.configure({ values })`
+   * or `FieldCompletion`, or record it as the signer's.
+   */
+  fieldValues: Record<string, FieldValue>;
 }
 
 export interface DocxImportCallOptions extends DocxImportOptions {
@@ -90,7 +107,6 @@ export async function importDocx(
   bytes: Uint8Array,
   options: DocxImportCallOptions = {},
 ): Promise<DocxImportResult> {
-  const handlers = collectHandlers(editor, options.overrides);
   const lifecycleHooks = collectLifecycleHooks(editor, options.overrides);
 
   // Build ctx first; the image resolver needs ctx.diagnostics to route
@@ -102,6 +118,7 @@ export async function importDocx(
     ...options,
   });
   const recorder = reportRecorderOf(ctx);
+  const handlers = collectHandlers(editor, options.overrides, recorder);
   const tracker = options.trackUnread ? new ReadTracker() : undefined;
   // The parser warns through the diagnostics and records what it could not
   // read in the report — the two channels a drop belongs in.
@@ -305,7 +322,12 @@ export async function importDocx(
       }
     }
     const report = recorder.snapshot();
-    return { doc, diagnostics: finalDiagnostics, report: tracker ? { ...report, unread: tracker.unread() } : report };
+    return {
+      doc,
+      diagnostics: finalDiagnostics,
+      report: tracker ? { ...report, unread: tracker.unread() } : report,
+      fieldValues: importedFieldValues(ctx),
+    };
   } catch (err) {
     if (err instanceof DocxImportError) throw err;
     const message = err instanceof Error ? err.message : String(err);
@@ -360,7 +382,8 @@ function docxImportBundles(
 
 function collectHandlers(
   editor: IBaseEditor,
-  overrides?: DocxImports,
+  overrides: DocxImports | undefined,
+  recorder: DocxReportRecorder,
 ): ResolvedImportHandlers {
   const resolved: ResolvedImportHandlers = {
     blocks: {},
@@ -372,13 +395,41 @@ function collectHandlers(
 
   for (const { owner, bundle: docx } of docxImportBundles(editor, overrides)) {
     const { owners } = resolved;
-    assignOwned(resolved.blocks, owners.blocks, docx.blocks, owner);
+    layerOver(resolved.blocks, owners.blocks, docx.blocks, owner, recorder);
     assignOwned(resolved.paragraphStyles, owners.paragraphStyles, docx.paragraphStyles, owner);
-    assignOwned(resolved.marks, owners.marks, docx.marks, owner);
-    assignOwned(resolved.inlines, owners.inlines, docx.inlines, owner);
+    layerOver(resolved.marks, owners.marks, docx.marks, owner, recorder);
+    layerOver(resolved.inlines, owners.inlines, docx.inlines, owner, recorder);
   }
 
   return resolved;
+}
+
+/**
+ * Register handlers over the ones already there. A later handler is asked
+ * first; when it declines with `null`, the earlier one is asked. One element
+ * serves several owners — every extension that stores something in a content
+ * control claims `<w:sdt>`, and its marks, by its tag — so replacing would
+ * hide all but one.
+ *
+ * `owners` names the handler asked first, which dispatch files the item
+ * under. An earlier handler that answers instead reports as itself.
+ */
+function layerOver<Args extends unknown[], Result>(
+  registry: Record<string, (...args: Args) => Result | null>,
+  owners: Record<string, HandlerOwner>,
+  added: Readonly<Record<string, (...args: Args) => Result | null>> | undefined,
+  owner: HandlerOwner,
+  recorder: DocxReportRecorder,
+): void {
+  if (!added) return;
+  for (const [key, later] of Object.entries(added)) {
+    const earlier = entryOf(registry, key);
+    const earlierOwner = ownerOf(owners, key);
+    registry[key] = earlier
+      ? (...args: Args) => later(...args) ?? recorder.asOwner(earlierOwner, () => earlier(...args))
+      : later;
+    owners[key] = owner;
+  }
 }
 
 interface LifecycleHooks {

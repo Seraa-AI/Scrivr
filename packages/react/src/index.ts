@@ -1,6 +1,7 @@
 // React adapter for @scrivr/core
 
 export { useScrivrEditor } from "./hooks/useScrivrEditor";
+export { useZoom, useZoomRequest } from "./hooks/useZoom";
 export { BubbleMenu } from "./components/BubbleMenu";
 export { useBubbleMenu } from "./hooks/useBubbleMenu";
 export { FloatingMenu } from "./components/FloatingMenu";
@@ -9,6 +10,8 @@ export { LinkPopover } from "./components/LinkPopover";
 export { useLinkPopover } from "./hooks/useLinkPopover";
 export { ImageMenu } from "./components/ImageMenu";
 export { useImageMenu } from "./hooks/useImageMenu";
+export { TableMenu } from "./components/TableMenu";
+export { useTableMenu } from "./hooks/useTableMenu";
 export { SlashMenu } from "./components/SlashMenu";
 export { useSlashMenu } from "./hooks/useSlashMenu";
 export { AiSuggestionCardsPanel } from "./components/AiSuggestionCards";
@@ -22,8 +25,12 @@ export { useAiSuggestionPopover } from "./hooks/useAiSuggestionPopover";
 export { useBlockMarkerOverlay } from "./hooks/useBlockMarkerOverlay";
 export type { BubbleMenuProps } from "./components/BubbleMenu";
 export type { FloatingMenuProps } from "./components/FloatingMenu";
-export type { LinkPopoverProps } from "./components/LinkPopover";
-export type { ImageMenuProps } from "./components/ImageMenu";
+export type { LinkPopoverProps, LinkPopoverState } from "./components/LinkPopover";
+export type { UseLinkPopoverOptions } from "./hooks/useLinkPopover";
+export type { ImageMenuProps, ImageMenuState } from "./components/ImageMenu";
+export type { UseImageMenuOptions } from "./hooks/useImageMenu";
+export type { TableMenuProps, TableMenuState } from "./components/TableMenu";
+export type { UseTableMenuOptions } from "./hooks/useTableMenu";
 export type { ImageVerticalAlign, ImageWrappingMode } from "./hooks/useImageMenu";
 export type { TrackChangesPopoverProps } from "./components/TrackChangesPopover";
 export type { AiSuggestionPopoverProps } from "./components/AiSuggestionPopover";

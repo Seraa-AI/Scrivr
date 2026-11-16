@@ -168,16 +168,52 @@ const cleanup = createImageMenu(editor, {
 
 | Callback | Signature | Description |
 |----------|-----------|-------------|
-| `onShow` | `(rect: DOMRect, info: ImageMenuInfo) => void` | An image was just selected. |
-| `onMove` | `(rect: DOMRect, info: ImageMenuInfo) => void` | Image moved (layout reflow or scroll) — reposition. |
-| `onHide` | `() => void` | Selection left the image. |
+| `onShow` | `(rect: DOMRect, info: ImageMenuInfo) => void` | An image was selected, or peeked on hover. |
+| `onMove` | `(rect: DOMRect, info: ImageMenuInfo) => void` | The same image moved (layout reflow, scroll, an edit) or went from peek to full — reposition. |
+| `onHide` | `() => void` | Neither selected nor hovered any more. |
+
+Pass `hover: true` (or `{ showDelay, hideDelay }`) to peek an image the pointer rests on. Off by
+default, as in Word, Docs and Pages.
 
 ### `ImageMenuInfo`
 
 | Property | Type | Description |
 |----------|------|-------------|
-| `node` | `Node` | The selected ProseMirror image node. Access attributes via `info.node.attrs`. |
+| `node` | `Node` | The ProseMirror image node. Access attributes via `info.node.attrs`. |
 | `docPos` | `number` | Doc position of the image — use with transactions or `editor.selectNode()`. |
+| `presentation` | `"peek" \| "full"` | `"peek"` from hover (compact, read-only); `"full"` when the image is selected. |
+
+---
+
+## createLinkPopover
+
+Shows a popover for a link: `"full"` while the caret is in it, and a compact read-only `"peek"`
+when the pointer rests on one. **Hover is on by default**; pass `hover: false` to show it from
+the selection only.
+
+```ts
+import { createLinkPopover } from '@scrivr/core';
+
+const cleanup = createLinkPopover(editor, {
+  onShow: (rect, info) => { /* info.href, info.from, info.to, info.presentation */ },
+  onMove: (rect, info) => { /* the same link moved, or went peek → full */ },
+  onHide: () => { /* hide */ },
+});
+```
+
+A link on two lines anchors under the line the pointer (peek) or caret (full) is on. A
+different link arrives as `onShow`; the same link, moved by an edit, as `onMove`.
+
+---
+
+## createTableMenu
+
+Shows a menu for a table: `"full"` for a cell selection, with the table's actions from
+`editor.getNodeActions()`, and a `"peek"` of its shape on hover when `hover` is on (off by
+default). Its info carries `docPos`, `rows`, `columns`, `headerRow` and `presentation`.
+
+To build your own hover UI, read `editor.getHoverTargets()` (innermost first, e.g.
+`[link, table-cell, table]`) or subscribe with `subscribeHoverTarget(editor, kind, fn)`.
 
 ---
 
@@ -185,6 +221,6 @@ const cleanup = createImageMenu(editor, {
 
 <Cards>
   <Card title="React menus" href="/packages/react">
-    `BubbleMenu`, `FloatingMenu`, `SlashMenu`, `LinkPopover`, `ImageMenu` as React components.
+    `BubbleMenu`, `FloatingMenu`, `SlashMenu`, `LinkPopover`, `ImageMenu`, `TableMenu` as React components.
   </Card>
 </Cards>

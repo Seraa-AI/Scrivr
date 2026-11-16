@@ -94,7 +94,7 @@ const Stamp = Extension.create({
   },
   addExports() {
     return {
-      docx: { markWrappers: { stamp: (run) => xml("w:customXml", undefined, [run]) } },
+      docx: { markWrappers: { stamp: (runs) => xml("w:customXml", undefined, [...runs]) } },
     };
   },
 });
@@ -370,12 +370,13 @@ describe("importDocx — report", () => {
   });
 
   it("names the override behind a handler that built nothing, and behind a hook", async () => {
-    const editor = new ServerEditor({ extensions: [StarterKit] });
-    paragraphDoc(editor);
-    const bytes = await exportDocxBytes(editor);
+    // No extension reads `w:lang`, so nothing answers once the override declines.
+    const bytes = await docWithBody(
+      `<w:p><w:r><w:rPr><w:lang w:val="en-US"/></w:rPr><w:t>x</w:t></w:r></w:p>`,
+    );
     const { report } = await importDocx(new ServerEditor({ extensions: [StarterKit] }), bytes, {
       overrides: {
-        marks: { b: () => null },
+        marks: { lang: () => null },
         onImportComplete(doc, ctx) {
           ctx.report.changed("document", "reviewed by the caller");
           return doc;
@@ -385,7 +386,7 @@ describe("importDocx — report", () => {
 
     expect(report.entries).toContainEqual({
       outcome: "dropped",
-      kind: "b",
+      kind: "lang",
       reason: "handler returned nothing",
       owner: "overrides",
       count: 1,
@@ -405,7 +406,9 @@ describe("importDocx — report", () => {
       overrides: {
         blocks: {
           paragraph: (_block, content, ctx) => {
-            if (content.some((node) => node.text === "gone")) return null;
+            // An empty result built nothing; `null` would hand the paragraph
+            // on to the Paragraph extension.
+            if (content.some((node) => node.text === "gone")) return [];
             const paragraph = ctx.schema.nodes["paragraph"];
             return paragraph ? paragraph.create(null, content) : null;
           },
@@ -419,6 +422,40 @@ describe("importDocx — report", () => {
       kind: "text",
       reason: "inside a paragraph that was dropped",
       owner: "overrides",
+      count: 1,
+    });
+  });
+
+  it("files what a handler reports under its own owner when a later one declined to it", async () => {
+    const LangReader = Extension.create({
+      name: "langReader",
+      addImports() {
+        return {
+          docx: {
+            marks: {
+              lang: (_mark, ctx) => {
+                ctx.report.changed("lang", "kept as plain text");
+                return null;
+              },
+            },
+          },
+        };
+      },
+    });
+    const bytes = await docWithBody(
+      `<w:p><w:r><w:rPr><w:lang w:val="en-US"/></w:rPr><w:t>x</w:t></w:r></w:p>`,
+    );
+    const { report } = await importDocx(
+      new ServerEditor({ extensions: [StarterKit, LangReader] }),
+      bytes,
+      { overrides: { marks: { lang: () => null } } },
+    );
+
+    expect(report.entries).toContainEqual({
+      outcome: "changed",
+      kind: "lang",
+      reason: "kept as plain text",
+      owner: "langReader",
       count: 1,
     });
   });

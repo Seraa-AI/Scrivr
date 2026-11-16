@@ -35,11 +35,12 @@ function float(
 
 function input(
   objects: AnchoredObjectPlacement[],
-  opts: { text?: boolean; rect?: ObjectRectEntry } = {},
+  opts: { text?: boolean; region?: boolean; rect?: ObjectRectEntry } = {},
 ): PointOwnershipInput {
   return {
     anchoredObjects: objects,
     hasTextAt: () => opts.text ?? false,
+    regionAt: () => opts.region ?? false,
     objectRectAt: () => opts.rect,
   };
 }
@@ -57,6 +58,18 @@ describe("who owns a point", () => {
 
     it.each(["front", "square", "top-bottom"] as const)("%s takes the point", (wrapMode) => {
       const owner = resolvePointOwner(X, Y, 1, input([float({ wrapMode })], { text: true }));
+      expect(owner.kind).toBe("anchored");
+    });
+  });
+
+  describe("inside a region painted over it (a table cell)", () => {
+    it("behind yields to the region, though no glyph is there", () => {
+      const owner = resolvePointOwner(X, Y, 1, input([float({ wrapMode: "behind" })], { region: true }));
+      expect(owner.kind).toBe("text");
+    });
+
+    it.each(["front", "square", "top-bottom"] as const)("%s still takes the point", (wrapMode) => {
+      const owner = resolvePointOwner(X, Y, 1, input([float({ wrapMode })], { region: true }));
       expect(owner.kind).toBe("anchored");
     });
   });

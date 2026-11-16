@@ -30,6 +30,7 @@ export { isTrackedMark } from "./helpers";
 export { trackChangesPluginKey } from "./engine/trackChangesPlugin";
 export { findChanges } from "./findChanges";
 export { findLiveNodeById, isShadowNode, moveShadowRanges, shadowRanges } from "./liveNode";
+export { originalDocument } from "./originalView";
 export type { ShadowRange } from "./liveNode";
 export { applyChanges } from "./applyChanges";
 export { ChangeSet } from "./ChangeSet";
@@ -46,6 +47,7 @@ export { TrackChangesStatus, CHANGE_STATUS, CHANGE_OPERATION } from "./types";
 export type { TrackChangesState } from "./engine/trackChangesPlugin";
 export type {
   TrackChangesOptions,
+  TrackChangesRenderMode,
   TrackedAttrs,
   TrackedChange,
   TextChange,

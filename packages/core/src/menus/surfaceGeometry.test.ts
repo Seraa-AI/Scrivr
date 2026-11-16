@@ -1,0 +1,73 @@
+/**
+ * Geometry is asked of the document a position belongs to. While a header or
+ * footer is being edited, positions are that surface's; the body's layout
+ * cannot place them, and must not answer with whatever body node shares the
+ * number.
+ */
+import { afterEach, describe, expect, it } from "vitest";
+import { createTestEditor, registerActiveSurface } from "../test-utils";
+import { StarterKit } from "../extensions/StarterKit";
+import type { Editor } from "../Editor";
+
+let editor: Editor | null = null;
+afterEach(() => {
+  editor?.destroy();
+  editor = null;
+});
+
+/** A body that is one table, its pages placed on screen as the tile manager places them. */
+function mountedWithTable(): Editor {
+  const cell = { type: "tableCell", content: [{ type: "paragraph", content: [{ type: "text", text: "c" }] }] };
+  editor = createTestEditor({
+    extensions: [StarterKit.configure({ table: true })],
+    content: { type: "doc", content: [{ type: "table", attrs: { grid: [200] }, content: [{ type: "tableRow", content: [cell] }] }] },
+  });
+  editor.setPageTopLookup(() => ({ screenLeft: 0, screenTop: 0 }));
+  editor.ensurePagePopulated(1);
+  return editor;
+}
+
+describe("node geometry while a surface is edited", () => {
+  it("places the body's node when the body is edited", () => {
+    expect(mountedWithTable().getNodeViewportRects(0)).not.toEqual([]);
+  });
+
+  it("does not answer a surface position with the body node at the same number", () => {
+    const e = mountedWithTable();
+    registerActiveSurface(e);
+    expect(e.getNodeViewportRects(0)).toEqual([]);
+  });
+
+  it("does not answer a surface position with the body image at the same number", () => {
+    const e = createTestEditor({
+      content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "image", attrs: { src: "x.png", width: 80, height: 60 } }] }] },
+    });
+    editor = e;
+    e.setPageTopLookup(() => ({ screenLeft: 0, screenTop: 0 }));
+    e.ensurePagePopulated(1);
+    expect(e.getNodeViewportRects(1)).not.toEqual([]);
+    registerActiveSurface(e);
+    expect(e.getNodeViewportRects(1)).toEqual([]);
+  });
+
+  it("does not answer a surface range with the body text at the same numbers", () => {
+    const e = createTestEditor({ content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "body" }] }] } });
+    editor = e;
+    e.setPageTopLookup(() => ({ screenLeft: 0, screenTop: 0 }));
+    e.ensurePagePopulated(1);
+    expect(e.getRangeViewportRects(1, 3)).not.toEqual([]);
+    registerActiveSurface(e);
+    expect(e.getRangeViewportRects(1, 3)).toEqual([]);
+  });
+
+  it("places no body image for a surface position, for resize handles as for menus", () => {
+    const e = createTestEditor({
+      content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "image", attrs: { src: "x.png", width: 80, height: 60 } }] }] },
+    });
+    editor = e;
+    e.ensurePagePopulated(1);
+    expect(e.getNodeRect(1)).toBeDefined();
+    registerActiveSurface(e);
+    expect(e.getNodeRect(1)).toBeUndefined();
+  });
+});
