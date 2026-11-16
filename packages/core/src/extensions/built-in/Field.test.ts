@@ -9,7 +9,7 @@ import { DOMParser, DOMSerializer, type Node as PmNode } from "prosemirror-model
 import { ServerEditor } from "../../ServerEditor";
 import { StarterKit } from "../StarterKit";
 import { Field, fieldDrawingAt, fieldKindsOf, fieldValues, isFieldAnswered, listSignerFields, paintCheckbox, setFieldValue, unansweredBeforeSigning, valuesOnRecord, valuesOnRecordOf, type SignerFieldDescriptor } from "./Field";
-import { BUILT_IN_FIELD_KINDS, defaultSignedDate, isDatedWhenSigned, parseSignedAt, signedAtOf, isDrawnKind, fieldIconStrokes, fieldInk, fieldRoleColor, fieldValueLayout, fieldVerb, type FieldKinds, type FieldValue } from "./fieldKinds";
+import { BUILT_IN_FIELD_KINDS, defaultSignedDate, isDatedWhenSigned, parseSignedAt, readSigningMoment, signedAtOf, isDrawnKind, fieldIconStrokes, fieldInk, fieldRoleColor, fieldValueLayout, fieldVerb, type FieldKinds, type FieldValue } from "./fieldKinds";
 import { createMeasurer, createTestEditor, measureTextWidth } from "../../test-utils";
 import { DefaultFontProvider } from "../../fonts/DefaultFontProvider";
 
@@ -959,6 +959,19 @@ describe("the values a record shows", () => {
     expect(at("2026-11-14T23:30:00")).toBeUndefined();
     expect(at("11/14/2026")).toBeUndefined();
     expect([parseSignedAt("2026-11-14T09:30:00Z"), parseSignedAt("14 November 2026")]).toEqual([Date.parse("2026-11-14T09:30:00Z"), null]);
+  });
+
+  it("reads a signing's day, clock and zone as its signer wrote them, and whether a time was given at all", () => {
+    expect(readSigningMoment("2026-11-15T01:30:00.250+03:00")).toEqual({
+      at: Date.parse("2026-11-14T22:30:00.250Z"),
+      day: "2026-11-15",
+      clock: "01:30:00",
+      zone: "+03:00",
+    });
+    expect(readSigningMoment("2026-11-15T09:00Z")).toEqual({ at: Date.parse("2026-11-15T09:00:00Z"), day: "2026-11-15", clock: "09:00", zone: "+00:00" });
+    // A bare day names no time and no zone.
+    expect(readSigningMoment("2026-11-15")).toEqual({ at: Date.parse("2026-11-15T00:00:00Z"), day: "2026-11-15", clock: null, zone: null });
+    expect(readSigningMoment("15 November 2026")).toBeNull();
   });
 
   it("shows the day the signer signed on, in their own offset — the same on every machine", () => {

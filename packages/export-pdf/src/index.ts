@@ -486,5 +486,16 @@ async function embedImages(
 
 export { exportExecutedPdf } from "./executed";
 export type { ExecutedPdfOptions, ExecutedPdfRefusal, ExecutedPdfResult } from "./executed";
-export { bundleCertificate, exportCompletionCertificate } from "./certificate";
-export type { CertificatePdfOptions } from "./certificate";
+export { bundleCertificate, exportCompletionCertificate, DEFAULT_CERTIFICATE_LABELS } from "./certificate";
+export type {
+  CertificateLabels,
+  CertificateRefusal,
+  CompletionCertificateOptions,
+  CompletionCertificateResult,
+  CompletionEvent,
+  CompletionParty,
+  CompletionRecord,
+  StandardEventKind,
+  VerifiedFacts,
+  VerifiedSignature,
+} from "./certificate";

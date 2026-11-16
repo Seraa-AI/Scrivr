@@ -12,6 +12,7 @@ import {
   valuesOnRecordOf,
   verifySnapshot,
   type EditorOptions,
+  type FieldKinds,
   type FieldValue,
   type SealedSnapshot,
   type SignerFieldDescriptor,
@@ -37,13 +38,7 @@ export type ExecutedPdfRefusal =
   /** Required fields the record would print blank: unanswered, or a drawing the PDF cannot embed. */
   | { reason: "unanswered-fields"; missing: SignerFieldDescriptor[] };
 
-export type ExecutedPdfResult =
-  /**
-   * `values` are the ones printed: a drawing as embedded, none the PDF could
-   * not embed — what a certificate of completion is issued from.
-   */
-  | { ok: true; pdf: Uint8Array; artifactHash: string; values: Record<string, FieldValue> }
-  | { ok: false; refusal: ExecutedPdfRefusal };
+export type ExecutedPdfResult = { ok: true; pdf: Uint8Array; artifactHash: string } | { ok: false; refusal: ExecutedPdfRefusal };
 
 /**
  * The executed document: the sealed snapshot with every party's values
@@ -53,18 +48,42 @@ export type ExecutedPdfResult =
  * Refuses rather than print a record of something else: a snapshot that no
  * longer matches its hash, or a required field the record would show blank.
  * The fields are read from the verified content, not from what was stored
- * beside it, and are checked against the values as the printing editor holds
- * them, as the record `Field` prints (`valuesOnRecordOf`: its kinds, its
- * `formatSignedDate`) — what it prints is what was checked. Throws when `Field` is not among `editorOptions.extensions`,
- * or a plugin refuses the value set. The supplied values replace any configured
- * initial values in Field. Values are printed, never written: the
- * snapshot and its hash are unchanged.
+ * beside it, and are checked against the values as the printing editor
+ * holds them, as the record `Field` prints (`valuesOnRecordOf`: its kinds,
+ * its `formatSignedDate`) — what it prints is what was checked. A
+ * `signedAt` may be a bare day here, printed as that day; a certificate of
+ * completion asks for the moment. Throws when `Field` is not among
+ * `editorOptions.extensions`, or a plugin refuses the value set. The
+ * supplied values replace any configured initial values in Field. Values
+ * are printed, never written: the snapshot and its hash are unchanged.
  */
 export async function exportExecutedPdf(
   snapshot: Pick<SealedSnapshot, "content" | "contentHash">,
   values: Readonly<Record<string, FieldValue>>,
   options: ExecutedPdfOptions,
 ): Promise<ExecutedPdfResult> {
+  const printed = await printExecuted(snapshot, values, options);
+  return printed.ok ? { ok: true, pdf: printed.print.pdf, artifactHash: printed.print.artifactHash } : printed;
+}
+
+/** One printing of the executed record, and what was read to print it — all a certificate of completion describes. */
+export interface ExecutedPrint {
+  pdf: Uint8Array;
+  artifactHash: string;
+  fields: SignerFieldDescriptor[];
+  kinds: FieldKinds;
+  /** The values as the record printed them: a drawing as embedded, none that could not be, each date signed derived. */
+  onRecord: Readonly<Record<string, FieldValue>>;
+  /** Each printed drawing's own pixel size, from its embedding. */
+  drawings: ReadonlyMap<string, { width: number; height: number }>;
+}
+
+/** `exportExecutedPdf`'s printing, keeping what it read — so a certificate is issued from this printing and no other. */
+export async function printExecuted(
+  snapshot: Pick<SealedSnapshot, "content" | "contentHash">,
+  values: Readonly<Record<string, FieldValue>>,
+  options: ExecutedPdfOptions,
+): Promise<{ ok: true; print: ExecutedPrint } | { ok: false; refusal: ExecutedPdfRefusal }> {
   if (!(await verifySnapshot(snapshot.content, snapshot.contentHash))) {
     return { ok: false, refusal: { reason: "snapshot-altered" } };
   }
@@ -79,6 +98,7 @@ export async function exportExecutedPdf(
     const resolveImage = resolveOnce(pdfOptions.resolveImage ?? createDefaultImageResolver(pdfOptions.onImageRefused));
     const scratch = await PDFDocument.create();
     const printable: Record<string, FieldValue> = {};
+    const drawings = new Map<string, { width: number; height: number }>();
     for (const [id, value] of Object.entries(values)) {
       if (value.kind !== "image") {
         printable[id] = value;
@@ -86,7 +106,9 @@ export async function exportExecutedPdf(
       }
       // A drawing the PDF cannot embed is no value: the record would print it blank, and it dates no one.
       const drawing = await embeddedDrawing(scratch, resolveImage, value.src);
-      if (drawing !== null) printable[id] = { ...value, src: drawing };
+      if (drawing === null) continue;
+      printable[id] = { ...value, src: drawing.src };
+      drawings.set(id, { width: drawing.width, height: drawing.height });
     }
     // One authoritative record, including an empty one: configured values
     // cannot fill omissions or stand in for drawings that could not embed.
@@ -98,14 +120,15 @@ export async function exportExecutedPdf(
     const missing = fields.filter((f) => f.required && !isFieldAnswered(f, onRecord[f.id], kinds));
     if (missing.length > 0) return { ok: false, refusal: { reason: "unanswered-fields", missing } };
     const pdf = await exportToPdf(editor, { ...pdfOptions, resolveImage });
-    return { ok: true, pdf, artifactHash: await hashArtifact(pdf), values: printable };
+    return { ok: true, print: { pdf, artifactHash: await hashArtifact(pdf), fields, kinds, onRecord, drawings } };
   } finally {
     editor.destroy();
   }
 }
 
-/** A drawing as this PDF embeds it — through `safeDrawingUrl`, then the PDF's own embedding — or `null` when it cannot. */
-async function embeddedDrawing(scratch: PDFDocument, resolveImage: ImageResolver, src: string): Promise<string | null> {
+/** A drawing as this PDF embeds it — through `safeDrawingUrl`, then the PDF's own embedding — with its size, or `null` when it cannot. */
+async function embeddedDrawing(scratch: PDFDocument, resolveImage: ImageResolver, src: string): Promise<{ src: string; width: number; height: number } | null> {
   const drawing = safeDrawingUrl(src);
-  return drawing !== null && (await embedImage(scratch, resolveImage, drawing)) !== null ? drawing : null;
+  const image = drawing === null ? null : await embedImage(scratch, resolveImage, drawing);
+  return drawing !== null && image !== null ? { src: drawing, width: image.width, height: image.height } : null;
 }

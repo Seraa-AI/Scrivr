@@ -1,6 +1,6 @@
 # RFC: Certificate of completion
 
-Status: path locked (2026-11-15) — open questions answered; see [Decided](#decided-2026-11-15).
+Status: built on PR #260 (2026-11-16) — see [Decided](#decided) and [What shipped](#what-shipped).
 Builds on [Sealed Revisions](./sealed-revisions-rfc.md).
 
 ## Problem
@@ -43,12 +43,12 @@ Scrivr can check that chain end to end. So:
 | On the certificate | Owner | Scrivr's part |
 |---|---|---|
 | The snapshot matches `contentHash` | Scrivr | **checks**, at issue |
-| The executed PDF matches `artifactHash` | Scrivr | **checks**, at issue |
-| Each required signature is answered, and when (`signedAt`) | Scrivr | **checks** against the values printed |
-| Fields per role, page count | Scrivr | **reads** from the snapshot |
-| Party names, emails, authentication, IP, user agent | host | prints as given |
-| Events (sent, viewed, consented, signed, completed) | host | prints as given, checked for order and zone |
-| Document id, title, issuer | host | prints as given |
+| The executed PDF beside it, and its `artifactHash` | Scrivr | **prints** it in the same call |
+| Each required field answered; each signature as that PDF prints it | Scrivr | **checks**, from that printing |
+| When each signature was given (`signedAt`) | host | prints its own stamp, checked for zone and order |
+| Party names, emails, authentication, IP, user agent | host | prints its word, absent or blank left out |
+| Events (sent, viewed, consented, signed, declined, completed, its own) | host | prints its word in time order and UTC; checked for zone and order |
+| Document id, title, issuer | host | prints its word |
 
 The certificate shows which is which. That is the one thing a library's
 certificate can do that a hand-built one cannot: say plainly which lines a
@@ -87,44 +87,44 @@ A library does not, so it must.
 ## Decisions
 
 1. **Checked and asserted, shown apart.** The certificate's first section is
-   *Verified at issue*: the two hashes and the signatures, each with what was
-   checked. Everything the host supplies sits under *Signing record — as
+   *Verified at issue*: the two hashes and the signatures as the executed
+   PDF prints them. Everything the host supplies — the parties, its events,
+   and when each signature was given — sits under *Signing record — as
    recorded by {issuer}*. Scrivr never prints a host fact as checked.
 
 2. **Issued only for a complete signing.** It is a certificate of
    *completion*: issuing refuses while a required field is unanswered, as
    `exportExecutedPdf` does. No interim report.
 
-3. **A separate PDF that names the executed one by hash.** The certificate
-   quotes the executed PDF's `artifactHash`, so it cannot be inside the bytes
-   that hash covers. It is its own PDF with its own `certificateHash`. The
-   executed record stays exactly the artifact the signers' values were
-   printed into, verifiable alone. A host that wants one file, as Adobe and
-   Documenso deliver, bundles the two with `bundleCertificate`: the executed
-   pages, then the certificate's, under a `bundleHash` of their own.
+3. **Issued with the executed PDF, from one printing.** One call,
+   `exportCompletionCertificate(snapshot, values, options)`, prints the
+   executed record and then its certificate from the same editor, fields,
+   kinds and printed values — so a certificate can only describe the
+   document it was issued beside, and a mismatched pair cannot be built.
+   The certificate is its own PDF that names the executed one by its
+   `artifactHash`; the executed record stays verifiable alone. A host that
+   wants one file, as Adobe and Documenso deliver, bundles the two with
+   `bundleCertificate` under a `bundleHash` of their own.
 
 4. **A Scrivr document, printed by the same exporter.** The certificate is
    built as an ordinary document — headings, labelled lines, the drawn
-   signatures as images, nothing beyond StarterKit — and exported by
-   `@scrivr/export-pdf`, so given the executed record's `editorOptions` it
-   shares its fonts and page setup, and needs no second renderer.
-   Building and printing are two steps: `buildCompletionCertificate` returns
-   the document, so a host can show it in a viewer, restyle it, or add a
-   section before printing.
+   signatures as images, nothing beyond StarterKit — and printed with the
+   executed record's `editorOptions`, so the two share fonts and page setup
+   and need no second renderer. Its JSON is returned too, to show in a
+   viewer.
 
-5. **Times are UTC, and each signature also as signed.** Events print in UTC,
-   as DocuSign and Adobe do. A signature also shows its `signedAt` read in
-   the signer's own offset — the instant and offset its date-signed field
-   reads, so the two agree on the day. A time that is not a full timestamp
-   with a zone is refused, a bare day included: an audit line whose instant
-   is ambiguous, or invented, is worse than none.
+5. **A signature's time is the host's.** The executed PDF never prints a
+   signature's time — only the day a date-signed field derives from it — so
+   `signedAt` is the host's stamp on the value. It is printed in the record,
+   beside its party, as the signer gave it and in UTC, and is checked only
+   for its shape and its order against the host's events. A time that is
+   not a full timestamp with a zone is refused, a bare day included: an
+   audit line whose instant is ambiguous, or invented, is worse than none.
 
-6. **The signatures come from the values printed.** `exportExecutedPdf`
-   returns the values it printed — a drawing as it embedded it, none it
-   could not — and the certificate takes that result whole, bytes and
-   values together, so the signatures it shows are the ones that document
-   holds. Read through `Field`'s kinds; there is no
-   second list of who signed.
+6. **The signatures come from the printing.** A drawing the executed PDF
+   could not embed is no value there and no signature here; a drawing is
+   shown in its own proportions, fitted to its kind's box from the size its
+   embedding read, as the executed PDF fits it.
 
 7. **Personal data is what the host passes, nothing more.** IP, user agent
    and authentication method are optional per party, as Adobe makes IP
@@ -134,131 +134,125 @@ A library does not, so it must.
    PDF with an X.509 certificate (PAdES), as Documenso does, needs the host's
    key, which never enters Scrivr; the host signs the bytes it is given.
 
-9. **Labels are the host's language.** Every heading and label comes from one
-   table with English defaults that a host overrides, so a certificate can be
-   issued in the signers' language.
+9. **Labels are the host's language.** Every fixed heading and label comes
+   from one table with English defaults a host overrides; a signature is
+   headed by its field kind's own label, a party by its name.
 
 ## API
 
 ```ts
-// @scrivr/core — pure: no PDF, runs in a browser or a backend
-const built = await buildCompletionCertificate({
-  snapshot,                 // { content, contentHash } from createSnapshot
-  executed,                 // exportExecutedPdf's result: { pdf, values } — bytes hashed here
-  extensions: [StarterKit, Field], // the setup the executed PDF was printed with
+import { bundleCertificate, exportCompletionCertificate } from "@scrivr/export-pdf";
+
+const result = await exportCompletionCertificate(snapshot, values, {
+  editorOptions: { extensions: [StarterKit, Field], fonts }, // as the signers saw it
   record: {
+    issuer: "Acme Sign",
     documentId: "AGR-2026-0042",
     title: "Master Services Agreement",
-    issuer: "Acme Sign",
     parties: [
-      {
-        role: "client-authorized-signatory",
-        name: "Ada Lovelace",
-        email: "ada@example.com",
-        authentication: "Email code",
-        ip: "203.0.113.7",            // optional, like everything below name
-      },
+      { role: "client", name: "Ada Lovelace", email: "ada@example.com", authentication: "Email code", ip: "203.0.113.7" },
+      { role: "legal-cc", name: "Legal team" },             // a copy sent: no fields of its own
     ],
     events: [
-      { at: "2026-11-15T09:12:03Z", kind: "sent", party: "client-authorized-signatory" },
-      { at: "2026-11-15T09:30:00Z", kind: "custom", label: "Identity verified", party: "client-authorized-signatory" },
-      { at: "2026-11-15T09:40:51+03:00", kind: "viewed", party: "client-authorized-signatory" },
-      { at: "2026-11-15T09:44:10+03:00", kind: "signed", party: "client-authorized-signatory" },
+      { at: "2026-11-15T09:12:03Z", kind: "sent", party: "client" },
+      { at: "2026-11-15T09:30:00Z", kind: "custom", label: "Identity verified", party: "client" },
+      { at: "2026-11-15T09:44:10+03:00", kind: "signed", party: "client" },
       { at: "2026-11-15T09:44:12Z", kind: "completed" },
     ],
   },
-  labels,                    // optional overrides of the English defaults
+  labels,                                                   // optional overrides of the English defaults
 });
-// { ok: true, certificate: { content: DocJson, verified: VerifiedFacts } }
+// { ok: true, executed: { pdf, artifactHash }, certificate: { pdf, certificateHash, verified, content } }
 // | { ok: false, refusal }
 
-// @scrivr/export-pdf
-const issued = await exportCompletionCertificate(built.certificate, { editorOptions, ...pdfOptions });
-// { pdf: Uint8Array, certificateHash: "sha256:…" }
-
 // One file, when the host wants it
-const bundled = await bundleCertificate(executed.pdf, issued.pdf);
-// { pdf: Uint8Array, bundleHash: "sha256:…" }
+const bundled = await bundleCertificate(result.executed.pdf, result.certificate.pdf);
+// { pdf, bundleHash }
 ```
 
 **Events** are one of `sent`, `viewed`, `consented`, `signed`, `declined`,
 `completed`, labelled through the table, or `{ kind: "custom", label }`, a
-host's own step, printed as given and placed by its time. Order is checked
-where it means something: a party comes to the document — its first
-`sent`, `viewed` or `consented` — before its first signing, whether that
-signing is a checked signature or the host's `signed` event; and nothing is
-signed after `completed`. Views after signing, or after completion, are
-what signing tools record, and pass. A party with no fields — someone sent
-a copy — is listed like any other.
+host's own step, placed by its time. Order is checked where it means
+something: a party comes to the document — its first `sent`, `viewed` or
+`consented` — before its first signing, whether that signing is a printed
+signature or the host's `signed` event; and nothing is signed after
+`completed`. Views after signing, or after completion, are what signing
+tools record, and pass. `declined` is labelled, not checked.
 
 `VerifiedFacts` is the checked section as data — `contentHash`,
-`artifactHash`, and each signature with its role and `signedAt` — so a
+`artifactHash`, and each signature by `fieldId`, `role` and `kind` — so a
 host stores exactly what the certificate claims beside it.
 
 ### Refusals
 
 A result, not an exception, as `createSnapshot` and `exportExecutedPdf` do:
-each is an answer the host shows someone.
+each is an answer the host shows someone. The executed PDF's own refusals
+come first.
 
 | `reason` | When |
 |---|---|
 | `snapshot-altered` | `verifySnapshot(content, contentHash)` fails |
-| `unanswered-fields { missing }` | a required field has no answer — not complete |
+| `unanswered-fields { missing }` | a required field is unanswered, or holds a drawing the PDF cannot embed |
+| `unknown-field-kind { kind }` | a field's kind is not in the editor setup — a signature could not be told from text |
 | `missing-party { role }` | a role that answered or must answer a field has no party in the record |
 | `unknown-party { role }` | an event names a role no party in the record plays |
 | `unzoned-time { at }` | an event time or a `signedAt` is not a full timestamp with a zone |
-| `undated-signature { fieldId }` | an answered signature carries no `signedAt` |
+| `undated-signature { fieldId }` | a printed signature carries no `signedAt` |
 | `signed-after-completed { fieldId }` | a signature's `signedAt` is later than the `completed` event |
-| `events-out-of-order { event }` | a party first comes to the document after it signed, or a `signed` event follows `completed` |
-
-The executed bytes are hashed, not compared to a stored hash: the
-certificate quotes the hash of the bytes it was given, so a host that hands
-over the wrong file gets a certificate for that file, never a false match.
+| `events-out-of-order { event }` | a party first comes to the document after it signed, or a host `signed` event follows `completed` |
 
 ## Ownership
 
-- **The chain's facts** are read where they already live: `verifySnapshot`
-  and `hashArtifact` (core `sealing/`), the fields from the verified content,
-  the answers and their `signedAt` from the values the executed PDF printed,
-  through `Field`'s kinds — the same functions `exportExecutedPdf` uses to
-  refuse an unanswered record.
+- **The chain's facts** come from one printing: `printExecuted` verifies the
+  snapshot, opens it with the signers' extensions, holds the values it can
+  print, checks completeness against `valuesOnRecordOf`, prints, and hands
+  the certificate what it read — fields, kinds, the values on record, each
+  drawing's embedded size.
+- **The grammar of `signedAt`** is core's: `readSigningMoment`, beside
+  `parseSignedAt`, gives the instant, day, clock and zone the certificate
+  prints and orders by.
 - **The record** is the host's, passed in, never stored.
-- **The certificate document** is built in one pure function in core
-  `sealing/certificate.ts`; printing is `@scrivr/export-pdf`'s, beside
-  `exportExecutedPdf`.
+- **The certificate** — its checks and the blocks it is laid out in —
+  lives in `@scrivr/export-pdf` beside `exportExecutedPdf`, and is reachable
+  only through `exportCompletionCertificate`. The blocks become a document
+  through core's `documentFromBlocks`, so the exporter names no node.
 
 ## What changes, where
 
 | Place | Change |
 |---|---|
-| `core/src/sealing/certificate.ts` (new) | `buildCompletionCertificate`, `CompletionRecord`, `VerifiedFacts`, refusals, default labels |
-| `core/src/sealing/snapshot.ts` | nothing — reused |
-| `export-pdf/src/certificate.ts` (new) | `exportCompletionCertificate` — the exporter, then `hashArtifact`; `bundleCertificate` — copies both documents' pages into one |
+| `export-pdf/src/certificate.ts` (new) | `exportCompletionCertificate`, `bundleCertificate`, the record types, labels, checks and document |
+| `export-pdf/src/executed.ts` | `exportExecutedPdf` prints through `printExecuted`, which also returns what it read; each drawing's embedded size |
+| `export-pdf/src/contain.ts` (new) | `containedSize`, the one contain-fit both PDFs use |
+| `core/src/sealing/snapshot.ts` | `snapshotDocument`, the snapshot's document object, shared by every reader |
+| `core/src/model/documentFromBlocks.ts` (new) | `documentFromBlocks`: a plain document from titles, paragraphs, labelled lines and images — core owns StarterKit's vocabulary, so the exporter names no node |
+| `core/src/extensions/built-in/fieldKinds.ts` | `readSigningMoment` |
 | `docs/guides/sealing.mdx` | the certificate step after the executed PDF |
-| playground *Signing* demo | "Download certificate" beside the executed PDF |
+| playground *Signing* demo | the executed PDF and its certificate from one click |
 
 ## Invariants
 
 - Every line under *Verified at issue* was checked in that call; nothing the
   host supplied appears there.
-- The certificate's `artifactHash` is the hash of the bytes it was given.
-- The signatures it shows are the values the executed PDF printed.
-- The day shown for a signature equals the date-signed field's day in the
-  executed PDF.
-- No refusal case yields a certificate.
+- The certificate's `artifactHash` is the hash of the executed PDF issued
+  with it.
+- The signatures it shows are the ones that PDF prints, in the same
+  proportions.
+- A signature's recorded day is the day its date-signed field prints.
+- No refusal case yields either PDF.
 
 ## Tests
 
-- Verified section: built from a real snapshot and a real executed PDF, its
-  hashes equal `contentHash` and `hashArtifact(bytes)`.
-- Each refusal, one test each, from a real snapshot.
-- A party's drawn signature appears as the image `exportExecutedPdf` embedded.
-- A signature's shown day matches the executed PDF's date-signed field for an
-  offset that crosses midnight UTC.
-- Host fields absent → their lines absent, not blank.
-- Labels override; defaults otherwise.
-- Export: the PDF's hash is `certificateHash`; the certificate's text lists
-  the executed `artifactHash`.
+- The executed PDF and the certificate from one call; the certificate's
+  hashes equal `contentHash` and the executed PDF's `artifactHash`.
+- A drawing the executed PDF could not embed is no signature on the
+  certificate; a 3:1 drawing is 132 × 44 in a 180 × 44 box.
+- A signature's time is in the record, not *Verified at issue*; its recorded
+  day and the executed PDF's date-signed field agree across midnight UTC.
+- Each refusal, one test each, including an unknown field kind.
+- Blank host details print nothing, and the certificate opens.
+- Re-views and copies sent pass; labels override, a blank one keeps its
+  default; the defaults are frozen.
 
 ## Out of scope
 
@@ -268,7 +262,7 @@ over the wrong file gets a certificate for that file, never a false match.
   the host already receives them and decides what its record keeps.
 - An audit log of every event in a separate PDF (Documenso's second file).
 
-## Decided (2026-11-15)
+## Decided
 
 1. **Separate, with a bundle helper.** The certificate is its own PDF;
    `bundleCertificate` makes one file for hosts that want it, under its own
@@ -278,31 +272,24 @@ over the wrong file gets a certificate for that file, never a false match.
 3. **The host's `documentId` only, for now.** Printed as an opaque string.
    A document id of Scrivr's own, carried in the document, would be printed
    beside it once there is one.
-4. **A closed set of events, plus custom.** The six kinds are checked for
-   order and translated; `{ kind: "custom", label }` carries a host's own
-   step, printed as given.
+4. **A closed set of events, plus custom.** The six kinds are labelled and
+   translated, and those order means something for are checked (see *API*);
+   `{ kind: "custom", label }` carries a host's own step, placed by its time.
+5. **One call issues both PDFs (2026-11-16).** A first build took the
+   executed PDF and its values as two inputs, and nothing proved they
+   belonged together; the certificate is now issued with the executed PDF,
+   from its printing.
+6. **A signature's time is in the record (2026-11-16).** It is the host's
+   stamp — the executed PDF never prints it — so it moved out of *Verified
+   at issue*.
 
 ## What shipped
 
-Built as designed above, which records the build. Two things worth knowing
-that the design does not say:
-
-- **The builder opens the snapshot as `exportExecutedPdf` does** — a sealed
-  `ServerEditor` with the signers' `extensions`, holding the printed values,
-  reading the fields from the verified content and completeness from
-  `valuesOnRecordOf` — so a certificate is issued complete exactly when the
-  executed PDF printed complete. Both read the snapshot's document through
-  `snapshotDocument`.
-- **A drawn signature keeps its proportions.** Core reads a drawing's pixel
-  size from its own PNG or JPEG header (`drawingSize`, beside
-  `safeDrawingUrl`), and the certificate fits it to its kind's box, as the
-  canvas and the executed PDF (`fit: "contain"`) do — so it looks the same on
-  both documents.
-
-Guide: `guides/sealing.mdx`, *The certificate of completion*. The
-playground's signing room keeps a record as a host would — sent on opening,
-viewed per party, signed per signature, completed when the executed PDF is
-made — and issues the certificate from that PDF's result and that record.
+Built as designed above, which now records the build (PR #260). Guide:
+`guides/sealing.mdx`, *The certificate of completion*. The playground's
+signing room keeps a record as a host would — sent on opening, viewed per
+party, signed per signature, completed as the executed PDF is made — and
+issues the executed PDF and its certificate with one click.
 
 ## Sources
 

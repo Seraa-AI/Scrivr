@@ -39,6 +39,7 @@ export {
   isDrawnKind,
   isSigningKind,
   parseSignedAt,
+  readSigningMoment,
   signedAtOf,
 } from "./built-in/fieldKinds";
 export type {

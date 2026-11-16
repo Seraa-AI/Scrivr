@@ -11,19 +11,17 @@ import {
   isFieldAnswered,
   isSigningKind,
   signedAtOf,
-  buildCompletionCertificate,
+  snapshotDocument,
   listSignerFields,
   unansweredBeforeSigning,
   valuesOnRecord,
   verifySnapshot,
-  type CertificateRefusal,
-  type CompletionEvent,
   type FieldValue,
   type SealedSnapshot,
   type SignerFieldDescriptor,
 } from "@scrivr/core";
 import { FieldCompletion, ReadingProgress, requestField, type ReadingEvent } from "@scrivr/plugins";
-import { exportCompletionCertificate, exportExecutedPdf } from "@scrivr/export-pdf";
+import { exportCompletionCertificate, type CertificateRefusal, type CompletionEvent, type ExecutedPdfRefusal } from "@scrivr/export-pdf";
 import { playgroundFonts } from "./fonts";
 import { PLAYGROUND_THEME } from "./theme";
 import { ROLE_LABEL, SIGNING_ROLES, type SigningRole } from "./signingDemo";
@@ -70,8 +68,8 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
   });
   const [request, setRequest] = useState<FieldRequest | null>(null);
   const [verified, setVerified] = useState<boolean | null>(null);
-  // The executed PDF as issued — its bytes, the values it printed, and the room's record up to its completion: what a certificate describes.
-  const [executed, setExecuted] = useState<{ hash: string; url: string; pdf: Uint8Array; values: Record<string, FieldValue>; events: CompletionEvent[] } | null>(null);
+  // The executed PDF and its certificate, issued together from one printing.
+  const [executed, setExecuted] = useState<{ hash: string; url: string } | null>(null);
   const [certificate, setCertificate] = useState<{ hash: string; url: string } | null>(null);
   // The room's own record of the signing, as a host keeps one: Scrivr prints it on the certificate as the room's word.
   const [events, setEvents] = useState<CompletionEvent[]>(() => {
@@ -90,7 +88,7 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
   useEffect(() => {
     let current = true;
     void verifySnapshot(snapshot.content, snapshot.contentHash).then((intact) => {
-      const held = listSignerFields(new ServerEditor({ extensions: [StarterKit.configure({ table: true }), Field], content: JSON.parse(snapshot.content) }).getState().doc);
+      const held = listSignerFields(new ServerEditor({ extensions: [StarterKit.configure({ table: true }), Field], content: snapshotDocument(snapshot.content) }).getState().doc);
       if (current) setVerified(intact && JSON.stringify(held) === JSON.stringify(snapshot.fields));
     });
     return () => {
@@ -112,7 +110,7 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
     );
   }, [role]);
 
-  const content = useMemo(() => JSON.parse(snapshot.content), [snapshot]);
+  const content = useMemo(() => snapshotDocument(snapshot.content), [snapshot]);
   const mine = snapshot.fields.filter((f) => f.role === role);
 
   const editor = useScrivrEditor(
@@ -196,68 +194,33 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
     if (!verified) return;
     setExporting(true);
     setProblem(null);
-    // The executed document: the sealed snapshot with every party's values
-    // printed in their fields, laid out with the setup the signers used.
+    // The executed document — the sealed snapshot with every party's values
+    // printed in their fields — and its certificate of completion, issued
+    // together from one printing, laid out with the setup the signers used.
     try {
-      const result = await exportExecutedPdf(snapshot, values, {
+      const result = await exportCompletionCertificate(snapshot, values, {
         editorOptions: { pageConfig: defaultPageConfig, fonts: playgroundFonts, extensions: signersSetup() },
-      });
-      if (!result.ok) {
-        setProblem(
-          result.refusal.reason === "snapshot-altered"
-            ? "The sealed snapshot no longer matches its hash, so there is no executed document to make."
-            : `Still unanswered: ${result.refusal.missing.map((f) => KIND_LABEL[f.kind] ?? f.kind).join(", ")}.`,
-        );
-        return;
-      }
-      const url = URL.createObjectURL(new Blob([new Uint8Array(result.pdf)], { type: "application/pdf" }));
-      // Completed as it is executed; the certificate describes the record to here.
-      const completed: CompletionEvent = { at: signersTimestamp(new Date()), kind: "completed" };
-      setExecuted({ hash: result.artifactHash, url, pdf: result.pdf, values: result.values, events: [...events, completed] });
-      setCertificate(null);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = "services-agreement-executed.pdf";
-      link.click();
-    } catch (error) {
-      setProblem(`The executed PDF could not be made: ${error instanceof Error ? error.message : String(error)}. Try again.`);
-    } finally {
-      setExporting(false);
-    }
-  };
-
-  const exportCertificate = async () => {
-    if (!executed) return;
-    setExporting(true);
-    setProblem(null);
-    // The certificate of completion: what Scrivr checks against the sealed
-    // snapshot and the executed PDF, then the room's record of the signing.
-    try {
-      const built = await buildCompletionCertificate({
-        snapshot,
-        // Exactly what the executed PDF printed, in the setup it printed with.
-        executed: { pdf: executed.pdf, values: executed.values },
-        extensions: signersSetup(),
         record: {
           issuer: "the Scrivr playground",
           title: "Services Agreement",
           parties: SIGNING_ROLES.map((party) => ({ role: party, name: ROLE_LABEL[party] })),
-          events: executed.events,
+          // Completed as it is executed.
+          events: [...events, { at: signersTimestamp(new Date()), kind: "completed" }],
         },
       });
-      if (!built.ok) {
-        setProblem(`No certificate: ${CERTIFICATE_REFUSAL[built.refusal.reason]}`);
+      if (!result.ok) {
+        const { refusal } = result;
+        setProblem(
+          refusal.reason === "unanswered-fields"
+            ? `Still unanswered: ${refusal.missing.map((f) => KIND_LABEL[f.kind] ?? f.kind).join(", ")}.`
+            : `No executed document: ${REFUSAL_WORDS[refusal.reason]}`,
+        );
         return;
       }
-      const issued = await exportCompletionCertificate(built.certificate, { editorOptions: { pageConfig: defaultPageConfig, fonts: playgroundFonts } });
-      const url = URL.createObjectURL(new Blob([new Uint8Array(issued.pdf)], { type: "application/pdf" }));
-      setCertificate({ hash: issued.certificateHash, url });
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = "services-agreement-certificate.pdf";
-      link.click();
+      setExecuted({ hash: result.executed.artifactHash, url: download(result.executed.pdf, "services-agreement-executed.pdf") });
+      setCertificate({ hash: result.certificate.certificateHash, url: pdfUrl(result.certificate.pdf) });
     } catch (error) {
-      setProblem(`The certificate could not be made: ${error instanceof Error ? error.message : String(error)}. Try again.`);
+      setProblem(`The executed PDF could not be made: ${error instanceof Error ? error.message : String(error)}. Try again.`);
     } finally {
       setExporting(false);
     }
@@ -393,11 +356,10 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
               </a>
             </Row>
           )}
-          {executed && (
+          {certificate && (
             <button
               type="button"
-              disabled={exporting}
-              onClick={() => void exportCertificate()}
+              onClick={() => saveAs(certificate.url, "services-agreement-certificate.pdf")}
               className="mt-2 h-8 w-full rounded-md border text-[12px] font-semibold disabled:opacity-50"
               style={{ borderColor: "var(--app-border)", color: "var(--app-text)" }}
             >
@@ -433,10 +395,10 @@ function signersSetup() {
   return [StarterKit.configure({ table: true }), Field.configure({ formatSignedDate: signedDateInWords })];
 }
 
-/** Why the room could not issue a certificate, in words. */
-const CERTIFICATE_REFUSAL: Record<CertificateRefusal["reason"], string> = {
+/** Why the room could not issue the executed PDF and its certificate, in words. */
+const REFUSAL_WORDS: Record<Exclude<ExecutedPdfRefusal["reason"] | CertificateRefusal["reason"], "unanswered-fields">, string> = {
   "snapshot-altered": "the sealed snapshot no longer matches its hash.",
-  "unanswered-fields": "a required field is still unanswered.",
+  "unknown-field-kind": "a field is of a kind this room does not know.",
   "unknown-party": "the record names a party the room does not know.",
   "missing-party": "a party who signed is missing from the record.",
   "unzoned-time": "a time in the record names no zone.",
@@ -444,6 +406,23 @@ const CERTIFICATE_REFUSAL: Record<CertificateRefusal["reason"], string> = {
   "signed-after-completed": "a signature is dated after completion.",
   "events-out-of-order": "the record's events are out of order.",
 };
+
+const pdfUrl = (bytes: Uint8Array): string => URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: "application/pdf" }));
+
+/** Hands the browser `url` to save as `name`. */
+function saveAs(url: string, name: string): void {
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = name;
+  link.click();
+}
+
+/** A PDF's bytes as a link the browser saves at once; the link, to show again. */
+function download(bytes: Uint8Array, name: string): string {
+  const url = pdfUrl(bytes);
+  saveAs(url, name);
+  return url;
+}
 
 /**
  * The day a signature names, in the room's own words — "November 14, 2026". Read from the

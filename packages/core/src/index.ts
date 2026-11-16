@@ -26,20 +26,8 @@ export * from "./extensions";
 export type { DeferredEditOptions, DeferredEditAbandonment } from "./BaseEditor";
 export type { MutationDenied, MutationDenialReason, MutationGate, MutationOrigin } from "./mutationGate";
 export { createSnapshot, contentHashOf, verifySnapshot, hashArtifact, snapshotDocument } from "./sealing/snapshot";
-export { buildCompletionCertificate, DEFAULT_CERTIFICATE_LABELS } from "./sealing/certificate";
-export type {
-  CertificateInput,
-  CertificateLabels,
-  CertificateRefusal,
-  CertificateResult,
-  CompletionCertificate,
-  CompletionEvent,
-  CompletionParty,
-  CompletionRecord,
-  StandardEventKind,
-  VerifiedFacts,
-  VerifiedSignature,
-} from "./sealing/certificate";
+export { documentFromBlocks } from "./model/documentFromBlocks";
+export type { DocumentBlock } from "./model/documentFromBlocks";
 export type {
   CreateSnapshotOptions,
   HostSealRefusal,

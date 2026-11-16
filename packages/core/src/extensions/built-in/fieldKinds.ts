@@ -125,6 +125,26 @@ function readSignedAt(signedAt: string): { year: number; month: number; day: num
  */
 export const parseSignedAt = (signedAt: string): number | null => readSignedAt(signedAt)?.at ?? null;
 
+/**
+ * A `signedAt` as its signer wrote it: the instant, the day, and the clock
+ * time and zone when one was given (`Z` read as `+00:00`; fractions of a
+ * second kept in `at` only). A bare day has neither — a record must not
+ * stand an invented midnight in for it. `null` for what is no moment.
+ */
+export function readSigningMoment(signedAt: string): { at: number; day: string; clock: string | null; zone: string | null } | null {
+  const parts = SIGNED_AT.exec(signedAt);
+  const moment = readSignedAt(signedAt);
+  if (!parts || !moment) return null;
+  const [, , , , hour, minute, second, , sign, offsetHours, offsetMinutes] = parts;
+  const timed = hour !== undefined && minute !== undefined;
+  return {
+    at: moment.at,
+    day: signedAt.slice(0, 10),
+    clock: timed ? `${hour}:${minute}${second === undefined ? "" : `:${second}`}` : null,
+    zone: timed ? (sign === undefined ? "+00:00" : `${sign}${offsetHours}:${offsetMinutes}`) : null,
+  };
+}
+
 /** The `signedAt` a value carries when it names a moment (`parseSignedAt`); `null` otherwise. */
 export function signedAtOf(value: FieldValue | undefined): string | null {
   if (!value || !("signedAt" in value) || value.signedAt === undefined) return null;
