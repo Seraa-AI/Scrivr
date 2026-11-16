@@ -79,13 +79,15 @@ export interface DocxReportRecorder {
    * reports is filed under `owner`. If it reported neither `kept` (of at least
    * one) nor `dropped` for `kind` itself, the outcome is recorded from its
    * result: kept when `produced(result)`, otherwise dropped with `ifNothing`.
+   * A `null` `ifNothing` records nothing: the handler declined, and the caller
+   * accounts for the item another way.
    */
   handle<T>(
     owner: HandlerOwner,
     kind: string,
     run: () => T,
     produced: (result: T) => boolean,
-    ifNothing?: string,
+    ifNothing?: string | null,
   ): T;
   /**
    * Run code `owner` contributed that is not handed one item — a lifecycle
@@ -93,6 +95,12 @@ export interface DocxReportRecorder {
    * attributes; it records no outcome of its own.
    */
   attribute<T>(owner: HandlerOwner, run: () => T): T;
+  /**
+   * Run a handler that answers for the one `handle` is running, after it
+   * declined: what `run` reports is filed under `owner`, and the item stays
+   * the frame's to decide.
+   */
+  asOwner<T>(owner: HandlerOwner, run: () => T): T;
   /** `attribute` for a hook the converter awaits. The frame stays open until it settles. */
   attributeAsync<T>(owner: HandlerOwner, run: () => T | Promise<T>): Promise<T>;
   /**
@@ -228,7 +236,7 @@ export function createReportRecorder(options: ReportRecorderOptions = {}): DocxR
       const result = within(frame, run);
       if (!frame.decided) {
         if (produced(result)) addKept(kind, 1);
-        else addEntry("dropped", kind, ifNothing, owner);
+        else if (ifNothing !== null) addEntry("dropped", kind, ifNothing, owner);
       } else if (frame.claimedKept) {
         // A handler can keep an item without returning it here — writing it
         // to another part, say — so its enclosing subtree must not move its
@@ -239,6 +247,17 @@ export function createReportRecorder(options: ReportRecorderOptions = {}): DocxR
     },
     attribute(owner, run) {
       return within({ owner, kind: null, decided: false, claimedKept: false }, run);
+    },
+    asOwner(owner, run) {
+      const frame = innermost();
+      if (!frame) return run();
+      const handedOver = frame.owner;
+      frame.owner = owner;
+      try {
+        return run();
+      } finally {
+        frame.owner = handedOver;
+      }
     },
     async attributeAsync(owner, run) {
       // Hooks run one at a time, each awaited before the next, so the stack
