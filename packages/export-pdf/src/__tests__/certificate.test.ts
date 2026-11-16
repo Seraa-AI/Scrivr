@@ -294,8 +294,8 @@ describe("a host's own content on the certificate", () => {
   const logo = drawingOf(120, 40);
 
   it("adds the host's blocks above the title and after the record, and leaves what was verified as it was", async () => {
-    const plain = linesOf((await issued()).certificate.content);
-    const { certificate } = await issued(signed, {
+    const plain = await issued();
+    const { executed, certificate } = await issued(signed, {
       content: () => ({
         before: [{ image: logo, width: 120, height: 40 }, { paragraph: "Acme Sign — completion record" }],
         after: [{ title: "Electronic record and signature disclosure", level: 3 }, { paragraph: "The parties agreed to sign electronically." }],
@@ -306,7 +306,9 @@ describe("a host's own content on the certificate", () => {
     expect(lines.indexOf("Acme Sign — completion record")).toBeLessThan(lines.indexOf("Certificate of completion"));
     expect(lines.at(-1)).toBe("The parties agreed to sign electronically.");
     expect(imagesOf(certificate.content)[0]?.["src"]).toBe(logo);
-    expect(section(lines, VERIFIED, RECORD)).toEqual(section(plain, VERIFIED, RECORD));
+    // Each printing is its own PDF, stamped when it was made: the same section, with this issuing's hash.
+    const asIssuedHere = (line: string) => line.replace(plain.executed.artifactHash, executed.artifactHash);
+    expect(section(lines, VERIFIED, RECORD)).toEqual(section(linesOf(plain.certificate.content), VERIFIED, RECORD).map(asIssuedHere));
   });
 
   it("lets the host replace the record's body, still under its own name — given Scrivr's blocks to change", async () => {
@@ -335,8 +337,7 @@ describe("a host's own content on the certificate", () => {
   });
 
   it("cannot change what was verified: the hook sees the facts, never the ones printed or kept", async () => {
-    const plain = await issued();
-    const { certificate } = await issued(signed, {
+    const { executed, certificate } = await issued(signed, {
       content: ({ verified }) => {
         try {
           Reflect.set(verified, "artifactHash", "sha256:forged");
@@ -348,7 +349,7 @@ describe("a host's own content on the certificate", () => {
       },
     });
 
-    expect(certificate.verified.artifactHash).toBe(plain.certificate.verified.artifactHash);
+    expect(certificate.verified.artifactHash).toBe(executed.artifactHash);
     expect(certificate.verified.signatures[0]?.fieldId).toBe("client-sig");
     expect(linesOf(certificate.content).join("\n")).not.toContain("forged");
   });
