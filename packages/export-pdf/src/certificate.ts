@@ -1,5 +1,6 @@
 import {
   Editor,
+  StarterKit,
   documentFromBlocks,
   hashArtifact,
   isFieldAnswered,
@@ -7,14 +8,16 @@ import {
   readSigningMoment,
   type DocumentBlock,
   type FieldKindSpec,
+  type FieldKinds,
   type FieldValue,
   type SealedSnapshot,
   type SignerFieldDescriptor,
+  type SigningMoment,
 } from "@scrivr/core";
 import { PDFDocument } from "pdf-lib";
 import { containedSize } from "./contain";
 import { printExecuted, type ExecutedPdfOptions, type ExecutedPdfRefusal, type ExecutedPrint } from "./executed";
-import { exportToPdf } from "./index";
+import { exportToPdf } from "./pdf";
 
 /** The steps a certificate labels itself; `sent`, `viewed` and `consented` before signing, and signing before `completed`, are checked. */
 export type StandardEventKind = "sent" | "viewed" | "consented" | "signed" | "declined" | "completed";
@@ -144,6 +147,12 @@ export interface VerifiedFacts {
 export type CertificateRefusal =
   /** A field's kind is not one the editor setup knows: the certificate could not tell whether it is a signature. */
   | { reason: "unknown-field-kind"; kind: string }
+  /** The record names no issuer: its facts would be printed under nobody's name. */
+  | { reason: "unnamed-issuer" }
+  /** Two parties play one role: whose a signature for it is could not be said. */
+  | { reason: "duplicate-party"; role: string }
+  /** An event of a kind no certificate knows, or a step of the host's own with no label. */
+  | { reason: "unknown-event"; event: CompletionEvent }
   /** A role that answered or must answer a field has no party in the record. */
   | { reason: "missing-party"; role: string }
   /** An event names a role no party in the record plays. */
@@ -196,8 +205,10 @@ export async function exportCompletionCertificate(
   const issued = certificateOf(snapshot.contentHash, print, record, labelsOf(labels), content);
   if ("reason" in issued) return { ok: false, refusal: issued };
 
+  // Printed in StarterKit alone — the certificate is titles, paragraphs and
+  // images — with the signers' fonts and page, so it matches the record.
   const { editorOptions, ...pdfOptions } = executedOptions;
-  const editor = new Editor({ ...editorOptions, content: issued.content, sealed: true });
+  const editor = new Editor({ ...editorOptions, extensions: [StarterKit], content: issued.content, sealed: true });
   try {
     const pdf = await exportToPdf(editor, pdfOptions);
     return {
@@ -227,13 +238,15 @@ export async function bundleCertificate(executed: Uint8Array, certificate: Uint8
 
 // ── Checking the record ──────────────────────────────────────────────────────
 
-/** A signature as the executed record printed it, its kind and its instant read once. */
+/** A signature as the executed record printed it: its field, its kind, its value, its moment, and its size there. */
 interface Signature {
   field: SignerFieldDescriptor;
   spec: FieldKindSpec;
   value: Extract<FieldValue, { kind: "text" | "image" }>;
   signedAt: string;
-  at: number;
+  moment: SigningMoment & { time: NonNullable<SigningMoment["time"]> };
+  /** The signature as the executed PDF prints it: its words, or its drawing fitted to the field's box. */
+  shown: DocumentBlock;
 }
 
 interface TimedEvent {
@@ -241,7 +254,11 @@ interface TimedEvent {
   at: number;
 }
 
-/** The certificate's document and checked facts, or why it cannot be issued over this printing. */
+/**
+ * The certificate's document and checked facts, or why it cannot be issued
+ * over this printing. *Verified at issue* is laid out before the host's
+ * `content` is called, from facts the host only ever sees frozen.
+ */
 function certificateOf(
   contentHash: string,
   print: ExecutedPrint,
@@ -249,30 +266,32 @@ function certificateOf(
   labels: CertificateLabels,
   content: CompletionCertificateOptions["content"],
 ): { content: Record<string, unknown>; verified: VerifiedFacts } | CertificateRefusal {
-  const { fields, kinds, onRecord } = print;
-  const unknownKind = fields.find((f) => kinds[f.kind] === undefined);
+  const unknownKind = print.fields.find((f) => print.kinds[f.kind] === undefined);
   if (unknownKind) return { reason: "unknown-field-kind", kind: unknownKind.kind };
+  const issuer = given(record.issuer);
+  if (issuer === null) return { reason: "unnamed-issuer" };
 
   const signatures = signaturesOf(print);
   if ("reason" in signatures) return signatures;
   const timeline = timelineOf(record.events);
   if ("reason" in timeline) return timeline;
-  const refusal = checkParties(fields, onRecord, print.kinds, record) ?? checkOrder(timeline, signatures);
+  const refusal = checkParties(print, record) ?? checkOrder(timeline, signatures);
   if (refusal) return refusal;
 
-  const verified: VerifiedFacts = {
+  const verified = deepFreeze<VerifiedFacts>({
     contentHash,
     artifactHash: print.artifactHash,
     signatures: signatures.map(({ field }) => ({ fieldId: field.id, role: field.role, kind: field.kind })),
-  };
+  });
+  const checked = verifiedBlocks(verified, signatures, labels);
   const recordBody = recordBlocks(signatures, record, timeline, labels);
   const host = content?.({ record: recordBody, verified, signingRecord: record }) ?? {};
   return {
     content: documentFromBlocks([
       ...(host.before ?? []),
       { title: labels.title, level: 1 },
-      ...verifiedBlocks(verified, signatures, print.drawings, labels),
-      { title: `${labels.record} ${record.issuer}`.trim(), level: 2 },
+      ...checked,
+      { title: `${labels.record} ${issuer}`, level: 2 },
       ...(host.record ?? recordBody),
       ...(host.after ?? []),
     ]),
@@ -280,8 +299,17 @@ function certificateOf(
   };
 }
 
-/** The signatures the record printed, each dated by its full `signedAt`. */
-function signaturesOf({ fields, kinds, onRecord }: ExecutedPrint): Signature[] | CertificateRefusal {
+/** `value`, and everything in it, made read-only. */
+function deepFreeze<T>(value: T): T {
+  if (typeof value === "object" && value !== null && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const inner of Object.values(value)) deepFreeze(inner);
+  }
+  return value;
+}
+
+/** The signatures the record printed, each dated by its full `signedAt`. Unknown kinds were refused before. */
+function signaturesOf({ fields, kinds, onRecord, drawings, boxes }: ExecutedPrint): Signature[] | CertificateRefusal {
   const signatures: Signature[] = [];
   for (const field of fields) {
     const value = onRecord[field.id];
@@ -290,9 +318,14 @@ function signaturesOf({ fields, kinds, onRecord }: ExecutedPrint): Signature[] |
     // A signature line holds words or a drawing; anything else is no signature to show.
     if (value?.kind !== "text" && value?.kind !== "image") continue;
     if (value.signedAt === undefined) return { reason: "undated-signature", fieldId: field.id };
-    const at = instantOf(value.signedAt);
-    if (at === null) return { reason: "unzoned-time", at: value.signedAt };
-    signatures.push({ field, spec, value, signedAt: value.signedAt, at });
+    const moment = readSigningMoment(value.signedAt);
+    if (!moment?.time) return { reason: "unzoned-time", at: value.signedAt };
+    // Every drawing on record was embedded, so it has its size; one without was never printed.
+    const drawn = value.kind === "image" ? drawings.get(field.id) : undefined;
+    const shown: DocumentBlock | null =
+      value.kind === "text" ? { paragraph: value.text } : drawn ? { image: value.src, ...containedSize(drawn, boxes.get(field.id) ?? spec.size) } : null;
+    if (!shown) continue;
+    signatures.push({ field, spec, value, signedAt: value.signedAt, moment: { ...moment, time: moment.time }, shown });
   }
   return signatures;
 }
@@ -304,13 +337,18 @@ function signaturesOf({ fields, kinds, onRecord }: ExecutedPrint): Signature[] |
  */
 function instantOf(at: string): number | null {
   const moment = readSigningMoment(at);
-  return moment?.clock == null ? null : moment.at;
+  return moment?.time ? moment.at : null;
 }
 
-/** The events by time — ties in the host's order — or the first whose time is not an instant. */
+/** The kinds of event a certificate labels itself. */
+const STANDARD_EVENTS: ReadonlySet<string> = new Set<StandardEventKind>(["sent", "viewed", "consented", "signed", "declined", "completed"]);
+
+/** The events by time — ties in the host's order — or the first that is not an instant, or not an event a certificate can name. */
 function timelineOf(events: readonly CompletionEvent[]): TimedEvent[] | CertificateRefusal {
   const timed: TimedEvent[] = [];
   for (const event of events) {
+    const named = event.kind === "custom" ? given(event.label) !== null : STANDARD_EVENTS.has(event.kind);
+    if (!named) return { reason: "unknown-event", event };
     const at = instantOf(event.at);
     if (at === null) return { reason: "unzoned-time", at: event.at };
     timed.push({ event, at });
@@ -318,14 +356,13 @@ function timelineOf(events: readonly CompletionEvent[]): TimedEvent[] | Certific
   return timed.sort((a, b) => a.at - b.at);
 }
 
-/** Every role that answered or must answer a field has a party, and every event names one. */
-function checkParties(
-  fields: readonly SignerFieldDescriptor[],
-  onRecord: Readonly<Record<string, FieldValue>>,
-  kinds: ExecutedPrint["kinds"],
-  record: CompletionRecord,
-): CertificateRefusal | null {
-  const parties = new Set(record.parties.map((p) => p.role));
+/** One party per role; every role that answered or must answer a field has one; every event's party is one of them. */
+function checkParties({ fields, onRecord, kinds }: ExecutedPrint, record: CompletionRecord): CertificateRefusal | null {
+  const parties = new Set<string>();
+  for (const party of record.parties) {
+    if (parties.has(party.role)) return { reason: "duplicate-party", role: party.role };
+    parties.add(party.role);
+  }
   const unrepresented = fields.find((f) => (f.required || isFieldAnswered(f, onRecord[f.id], kinds)) && !parties.has(f.role));
   if (unrepresented) return { reason: "missing-party", role: unrepresented.role };
   const unknown = record.events.find((e) => e.party !== undefined && !parties.has(e.party));
@@ -344,7 +381,7 @@ const COMES_TO_THE_DOCUMENT: ReadonlySet<CompletionEvent["kind"]> = new Set(["se
 function checkOrder(timeline: readonly TimedEvent[], signatures: readonly Signature[]): CertificateRefusal | null {
   const firstSigning = new Map<string, number>();
   const noteSigning = (party: string, at: number) => firstSigning.set(party, Math.min(at, firstSigning.get(party) ?? Infinity));
-  for (const { field, at } of signatures) noteSigning(field.role, at);
+  for (const { field, moment } of signatures) noteSigning(field.role, moment.at);
   for (const { event, at } of timeline) if (event.kind === "signed" && event.party !== undefined) noteSigning(event.party, at);
 
   const firstCame = new Map<string, TimedEvent>();
@@ -358,7 +395,7 @@ function checkOrder(timeline: readonly TimedEvent[], signatures: readonly Signat
 
   const completed = timeline.find(({ event }) => event.kind === "completed");
   if (!completed) return null;
-  const late = signatures.find(({ at }) => at > completed.at);
+  const late = signatures.find(({ moment }) => moment.at > completed.at);
   if (late) return { reason: "signed-after-completed", fieldId: late.field.id };
   const signedLate = timeline.find(({ event, at }) => event.kind === "signed" && at > completed.at);
   return signedLate ? { reason: "events-out-of-order", event: signedLate.event } : null;
@@ -373,7 +410,7 @@ const given = (value: string | undefined): string | null => (value === undefined
 function labelsOf(overrides: CompletionCertificateOptions["labels"] = {}): CertificateLabels {
   const d = DEFAULT_CERTIFICATE_LABELS;
   const o = overrides;
-  const e = overrides.eventKinds ?? {};
+  const e = o.eventKinds ?? {};
   const pick = (value: string | undefined, fallback: string): string => given(value) ?? fallback;
   return {
     title: pick(o.title, d.title),
@@ -405,31 +442,21 @@ function labelsOf(overrides: CompletionCertificateOptions["labels"] = {}): Certi
 /** An instant as a reader reads it in UTC: `2026-11-14 22:30:00 UTC`. */
 const readableUtc = (at: number): string => `${new Date(at).toISOString().slice(0, 19).replace("T", " ")} UTC`;
 
-/** A full `signedAt` as its signer gave it, in their own offset: `2026-11-15 01:30:00 (UTC+03:00)`. */
-function asSigned(signedAt: string): string {
-  const moment = readSigningMoment(signedAt);
-  return moment ? `${moment.day} ${moment.clock ?? ""} (UTC${moment.zone ?? ""})` : signedAt;
-}
+/** A signature's moment as its signer gave it, in their own offset: `2026-11-15 01:30:00 (UTC+03:00)`. */
+const asSigned = ({ day, time }: Signature["moment"]): string => `${day} ${time.clock} (UTC${time.zone})`;
 
-/** *Verified at issue*: only what was checked, headed by kind and role — never a person, whose name is the host's word. */
-function verifiedBlocks(
-  verified: VerifiedFacts,
-  signatures: readonly Signature[],
-  drawings: ExecutedPrint["drawings"],
-  labels: CertificateLabels,
-): DocumentBlock[] {
+/**
+ * *Verified at issue*: what was checked, and each signature exactly as the
+ * executed PDF prints it, headed by its kind and role — no person is named
+ * as a fact here; who holds a role is the host's word, kept to the record.
+ */
+function verifiedBlocks(verified: VerifiedFacts, signatures: readonly Signature[], labels: CertificateLabels): DocumentBlock[] {
   return [
     { title: labels.verified, level: 2 },
     { paragraph: labels.verifiedNote },
     { label: labels.contentHash, value: verified.contentHash },
     { label: labels.artifactHash, value: verified.artifactHash },
-    ...signatures.flatMap(({ field, spec, value }): DocumentBlock[] => {
-      const size = drawings.get(field.id);
-      return [
-        { title: `${spec.label} — ${field.role}`, level: 3 },
-        value.kind === "image" ? { image: value.src, ...(size ? containedSize(size, spec.size) : spec.size) } : { paragraph: value.text },
-      ];
-    }),
+    ...signatures.flatMap(({ field, spec, shown }): DocumentBlock[] => [{ title: `${spec.label} — ${field.role}`, level: 3 }, shown]),
   ];
 }
 
@@ -454,10 +481,11 @@ function recordBlocks(signatures: readonly Signature[], record: CompletionRecord
     // When each signature was given is the host's own stamp on it, recorded here beside the party.
     ...signatures
       .filter(({ field }) => field.role === party.role)
-      .map(({ spec, signedAt, at }): DocumentBlock => ({ label: `${labels.signatureRecorded} (${spec.label})`, value: `${asSigned(signedAt)} · ${readableUtc(at)}` })),
+      .map(({ spec, moment }): DocumentBlock => ({ label: `${labels.signatureRecorded} (${spec.label})`, value: `${asSigned(moment)} · ${readableUtc(moment.at)}` })),
   ]);
 
   const eventBlocks = timeline.map(({ event, at }): DocumentBlock => {
+    // Every event was checked nameable: a standard kind, or a step with a label.
     const what = event.kind === "custom" ? event.label : labels.eventKinds[event.kind];
     const who = event.party === undefined ? "" : ` — ${nameOf(event.party)}`;
     return { paragraph: `${readableUtc(at)} — ${what}${who}` };

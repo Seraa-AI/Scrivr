@@ -264,7 +264,8 @@ export function hashArtifact(bytes: Uint8Array): Promise<string> {
 
 /**
  * A snapshot's document object, to open in an editor: copied, not cast —
- * content is untrusted until parsed. Throws when it is not a document object.
+ * content is untrusted until parsed. Throws when it is not a JSON object;
+ * whether it is a valid document is the editor's to say as it opens it.
  */
 export function snapshotDocument(content: string): Record<string, unknown> {
   const parsed: unknown = JSON.parse(content);

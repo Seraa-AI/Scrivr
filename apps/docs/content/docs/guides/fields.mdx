@@ -139,7 +139,7 @@ Field.configure({
 });
 ```
 
-`FieldCompletion` takes a `paint` of its own for the signing view. It is also told whether the field is this viewer's (`own`), whether it is under the pointer or keyboard focus (`active`, `focused`), whether its value is being captured (`pending`), and, for a signature held back, how many of the viewer's fields come first (`waitingOn`, 0 otherwise) — so your own look can show that a signature waits.
+`FieldCompletion` takes a `paint` of its own for the signing view. It is also told whether the field is this viewer's (`own`), whether it is under the pointer or keyboard focus (`active`, `focused`), whether its value is being captured (`pending`), and, for a signature, how many of the viewer's fields must be answered before it can be signed (`fieldsBeforeSigning`, 0 otherwise — the same rule pressing it applies) with the tag Scrivr would show (`waitingLabel`) — so your own look can show that a signature waits. Word that tag in your signers' language with `FieldCompletion.configure({ waitingLabel: (count) => … })`.
 
 ## Reading the fields in a document
 

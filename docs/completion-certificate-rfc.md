@@ -113,9 +113,10 @@ A library does not, so it must.
    and need no second renderer. Its JSON is returned too, to show in a
    viewer.
 
-5. **A signature's time is the host's.** The executed PDF never prints a
-   signature's time — only the day a date-signed field derives from it — so
-   `signedAt` is the host's stamp on the value. It is printed in the record,
+5. **A signature's time is the host's.** With the default `formatSignedDate`
+   the executed PDF prints no signature's time — only the day a date-signed
+   field derives from its party's latest signature — so `signedAt` is the
+   host's stamp on the value. It is printed in the record,
    beside its party, as the signer gave it and in UTC, and is checked only
    for its shape and its order against the host's events. A time that is
    not a full timestamp with a zone is refused, a bare day included: an
@@ -164,10 +165,11 @@ const result = await exportCompletionCertificate(snapshot, values, {
     events: [
       { at: "2026-11-15T09:12:03Z", kind: "sent", party: "client" },
       { at: "2026-11-15T09:30:00Z", kind: "custom", label: "Identity verified", party: "client" },
-      { at: "2026-11-15T09:44:10+03:00", kind: "signed", party: "client" },
+      { at: "2026-11-15T12:44:10+03:00", kind: "signed", party: "client" }, // 09:44:10 UTC
       { at: "2026-11-15T09:44:12Z", kind: "completed" },
     ],
   },
+  content: ({ record }) => ({ after: [{ title: "Disclosure", level: 3 }, { paragraph: disclosure }] }),
   labels,                                                   // optional overrides of the English defaults
 });
 // { ok: true, executed: { pdf, artifactHash }, certificate: { pdf, certificateHash, verified, content } }
@@ -202,10 +204,13 @@ come first.
 | `snapshot-altered` | `verifySnapshot(content, contentHash)` fails |
 | `unanswered-fields { missing }` | a required field is unanswered, or holds a drawing the PDF cannot embed |
 | `unknown-field-kind { kind }` | a field's kind is not in the editor setup — a signature could not be told from text |
-| `missing-party { role }` | a role that answered or must answer a field has no party in the record |
-| `unknown-party { role }` | an event names a role no party in the record plays |
-| `unzoned-time { at }` | an event time or a `signedAt` is not a full timestamp with a zone |
+| `unnamed-issuer` | the record names no issuer, so its facts would sit under nobody's name |
 | `undated-signature { fieldId }` | a printed signature carries no `signedAt` |
+| `unzoned-time { at }` | an event time or a `signedAt` is not `YYYY-MM-DDThh:mm[:ss[.fff]]` with `Z` or `±hh:mm` |
+| `unknown-event { event }` | an event of no known kind, or a `custom` step with no label |
+| `duplicate-party { role }` | two parties play one role |
+| `missing-party { role }` | a role that answered or must answer a field has no party in the record |
+| `unknown-party { role }` | an event's `party` is a role no party in the record plays |
 | `signed-after-completed { fieldId }` | a signature's `signedAt` is later than the `completed` event |
 | `events-out-of-order { event }` | a party first comes to the document after it signed, or a host `signed` event follows `completed` |
 
@@ -215,10 +220,10 @@ come first.
   snapshot, opens it with the signers' extensions, holds the values it can
   print, checks completeness against `valuesOnRecordOf`, prints, and hands
   the certificate what it read — fields, kinds, the values on record, each
-  drawing's embedded size.
+  drawing's embedded size, each field's own box.
 - **The grammar of `signedAt`** is core's: `readSigningMoment`, beside
-  `parseSignedAt`, gives the instant, day, clock and zone the certificate
-  prints and orders by.
+  `parseSignedAt` and built on the same one reader, gives the instant, the
+  day, and the clock and zone together when a time was written.
 - **The record** is the host's, passed in, never stored.
 - **The certificate** — its checks and the blocks it is laid out in —
   lives in `@scrivr/export-pdf` beside `exportExecutedPdf`, and is reachable
@@ -232,21 +237,25 @@ come first.
 | `export-pdf/src/certificate.ts` (new) | `exportCompletionCertificate`, `bundleCertificate`, the record types, labels, checks and document |
 | `export-pdf/src/executed.ts` | `exportExecutedPdf` prints through `printExecuted`, which also returns what it read; each drawing's embedded size |
 | `export-pdf/src/contain.ts` (new) | `containedSize`, the one contain-fit both PDFs use |
+| `export-pdf/src/pdf.ts` (new) | `exportToPdf` and `buildPdf`, moved out of the barrel so the modules that print import them without a cycle |
 | `core/src/sealing/snapshot.ts` | `snapshotDocument`, the snapshot's document object, shared by every reader |
 | `core/src/model/documentFromBlocks.ts` (new) | `documentFromBlocks`: a plain document from titles, paragraphs, labelled lines and images — core owns StarterKit's vocabulary, so the exporter names no node |
-| `core/src/extensions/built-in/fieldKinds.ts` | `readSigningMoment` |
-| `docs/guides/sealing.mdx` | the certificate step after the executed PDF |
+| `core/src/extensions/built-in/fieldKinds.ts` | `readSigningMoment`, `SigningMoment` |
+| `plugins/src/sealed-viewer/FieldCompletion.ts` | the signing walkthrough: `fieldsBeforeSigning`, `waitingLabel`, a held-back signature opening the first field owed |
+| `docs/guides/certificate.mdx` (new) | the certificate's own guide; `sealing.mdx` points to it, `fields.mdx` describes the walkthrough |
 | playground *Signing* demo | the executed PDF and its certificate from one click |
 
 ## Invariants
 
-- Every line under *Verified at issue* was checked in that call; nothing the
-  host supplied appears there.
+- *Verified at issue* holds only what was checked in that call, laid out
+  before the host's `content` runs; the host's record never appears there.
+  Its title and note are labels the host may translate.
 - The certificate's `artifactHash` is the hash of the executed PDF issued
   with it.
-- The signatures it shows are the ones that PDF prints, in the same
-  proportions.
-- A signature's recorded day is the day its date-signed field prints.
+- The signatures it shows are the ones that PDF prints, fitted to the same
+  field boxes.
+- With the default `formatSignedDate`, a party's latest signature's
+  recorded day is the day its date-signed field prints.
 - No refusal case yields either PDF.
 
 ## Tests
@@ -261,6 +270,13 @@ come first.
 - Blank host details print nothing, and the certificate opens.
 - Re-views and copies sent pass; labels override, a blank one keeps its
   default; the defaults are frozen.
+- The host's `content`: blocks before and after, a record body of its own,
+  the facts handed over frozen — a write to them changes nothing printed or
+  kept; a refusal still fires whatever it prints.
+- A drawing with no area answers nothing; a signature fits its field's own
+  box; the guide's own example record is issued.
+- The walkthrough: a held-back signature opens the first field owed (a
+  checkbox only focused), and its tag counts what pressing it waits on.
 
 ## Out of scope
 
@@ -288,8 +304,8 @@ come first.
    belonged together; the certificate is now issued with the executed PDF,
    from its printing.
 6. **A signature's time is in the record (2026-11-16).** It is the host's
-   stamp — the executed PDF never prints it — so it moved out of *Verified
-   at issue*.
+   stamp — with the default date format the executed PDF prints only its
+   day — so it moved out of *Verified at issue*.
 7. **A host overrides everything but what was verified (2026-11-16).** See
    decision 10. Full control was weighed and declined: nothing would stop a
    host printing "verified" over what was not checked.
@@ -297,10 +313,12 @@ come first.
 ## What shipped
 
 Built as designed above, which now records the build (PR #260). Guide:
-`guides/sealing.mdx`, *The certificate of completion*. The playground's
-signing room keeps a record as a host would — sent on opening, viewed per
-party, signed per signature, completed as the executed PDF is made — and
-issues the executed PDF and its certificate with one click.
+`guides/certificate.mdx`, its own page; *Sealing a revision* points to it and
+*Fields* describes the signing walkthrough. The playground's signing room
+keeps a record as a host would — sent on opening, viewed per party, each
+signing taken from its value, completed as the executed PDF is made — adds
+a disclosure through `content`, and issues the executed PDF and its
+certificate with one click.
 
 ## Sources
 

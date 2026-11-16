@@ -961,16 +961,15 @@ describe("the values a record shows", () => {
     expect([parseSignedAt("2026-11-14T09:30:00Z"), parseSignedAt("14 November 2026")]).toEqual([Date.parse("2026-11-14T09:30:00Z"), null]);
   });
 
-  it("reads a signing's day, clock and zone as its signer wrote them, and whether a time was given at all", () => {
+  it("reads a signing's day, and its clock and zone together when a time was given", () => {
     expect(readSigningMoment("2026-11-15T01:30:00.250+03:00")).toEqual({
       at: Date.parse("2026-11-14T22:30:00.250Z"),
       day: "2026-11-15",
-      clock: "01:30:00",
-      zone: "+03:00",
+      time: { clock: "01:30:00", zone: "+03:00" },
     });
-    expect(readSigningMoment("2026-11-15T09:00Z")).toEqual({ at: Date.parse("2026-11-15T09:00:00Z"), day: "2026-11-15", clock: "09:00", zone: "+00:00" });
-    // A bare day names no time and no zone.
-    expect(readSigningMoment("2026-11-15")).toEqual({ at: Date.parse("2026-11-15T00:00:00Z"), day: "2026-11-15", clock: null, zone: null });
+    expect(readSigningMoment("2026-11-15T09:00Z")).toEqual({ at: Date.parse("2026-11-15T09:00:00Z"), day: "2026-11-15", time: { clock: "09:00", zone: "+00:00" } });
+    // A bare day names no time, so no zone either.
+    expect(readSigningMoment("2026-11-15")).toEqual({ at: Date.parse("2026-11-15T00:00:00Z"), day: "2026-11-15", time: null });
     expect(readSigningMoment("15 November 2026")).toBeNull();
   });
 

@@ -619,13 +619,63 @@ describe("FieldCompletion — signing last", () => {
     const waiting = () => {
       drawn.length = 0;
       e.painters.at(-1)?.(recordingContext([]), 1, defaultPageConfig, map, e.getResolvedTheme());
-      return Object.fromEntries(drawn.map((f) => [f.kind, f.waitingOn]));
+      return Object.fromEntries(drawn.map((f) => [f.kind, f.fieldsBeforeSigning]));
     };
 
     expect(waiting()).toEqual({ dropdown: 0, checkbox: 0, signature: 2 });
     requestField(e, terms.id);
     await flush();
     expect(waiting()["signature"]).toBe(1);
+  });
+
+  it("shows a signature as waiting whenever pressing it would wait — signed already, with a required field since blanked", async () => {
+    const drawn: SigningFieldDrawing[] = [];
+    const request = vi.fn(async (field: SignerFieldDescriptor): Promise<FieldValue | null> =>
+      field.id === terms.id ? { kind: "choice", id: "net-30" } : signature,
+    );
+    const { e } = signingAfter([terms], request, undefined, (field) => drawn.push(field));
+    const map = new CharacterMap();
+    for (const pos of [1, 2]) map.registerObjectRect({ docPos: pos, x: pos * 200, y: 100, width: 180, height: 44, page: 1, baseline: 144 });
+    const waiting = () => {
+      drawn.length = 0;
+      e.painters.at(-1)?.(recordingContext([]), 1, defaultPageConfig, map, e.getResolvedTheme());
+      return drawn.find((f) => f.kind === "signature")?.fieldsBeforeSigning;
+    };
+
+    requestField(e, terms.id);
+    await flush();
+    requestField(e, signHere.id);
+    await flush();
+    expect(waiting()).toBe(0);
+
+    // The choice is withdrawn: the signature stands, but signing again would wait — and says so.
+    setFieldValue(e, terms.id, { kind: "choice", id: "withdrawn" });
+    expect(requestField(e, signHere.id)).toBe(false);
+    expect(waiting()).toBe(1);
+  });
+
+  it("words the waiting tag in the host's language", () => {
+    const words: string[] = [];
+    editor = new LaidOutViewer({
+      extensions: [
+        StarterKit,
+        Field,
+        FieldCompletion.configure({
+          fields: [terms, signHere],
+          completable: [terms.id, signHere.id],
+          onFieldRequest: async () => null,
+          waitingLabel: (count) => `Après ${count} champ${count === 1 ? "" : "s"}`,
+        }),
+      ],
+      content: { type: "doc", content: [{ type: "paragraph", content: [terms, signHere].map((f) => ({ ...fieldNode(f), attrs: { ...fieldNode(f).attrs, options: f.options } })) }] },
+      sealed: true,
+    });
+    editor.mountView();
+    const map = new CharacterMap();
+    for (const pos of [1, 2]) map.registerObjectRect({ docPos: pos, x: pos * 200, y: 100, width: 180, height: 44, page: 1, baseline: 144 });
+    editor.painters.at(-1)?.(recordingContext(words), 1, defaultPageConfig, map, editor.getResolvedTheme());
+
+    expect(words.some((w) => w.includes("Après 1 champ"))).toBe(true);
   });
 
   it("never ticks a required box for the signer on the way to signing", () => {

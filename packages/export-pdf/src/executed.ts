@@ -20,7 +20,7 @@ import {
 import { PDFDocument } from "pdf-lib";
 import { embedImage } from "./embedImage";
 import { createDefaultImageResolver, resolveOnce, type ImageResolver } from "./fetchImage";
-import { exportToPdf, type PdfExportOptions } from "./index";
+import { exportToPdf, type PdfExportOptions } from "./pdf";
 
 export interface ExecutedPdfOptions extends PdfExportOptions {
   /**
@@ -76,6 +76,8 @@ export interface ExecutedPrint {
   onRecord: Readonly<Record<string, FieldValue>>;
   /** Each printed drawing's own pixel size, from its embedding. */
   drawings: ReadonlyMap<string, { width: number; height: number }>;
+  /** Each field's box as the document gives it — what a drawing is fitted to when printed. */
+  boxes: ReadonlyMap<string, { width: number; height: number }>;
 }
 
 /** `exportExecutedPdf`'s printing, keeping what it read — so a certificate is issued from this printing and no other. */
@@ -114,21 +116,33 @@ export async function printExecuted(
     // cannot fill omissions or stand in for drawings that could not embed.
     if (!replaceFieldValues(editor, printable)) throw new Error("exportExecutedPdf could not hold the field values: a plugin refused them");
     const kinds = fieldKindsOf(editor);
-    const fields = listSignerFields(editor.getState().doc);
+    const doc = editor.getState().doc;
+    const fields = listSignerFields(doc);
+    const boxes = new Map<string, { width: number; height: number }>();
+    doc.descendants((node) => {
+      const id = node.attrs["nodeId"];
+      if (node.type.name === "field" && typeof id === "string") boxes.set(id, { width: Number(node.attrs["width"]), height: Number(node.attrs["height"]) });
+    });
     // The record Field prints — its kinds, its date format — so what is checked is what prints.
     const onRecord = valuesOnRecordOf(editor);
     const missing = fields.filter((f) => f.required && !isFieldAnswered(f, onRecord[f.id], kinds));
     if (missing.length > 0) return { ok: false, refusal: { reason: "unanswered-fields", missing } };
     const pdf = await exportToPdf(editor, { ...pdfOptions, resolveImage });
-    return { ok: true, print: { pdf, artifactHash: await hashArtifact(pdf), fields, kinds, onRecord, drawings } };
+    return { ok: true, print: { pdf, artifactHash: await hashArtifact(pdf), fields, kinds, onRecord, drawings, boxes } };
   } finally {
     editor.destroy();
   }
 }
 
-/** A drawing as this PDF embeds it — through `safeDrawingUrl`, then the PDF's own embedding — with its size, or `null` when it cannot. */
+/**
+ * A drawing as this PDF embeds it — through `safeDrawingUrl`, then the PDF's
+ * own embedding — with its size; `null` when it cannot embed, or has no area
+ * to show (a 0-pixel side would print nothing, and fit to no box).
+ */
 async function embeddedDrawing(scratch: PDFDocument, resolveImage: ImageResolver, src: string): Promise<{ src: string; width: number; height: number } | null> {
   const drawing = safeDrawingUrl(src);
-  const image = drawing === null ? null : await embedImage(scratch, resolveImage, drawing);
-  return drawing !== null && image !== null ? { src: drawing, width: image.width, height: image.height } : null;
+  if (drawing === null) return null;
+  const image = await embedImage(scratch, resolveImage, drawing);
+  if (!image || image.width <= 0 || image.height <= 0) return null;
+  return { src: drawing, width: image.width, height: image.height };
 }

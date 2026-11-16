@@ -40,6 +40,7 @@ export {
   isSigningKind,
   parseSignedAt,
   readSigningMoment,
+  type SigningMoment,
   signedAtOf,
 } from "./built-in/fieldKinds";
 export type {

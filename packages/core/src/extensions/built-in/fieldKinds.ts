@@ -101,9 +101,10 @@ const daysInMonth = (year: number, month: number): number => (month === 2 ? (isL
  * here rather than by `Date.parse`, which some engines let roll 30 February
  * over into March while others refuse it.
  */
-function readSignedAt(signedAt: string): { year: number; month: number; day: number; at: number } | null {
+function readSignedAt(signedAt: string): { year: number; month: number; day: number; at: number; time: SigningMoment["time"] } | null {
   const parts = SIGNED_AT.exec(signedAt);
   if (!parts) return null;
+  const [, , , , hourText, minuteText, secondText, , sign, offsetHoursText, offsetMinutesText] = parts;
   const [year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0, offsetHours = 0, offsetMinutes = 0] = [1, 2, 3, 4, 5, 6, 9, 10].map((i) =>
     Number(parts[i] ?? 0),
   );
@@ -114,7 +115,15 @@ function readSignedAt(signedAt: string): { year: number; month: number; day: num
   const utc = new Date(0);
   utc.setUTCFullYear(year, month - 1, day);
   utc.setUTCHours(hour, minute - offset, second, millis);
-  return { year, month, day, at: utc.getTime() };
+  // A bare day names no clock, so no zone either — the group carries both or neither.
+  const time =
+    hourText === undefined
+      ? null
+      : {
+          clock: `${hourText}:${minuteText}${secondText === undefined ? "" : `:${secondText}`}`,
+          zone: sign === undefined ? "+00:00" : `${sign}${offsetHoursText}:${offsetMinutesText}`,
+        };
+  return { year, month, day, at: utc.getTime(), time };
 }
 
 /**
@@ -125,28 +134,28 @@ function readSignedAt(signedAt: string): { year: number; month: number; day: num
  */
 export const parseSignedAt = (signedAt: string): number | null => readSignedAt(signedAt)?.at ?? null;
 
+/** A `signedAt` as its signer wrote it — see `readSigningMoment`. */
+export interface SigningMoment {
+  /** The instant, fractions of a second included. */
+  at: number;
+  /** `YYYY-MM-DD`, the day in the signer's own offset. */
+  day: string;
+  /** The clock time and zone as written (`Z` read as `+00:00`), or `null` for a bare day. */
+  time: { clock: string; zone: string } | null;
+}
+
 /**
- * A `signedAt` as its signer wrote it: the instant, the day, and the clock
- * time and zone when one was given (`Z` read as `+00:00`; fractions of a
- * second kept in `at` only). A bare day has neither — a record must not
- * stand an invented midnight in for it. `null` for what is no moment.
+ * A `signedAt` as its signer wrote it: the instant, the day, and — when one
+ * was given — the clock time and zone. A bare day has neither, so a record
+ * never stands an invented midnight in for it. `null` for what is no moment.
  */
-export function readSigningMoment(signedAt: string): { at: number; day: string; clock: string | null; zone: string | null } | null {
-  const parts = SIGNED_AT.exec(signedAt);
+export function readSigningMoment(signedAt: string): SigningMoment | null {
   const moment = readSignedAt(signedAt);
-  if (!parts || !moment) return null;
-  const [, , , , hour, minute, second, , sign, offsetHours, offsetMinutes] = parts;
-  const timed = hour !== undefined && minute !== undefined;
-  return {
-    at: moment.at,
-    day: signedAt.slice(0, 10),
-    clock: timed ? `${hour}:${minute}${second === undefined ? "" : `:${second}`}` : null,
-    zone: timed ? (sign === undefined ? "+00:00" : `${sign}${offsetHours}:${offsetMinutes}`) : null,
-  };
+  return moment ? { at: moment.at, day: signedAt.slice(0, 10), time: moment.time } : null;
 }
 
 /** The `signedAt` a value carries when it names a moment (`parseSignedAt`); `null` otherwise. */
-export function signedAtOf(value: FieldValue | undefined): string | null {
+export function signedAtOf(value: FieldValue | null | undefined): string | null {
   if (!value || !("signedAt" in value) || value.signedAt === undefined) return null;
   return parseSignedAt(value.signedAt) === null ? null : value.signedAt;
 }

@@ -21,7 +21,9 @@ A certificate has two sections, and the difference between them is the whole poi
 
 **Signing record — as recorded by** *your issuer* holds your word: the document's title and id, your parties and their details, when each signature was given, and your events. Scrivr checks that the record fits the document and time (see [What is checked](#what-is-checked)), and prints it as you gave it.
 
-No person's name, email, IP address or time ever appears under *Verified at issue*. A signature there is headed by its kind and role — "Signature — client" — because which person holds that role is your fact, not Scrivr's.
+*Verified at issue* names no person as a fact. Each signature is shown exactly as the executed PDF prints it — a typed signature's words, a drawing — headed by its kind and role ("Signature — client"), because which person holds that role is your fact, not Scrivr's. No email, IP address or signing time appears there.
+
+Your words can still reach that section in one way: its title and note are labels you may translate (see [Labels](#labels)). Scrivr never puts your record there; keeping your translated labels honest is yours.
 
 ## Issuing one
 
@@ -48,7 +50,7 @@ const result = await exportCompletionCertificate(sealed.snapshot, values, {
       { at: "2026-11-15T08:00:00Z", kind: "sent", party: "client" },
       { at: "2026-11-15T08:00:00Z", kind: "sent", party: "provider" },
       { at: "2026-11-15T09:30:00Z", kind: "custom", label: "Identity verified", party: "client" },
-      { at: "2026-11-15T09:44:10+03:00", kind: "signed", party: "client" },
+      { at: "2026-11-15T12:44:10+03:00", kind: "signed", party: "client" }, // 09:44:10 UTC
       { at: "2026-11-15T10:02:00Z", kind: "signed", party: "provider" },
       { at: "2026-11-15T10:02:05Z", kind: "completed" },
     ],
@@ -56,7 +58,7 @@ const result = await exportCompletionCertificate(sealed.snapshot, values, {
 });
 
 if (!result.ok) {
-  showToSigner(result.refusal); // see Refusals
+  showToSigner(result.refusal); // see What is checked
   return;
 }
 
@@ -65,10 +67,10 @@ const { executed, certificate } = result;
 // certificate: { pdf, certificateHash, verified, content }
 ```
 
-- `values` are every party's answers, as for [`exportExecutedPdf`](/docs/guides/fields#the-executed-document). Each signature's `signedAt` must be a full timestamp with its zone (see [Times](#times)).
+- `values` are every party's answers, as for [`exportExecutedPdf`](/docs/guides/fields#the-executed-document). Each signature's `signedAt` must be a full timestamp with its zone (see [Times](#times)), and its time must fit your events: a party is sent or views the document before it signs.
 - `certificate.verified` is *Verified at issue* as data: `contentHash`, `artifactHash`, and each signature's `fieldId`, `role` and `kind`.
 - `certificate.content` is the certificate as a document's JSON — open it in a read-only `Editor` to show it on screen as well as in print.
-- Like the executed PDF, printing needs a browser `Editor`: a page, or a server with a headless DOM and a canvas.
+- Like the executed PDF, printing needs a browser `Editor`: a page, or a server with a headless DOM and a canvas. The certificate itself is printed in StarterKit with your `editorOptions`' fonts and page setup.
 
 Do not build the executed PDF and the certificate in separate calls and pair them yourself. There is no API for that on purpose: nothing could prove the two belong together.
 
@@ -82,6 +84,7 @@ Store these together, where they cannot be changed afterwards:
 | `executed.pdf` and `executed.artifactHash` | the signed record, and the hash the certificate names |
 | `certificate.pdf` and `certificate.certificateHash` | the certificate as issued |
 | `certificate.verified` | what the certificate claims as checked, as data |
+| The `values` you passed | every answer and its `signedAt` — what both PDFs were printed from, needed to check or issue them again |
 | The `record` you passed, and your own evidence behind it | the certificate prints your record; your logs are what back it |
 
 A hash proves bytes are the ones recorded only while the recorded hash is kept somewhere it cannot be quietly replaced — an append-only log, a database row written once, a timestamping service. If someone can change both the PDF and its stored hash, the hash proves nothing.
@@ -114,31 +117,35 @@ type CompletionEvent =
 - A detail you leave out — or leave blank — is not printed. A party with no name is headed by its role.
 - **Personal data is only what you pass.** Scrivr reads no request, header or clock. Collect an IP address or user agent only if you have a reason and a lawful basis to — Adobe Sign, for one, leaves IP collection off unless an admin enables it.
 - `custom` events are your own steps ("Identity verified", "Reminder sent"), printed by their label and placed by their time.
-- When each signature was given comes from its value's `signedAt` — the stamp you put on it when you recorded it. It is printed beside its party in the record, as the signer gave it and in UTC: `2026-11-15 01:30:00 (UTC+03:00) · 2026-11-14 22:30:00 UTC`. The executed PDF never prints this time — only the day a date-signed field derives from it — so it is your fact, not a checked one.
+- When each signature was given comes from its value's `signedAt` — the stamp you put on it when you recorded it. It is printed beside its party in the record, as the signer gave it and in UTC: `2026-11-15 01:30:00 (UTC+03:00) · 2026-11-14 22:30:00 UTC`. It is your fact, not a checked one: with the default `formatSignedDate` the executed PDF prints only the day, in a date-signed field, from each party's latest signature — a `formatSignedDate` of your own may print more.
+- One party per role, and every record names its `issuer` — a certificate never prints your facts under nobody's name.
 
 ## Times
 
-Every time on a certificate — each event's `at`, each signature's `signedAt` — must be a full ISO 8601 timestamp with its zone:
+Every time on a certificate — each event's `at`, each signature's `signedAt` — must be written `YYYY-MM-DDThh:mm[:ss[.fff]]` followed by `Z` or `±hh:mm`, as `new Date().toISOString()` writes it, and name a day that exists:
 
-- `2026-11-15T09:44:10Z` and `2026-11-15T09:44:10+03:00` are accepted; seconds are optional, fractions are kept for ordering.
+- `2026-11-15T09:44:10Z`, `2026-11-15T09:44:10.250Z` and `2026-11-15T09:44:10+03:00` are accepted; seconds are optional, fractions are kept for ordering.
 - `2026-11-15T09:44:10` (no zone) is refused: read on another machine it would name another moment.
 - `2026-11-15` (a bare day) is refused for a certificate, though a field accepts it for its date: the certificate would have to invent the time.
+- Other spellings — `+0300`, a lowercase `z`, a space for the `T`, `2026-02-30` — are refused too.
 
 Events print in UTC, in time order — ties in the order you gave them — as DocuSign and Adobe Sign print theirs.
 
 ## What is checked
 
-Before issuing, Scrivr checks the document, then your record against it and against time. The first that fails is the refusal.
+Before issuing, Scrivr checks the document, then your record against it and against time, in about this order — the first that fails is the refusal.
 
 | Check | Refusal |
 |---|---|
 | The snapshot matches its `contentHash` | `snapshot-altered` |
 | Every required field is answered, as the executed PDF would print it — a drawing it cannot embed answers nothing | `unanswered-fields { missing }` |
 | Every field's kind is one the editor setup knows — or it could not tell a signature from text | `unknown-field-kind { kind }` |
-| Every printed signature carries a `signedAt` | `undated-signature { fieldId }` |
-| Every `signedAt` and event time is a full timestamp with a zone | `unzoned-time { at }` |
+| The record names an issuer | `unnamed-issuer` |
+| Every printed signature carries a `signedAt`, written as [Times](#times) says | `undated-signature { fieldId }`, `unzoned-time { at }` |
+| Every event is one of the six kinds, or a `custom` step with a label, at a time written as [Times](#times) says | `unknown-event { event }`, `unzoned-time { at }` |
+| One party per role | `duplicate-party { role }` |
 | Every role that answered or must answer a field has a party | `missing-party { role }` |
-| Every event names one of your parties | `unknown-party { role }` |
+| Every event's `party`, when it names one, is one of your parties | `unknown-party { role }` |
 | A party first comes to the document — its first `sent`, `viewed` or `consented` — before its first signing, whether that is a printed signature or your `signed` event | `events-out-of-order { event }` |
 | No signature is dated after `completed` | `signed-after-completed { fieldId }` |
 | No `signed` event follows `completed` | `events-out-of-order { event }` |
@@ -152,9 +159,12 @@ const words: Record<string, string> = {
   "snapshot-altered": "The stored agreement no longer matches what was sealed.",
   "unanswered-fields": "Some required fields are still empty.",
   "unknown-field-kind": "A field is of a kind this app does not know.",
+  "unnamed-issuer": "The record does not say who issued it.",
+  "duplicate-party": "Two people are recorded for the same role.",
+  "unknown-event": "The record holds an event that cannot be named.",
   "missing-party": "A party who signed is missing from the record.",
   "unknown-party": "The record names a party who is not part of this signing.",
-  "unzoned-time": "A time in the record has no time zone.",
+  "unzoned-time": "A time is not written as a full time with its zone.",
   "undated-signature": "A signature was recorded without a time.",
   "signed-after-completed": "A signature is dated after the signing completed.",
   "events-out-of-order": "The record's events are out of order.",
@@ -178,29 +188,39 @@ labels: {
 
 `DEFAULT_CERTIFICATE_LABELS` holds the English defaults — spread it as the base for a full translation. A signature is headed by its field kind's own label (from `Field`'s kinds), and a party by its name.
 
-Translating `verified` or `verifiedNote` is fine. Rewording them to claim more than Scrivr checked is not — the note says what was checked so a reader can rely on it.
+Translating `verified` or `verifiedNote` is fine. Rewording them to claim more than Scrivr checked is not: they are printed inside *Verified at issue*, and the note says what was checked so a reader can rely on it. Scrivr cannot tell a translation from a new claim, so this one is yours to keep honest.
 
 ### Your own content
 
-`content` lets you add your own blocks around the certificate, or lay out the record your own way. It is handed what Scrivr would print and the facts behind it:
+`content` lets you add your own blocks around the certificate, or lay out the record your own way. It is handed what Scrivr would print and the facts behind it (`CertificateParts`), and returns your blocks (`CertificateContent`):
 
 ```ts
-content: ({ record, verified, signingRecord }) => ({
+import { DEFAULT_CERTIFICATE_LABELS, exportCompletionCertificate, type CertificateContent, type CertificateParts } from "@scrivr/export-pdf";
+import type { DocumentBlock } from "@scrivr/core";
+
+// The IP label as it is printed — your translation if you gave one, else the default.
+const ipLabel = DEFAULT_CERTIFICATE_LABELS.ip;
+
+const content = ({ record }: CertificateParts): CertificateContent => ({
   // Above the certificate's title: your logo, an introduction.
   before: [{ image: logoDataUrl, width: 120, height: 40 }, { paragraph: "Acme Sign — completion record" }],
   // The record's body, your way: here Scrivr's own, less the IP addresses.
-  record: record.filter((block) => !("label" in block && block.label === "IP address")),
+  record: record.filter((block: DocumentBlock) => !("label" in block && block.label === ipLabel)),
   // At the end: your disclosure, consent text, support contact.
   after: [
     { title: "Electronic record and signature disclosure", level: 3 },
     { paragraph: disclosureText },
   ],
-}),
+});
+
+const result = await exportCompletionCertificate(snapshot, values, { editorOptions, record: signingRecord, content });
 ```
 
-- Blocks are `{ title, level: 1 | 2 | 3 }`, `{ paragraph }`, `{ label, value }` (a bold label and its value) and `{ image, width, height }` (an inline PNG or JPEG as a data URL).
+`CertificateParts` also hands you `verified` (the checked facts, frozen) and `signingRecord` (your record as you gave it), to lay the record out from scratch.
+
+- Blocks are `DocumentBlock`s from `@scrivr/core`: `{ title, level: 1 | 2 | 3 }`, `{ paragraph }`, `{ label, value }` (a bold label and its value) and `{ image, width, height }`. An image is fetched like any image in an export — prefer an inline PNG or JPEG `data:` URL, so the certificate depends on nothing at a URL.
 - `record` is the body of the record section as Scrivr lays it out — keep it, filter it, add to it, or replace it with your own built from `signingRecord`. Leave out any of `before`, `record`, `after` and that part stays Scrivr's.
-- **What you cannot change:** *Verified at issue*, and the record's title naming your issuer. You can place anything around what was checked, and nothing inside it — so a certificate never prints as checked what was not. The checks run on your `record` data whatever you print, so content cannot print its way past a refusal.
+- **What you cannot change:** what *Verified at issue* holds, and the record's title naming your issuer. The section is laid out before `content` is called, and `verified` is handed to you frozen, so your content can sit around what was checked and never inside it. The checks run on your `record` data whatever you print, so content cannot print its way past a refusal.
 
 Your content is yours to keep honest. Scrivr cannot stop a block that *says* "verified", so do not word your own content as if Scrivr had checked it.
 

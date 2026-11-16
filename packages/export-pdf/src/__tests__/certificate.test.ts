@@ -6,6 +6,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { createCanvas } from "@napi-rs/canvas";
+import { crc32 } from "node:zlib";
 import { PDFDocument } from "pdf-lib";
 import {
   BUILT_IN_FIELD_KINDS,
@@ -24,7 +25,9 @@ import {
   DEFAULT_CERTIFICATE_LABELS,
   bundleCertificate,
   exportCompletionCertificate,
+  type CertificateContent,
   type CertificateLabels,
+  type CertificateParts,
   type CertificateRefusal,
   type CompletionCertificateOptions,
   type CompletionCertificateResult,
@@ -41,10 +44,22 @@ const measureContext = (ctx: { font: string; measureText: (text: string) => Text
 const measurer = () => new TextMeasurer({ lineHeightMultiplier: 1.2, context: measureContext(createCanvas(800, 600).getContext("2d")) });
 /** A drawing as a signature pad gives one, `width × height`. */
 const drawingOf = (width: number, height: number) => `data:image/png;base64,${createCanvas(width, height).toBuffer("image/png").toString("base64")}`;
+/** A real PNG whose header says it is 0 pixels wide: valid bytes, no area. */
+const zeroWidthPng = (): string => {
+  const bytes = createCanvas(20, 10).toBuffer("image/png");
+  bytes.writeUInt32BE(0, 16);
+  // The IHDR chunk's checksum covers its type and data, bytes 12 to 28.
+  bytes.writeUInt32BE(crc32(bytes.subarray(12, 29)), 29);
+  return `data:image/png;base64,${bytes.toString("base64")}`;
+};
 /** Opens as a PNG, but is no image: the PDF cannot embed it. */
 const brokenPng = "data:image/png;base64,iVBORw0KGgoAAAAAAAA";
 
-const field = (id: string, role: string, kind: string, required = true) => ({ type: "field", attrs: { nodeId: id, kind, fill: "signer", role, required } });
+/** A signer field with its kind's size, as inserting one gives it. */
+const field = (id: string, role: string, kind: string, required = true) => {
+  const { width, height } = BUILT_IN_FIELD_KINDS[kind === "dateSigned" ? "dateSigned" : kind === "initials" ? "initials" : "signature"].size;
+  return { type: "field", attrs: { nodeId: id, kind, fill: "signer", role, required, width, height } };
+};
 
 let sealedOnce: Promise<SealedSnapshot> | null = null;
 /** A client signature with its date signed, and a vendor signature — sealed for both. */
@@ -318,6 +333,25 @@ describe("a host's own content on the certificate", () => {
     expect(linesOf(certificate.content)).toContain("2 parties signed.");
   });
 
+  it("cannot change what was verified: the hook sees the facts, never the ones printed or kept", async () => {
+    const plain = await issued();
+    const { certificate } = await issued(signed, {
+      content: ({ verified }) => {
+        try {
+          Reflect.set(verified, "artifactHash", "sha256:forged");
+          Reflect.set(verified.signatures, 0, { fieldId: "forged", role: "client", kind: "signature" });
+        } catch {
+          // Frozen: a write may throw, or be ignored.
+        }
+        return {};
+      },
+    });
+
+    expect(certificate.verified.artifactHash).toBe(plain.certificate.verified.artifactHash);
+    expect(certificate.verified.signatures[0]?.fieldId).toBe("client-sig");
+    expect(linesOf(certificate.content).join("\n")).not.toContain("forged");
+  });
+
   it("still refuses a record that does not fit the document, whatever the host prints", async () => {
     const parties = record().parties.filter((p) => p.role !== "vendor");
     const refusal = await refusalOf(signed, { record: record({ parties }), content: () => ({ record: [] }) });
@@ -393,6 +427,105 @@ describe("exportCompletionCertificate refuses", () => {
   });
 });
 
+describe("exportCompletionCertificate refuses a record it could not print honestly", () => {
+  it("one with no issuer to attribute it to", async () => {
+    expect(await refusalOf(signed, { record: record({ issuer: "  " }) })).toEqual({ reason: "unnamed-issuer" });
+  });
+
+  it("two parties for one role — whose signature would it be?", async () => {
+    const parties: CompletionParty[] = [...record().parties, { role: "client", name: "Someone else" }];
+    expect(await refusalOf(signed, { record: record({ parties }) })).toEqual({ reason: "duplicate-party", role: "client" });
+  });
+
+  it("an event no certificate can name: a step of the host's own with no label", async () => {
+    const blank: CompletionEvent = { at: "2026-11-14T20:30:00Z", kind: "custom", label: " ", party: "client" };
+    const events: CompletionEvent[] = [...record().events.slice(0, 2), blank, ...record().events.slice(2)];
+    expect(await refusalOf(signed, { record: record({ events }) })).toEqual({ reason: "unknown-event", event: blank });
+  });
+
+  it("a drawing with no area: it would print nothing, so it answers nothing", async () => {
+    const flat: FieldValue = { kind: "image", src: zeroWidthPng(), signedAt: "2026-11-15T01:30:00+03:00" };
+    const refusal = await refusalOf({ ...signed, "client-sig": flat });
+    // And with no signature to date it, the date signed is blank too.
+    expect(refusal?.reason === "unanswered-fields" && refusal.missing.map((f) => f.id)).toEqual(["client-sig", "client-date"]);
+  });
+});
+
+describe("exportCompletionCertificate prints a signature as the executed PDF does", () => {
+  it("in the field's own box, not its kind's default", async () => {
+    const author = new ServerEditor({
+      extensions: [StarterKit, Field],
+      content: {
+        type: "doc",
+        content: [
+          { type: "paragraph", content: [{ type: "field", attrs: { nodeId: "wide", kind: "signature", fill: "signer", role: "client", required: true, width: 300, height: 60 } }] },
+        ],
+      },
+    });
+    const sealedWide = await createSnapshot(author.getState().doc, { kinds: BUILT_IN_FIELD_KINDS, assignedRoles: ["client"] });
+    if (!sealedWide.ok) throw new Error(sealedWide.refusal.reason);
+    const result = await exportCompletionCertificate(
+      sealedWide.snapshot,
+      { wide: { kind: "image", src: drawing, signedAt: "2026-11-15T09:00:00Z" } },
+      options({ record: record({ parties: [{ role: "client", name: "Ada" }], events: [] }) }),
+    );
+    if (!result.ok) throw new Error(JSON.stringify(result.refusal));
+
+    // A 3:1 drawing in a 300 × 60 box: 60 high sets the scale, so 180 × 60.
+    const image = imagesOf(result.certificate.content)[0];
+    expect(image?.["width"]).toBeCloseTo(180, 6);
+    expect(image?.["height"]).toBeCloseTo(60, 6);
+  });
+
+  it("as the drawing it embedded, cleaned of stray whitespace", async () => {
+    const client: FieldValue = { kind: "image", src: `  ${drawing}\n`, signedAt: "2026-11-15T01:30:00+03:00" };
+    const { certificate } = await issued({ ...signed, "client-sig": client });
+
+    expect(imagesOf(certificate.content)[0]?.["src"]).toBe(drawing);
+  });
+});
+
+describe("the guide's own example", () => {
+  // The record docs/guides/certificate.mdx shows a host — kept here so the guide never shows one that is refused.
+  const guideRecord: CompletionRecord = {
+    issuer: "Acme Sign",
+    title: "Master Services Agreement",
+    documentId: "AGR-2026-0042",
+    parties: [
+      { role: "client", name: "Ada Lovelace", email: "ada@example.com", authentication: "Email code" },
+      { role: "provider", name: "Northwind Studio" },
+      { role: "legal-cc", name: "Legal team" },
+    ],
+    events: [
+      { at: "2026-11-15T08:00:00Z", kind: "sent", party: "client" },
+      { at: "2026-11-15T08:00:00Z", kind: "sent", party: "provider" },
+      { at: "2026-11-15T09:30:00Z", kind: "custom", label: "Identity verified", party: "client" },
+      { at: "2026-11-15T12:44:10+03:00", kind: "signed", party: "client" },
+      { at: "2026-11-15T10:02:00Z", kind: "signed", party: "provider" },
+      { at: "2026-11-15T10:02:05Z", kind: "completed" },
+    ],
+  };
+
+  it("is issued", async () => {
+    const author = new ServerEditor({
+      extensions: [StarterKit, Field],
+      content: { type: "doc", content: [{ type: "paragraph", content: [field("c", "client", "signature"), field("p", "provider", "signature")] }] },
+    });
+    const sealedGuide = await createSnapshot(author.getState().doc, { kinds: BUILT_IN_FIELD_KINDS, assignedRoles: ["client", "provider"] });
+    if (!sealedGuide.ok) throw new Error(sealedGuide.refusal.reason);
+    const result = await exportCompletionCertificate(
+      sealedGuide.snapshot,
+      {
+        c: { kind: "text", text: "Ada Lovelace", signedAt: "2026-11-15T12:44:10+03:00" },
+        p: { kind: "text", text: "Northwind Studio", signedAt: "2026-11-15T10:02:00Z" },
+      },
+      options({ record: guideRecord }),
+    );
+
+    expect(result.ok ? null : result.refusal).toBeNull();
+  });
+});
+
 describe("bundleCertificate", () => {
   it("puts the executed record's pages first and the certificate's after, under a hash of their own", async () => {
     const { executed, certificate } = await issued();
@@ -417,6 +550,8 @@ describe("the certificate's contract", () => {
     const kind: StandardEventKind = "sent";
     const labels: CertificateLabels = DEFAULT_CERTIFICATE_LABELS;
     const refusal: CertificateRefusal = { reason: "unknown-field-kind", kind: "stamp" };
+    const hook = (parts: CertificateParts): CertificateContent => ({ record: parts.record });
+    expect(hook({ record: [], verified, signingRecord: record() })).toEqual({ record: [] });
 
     expect([signature?.role, labels.eventKinds[kind], refusal.reason]).toEqual(["client", "Sent", "unknown-field-kind"]);
   });
