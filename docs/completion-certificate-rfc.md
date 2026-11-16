@@ -318,7 +318,11 @@ Built as designed above, which now records the build (PR #260). Guide:
 keeps a record as a host would — sent on opening, viewed per party, each
 signing taken from its value, completed as the executed PDF is made — adds
 a disclosure through `content`, and issues the executed PDF and its
-certificate with one click.
+certificate with one click. A full click-through as both parties issued
+both PDFs; from it, a signature's time in the record is headed by its kind
+alone ("Signature: …"), and the guide says why initials and other answers
+are not repeated on the certificate — the executed PDF's verified hash
+covers them.
 
 ## Sources
 

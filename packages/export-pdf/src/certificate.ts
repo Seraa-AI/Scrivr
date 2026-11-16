@@ -72,7 +72,6 @@ export interface CertificateLabels {
   authentication: string;
   ip: string;
   userAgent: string;
-  signatureRecorded: string;
   events: string;
   eventKinds: Readonly<Record<StandardEventKind, string>>;
 }
@@ -93,7 +92,6 @@ export const DEFAULT_CERTIFICATE_LABELS: Readonly<CertificateLabels> = Object.fr
   authentication: "Authentication",
   ip: "IP address",
   userAgent: "User agent",
-  signatureRecorded: "Signature recorded",
   events: "Events",
   eventKinds: Object.freeze({ sent: "Sent", viewed: "Viewed", consented: "Consented", signed: "Signed", declined: "Declined", completed: "Completed" }),
 });
@@ -426,7 +424,6 @@ function labelsOf(overrides: CompletionCertificateOptions["labels"] = {}): Certi
     authentication: pick(o.authentication, d.authentication),
     ip: pick(o.ip, d.ip),
     userAgent: pick(o.userAgent, d.userAgent),
-    signatureRecorded: pick(o.signatureRecorded, d.signatureRecorded),
     events: pick(o.events, d.events),
     eventKinds: {
       sent: pick(e.sent, d.eventKinds.sent),
@@ -481,7 +478,7 @@ function recordBlocks(signatures: readonly Signature[], record: CompletionRecord
     // When each signature was given is the host's own stamp on it, recorded here beside the party.
     ...signatures
       .filter(({ field }) => field.role === party.role)
-      .map(({ spec, moment }): DocumentBlock => ({ label: `${labels.signatureRecorded} (${spec.label})`, value: `${asSigned(moment)} · ${readableUtc(moment.at)}` })),
+      .map(({ spec, moment }): DocumentBlock => ({ label: spec.label, value: `${asSigned(moment)} · ${readableUtc(moment.at)}` })),
   ]);
 
   const eventBlocks = timeline.map(({ event, at }): DocumentBlock => {

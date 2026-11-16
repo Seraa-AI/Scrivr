@@ -207,7 +207,8 @@ describe("exportCompletionCertificate", () => {
 
     expect(verified).not.toContain("2026-11-15 01:30:00");
     // 01:30 at +03:00 is still the 14th in UTC; the signer's day is the 15th.
-    expect(lines).toContain("Signature recorded (Signature): 2026-11-15 01:30:00 (UTC+03:00) · 2026-11-14 22:30:00 UTC");
+    // Headed by its kind alone: the section and the party already say it is the host's record.
+    expect(lines).toContain("Signature: 2026-11-15 01:30:00 (UTC+03:00) · 2026-11-14 22:30:00 UTC");
   });
 
   it("records a signature on the day the executed PDF's date-signed field prints", async () => {
@@ -251,7 +252,7 @@ describe("exportCompletionCertificate", () => {
   it("lists the events in the order they happened, each in UTC, a host's own step by its label", async () => {
     const lines = linesOf((await issued()).certificate.content);
 
-    expect(lines.filter((line) => / UTC — /.test(line) && !line.startsWith("Signature recorded"))).toEqual([
+    expect(lines.filter((line) => / UTC — /.test(line))).toEqual([
       "2026-11-14 20:00:00 UTC — Sent — Ada Lovelace",
       "2026-11-14 20:00:00 UTC — Sent — Grace Hopper",
       "2026-11-14 21:00:00 UTC — Identity verified — Ada Lovelace",

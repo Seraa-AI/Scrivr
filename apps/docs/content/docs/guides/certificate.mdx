@@ -23,6 +23,8 @@ A certificate has two sections, and the difference between them is the whole poi
 
 *Verified at issue* names no person as a fact. Each signature is shown exactly as the executed PDF prints it — a typed signature's words, a drawing — headed by its kind and role ("Signature — client"), because which person holds that role is your fact, not Scrivr's. No email, IP address or signing time appears there.
 
+Only signatures are shown — fields whose kind is a signature line. Initials, ticked boxes and every other answer are in the executed PDF, and they are covered by its hash, which the certificate does verify; they are not repeated on the certificate.
+
 Your words can still reach that section in one way: its title and note are labels you may translate (see [Labels](#labels)). Scrivr never puts your record there; keeping your translated labels honest is yours.
 
 ## Issuing one
@@ -186,7 +188,7 @@ labels: {
 },
 ```
 
-`DEFAULT_CERTIFICATE_LABELS` holds the English defaults — spread it as the base for a full translation. A signature is headed by its field kind's own label (from `Field`'s kinds), and a party by its name.
+`DEFAULT_CERTIFICATE_LABELS` holds the English defaults — spread it as the base for a full translation. A signature is headed by its field kind's own label (from `Field`'s kinds) — both under *Verified at issue* and beside its time in the record ("Signature: 2026-11-15 …") — and a party by its name.
 
 Translating `verified` or `verifiedNote` is fine. Rewording them to claim more than Scrivr checked is not: they are printed inside *Verified at issue*, and the note says what was checked so a reader can rely on it. Scrivr cannot tell a translation from a new claim, so this one is yours to keep honest.
 
