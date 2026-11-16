@@ -1,5 +1,5 @@
 import type { DocxMark } from "@scrivr/core";
-import { attr, findChild, findChildren, parseOoxml, type OoxmlElement } from "./xml";
+import { attr, findChild, findChildren, parseOoxml, type OoxmlElement, type ReadTracker } from "./xml";
 import { parseRunProperties } from "./parser";
 
 /**
@@ -32,9 +32,9 @@ const EMPTY: DocxStyleSheet = {
   raw: () => undefined,
 };
 
-export function readStyleSheet(xml: string | undefined): DocxStyleSheet {
+export function readStyleSheet(xml: string | undefined, tracker?: ReadTracker): DocxStyleSheet {
   if (xml === undefined) return EMPTY;
-  const root = parseOoxml(xml);
+  const root = parseOoxml(xml, tracker && { tracker, part: "word/styles.xml" });
   if (!root || root.name !== "w:styles") return EMPTY;
 
   const byId = new Map<string, OoxmlElement>();

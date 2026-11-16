@@ -27,6 +27,12 @@ export interface DocxImportOptions {
    *     uploads.
    */
   media?: DocxMediaSink;
+  /**
+   * Report the Word XML the import never read, in `report.unread`. Off by
+   * default: every element is watched while it is on, which costs time on a
+   * large file.
+   */
+  trackUnread?: boolean;
 }
 
 export interface CreateDocxImportContextInput extends DocxImportOptions {

@@ -24,6 +24,7 @@
 
 import type { Node as PmNode, Mark as PmMark } from "@scrivr/core/pm";
 import { layer } from "./styles";
+import { isIgnored } from "./ignored";
 import type {
   DocxBlock,
   DocxDiagnostic,
@@ -335,16 +336,15 @@ function transformMarks(
     if (mark.off) continue;
     const handler = entryOf(handlers.marks, mark.kind);
     if (!handler) {
-      // Reserved kinds we don't map yet (like spacing, kern, lang) flood
-      // diagnostics noisily, so their warning is silenced. They are still
-      // counted: the report is the inventory, and a property nobody reads is
-      // still a property dropped.
+      // A property dropped on purpose raises no warning. It is still counted:
+      // the report is the inventory, and a property nobody reads is still a
+      // property dropped.
       dropUnhandled(
         ctx,
         recorder,
         mark.kind,
         NO_HANDLER,
-        NOISY_RPR_KINDS.has(mark.kind)
+        isIgnored("w:rPr", `w:${mark.kind}`)
           ? null
           : {
               code: "unsupported-mark",
@@ -367,21 +367,6 @@ function transformMarks(
   }
   return out;
 }
-
-// rPr children that almost never need to round-trip — silenced so the
-// diagnostic stream stays useful. Extensions that want any of these
-// register handlers and override the silence.
-const NOISY_RPR_KINDS = new Set([
-  "lang",
-  "noProof",
-  "spacing",
-  "kern",
-  "position",
-  "snapToGrid",
-  "vertAlign",
-  "w",
-  "webHidden",
-]);
 
 // ── Universal fallbacks ─────────────────────────────────────────────────────
 

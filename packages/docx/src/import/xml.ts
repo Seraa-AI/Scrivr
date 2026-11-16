@@ -10,6 +10,8 @@
  */
 
 import { XMLParser } from "fast-xml-parser";
+import type { DocxUnreadElement } from "@scrivr/core";
+import { isIgnored } from "./ignored";
 
 export type OoxmlChild = OoxmlElement | string;
 
@@ -35,11 +37,124 @@ const parser = new XMLParser({
  * with `preserveOrder: true` emits the declaration as its own pseudo-node
  * keyed by `?xml`.
  */
-export function parseOoxml(xml: string): OoxmlElement | null {
+export function parseOoxml(
+  xml: string,
+  tracking?: { tracker: ReadTracker; part: string },
+): OoxmlElement | null {
   const raw = parser.parse(xml);
   if (!Array.isArray(raw)) return null;
   const normalized = normalizeArray(raw);
-  return normalized.find((el) => !el.name.startsWith("?")) ?? null;
+  const root = normalized.find((el) => !el.name.startsWith("?")) ?? null;
+  return root && tracking ? tracking.tracker.track(tracking.part, root) : root;
+}
+
+// ── Read tracking ──────────────────────────────────────────────────────────
+
+/** How far an element of a tracked tree was read. Absent: not at all. */
+type ReadState = "examined" | "read";
+
+/** A tracked element's tracker and the element it stands for. */
+const trackedElements = new WeakMap<object, { tracker: ReadTracker; target: OoxmlElement }>();
+
+/**
+ * Records which elements of the trees it tracks get read, so an import can
+ * report what it never looked at without the parser saying so: the parser
+ * walks the tree it is given, and that tree notices.
+ *
+ * Reading an element's `attrs` or `children` reads it. Matching its `name`
+ * examines it, which reads all of it when it has nothing but a name. The
+ * search helpers below look through the untracked tree and mark only what
+ * they return, so the siblings a search passed over stay unread.
+ */
+export class ReadTracker {
+  private readonly roots: Array<{ part: string; root: OoxmlElement }> = [];
+  private readonly states = new WeakMap<OoxmlElement, ReadState>();
+  private readonly proxies = new WeakMap<OoxmlElement, OoxmlElement>();
+  private readonly wrappedChildren = new WeakMap<OoxmlElement, OoxmlChild[]>();
+
+  /** Tracks `root`, the root of `part`, and returns the tree to parse instead. */
+  track(part: string, root: OoxmlElement): OoxmlElement {
+    this.roots.push({ part, root });
+    return this.wrap(root);
+  }
+
+  /** `element`, as handed back by a search: read. */
+  returned(element: OoxmlElement): OoxmlElement {
+    this.states.set(element, "read");
+    return this.wrap(element);
+  }
+
+  /** What nobody read, in the order the parts were tracked and then document order. */
+  unread(): DocxUnreadElement[] {
+    const entries = new Map<string, DocxUnreadElement>();
+    const record = (part: string, path: string, outcome: DocxUnreadElement["outcome"]) => {
+      const key = `${part}\n${path}\n${outcome}`;
+      const entry = entries.get(key);
+      if (entry) entry.count += 1;
+      else entries.set(key, { part, path, outcome, count: 1 });
+    };
+    const visit = (part: string, element: OoxmlElement, parent: string | undefined, path: string) => {
+      if (isIgnored(parent, element.name)) return;
+      const state = this.states.get(element);
+      if (state !== "read") {
+        record(part, path, state === "examined" ? "examined" : "unread");
+        return;
+      }
+      for (const child of element.children) {
+        if (typeof child !== "string") visit(part, child, element.name, `${path}/${child.name}`);
+      }
+    };
+    for (const { part, root } of this.roots) visit(part, root, undefined, root.name);
+    return [...entries.values()];
+  }
+
+  private wrap(element: OoxmlElement): OoxmlElement {
+    const existing = this.proxies.get(element);
+    if (existing) return existing;
+    const proxy = new Proxy(element, {
+      get: (target, key, receiver) => {
+        if (key === "name") this.examine(target);
+        else if (key === "attrs") this.states.set(target, "read");
+        else if (key === "children") {
+          this.states.set(target, "read");
+          return this.childrenOf(target);
+        }
+        return Reflect.get(target, key, receiver);
+      },
+    });
+    this.proxies.set(element, proxy);
+    trackedElements.set(proxy, { tracker: this, target: element });
+    return proxy;
+  }
+
+  private examine(element: OoxmlElement): void {
+    if (this.states.get(element) === "read") return;
+    const bare = element.children.length === 0 && Object.keys(element.attrs).length === 0;
+    this.states.set(element, bare ? "read" : "examined");
+  }
+
+  private childrenOf(element: OoxmlElement): OoxmlChild[] {
+    const existing = this.wrappedChildren.get(element);
+    if (existing) return existing;
+    const children = element.children.map((child) => (typeof child === "string" ? child : this.wrap(child)));
+    this.wrappedChildren.set(element, children);
+    return children;
+  }
+}
+
+/**
+ * The children a search should look through, and a way to hand back what it
+ * found. Searching an element reads it; for a tracked one the search runs over
+ * its untracked children, so the ones it passes over stay unread.
+ */
+function searchable(el: OoxmlElement): {
+  children: OoxmlChild[];
+  found: (element: OoxmlElement) => OoxmlElement;
+} {
+  const tracked = trackedElements.get(el);
+  if (!tracked) return { children: el.children, found: (element) => element };
+  tracked.tracker.returned(tracked.target);
+  return { children: tracked.target.children, found: (element) => tracked.tracker.returned(element) };
 }
 
 // fast-xml-parser preserveOrder emits each node as an object with one
@@ -91,19 +206,44 @@ function normalizeNode(node: FxpNode): OoxmlElement | null {
 
 /** First direct child with the given name, or `undefined`. */
 export function findChild(el: OoxmlElement, name: string): OoxmlElement | undefined {
-  for (const c of el.children) {
-    if (typeof c !== "string" && c.name === name) return c;
+  const { children, found } = searchable(el);
+  for (const c of children) {
+    if (typeof c !== "string" && c.name === name) return found(c);
   }
   return undefined;
 }
 
 /** All direct children with the given name. */
 export function findChildren(el: OoxmlElement, name: string): OoxmlElement[] {
+  const { children, found } = searchable(el);
   const out: OoxmlElement[] = [];
-  for (const c of el.children) {
-    if (typeof c !== "string" && c.name === name) out.push(c);
+  for (const c of children) {
+    if (typeof c !== "string" && c.name === name) out.push(found(c));
   }
   return out;
+}
+
+/**
+ * First descendant with the given name, depth first, or `undefined`. Real
+ * OOXML wraps content in `<mc:AlternateContent>` and similar, so a fixed path
+ * misses it.
+ */
+export function findDescendant(el: OoxmlElement, name: string): OoxmlElement | undefined {
+  const { children, found } = searchable(el);
+  // The elements from `el` down to the hit, which the hit was read through.
+  const search = (siblings: OoxmlChild[]): OoxmlElement[] | undefined => {
+    for (const child of siblings) {
+      if (typeof child === "string") continue;
+      if (child.name === name) return [child];
+      const inner = search(child.children);
+      if (inner) return [child, ...inner];
+    }
+    return undefined;
+  };
+  const path = search(children);
+  if (!path) return undefined;
+  const hits = path.map(found);
+  return hits[hits.length - 1];
 }
 
 /** Read an attribute value, or `undefined` if absent. */

@@ -29,7 +29,7 @@ import type {
   DocxReport,
 } from "@scrivr/core";
 import { readDocxPackage, resolveOpcTarget } from "./opc";
-import { parseOoxml, findChild, attr } from "./xml";
+import { parseOoxml, findChild, attr, ReadTracker } from "./xml";
 import {
   parseDocumentBody,
   parseBlockContainer,
@@ -102,6 +102,7 @@ export async function importDocx(
     ...options,
   });
   const recorder = reportRecorderOf(ctx);
+  const tracker = options.trackUnread ? new ReadTracker() : undefined;
   // The parser warns through the diagnostics and records what it could not
   // read in the report — the two channels a drop belongs in.
   const parserSink: ParserDiagnostics = {
@@ -129,7 +130,7 @@ export async function importDocx(
         ctx.diagnostics.list(),
       );
     }
-    const root = parseOoxml(documentXml);
+    const root = parseOoxml(documentXml, tracker && { tracker, part: "word/document.xml" });
     if (!root || root.name !== "w:document") {
       throw new DocxImportError(
         "Invalid DOCX: word/document.xml does not start with <w:document>",
@@ -137,10 +138,10 @@ export async function importDocx(
       );
     }
 
-    const numbering = readNumberingMap(pkg.readText("word/numbering.xml"));
+    const numbering = readNumberingMap(pkg.readText("word/numbering.xml"), tracker);
     // Before the body is transformed: a run's formatting is its style's,
     // layered under whatever the run says directly.
-    ctx.styles = readStyleSheet(pkg.readText("word/styles.xml"));
+    ctx.styles = readStyleSheet(pkg.readText("word/styles.xml"), tracker);
 
     // Header/footer support: expose the section references + a part walker so
     // a contribution (HeaderFooter) can reconstruct each part's content
@@ -148,7 +149,7 @@ export async function importDocx(
     const sectionRefs = parseSectionReferences(root);
     ctx.section = {
       ...sectionRefs,
-      evenAndOdd: readEvenAndOddHeaders(pkg.readText("word/settings.xml")),
+      evenAndOdd: readEvenAndOddHeaders(pkg.readText("word/settings.xml"), tracker),
     };
     // Installed with the handler set, before the lifecycle hooks below, so a
     // contribution can walk blocks from `onBeforeImport` as it can `walkPart`.
@@ -180,7 +181,7 @@ export async function importDocx(
         });
         return null;
       }
-      const partRoot = parseOoxml(partXml);
+      const partRoot = parseOoxml(partXml, tracker && { tracker, part: path });
       if (!partRoot) return null;
       const expectedRoot = rel.type === "header" ? "w:hdr" : "w:ftr";
       if (partRoot.name !== expectedRoot) {
@@ -279,7 +280,8 @@ export async function importDocx(
         throw new DocxImportError(fatal.message, finalDiagnostics);
       }
     }
-    return { doc, diagnostics: finalDiagnostics, report: recorder.snapshot() };
+    const report = recorder.snapshot();
+    return { doc, diagnostics: finalDiagnostics, report: tracker ? { ...report, unread: tracker.unread() } : report };
   } catch (err) {
     if (err instanceof DocxImportError) throw err;
     const message = err instanceof Error ? err.message : String(err);
@@ -312,9 +314,9 @@ function partRelsPath(partPath: string): string {
 }
 
 /** Read `<w:evenAndOddHeaders/>` from settings.xml — activates even-page slots. */
-function readEvenAndOddHeaders(settingsXml: string | undefined): boolean {
+function readEvenAndOddHeaders(settingsXml: string | undefined, tracker: ReadTracker | undefined): boolean {
   if (settingsXml === undefined) return false;
-  const root = parseOoxml(settingsXml);
+  const root = parseOoxml(settingsXml, tracker && { tracker, part: "word/settings.xml" });
   if (!root) return false;
   const el = findChild(root, "w:evenAndOddHeaders");
   return el ? isOoxmlOn(attr(el, "w:val")) : false;

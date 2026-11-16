@@ -251,6 +251,30 @@ export interface DocxReport {
   counts: Record<string, DocxReportCount>;
   /** Every distinct drop and change, in the order the conversion first met it. */
   entries: DocxReportEntry[];
+  /**
+   * Import only, with `trackUnread` on: the Word XML the import never read.
+   * A handler can only report what it is handed, so this is the one place a
+   * property no code looks at shows up.
+   */
+  unread?: DocxUnreadElement[];
+}
+
+/**
+ * Word XML an import did not read, by where it sits. Repeats of one path share
+ * an entry and add to its `count`. Only the top of a skipped subtree is listed:
+ * what is inside it was skipped with it.
+ */
+export interface DocxUnreadElement {
+  /** The package part it came from: `"word/document.xml"`, `"word/styles.xml"`. */
+  part: string;
+  /** Element names from the part's root down to it: `"w:document/w:body/w:p/w:pPr/w:ind"`. */
+  path: string;
+  /**
+   * `unread`: never looked at. `examined`: its name was matched, but nothing
+   * in it was read — the import knew it was there and took nothing from it.
+   */
+  outcome: "unread" | "examined";
+  count: number;
 }
 
 // ── Options ─────────────────────────────────────────────────────────────────

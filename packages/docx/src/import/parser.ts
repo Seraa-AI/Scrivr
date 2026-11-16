@@ -21,6 +21,7 @@ import {
   attr,
   findChild,
   findChildren,
+  findDescendant,
   type OoxmlElement,
 } from "./xml";
 import type {
@@ -651,21 +652,6 @@ function readTextChildren(el: OoxmlElement): string {
     if (typeof c === "string") out += c;
   }
   return out;
-}
-
-/**
- * Recursive descendant lookup. Looser than the fixed graphic path in
- * earlier revisions — real-world OOXML wraps the picture in
- * `<mc:AlternateContent>` / `<mc:Choice>` blocks the rigid path missed.
- */
-function findDescendant(el: OoxmlElement, name: string): OoxmlElement | undefined {
-  for (const child of el.children) {
-    if (typeof child === "string") continue;
-    if (child.name === name) return child;
-    const found = findDescendant(child, name);
-    if (found) return found;
-  }
-  return undefined;
 }
 
 // ── Run properties → DocxMark ──────────────────────────────────────────────
