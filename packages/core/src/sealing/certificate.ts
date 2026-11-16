@@ -11,6 +11,7 @@ import {
   type SignerFieldDescriptor,
 } from "../extensions/built-in/Field";
 import { isSigningKind, parseSignedAt, type FieldKinds, type FieldKindSpec, type FieldValue } from "../extensions/built-in/fieldKinds";
+import { drawingSize } from "../model/drawingSize";
 import { hashArtifact, snapshotDocument, verifySnapshot, type SealedSnapshot } from "./snapshot";
 
 /** The steps a certificate labels itself; whether a party saw the document before signing, and when it completed, are checked. */
@@ -306,6 +307,17 @@ function asSigned(signedAt: string): string {
   return `${day} ${time.slice(0, time.length - zone.length)} (UTC${zone === "Z" ? "+00:00" : zone})`;
 }
 
+/**
+ * A drawing's size in `box`, keeping its own proportions — as the canvas and
+ * the executed PDF fit it. The box itself when its size cannot be read.
+ */
+function fitted(src: string, box: { width: number; height: number }): { width: number; height: number } {
+  const own = drawingSize(src);
+  if (!own) return box;
+  const scale = Math.min(box.width / own.width, box.height / own.height);
+  return { width: own.width * scale, height: own.height * scale };
+}
+
 // ── The document ─────────────────────────────────────────────────────────────
 
 type Json = Record<string, unknown>;
@@ -328,7 +340,7 @@ function certificateDocument(
   const signatureBlocks = signatures.flatMap(({ field, spec, value, signedAt, at }) => [
     heading(3, `${spec.label} — ${field.role}`),
     value.kind === "image"
-      ? paragraph({ type: "image", attrs: { src: value.src, width: spec.size.width, height: spec.size.height } })
+      ? paragraph({ type: "image", attrs: { src: value.src, ...fitted(value.src, spec.size) } })
       : paragraph(text(value.text)),
     line(labels.signed, `${asSigned(signedAt)} · ${readableUtc(at)}`),
   ]);

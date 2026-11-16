@@ -293,9 +293,11 @@ that the design does not say:
   `valuesOnRecordOf` — so a certificate is issued complete exactly when the
   executed PDF printed complete. Both read the snapshot's document through
   `snapshotDocument`.
-- **Known gap:** a drawn signature is shown at its kind's box size, so a
-  drawing of other proportions is stretched slightly; the executed PDF fits
-  it (`fit: "contain"`). Fitting it here needs the drawing's own size.
+- **A drawn signature keeps its proportions.** Core reads a drawing's pixel
+  size from its own PNG or JPEG header (`drawingSize`, beside
+  `safeDrawingUrl`), and the certificate fits it to its kind's box, as the
+  canvas and the executed PDF (`fit: "contain"`) do — so it looks the same on
+  both documents.
 
 Guide: `guides/sealing.mdx`, *The certificate of completion*. The
 playground's signing room keeps a record as a host would — sent on opening,

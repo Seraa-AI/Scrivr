@@ -3,6 +3,7 @@
  * when it was issued, kept apart from the host's own record of the signing.
  */
 import { describe, expect, it } from "vitest";
+import { createCanvas } from "@napi-rs/canvas";
 import { ServerEditor } from "../ServerEditor";
 import { StarterKit } from "../extensions/StarterKit";
 import { Field } from "../extensions/built-in/Field";
@@ -96,6 +97,14 @@ const linesOf = (content: unknown): string[] => {
     : [];
 };
 
+/** Every image node's attributes, in document order. */
+const imagesOf = (node: unknown): Array<Record<string, unknown>> => {
+  if (typeof node !== "object" || node === null) return [];
+  const own = "type" in node && node.type === "image" && "attrs" in node && typeof node.attrs === "object" && node.attrs !== null ? [Object.fromEntries(Object.entries(node.attrs))] : [];
+  const children = "content" in node && Array.isArray(node.content) ? node.content.flatMap(imagesOf) : [];
+  return [...own, ...children];
+};
+
 /** The lines between a heading and the next heading of the same words' section. */
 const section = (lines: string[], from: string, to: string): string[] => lines.slice(lines.indexOf(from), lines.indexOf(to));
 
@@ -134,6 +143,18 @@ describe("buildCompletionCertificate", () => {
 
     expect(json).toContain(drawing);
     expect(linesOf(content).join("\n")).toContain("Grace Hopper");
+  });
+
+  it("shows a drawn signature in its own proportions, fitted to the signature's box, as the executed PDF does", async () => {
+    // A 3:1 drawing in the 180×44 signature box: 44 high sets the scale, so 132 × 44.
+    const wide = `data:image/png;base64,${createCanvas(240, 80).toBuffer("image/png").toString("base64")}`;
+    const client: FieldValue = { kind: "image", src: wide, signedAt: "2026-11-15T01:30:00+03:00" };
+    const { content } = await issued({ executed: printed({ ...signed, "client-sig": client }) });
+
+    const image = imagesOf(content)[0];
+    expect(image?.["src"]).toBe(wide);
+    expect(image?.["width"]).toBeCloseTo(132, 6);
+    expect(image?.["height"]).toBeCloseTo(44, 6);
   });
 
   it("keeps everything the host supplied out of what was verified", async () => {
