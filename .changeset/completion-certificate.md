@@ -1,0 +1,6 @@
+---
+"@scrivr/core": patch
+"@scrivr/export-pdf": patch
+---
+
+Certificate of completion. `exportCompletionCertificate(snapshot, values, { editorOptions, record })` (export-pdf) issues the executed PDF and its certificate from one printing: *Verified at issue* holds only what it checked — the snapshot against its hash, the executed PDF's hash, each signature as that PDF prints it — and the host's parties, events and signing times follow under the issuer's name. It refuses as `exportExecutedPdf` does (a drawing with no area now answers nothing), and for an unknown field kind, a record with no issuer or two parties for one role, a record that does not fit the document, an undated or unzoned time, an event it cannot name, or events out of order. `bundleCertificate` joins the two PDFs; labels are overridable for other languages, and `content` — handed the labels in use, and the verified facts frozen and typed read-only — adds a host's blocks before and after the certificate or replaces the record's body, never what was verified. Each drawing on the certificate is the bytes the executed PDF embedded. Core adds `snapshotDocument`, `readSigningMoment` (with `SigningMoment`), `documentFromBlocks` and `fieldSize`: a field whose own size is zero, negative or not a number is laid out, printed and exported to Word at its kind's size, as a pasted one already was.

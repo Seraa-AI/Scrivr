@@ -101,9 +101,10 @@ const daysInMonth = (year: number, month: number): number => (month === 2 ? (isL
  * here rather than by `Date.parse`, which some engines let roll 30 February
  * over into March while others refuse it.
  */
-function readSignedAt(signedAt: string): { year: number; month: number; day: number; at: number } | null {
+function readSignedAt(signedAt: string): { year: number; month: number; day: number; at: number; time: SigningMoment["time"] } | null {
   const parts = SIGNED_AT.exec(signedAt);
   if (!parts) return null;
+  const [, , , , hourText, minuteText, secondText, , sign, offsetHoursText, offsetMinutesText] = parts;
   const [year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0, offsetHours = 0, offsetMinutes = 0] = [1, 2, 3, 4, 5, 6, 9, 10].map((i) =>
     Number(parts[i] ?? 0),
   );
@@ -114,7 +115,15 @@ function readSignedAt(signedAt: string): { year: number; month: number; day: num
   const utc = new Date(0);
   utc.setUTCFullYear(year, month - 1, day);
   utc.setUTCHours(hour, minute - offset, second, millis);
-  return { year, month, day, at: utc.getTime() };
+  // A bare day names no clock, so no zone either — the group carries both or neither.
+  const time =
+    hourText === undefined
+      ? null
+      : {
+          clock: `${hourText}:${minuteText}${secondText === undefined ? "" : `:${secondText}`}`,
+          zone: sign === undefined ? "+00:00" : `${sign}${offsetHoursText}:${offsetMinutesText}`,
+        };
+  return { year, month, day, at: utc.getTime(), time };
 }
 
 /**
@@ -125,8 +134,28 @@ function readSignedAt(signedAt: string): { year: number; month: number; day: num
  */
 export const parseSignedAt = (signedAt: string): number | null => readSignedAt(signedAt)?.at ?? null;
 
+/** A `signedAt` as its signer wrote it — see `readSigningMoment`. */
+export interface SigningMoment {
+  /** The instant, fractions of a second included. */
+  at: number;
+  /** `YYYY-MM-DD`, the day in the signer's own offset. */
+  day: string;
+  /** The clock time and zone as written (`Z` read as `+00:00`), or `null` for a bare day. */
+  time: { clock: string; zone: string } | null;
+}
+
+/**
+ * A `signedAt` as its signer wrote it: the instant, the day, and — when one
+ * was given — the clock time and zone. A bare day has neither, so a record
+ * never stands an invented midnight in for it. `null` for what is no moment.
+ */
+export function readSigningMoment(signedAt: string): SigningMoment | null {
+  const moment = readSignedAt(signedAt);
+  return moment ? { at: moment.at, day: signedAt.slice(0, 10), time: moment.time } : null;
+}
+
 /** The `signedAt` a value carries when it names a moment (`parseSignedAt`); `null` otherwise. */
-export function signedAtOf(value: FieldValue | undefined): string | null {
+export function signedAtOf(value: FieldValue | null | undefined): string | null {
   if (!value || !("signedAt" in value) || value.signedAt === undefined) return null;
   return parseSignedAt(value.signedAt) === null ? null : value.signedAt;
 }
@@ -263,6 +292,22 @@ export function shownValue(kinds: FieldKinds, kind: string, value: FieldValue | 
     return src === null ? undefined : { ...value, src };
   }
   return value && SHOWN_BY[controlOfKind(kinds, kind)].has(value.kind) ? value : undefined;
+}
+
+/**
+ * A field's box as its author sized it — or, where that is no size, its
+ * kind's, as a field pasted in without one gets. Layout and print both read
+ * it, so a field never prints at a size it was not laid out at.
+ */
+export function fieldSize(kinds: FieldKinds, node: PmNode): { width: number; height: number } {
+  const kindSize = (kinds[String(node.attrs["kind"])] ?? BUILT_IN_FIELD_KINDS.text).size;
+  return { width: sizeOr(node.attrs["width"], kindSize.width), height: sizeOr(node.attrs["height"], kindSize.height) };
+}
+
+/** A length given as a size, or the fallback when it is none: blank, zero, negative or not a number. */
+export function sizeOr(given: unknown, fallback: number): number {
+  const length = Number(given);
+  return Number.isFinite(length) && length > 0 ? length : fallback;
 }
 
 /** What a field is, as its label says it: "Signature". */
