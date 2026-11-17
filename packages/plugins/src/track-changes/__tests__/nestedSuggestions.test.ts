@@ -259,6 +259,23 @@ describe("a suggestion held over part of its range", () => {
     expect(bob.type === "mark-change" && [...(bob.within ?? [])].sort()).toEqual([...holders].sort());
   });
 
+  it("offers a split suggestion where it shows, though part of it is held", () => {
+    const bob = editorWith([blue()], "bob");
+    recolourRange(bob, 1, 6, "red");
+    const carol = handTo(bob, "carol");
+    carol.applyTransaction(carol.getState().tr.split(3));
+    const alice = new ServerEditor({
+      extensions: [StarterKit, TrackChanges.configure({ userID: "alice", initialStatus: TrackChangesStatus.enabled, canAcceptReject: true })],
+      content: carol.getState().doc.toJSON(),
+    });
+    recolourRange(alice, 1, 3, "green");
+    for (const head of [6, 7]) {
+      const offered = changeAtCaret(pending(alice), head);
+      expect(offered?.dataTracked.authorID).toBe("bob");
+      expect(offered?.type === "mark-change" && offered.within).toBeUndefined();
+    }
+  });
+
   it("never offers a held piece as the act of a suggestion that shows", () => {
     const bob = editorWith([blue()], "bob");
     recolourRange(bob, 1, 3, "red");
@@ -291,6 +308,9 @@ describe("what else reads a held suggestion", () => {
     const changes = unit?.changes ?? [];
     expect(changes.map((c) => c.authorId).sort()).toEqual(["alice", "bob"]);
     for (const change of changes) expect(change.oldAttrs).toEqual({ marks: [{ type: "color", attrs: { color: "blue" } }] });
+    // The text shows Alice's green, so Bob's proposal is stated on his change.
+    expect(changes.find((c) => c.authorId === "bob")?.newAttrs).toEqual({ marks: [{ type: "color", attrs: { color: "red" } }] });
+    expect(changes.find((c) => c.authorId === "alice")?.newAttrs).toBeUndefined();
   });
 
   it("previews the suggestions a decision discards", () => {

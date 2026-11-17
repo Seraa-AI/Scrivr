@@ -131,8 +131,10 @@ with one on the text.
   by their last record only, dropping the rest of a mark carrying several
   records, and renamed other authors' ids. It now fuses only single records
   of the author writing. Cloning a document re-keys held records too.
-- The semantic lane lists held suggestions and reads the agreed formatting as
-  what the text had before.
+- The semantic lane lists held suggestions, with `newAttrs` for the value each
+  proposes, and reads the agreed formatting as what the text had before.
+- An act that shows on the text takes its primary from a shown piece, so a
+  suggestion split across paragraphs is offered where it shows.
 - Not changed: core's sealing count reads top-level records only. A held
   record always has a pending holder, so sealing is still refused, but the
   count is lower than `findChanges` reports.

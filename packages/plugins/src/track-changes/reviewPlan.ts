@@ -197,7 +197,10 @@ export function changeActs(changes: readonly TrackedChange[]): ChangeAct[] {
       }
     }
     const inOrder = changes.filter(c => records.includes(c));
-    acts.push({ primary: inOrder.find(c => !isPartOfAct(c)) ?? inOrder[0]!, records: inOrder });
+    // An act that shows on the text is offered where it shows, never by a piece held under another change.
+    const shown = inOrder.filter(c => c.type !== "mark-change" || c.within === undefined);
+    const candidates = shown.length > 0 ? shown : inOrder;
+    acts.push({ primary: candidates.find(c => !isPartOfAct(c)) ?? candidates[0]!, records: inOrder });
   }
   return acts;
 }
@@ -318,6 +321,9 @@ const placementDependents = (
  * linked record takes the decision of the change it belongs to. Naming a change
  * on either side authorizes deciding it, so it is never reported as a
  * dependent of another change in the same decision.
+ *
+ * It plans from the change set alone, so it cannot see which formatting
+ * suggestions a decision displaces; `planReview` and `planReviewIn` add them.
  */
 export function planChangeReview(changeSet: ChangeSet, decisions: ReviewDecisions): ReviewPlan {
   const changes = changeSet.pending;

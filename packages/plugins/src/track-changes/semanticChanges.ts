@@ -12,7 +12,7 @@ import type { Mark, Node as PMNode } from "@scrivr/core/pm";
 
 import { findChanges } from "./findChanges";
 import { getBlockInlineTrackedData, isTrackedRecord, isValidTrackableMark, markRecords } from "./helpers";
-import { marksToRestore, settle } from "./formatSuggestions";
+import { marksToRestore, settle, untracked } from "./formatSuggestions";
 import { changeActs } from "./reviewPlan";
 import { CHANGE_OPERATION, CHANGE_STATUS, type TrackedAttrs } from "./types";
 
@@ -178,11 +178,11 @@ const NODE_CHANGES = new Map<string, NodeReading>([
   })],
 ]);
 
-/** Every pending record on `mark`, and on the suggestions its records hold, at any depth. */
-function pendingFormatting(mark: Mark): TrackedRecord[] {
+/** Every pending record on `mark`, and on the suggestions its records hold, at any depth, with the mark it is on. */
+function pendingFormatting(mark: Mark, held = false): { record: TrackedRecord; mark: Mark; held: boolean }[] {
   return markRecords(mark).filter(isPending).flatMap((record) => [
-    record,
-    ...marksToRestore(record, mark.type.schema).flatMap(pendingFormatting),
+    { record, mark, held },
+    ...marksToRestore(record, mark.type.schema).flatMap((inner) => pendingFormatting(inner, true)),
   ]);
 }
 
@@ -197,8 +197,15 @@ function formattingChanges(node: PMNode, ctx: UnitCtx): SemanticNodeChange[] {
   const before = { marks: formatting.flatMap((mark) => settle(mark, () => CHANGE_STATUS.rejected)).map(describeInlineMark) };
   return formatting.filter(isValidTrackableMark).flatMap((mark) =>
     pendingFormatting(mark)
-      .filter((record) => FORMATTING_OPERATIONS.has(record.operation))
-      .map((record): SemanticNodeChange => ({ change: { ...describe("suggestedAttrs", "", record, ctx), oldAttrs: before }, place: "covers" })),
+      .filter(({ record }) => FORMATTING_OPERATIONS.has(record.operation))
+      .map(({ record, mark: on, held }): SemanticNodeChange => ({
+        change: {
+          ...describe("suggestedAttrs", "", record, ctx),
+          oldAttrs: before,
+          ...(held ? { newAttrs: { marks: [describeInlineMark(untracked(on))] } } : {}),
+        },
+        place: "covers",
+      })),
   );
 }
 

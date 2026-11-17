@@ -52,7 +52,7 @@ function displacedBy(state: EditorState, changeSet: ChangeSet, plan: ReviewDecis
     ...plan.rejected.map((id): [string, CHANGE_STATUS.rejected] => [id, CHANGE_STATUS.rejected]),
   ]);
   const scratch = state.tr;
-  settleMarks(scratch, 0, scratch.doc.content.size, id => statuses.get(id));
+  settleMarks(scratch, id => statuses.get(id));
   const left = new Set(findChanges(EditorState.create({ doc: scratch.doc })).pending.map(change => change.id));
   return undecidedMarks.filter(change => !left.has(change.id)).map(change => change.id);
 }

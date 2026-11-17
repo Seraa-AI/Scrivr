@@ -98,7 +98,8 @@ function sameOwnAttrs(a: Mark, b: Mark): boolean {
  * (bold/highlight/color/…): a run of the same mark, same author, operation and
  * status collapses to one tracking id — the same grouping typing already gets,
  * now for formatting. Marks with different OWN attrs (e.g. two colors) never
- * merge. Merging is keyed on userID + operation + status.
+ * merge. Merging is keyed on userID + operation + status, and fuses only the
+ * single records of `authorID`, the author writing: fusing renames records.
  */
 export function mergeTrackedMarks(pos: number, doc: PMNode, newTr: Transaction, schema: Schema, authorID: string) {
   const resolved = doc.resolve(pos);

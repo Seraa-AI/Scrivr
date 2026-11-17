@@ -49,17 +49,17 @@ function decisionsIn(changeSet: ChangeSet): DecisionOf {
 }
 
 /**
- * Settles every formatting mark on the text from `from` to `to` that a
- * decision in this review reaches — on the mark, or held by it — so a mark is
- * settled once from all its decisions, whichever of its changes comes first.
+ * Settles every formatting mark in the document that a decision reaches — on
+ * the mark, or held by it — so a mark is settled once from all its decisions,
+ * whichever of its changes comes first.
  */
-export function settleMarks(tr: Transaction, from: number, to: number, decided: DecisionOf) {
+export function settleMarks(tr: Transaction, decided: DecisionOf) {
   const reached: { from: number; to: number; mark: Mark }[] = [];
-  tr.doc.nodesBetween(from, to, (node, pos) => {
+  tr.doc.descendants((node, pos) => {
     if (!node.isInline) return;
     for (const mark of node.marks) {
       if (isValidTrackableMark(mark) && hasDecision(mark, decided)) {
-        reached.push({ from: Math.max(pos, from), to: Math.min(pos + node.nodeSize, to), mark });
+        reached.push({ from: pos, to: pos + node.nodeSize, mark });
       }
     }
   });
@@ -167,7 +167,7 @@ export function applyChanges(
     } else if (ChangeSet.isMarkChange(change)) {
       if (ChangeSet.isInlineMarkChange(change)) {
         // A decision reaches every copy of its record — on the text, or held — wherever it is.
-        if (!settledAll) settleMarks(tr, 0, tr.doc.content.size, decided);
+        if (!settledAll) settleMarks(tr, decided);
         settledAll = true;
         return;
       }
