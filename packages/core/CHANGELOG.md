@@ -1,5 +1,21 @@
 # @scrivr/core
 
+## 1.0.25
+
+### Patch Changes
+
+- 29af9a4: Core now requires the current ProseMirror packages: prosemirror-transform ^1.12.6, prosemirror-model ^1.25.13, prosemirror-commands ^1.7.2, prosemirror-history ^1.5.1, prosemirror-inputrules ^1.6.0, prosemirror-schema-list ^1.6.0 and prosemirror-markdown ^1.13.9. Scrivr's plugins reach ProseMirror through `@scrivr/core/pm`, so an app that pins older `prosemirror-*` versions directly installs a second copy, and its steps and marks then fail Scrivr's `instanceof` checks: import from `@scrivr/core/pm` instead. prosemirror-model now validates attributes when a node or mark is created, so content built with an attribute its schema's `validate` refuses throws at creation rather than at `check()`.
+- 29af9a4: A colour, size, font or link set over another author's pending suggestion no longer drops it. The new change holds it: rejecting the new change gives theirs back, still theirs, and accepting it discards theirs. Removing another author's suggestion adds a removal beside it instead. Either can be decided alone, and rejecting everything returns the agreed value in one review.
+
+  What a host sees:
+
+  - `findChanges().pending` lists a held suggestion as its own mark change, with `within` naming the changes that hold it. Show it under its holder, as the popover's new `heldChanges` does, rather than as a card of its own on the text.
+  - `planReview` and `reviewChanges` may list in `rejected` changes the caller did not name: suggestions a decision leaves no place for, such as those held by a change being accepted. The plan names them before the review runs.
+  - `getRichBlocks` lists a held suggestion with `newAttrs`, the value it proposes, since the text shows its holder's. `SemanticChange` gains that field.
+  - Merging neighbouring tracked formatting no longer fuses another author's records, which renamed their ids.
+
+- a6b92e1: A block near the foot of a page keeps the gap above it, as Word does. When its first line does not fit after the gap, it starts the next page, and the gap is dropped there. Before, core gave up the gap to fit the line, so a heading could sit flush against the paragraph above it with the rest of the heading's block on the next page. Documents with a block in that last sliver of a page paginate differently.
+
 ## 1.0.24
 
 ### Patch Changes

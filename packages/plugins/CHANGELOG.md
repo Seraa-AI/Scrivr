@@ -1,5 +1,29 @@
 # @scrivr/plugins
 
+## 1.0.25
+
+### Patch Changes
+
+- 29af9a4: A colour, size, font or link set over another author's pending suggestion no longer drops it. The new change holds it: rejecting the new change gives theirs back, still theirs, and accepting it discards theirs. Removing another author's suggestion adds a removal beside it instead. Either can be decided alone, and rejecting everything returns the agreed value in one review.
+
+  What a host sees:
+
+  - `findChanges().pending` lists a held suggestion as its own mark change, with `within` naming the changes that hold it. Show it under its holder, as the popover's new `heldChanges` does, rather than as a card of its own on the text.
+  - `planReview` and `reviewChanges` may list in `rejected` changes the caller did not name: suggestions a decision leaves no place for, such as those held by a change being accepted. The plan names them before the review runs.
+  - `getRichBlocks` lists a held suggestion with `newAttrs`, the value it proposes, since the text shows its holder's. `SemanticChange` gains that field.
+  - Merging neighbouring tracked formatting no longer fuses another author's records, which renamed their ids.
+
+- 29af9a4: Formatting is tracked again on current ProseMirror. From prosemirror-transform 1.12.3, bold, colour or any other added mark landed untracked: recording it threw, and the error was only logged.
+
+  A colour, size, font or link set over another now remembers the agreed one it replaced. Rejecting it puts that back, where before the text was left with none. The change popover offers it as `replacedMarks`, and `getRichBlocks` lists it in the change's `oldAttrs`. Text that had different values becomes one change per value.
+
+  Setting a value the text already shows changes nothing; setting the agreed value back proposes nothing. Saving a link with its own address, or with a new one through `setLinkHref`, no longer proposes removing the link. Taking off your own pending suggestion withdraws it and proposes removing the agreed value under it. Marks set and taken off within one transaction are recorded against what the text had before it. An agent's edits through `applyRichDiffAsSuggestion` follow the same rules. Text whose formatting a review settled joins its neighbours again.
+
+- Updated dependencies [29af9a4]
+- Updated dependencies [29af9a4]
+- Updated dependencies [a6b92e1]
+  - @scrivr/core@1.0.25
+
 ## 1.0.24
 
 ### Patch Changes
