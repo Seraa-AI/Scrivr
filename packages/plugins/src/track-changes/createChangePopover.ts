@@ -86,6 +86,12 @@ export interface ChangePopoverInfo {
    */
   replacedMarks?: ReplacedMark[];
   /**
+   * For a change set over other authors' suggestions: those suggestions, still
+   * theirs and each decidable — the "over Bob's blue → red" of "Alice: red →
+   * green". Rejecting this change gives them back; accepting it discards them.
+   */
+  heldChanges?: ChangePopoverInfo[];
+  /**
    * Discriminator for the change kind — mirrors TrackedChange.type without the
    * "-change" suffix. Lets UI components render the correct label and preview
    * without having to infer the kind from operation + markName + oldAttrs.
@@ -118,6 +124,9 @@ export interface ChangePopoverCallbacks {
   getPopoverElement?: () => HTMLElement | null;
 }
 
+/** A suggestion held by another change rather than standing on the text itself. */
+const isHeld = (change: TrackedChange) => change.type === "mark-change" && change.within !== undefined;
+
 /**
  * The change a popover offers at the caret: the act that owns the innermost
  * pending record there, shown by that act's primary. Inside a row someone
@@ -125,7 +134,8 @@ export interface ChangePopoverCallbacks {
  * someone else made inside the row is its own act and shows as itself.
  */
 export function changeAtCaret(pending: readonly TrackedChange[], head: number): TrackedChange | undefined {
-  const atCaret = pending.filter((c) => head >= c.from && head <= c.to);
+  // A held suggestion is not on the text: its holder is, and shows it.
+  const atCaret = pending.filter((c) => head >= c.from && head <= c.to && !isHeld(c));
   const innermost = atCaret.reduce<TrackedChange | undefined>(
     (best, c) => (!best || c.to - c.from < best.to - best.from ? c : best),
     undefined,
@@ -237,7 +247,7 @@ export function createChangePopover(
 
     if (primaryIsConflict) {
       conflictGroup = pending.filter(
-        (c) => c.from <= primary.to && c.to >= primary.from,
+        (c) => c.from <= primary.to && c.to >= primary.from && !isHeld(c),
       );
       isConflict = conflictGroup.length > 1 || primaryIsConflict;
     } else {
@@ -245,7 +255,7 @@ export function createChangePopover(
       // Only treat as a conflict when different authors have opposing operations
       // (insert vs delete). Same-author overlaps or same-operation overlaps are
       // normal multi-author coexistence, not conflicts.
-      const atCursor = pending.filter((c) => head >= c.from && head <= c.to);
+      const atCursor = pending.filter((c) => head >= c.from && head <= c.to && !isHeld(c));
       if (atCursor.length > 1) {
         const uniqueAuthors = new Set(
           atCursor.map((c) => c.dataTracked.authorID),
@@ -348,6 +358,7 @@ export function createChangePopover(
       }
 
       // ── Mark change fields ───────────────────────────────────────────────────
+      const held = pending.filter((p) => p.type === "mark-change" && p.within === c.id);
       let markName: string | undefined;
       let replacedMarks: ReplacedMark[] | undefined;
       if (c.type === "mark-change") {
@@ -400,6 +411,7 @@ export function createChangePopover(
         ...(moveRole !== undefined ? { moveRole } : {}),
         ...(markName !== undefined ? { markName } : {}),
         ...(replacedMarks !== undefined ? { replacedMarks } : {}),
+        ...(held.length > 0 ? { heldChanges: held.map(toInfo) } : {}),
         ...(c.type === "node-change" || c.type === "node-attr-change" ? { nodeTypeName: c.node.type.name } : {}),
       };
     };

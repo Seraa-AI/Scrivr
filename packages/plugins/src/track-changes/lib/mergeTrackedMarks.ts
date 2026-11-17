@@ -74,6 +74,8 @@ function descriptorOf(mark: Mark): Partial<TrackedAttrs> | null {
   return dt;
 }
 
+const recordCount = (mark: Mark) => (Array.isArray(mark.attrs.dataTracked) ? mark.attrs.dataTracked.length : mark.attrs.dataTracked ? 1 : 0);
+
 /** A mark eligible for adjacency-merge: a tracked-text mark or a pending trackable formatting mark. */
 function isMergeableTrackedMark(mark: Mark, schema: Schema): boolean {
   if (mark.type === schema.marks.trackedInsert || mark.type === schema.marks.trackedDelete) {
@@ -119,6 +121,8 @@ export function mergeTrackedMarks(pos: number, doc: PMNode, newTr: Transaction, 
     const rightMark = rightMarks.find(m => m.type === leftMark.type && sameOwnAttrs(m, leftMark));
     if (!rightMark) continue;
 
+    // A mark carrying several authors' records is not one change: fusing keeps only one record.
+    if (recordCount(leftMark) > 1 || recordCount(rightMark) > 1) continue;
     const leftDataTracked = descriptorOf(leftMark);
     const rightDataTracked = descriptorOf(rightMark);
     if (!leftDataTracked || !rightDataTracked) continue;

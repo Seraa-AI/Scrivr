@@ -242,6 +242,12 @@ export type MarkChange = Change & {
   mark: Mark;
   node: Node;
   text: string;
+  /**
+   * For a suggestion held by another change — set over it by another author —
+   * that change's id. It covers the holder's range and is decided with it, or
+   * alone while the holder stays pending.
+   */
+  within?: string;
 };
 
 export type TrackedChange =

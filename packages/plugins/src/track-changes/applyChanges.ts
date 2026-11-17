@@ -1,11 +1,11 @@
-import { Node as PMNode, Schema } from "@scrivr/core/pm";
+import { type Mark, Node as PMNode, Schema } from "@scrivr/core/pm";
 import { Transaction } from "@scrivr/core/pm";
 import { Mapping } from "@scrivr/core/pm";
 
 import { revertWrapNodeChange } from "./lib/revertChanges";
 import { restoreNode, updateChangeChildrenAttributes } from "./engine/updateAttributes";
 import { ChangeSet } from "./ChangeSet";
-import { excludeFromTracked, marksToRestore } from "./helpers";
+import { excludeFromTracked, hasDecision, isValidTrackableMark, settle } from "./helpers";
 import { deleteNode } from "./lib/deleteNode";
 import { clearTextChange } from "./lib/clearTextChange";
 import { rejectMove } from "./engine/moveIdentity";
@@ -37,6 +37,33 @@ function isEntirelyGone(change: TrackedChange, deleteMap: Mapping) {
   return deleted && !(spansText && deleteMap.map(change.to, -1) > pos);
 }
 
+/** Each change's decision in this review, by id; `pending` for one left undecided. */
+function statusLookup(changeSet: ChangeSet): (id: string) => CHANGE_STATUS | undefined {
+  const statuses = new Map(changeSet.changes.map(change => [change.id, change.dataTracked.status]));
+  return id => statuses.get(id);
+}
+
+/**
+ * Settles every formatting mark on the text from `from` to `to` that a
+ * decision in this review reaches — on the mark, or held by it — so a mark is
+ * settled once from all its decisions, whichever of its changes comes first.
+ */
+function settleMarks(tr: Transaction, from: number, to: number, statusOf: (id: string) => CHANGE_STATUS | undefined) {
+  const reached: { from: number; to: number; mark: Mark }[] = [];
+  tr.doc.nodesBetween(from, to, (node, pos) => {
+    if (!node.isInline) return;
+    for (const mark of node.marks) {
+      if (isValidTrackableMark(mark) && hasDecision(mark, statusOf)) {
+        reached.push({ from: Math.max(pos, from), to: Math.min(pos + node.nodeSize, to), mark });
+      }
+    }
+  });
+  for (const { from: start, to: end, mark } of reached) {
+    tr.removeMark(start, end, mark);
+    for (const settled of settle(mark, statusOf)) tr.addMark(start, end, settled);
+  }
+}
+
 /**
  * Applies accepted/rejected changes to the document and clears tracking metadata.
  */
@@ -57,6 +84,8 @@ export function applyChanges(
     }
     return c1.dataTracked.updatedAt - c2.dataTracked.updatedAt;
   });
+
+  const statusOf = statusLookup(changeSet);
 
   // ── First pass — everything except move/structure ──────────────────────────
   changes.forEach(change => {
@@ -143,13 +172,7 @@ export function applyChanges(
         (change.dataTracked.status === CHANGE_STATUS.rejected && isDelete);
 
       if (ChangeSet.isInlineMarkChange(change)) {
-        const to = deleteMap.map(change.to);
-        tr.removeMark(from, to, change.mark);
-        if (toBeRestored) tr.addMark(from, to, newMark);
-        const isRejectedInsert = isInsert && change.dataTracked.status === CHANGE_STATUS.rejected;
-        if (isRejectedInsert) {
-          for (const mark of marksToRestore(change.dataTracked, tr.doc.type.schema)) tr.addMark(from, to, mark);
-        }
+        settleMarks(tr, from, deleteMap.map(change.to), statusOf);
       } else {
         tr.removeNodeMark(from, change.mark);
         if (toBeRestored) tr.addNodeMark(from, newMark);

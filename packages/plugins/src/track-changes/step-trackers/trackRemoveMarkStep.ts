@@ -49,7 +49,7 @@ export function trackRemoveMarkStep(
   try {
     for (const piece of stepPieces(step, index, tr)) {
       // Where the transaction had set the mark itself, what is taken off is what the text had.
-      const removing = step.mark.isInSet(piece.marks) ? [step.mark] : restoredOnReject(step.mark, piece.marks);
+      const removing = step.mark.isInSet(piece.marks) ? [step.mark] : restoredOnReject(step.mark, piece.marks, emptyAttrs.authorID);
       for (const [from, to] of notSuperseded(step.mark, replayBridge.map(piece.from, 1), replayBridge.map(piece.to, -1), newTr.doc)) {
         for (const mark of removing) {
           for (const written of proposeRemoval(mark, from, to, emptyAttrs)) newTr.step(written);
@@ -187,7 +187,7 @@ export function trackAddMarkStep(
   if (!isValidTrackableMark(step.mark)) return;
 
   const runs: RestoreRun[] = [];
-  for (const run of restoreRuns(step.mark, stepPieces(step, index, tr))) {
+  for (const run of restoreRuns(step.mark, stepPieces(step, index, tr), emptyAttrs.authorID)) {
     const from = replayBridge.map(run.from, 1);
     const to = replayBridge.map(run.to, -1);
     if (from >= to) continue;

@@ -1,9 +1,9 @@
-import { Node as PMNode } from "@scrivr/core/pm";
+import { type Mark, Node as PMNode } from "@scrivr/core/pm";
 import { EditorState } from "@scrivr/core/pm";
 
 import { ChangeSet } from "./ChangeSet";
 import { joinedBlockAt } from "./lib/deleteBreak";
-import { getMarkTrackedData, getNodeTrackedData } from "./helpers";
+import { getMarkTrackedData, getNodeTrackedData, markRecords, marksToRestore } from "./helpers";
 import {
   CHANGE_OPERATION,
   CHANGE_STATUS,
@@ -86,6 +86,25 @@ const BUILD = new Map<string, ChangeBuilder>([
 ]);
 
 /**
+ * Every record on a node's marks, with the mark it is on, and every pending
+ * suggestion those records hold in `replaced`, at any depth, each with the
+ * record that holds it.
+ */
+function markRecordsIn(node: PMNode): { record: Partial<TrackedAttrs>; mark: Mark; within?: string }[] {
+  const found: { record: Partial<TrackedAttrs>; mark: Mark; within?: string }[] = [];
+  const visit = (mark: Mark, records: readonly Partial<TrackedAttrs>[], within?: string) => {
+    for (const record of records) {
+      found.push({ record, mark, ...(within === undefined ? {} : { within }) });
+      for (const held of marksToRestore(record, mark.type.schema)) {
+        visit(held, markRecords(held).filter(r => r.status === CHANGE_STATUS.pending), record.id);
+      }
+    }
+  };
+  getMarkTrackedData(node).forEach((records, mark) => visit(mark, records));
+  return found;
+}
+
+/**
  * Finds all tracked changes (text marks or node attributes) in the document.
  */
 export function findChanges(state: EditorState): ChangeSet {
@@ -105,13 +124,11 @@ export function findChanges(state: EditorState): ChangeSet {
       markMap.clear();
     }
 
-    const marksWithTrackChanges = getMarkTrackedData(node);
-    if (marksWithTrackChanges.size > 0) {
+    const records = markRecordsIn(node);
+    if (records.length > 0) {
       // Build the set of tracking IDs active in this node.
       const activeMarkIds = new Set<string>();
-      marksWithTrackChanges.forEach(trackAttrs =>
-        trackAttrs.forEach(c => { if (c.id) activeMarkIds.add(c.id); }),
-      );
+      records.forEach(({ record }) => { if (record.id) activeMarkIds.add(record.id); });
 
       // Flush stale mark groups (IDs that ended before this node).
       for (const [id, c] of Array.from(markMap.entries())) {
@@ -122,8 +139,8 @@ export function findChanges(state: EditorState): ChangeSet {
       }
 
       // Extend existing groups or open new ones.
-      marksWithTrackChanges.forEach((trackAttrs, mark) => {
-        trackAttrs.forEach(c => {
+      records.forEach(({ record: c, mark, within }) => {
+        {
           const id = c.id;
           if (!id) return;
           if (markMap.has(id)) {
@@ -143,11 +160,12 @@ export function findChanges(state: EditorState): ChangeSet {
                 node,
                 mark,
                 text: node.text ?? "",
+                ...(within === undefined ? {} : { within }),
               },
               node,
             });
           }
-        });
+        }
       });
     }
 

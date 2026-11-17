@@ -370,8 +370,14 @@ act — render controls for each. Keeping one is accepting it and rejecting the 
 A colour, a size, a font or a link replaces the one it is set over, so a tracked recolour remembers
 the agreed value it replaced: `info.replacedMarks` lists the marks it replaced (the "blue" of
 "blue → red"), and rejecting the change puts them back. Text that had several colours becomes one
-change per colour. A recolour over someone's pending recolour supersedes it, and rejecting it
-returns to the agreed colour, not to the suggestion.
+change per colour.
+
+A suggestion set over another author's keeps theirs: Alice's green over Bob's pending red holds
+Bob's red, which is listed as its own change with `within` naming Alice's, and offered in
+`info.heldChanges`. Rejecting Alice's gives Bob's back, still his; accepting hers discards it,
+and the review reports it rejected. Either can be decided alone, and "reject all" returns the
+agreed colour in one review. Removing another author's suggestion adds a removal beside it on
+the same mark rather than dropping it. A later edit to your own suggestion folds into it.
 
 `reviewChanges` reports what actually happened, so it is what a review button should call. The
 `setChangeStatuses` command only returns whether it dispatched, and `false` when the decision is

@@ -395,7 +395,7 @@ function emitKeepMarkChanges(
             if (other && excludes(real, other)) takenOff.add(r);
           }
           // Where it changes nothing it is set plain; elsewhere it is proposed, restoring what each stretch had.
-          const runs = restoreRuns(real, inlinePieces(tr.doc, from, to));
+          const runs = restoreRuns(real, inlinePieces(tr.doc, from, to), base().authorID);
           tr.addMark(from, to, untracked(real));
           for (const run of runs) {
             if (run.carried) tr.addMark(run.from, run.to, run.carried);

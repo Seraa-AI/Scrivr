@@ -8,7 +8,7 @@ import { applyChanges } from "../applyChanges";
 import { revertSplitNodeChange } from "../lib/revertChanges";
 import { acceptBreakDeletion } from "../lib/deleteBreak";
 import { restoreListPlaces } from "../lib/listChange";
-import type { ReviewDecision, ReviewOutcome, ReviewPlan } from "../reviewPlan";
+import { settledTogether, type ReviewDecision, type ReviewOutcome, type ReviewPlan } from "../reviewPlan";
 
 /**
  * The same records, with the reviewed ones stamped. Returns the unvalidated
@@ -161,10 +161,27 @@ export function updateChangesStatus(
     // unselected pending identity must survive, even if an executor's effects
     // drift from the planner's model in a future change.
     const pending = new Set(findChanges(EditorState.create({ doc: scratch.doc })).pending.map(c => c.id));
-    if ([...statusOf.keys()].some(id => pending.has(id)) ||
-        changeSet.pending.some(c => !statusOf.has(c.id) && !pending.has(c.id))) {
+    // A formatting suggestion the review left no place for — held by an
+    // accepted change, or on a mark a decision took away — is decided with it.
+    // Anything else gone undecided is an engine fault.
+    const gone = changeSet.pending.filter(c => !statusOf.has(c.id) && !pending.has(c.id));
+    const displacing = new Set(statusOf.keys());
+    const displaced: TrackedChange[] = [];
+    for (let found = true; found;) {
+      found = false;
+      for (const c of gone) {
+        if (displacing.has(c.id)) continue;
+        if (changeSet.pending.some(d => displacing.has(d.id) && settledTogether(c, d, changeSet.pending))) {
+          displacing.add(c.id);
+          displaced.push(c);
+          found = true;
+        }
+      }
+    }
+    if ([...statusOf.keys()].some(id => pending.has(id)) || displaced.length !== gone.length) {
       throw new Error("Review did not preserve the authorized set of change identities");
     }
+    decisions.rejected = [...decisions.rejected, ...displaced.map(c => c.id)];
   } catch (error) {
     // Nothing is published, and this is logged rather than only reported: an
     // engine invariant broke here, which is not a decision the reviewer made.

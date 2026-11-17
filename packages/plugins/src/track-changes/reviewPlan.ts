@@ -2,7 +2,7 @@ import type { Mark } from "@scrivr/core/pm";
 import { stableStringify } from "@scrivr/core";
 
 import type { ChangeSet } from "./ChangeSet";
-import { isMoveShadow } from "./helpers";
+import { isMoveShadow, untracked } from "./helpers";
 import type { TrackedChange } from "./types";
 
 /** What deciding a change does to the document, which settles what it can take with it. */
@@ -284,8 +284,34 @@ const existenceDependents = (
       !selected.has(other.id) &&
       !restoredPriorPlacement(other, change, decision) &&
       (other.dataTracked.dependsOn?.includes(change.id) ||
-        (overlaps(other, change) && !strictlyContains(other, change))),
+        (overlaps(other, change) && !strictlyContains(other, change) && !settledTogether(other, change, changes))),
   );
+
+/** The change at the top of what holds `change`: itself when nothing does. */
+const holdingRoot = (change: TrackedChange, changes: readonly TrackedChange[]): string => {
+  const seen = new Set<string>();
+  let current = change;
+  while (current.type === "mark-change" && !seen.has(current.id)) {
+    const within = current.within;
+    if (within === undefined) break;
+    seen.add(current.id);
+    const holder = changes.find(other => other.id === within);
+    if (!holder) break;
+    current = holder;
+  }
+  return current.id;
+};
+
+/**
+ * Whether `a` and `b` are settled together: records on one formatting mark, or
+ * a suggestion and those it holds. They share a range without being work on
+ * each other's content — the mark is settled from all its decisions at once —
+ * so either can be decided without the other.
+ */
+export const settledTogether = (a: TrackedChange, b: TrackedChange, changes: readonly TrackedChange[]) =>
+  a.type === "mark-change" && b.type === "mark-change" &&
+  (holdingRoot(a, changes) === holdingRoot(b, changes) ||
+    (overlaps(a, b) && untracked(a.mark).eq(untracked(b.mark))));
 
 /**
  * Placements this decision cannot be taken without. Rejecting a move needs the

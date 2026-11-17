@@ -9,16 +9,23 @@ export function genId(): string {
 import { isTrackedMark, stableStringify } from "@scrivr/core";
 export { isTrackedMark } from "@scrivr/core";
 
+/** A mark as a record keeps it: its type and attrs, and its records only when it has any. */
 export const toReplacedMark = (mark: Mark): ReplacedMark => {
   const { dataTracked: _tracking, ...attrs } = mark.attrs;
-  return { type: mark.type.name, attrs };
+  const records = markRecords(mark);
+  return { type: mark.type.name, attrs: records.length > 0 ? { ...attrs, dataTracked: records } : attrs };
 };
 
+/** `mark` carrying exactly `records`; one that carries no records is returned as it is. */
+const withRecords = (mark: Mark, records: readonly Partial<TrackedAttrs>[]): Mark =>
+  isValidTrackableMark(mark) ? mark.type.create({ ...mark.attrs, dataTracked: [...records] }) : mark;
+
 /**
- * The marks a record says to put back, as `schema` makes them, untracked.
- * Records arrive from saved and synced documents, so an entry the schema
- * cannot make — an unknown or review type, attrs it refuses — is left out
- * rather than failing the review.
+ * The marks a record says to put back, as `schema` makes them: agreed
+ * formatting, or another author's suggestion the change holds, with its
+ * records. Records arrive from saved and synced documents, so an entry the
+ * schema cannot make — an unknown or review type, attrs it refuses — is left
+ * out, and a record that does not read as one is dropped, never trusted.
  */
 export function marksToRestore(record: Partial<TrackedAttrs>, schema: Schema): Mark[] {
   const replaced: unknown = record.replaced;
@@ -32,7 +39,8 @@ export function marksToRestore(record: Partial<TrackedAttrs>, schema: Schema): M
       return [];
     }
     try {
-      return [untracked(markType.create(attrs))];
+      const made = markType.create(attrs);
+      return [withRecords(made, markRecords(made))];
     } catch (e) {
       console.warn("track-changes: a replaced mark this schema refuses was left out", entry, e);
       return [];
@@ -41,22 +49,29 @@ export function marksToRestore(record: Partial<TrackedAttrs>, schema: Schema): M
 }
 
 /** A mark as agreed text carries it: without the records that track it. */
-export const untracked = (mark: Mark): Mark =>
-  isValidTrackableMark(mark) ? mark.type.create({ ...mark.attrs, dataTracked: [] }) : mark;
+export const untracked = (mark: Mark): Mark => withRecords(mark, []);
 
 /** Whether setting `mark` takes `other` off the text, as a colour does another colour. */
 export const excludes = (mark: Mark, other: Mark): boolean => !other.eq(mark) && !other.isInSet(mark.addToSet([other]));
 
+const pendingRecords = (mark: Mark) => markRecords(mark).filter(r => r.status === CHANGE_STATUS.pending);
+
+/** Whether `mark` carries pending work by someone other than `authorID`: then it stays theirs, held whole. */
+const othersWork = (mark: Mark, authorID: string) => pendingRecords(mark).some(r => r.authorID !== authorID);
+
 /**
- * What rejecting `mark`, set over text carrying `marks`, must put back: the
- * agreed formatting it takes off, as one ordered set. A suggestion it takes
- * off was never agreed, so it gives back what it replaced in turn.
+ * What rejecting `mark`, set by `authorID` over text carrying `marks`, must
+ * put back, as one ordered set. Another author's pending work is held whole,
+ * records and all, so it is decided by someone rather than lost. The author's
+ * own suggestion folds into this change, giving back what it replaced; agreed
+ * formatting comes back untracked.
  */
-export function restoredOnReject(mark: Mark, marks: readonly Mark[]): readonly Mark[] {
+export function restoredOnReject(mark: Mark, marks: readonly Mark[], authorID: string): readonly Mark[] {
   return Mark.setFrom(
     marks
       .filter(other => excludes(mark, other))
       .flatMap(other => {
+        if (othersWork(other, authorID)) return [other];
         return isSuggested(other) ? markRecords(other).flatMap(r => marksToRestore(r, other.type.schema)) : [untracked(other)];
       }),
   );
@@ -72,20 +87,65 @@ const isSuggested = (mark: Mark) =>
   markRecords(mark).some(r => r.status === CHANGE_STATUS.pending && r.operation === CHANGE_OPERATION.insert);
 
 /**
- * The steps that propose taking `mark` off `from`–`to`. A pending suggestion is
- * withdrawn, and what it replaced was agreed, so removing that is proposed in
- * its place; a pending removal stays agreed; anything else is struck.
+ * The steps that propose taking `mark` off `from`–`to`. Another author's
+ * pending work stays theirs: the removal is one more record on their mark. The
+ * author's own suggestion is withdrawn, and removing what it replaced is
+ * proposed in its place; their own pending removal stays agreed; anything else
+ * is struck.
  */
 export function proposeRemoval(mark: Mark, from: number, to: number, emptyAttrs: NewEmptyAttrs): Step[] {
-  const struck = (agreed: Mark) =>
-    new AddMarkStep(from, to, agreed.type.create({ ...agreed.attrs, dataTracked: [{ ...createNewDeleteAttrs(emptyAttrs), id: genId() }] }));
+  const deletion = () => ({ ...createNewDeleteAttrs(emptyAttrs), id: genId() });
+  const strike = (target: Mark) =>
+    othersWork(target, emptyAttrs.authorID)
+      ? new AddMarkStep(from, to, withRecords(target, [...markRecords(target), deletion()]))
+      : new AddMarkStep(from, to, withRecords(target, [deletion()]));
+  if (othersWork(mark, emptyAttrs.authorID)) return [new RemoveMarkStep(from, to, mark), strike(mark)];
   if (isSuggested(mark)) {
-    return [new RemoveMarkStep(from, to, mark), ...markRecords(mark).flatMap(r => marksToRestore(r, mark.type.schema)).map(struck)];
+    return [new RemoveMarkStep(from, to, mark), ...markRecords(mark).flatMap(r => marksToRestore(r, mark.type.schema)).map(strike)];
   }
   if (markRecords(mark).some(r => r.status === CHANGE_STATUS.pending && r.operation === CHANGE_OPERATION.delete)) {
     return [new AddMarkStep(from, to, untracked(mark))];
   }
-  return [struck(untracked(mark))];
+  return [strike(untracked(mark))];
+}
+
+/**
+ * The marks text carrying `mark` keeps once the decisions `statusOf` gives are
+ * applied — the one place a mark's decided records become marks, so a mark is
+ * settled once from every decision on it, in no order. An accepted removal
+ * takes the value off; a rejected suggestion gives back what it replaced, each
+ * settled in turn and carrying the mark's undecided records; accepted
+ * suggestions and rejected removals leave the mark without their record. What
+ * an undecided suggestion holds is settled in place, so a held suggestion
+ * decided alone changes what its holder would restore.
+ */
+export function settle(mark: Mark, statusOf: (id: string) => CHANGE_STATUS | undefined): Mark[] {
+  const records = markRecords(mark);
+  const decisionOf = (record: Partial<TrackedAttrs>) => {
+    const status = record.id === undefined ? undefined : statusOf(record.id);
+    return status === CHANGE_STATUS.pending ? undefined : status;
+  };
+  if (records.some(r => r.operation === CHANGE_OPERATION.delete && decisionOf(r) === CHANGE_STATUS.accepted)) return [];
+  const undecided = records
+    .filter(r => decisionOf(r) === undefined)
+    .map(r => (r.replaced === undefined ? r : {
+      ...r,
+      replaced: marksToRestore(r, mark.type.schema).flatMap(held => settle(held, statusOf)).map(toReplacedMark),
+    }));
+  const rejected = records.filter(r => r.operation === CHANGE_OPERATION.insert && decisionOf(r) === CHANGE_STATUS.rejected);
+  if (rejected.length === 0) return [withRecords(mark, undecided)];
+  return rejected
+    .flatMap(r => marksToRestore(r, mark.type.schema))
+    .flatMap(restored => settle(withRecords(restored, [...markRecords(restored), ...undecided]), statusOf));
+}
+
+/** Whether any record on `mark`, or held by one, is decided in `statusOf`. */
+export function hasDecision(mark: Mark, statusOf: (id: string) => CHANGE_STATUS | undefined): boolean {
+  return markRecords(mark).some(r => {
+    const status = r.id === undefined ? undefined : statusOf(r.id);
+    return (status !== undefined && status !== CHANGE_STATUS.pending) ||
+      marksToRestore(r, mark.type.schema).some(held => hasDecision(held, statusOf));
+  });
 }
 
 /** Text from `from` to `to` and the marks it had before the edit being recorded. */
@@ -105,7 +165,7 @@ export type RestoreRun = { from: number; to: number; restored: readonly Mark[]; 
  * setting what is already shown changes nothing, and takes no one's
  * suggestion from them.
  */
-export function restoreRuns(mark: Mark, pieces: Iterable<FoundPiece>): RestoreRun[] {
+export function restoreRuns(mark: Mark, pieces: Iterable<FoundPiece>, authorID: string): RestoreRun[] {
   const runs: (RestoreRun & { key: string })[] = [];
   const push = (piece: FoundPiece, run: Omit<RestoreRun, "from" | "to">, key: string) => {
     const last = runs[runs.length - 1];
@@ -119,7 +179,7 @@ export function restoreRuns(mark: Mark, pieces: Iterable<FoundPiece>): RestoreRu
       push(piece, { restored: [], carried }, `carried:${stableStringify(carried.toJSON())}`);
       continue;
     }
-    const restored = restoredOnReject(mark, piece.marks);
+    const restored = restoredOnReject(mark, piece.marks, authorID);
     if (restoresItself(mark, restored)) continue;
     push(piece, { restored }, restoredKey(restored));
   }

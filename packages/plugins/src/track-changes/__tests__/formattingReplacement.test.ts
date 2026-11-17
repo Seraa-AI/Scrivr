@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import { ServerEditor, StarterKit, type InlineSpan } from "@scrivr/core";
 import type { Node as PMNode } from "@scrivr/core/pm";
 import { toSemanticUnits } from "@scrivr/export-semantic";
-import { changeActs, reviewChanges, TrackChanges, TrackChangesStatus } from "../index";
+import { changeActs, reviewChanges, TrackChanges, TrackChangesStatus, trackChangesPluginKey } from "../index";
 import { findChanges } from "../findChanges";
 import { applyRichDiffAsSuggestion } from "../lib/applyRichDiffAsSuggestion";
 import { isMarkRemoved } from "../semanticChanges";
@@ -308,19 +308,24 @@ function colourScenario(seed: number) {
     const from = 1 + Math.floor(random() * 7);
     const to = Math.min(9, from + 1 + Math.floor(random() * 4));
     const kind = random();
+    const author = kind < 0.12 ? "ai:Assistant" : trackChangesPluginKey.getState(editor.getState())!.userID;
+    const othersBefore = pending(editor).filter((c) => c.dataTracked.authorID !== author).map((c) => c.id);
     if (kind < 0.12) {
       // An agent proposes one colour, or none, for the whole paragraph.
       const value = pick([...PALETTE, "blue", null]);
       const spans: InlineSpan[] = [{ text: editor.getState().doc.child(0).textContent, marks: value ? [{ type: "color", attrs: { color: value } }] : [] }];
       applyRichDiffAsSuggestion(editor.getState(), (t) => editor.applyTransaction(t), { edits: [{ nodeId: "a", spans }], authorID: "ai:Assistant" });
-      continue;
+    } else {
+      const tr = editor.getState().tr;
+      if (kind < 0.5) tr.addMark(from, to, type.create({ color: pick([...PALETTE, "blue"]) }));
+      else if (kind < 0.7) tr.removeMark(from, to, type);
+      else if (kind < 0.85) tr.addMark(from, to, type.create({ color: pick(PALETTE) })).addMark(from, to, type.create({ color: pick(PALETTE) }));
+      else tr.addMark(1, 9, type.create({ color: pick(PALETTE) })).removeMark(from, to, type);
+      editor.applyTransaction(tr);
     }
-    const tr = editor.getState().tr;
-    if (kind < 0.5) tr.addMark(from, to, type.create({ color: pick([...PALETTE, "blue"]) }));
-    else if (kind < 0.7) tr.removeMark(from, to, type);
-    else if (kind < 0.85) tr.addMark(from, to, type.create({ color: pick(PALETTE) })).addMark(from, to, type.create({ color: pick(PALETTE) }));
-    else tr.addMark(1, 9, type.create({ color: pick(PALETTE) })).removeMark(from, to, type);
-    editor.applyTransaction(tr);
+    // No one's edit drops another author's pending suggestion.
+    const after = new Set(pending(editor).map((c) => c.id));
+    expect(othersBefore.filter((id) => !after.has(id)), `seed ${seed} step ${i}`).toEqual([]);
   }
   return editor;
 }
@@ -345,6 +350,35 @@ describe("any run of recolouring can be decided", () => {
       const editor = colourScenario(seed);
       if (pending(editor).length > 0) decideAll(editor, "rejected");
       expect(colourByChar(editor), `seed ${seed}`).toEqual(ORIGINAL);
+    }
+  });
+
+  it("rejecting some changes, then the rest, gives back the original colours", () => {
+    for (let seed = 1; seed <= SEEDS; seed++) {
+      const editor = colourScenario(seed);
+      const random = seeded(seed * 7919);
+      const some = pending(editor).filter(() => random() < 0.5);
+      if (some.length > 0) {
+        const outcome = reviewChanges(editor, { accepted: [], rejected: some.map((c) => c.id) });
+        expect(outcome.status, `seed ${seed}`).toBe("applied");
+      }
+      if (pending(editor).length > 0) decideAll(editor, "rejected");
+      expect(colourByChar(editor), `seed ${seed}`).toEqual(ORIGINAL);
+    }
+  });
+
+  it("accepting some changes, then the rest, gives the colours proposed", () => {
+    for (let seed = 1; seed <= SEEDS; seed++) {
+      const editor = colourScenario(seed);
+      const proposal = colourByChar(editor, true);
+      const random = seeded(seed * 7919);
+      const some = pending(editor).filter(() => random() < 0.5);
+      if (some.length > 0) {
+        const outcome = reviewChanges(editor, { accepted: some.map((c) => c.id), rejected: [] });
+        expect(outcome.status, `seed ${seed}`).toBe("applied");
+      }
+      if (pending(editor).length > 0) decideAll(editor, "accepted");
+      expect(colourByChar(editor), `seed ${seed}`).toEqual(proposal);
     }
   });
 
