@@ -47,10 +47,11 @@ import {
   getBlockInlineTrackedData,
   excludes,
   proposedForDeletion,
-  restoredOnReject,
-  restoresItself,
+  proposeRemoval,
+  restoreRuns,
   toReplacedMark,
   untracked,
+  type FoundPiece,
   type NewEmptyAttrs,
 } from "../helpers";
 import { isMarkRemoved } from "../semanticChanges";
@@ -393,15 +394,22 @@ function emitKeepMarkChanges(
             const other = resolveInlineMark(r, schema);
             if (other && excludes(real, other)) takenOff.add(r);
           }
-          const restored = restoredOnReject(real, marksIn(tr.doc, from, to));
-          if (restoresItself(real, restored)) tr.addMark(from, to, untracked(real));
-          else addTrackedMark(tr, from, to, real, createNewInsertAttrs(base()), restored);
+          // Where it changes nothing it is set plain; elsewhere it is proposed, restoring what each stretch had.
+          const runs = restoreRuns(real, inlinePieces(tr.doc, from, to));
+          tr.addMark(from, to, untracked(real));
+          for (const run of runs) {
+            addTrackedMark(tr, run.from, run.to, real, createNewInsertAttrs(base()), run.restored);
+          }
           applied = true;
         }
         for (const m of removed) {
           const real = takenOff.has(m) ? null : resolveInlineMark(m, schema, onWarn);
           if (!real) continue;
-          addTrackedMark(tr, from, to, real, createNewDeleteAttrs(base()));
+          // Taken off as the text carries it, so a suggestion there is withdrawn, not struck.
+          for (const piece of inlinePieces(tr.doc, from, to)) {
+            const carried = piece.marks.find((mark) => untracked(mark).eq(untracked(real))) ?? real;
+            for (const step of proposeRemoval(carried, piece.from, piece.to, base())) tr.step(step);
+          }
           applied = true;
         }
       }
@@ -411,13 +419,13 @@ function emitKeepMarkChanges(
   return applied;
 }
 
-/** Every mark on the inline content between `from` and `to`. */
-function marksIn(doc: PMNode, from: number, to: number): Mark[] {
-  const found: Mark[] = [];
-  doc.nodesBetween(from, to, (node) => {
-    if (node.isInline) found.push(...node.marks);
+/** The inline content between `from` and `to`, piece by piece, with its marks. */
+function inlinePieces(doc: PMNode, from: number, to: number): FoundPiece[] {
+  const pieces: FoundPiece[] = [];
+  doc.nodesBetween(from, to, (node, at) => {
+    if (node.isInline) pieces.push({ from: Math.max(at, from), to: Math.min(at + node.nodeSize, to), marks: node.marks });
   });
-  return found;
+  return pieces;
 }
 
 /** Apply `mark` with a tracking record (exclusion replaces the plain mark). */

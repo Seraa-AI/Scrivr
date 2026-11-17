@@ -198,7 +198,7 @@ function trackOneStep(
   } else if (step instanceof RemoveMarkStep) {
     const placed = step.map(replayBridge);
     if (!(placed instanceof RemoveMarkStep)) return;
-    trackRemoveMarkStep(step, placed, baseAttrs, newTr, tr.docs[i]!);
+    trackRemoveMarkStep(step, i, tr, baseAttrs, newTr, replayBridge);
     mergeTrackedMarks(placed.from, newTr.doc, newTr, oldState.schema);
     mergeTrackedMarks(placed.to, newTr.doc, newTr, oldState.schema);
   } else if (step instanceof RemoveNodeMarkStep) {

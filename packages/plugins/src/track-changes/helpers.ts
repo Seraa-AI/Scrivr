@@ -1,4 +1,4 @@
-import { Attrs, Fragment, Mark, Node as PMNode, Schema, type Transaction } from "@scrivr/core/pm";
+import { AddMarkStep, Attrs, Fragment, Mark, Node as PMNode, RemoveMarkStep, Schema, type Step, type Transaction } from "@scrivr/core/pm";
 
 import { CHANGE_OPERATION, CHANGE_STATUS, type ReplacedMark, TrackedAttrs } from "./types";
 
@@ -9,7 +9,10 @@ export function genId(): string {
 import { isTrackedMark, stableStringify } from "@scrivr/core";
 export { isTrackedMark } from "@scrivr/core";
 
-export const toReplacedMark = (mark: Mark): ReplacedMark => ({ type: mark.type.name, attrs: { ...mark.attrs } });
+export const toReplacedMark = (mark: Mark): ReplacedMark => {
+  const { dataTracked: _tracking, ...attrs } = mark.attrs;
+  return { type: mark.type.name, attrs };
+};
 
 /**
  * The marks a record says to put back, as `schema` makes them, untracked.
@@ -54,8 +57,7 @@ export function restoredOnReject(mark: Mark, marks: readonly Mark[]): readonly M
     marks
       .filter(other => excludes(mark, other))
       .flatMap(other => {
-        const suggested = markRecords(other).filter(r => r.status === CHANGE_STATUS.pending && r.operation === CHANGE_OPERATION.insert);
-        return suggested.length > 0 ? suggested.flatMap(r => marksToRestore(r, other.type.schema)) : [untracked(other)];
+        return isSuggested(other) ? markRecords(other).flatMap(r => marksToRestore(r, other.type.schema)) : [untracked(other)];
       }),
   );
 }
@@ -64,8 +66,52 @@ export function restoredOnReject(mark: Mark, marks: readonly Mark[]): readonly M
 export const restoresItself = (mark: Mark, restored: readonly Mark[]): boolean =>
   restored.length === 1 && !!restored[0]?.eq(untracked(mark));
 
-/** One key for a set of restored marks, so runs, merges and acts agree on what is the same. */
-export const restoredKey = (restored: readonly Mark[]): string => stableStringify(restored.map(toReplacedMark));
+const restoredKey = (restored: readonly Mark[]): string => stableStringify(restored.map(toReplacedMark));
+
+const isSuggested = (mark: Mark) =>
+  markRecords(mark).some(r => r.status === CHANGE_STATUS.pending && r.operation === CHANGE_OPERATION.insert);
+
+/**
+ * The steps that propose taking `mark` off `from`–`to`. A pending suggestion is
+ * withdrawn, and what it replaced was agreed, so removing that is proposed in
+ * its place; a pending removal stays agreed; anything else is struck.
+ */
+export function proposeRemoval(mark: Mark, from: number, to: number, emptyAttrs: NewEmptyAttrs): Step[] {
+  const struck = (agreed: Mark) =>
+    new AddMarkStep(from, to, agreed.type.create({ ...agreed.attrs, dataTracked: [{ ...createNewDeleteAttrs(emptyAttrs), id: genId() }] }));
+  if (isSuggested(mark)) {
+    return [new RemoveMarkStep(from, to, mark), ...markRecords(mark).flatMap(r => marksToRestore(r, mark.type.schema)).map(struck)];
+  }
+  if (markRecords(mark).some(r => r.status === CHANGE_STATUS.pending && r.operation === CHANGE_OPERATION.delete)) {
+    return [new AddMarkStep(from, to, untracked(mark))];
+  }
+  return [struck(untracked(mark))];
+}
+
+/** Text from `from` to `to` and the marks it had before the edit being recorded. */
+export type FoundPiece = { from: number; to: number; marks: readonly Mark[] };
+
+/** A stretch where setting `mark` changes something, and what rejecting it there restores. */
+export type RestoreRun = { from: number; to: number; restored: readonly Mark[] };
+
+/**
+ * The stretches of `pieces` where setting `mark` is a change to propose, each
+ * with what rejecting it restores, neighbours that restore the same joined.
+ * Text that had `mark`, or whose restore is `mark` itself, has nothing to propose.
+ */
+export function restoreRuns(mark: Mark, pieces: Iterable<FoundPiece>): RestoreRun[] {
+  const runs: (RestoreRun & { key: string })[] = [];
+  for (const piece of pieces) {
+    if (mark.isInSet(piece.marks)) continue;
+    const restored = restoredOnReject(mark, piece.marks);
+    if (restoresItself(mark, restored)) continue;
+    const key = restoredKey(restored);
+    const last = runs[runs.length - 1];
+    if (last && last.to === piece.from && last.key === key) last.to = piece.to;
+    else runs.push({ from: piece.from, to: piece.to, restored, key });
+  }
+  return runs.map(({ from, to, restored }) => ({ from, to, restored }));
+}
 
 export function isValidTrackableMark(mark: Mark) {
   const spec = mark.type.spec;

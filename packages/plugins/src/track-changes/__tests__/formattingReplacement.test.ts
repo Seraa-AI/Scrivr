@@ -27,13 +27,14 @@ function editorWith(content: DocNode[], userID = "alice") {
 
 const pending = (editor: ServerEditor) => findChanges(editor.getState()).pending;
 
-/** Each text run's own value of `markName` — with no tracking left on it — or null. */
+/** The value of `markName` along the text, run by run: neighbours with the same value are one run. */
 function valuesOf(editor: ServerEditor, markName: string, attr: string) {
   const runs: (unknown | null)[] = [];
   editor.getState().doc.descendants((node: PMNode) => {
     if (!node.isText) return;
     const mark = node.marks.find((m) => m.type.name === markName);
-    runs.push(mark ? mark.attrs[attr] : null);
+    const value = mark ? mark.attrs[attr] : null;
+    if (runs.length === 0 || runs[runs.length - 1] !== value) runs.push(value);
   });
   return runs;
 }
@@ -177,6 +178,68 @@ describe("setting a format over another of its kind", () => {
     expect(valuesOf(editor, "color", "color")).toEqual(["blue", "green"]);
   });
 
+  it("leaves a link alone when its own address is saved again", () => {
+    const link = (href: string): DocNode => ({ type: "link", attrs: { href } });
+    const editor = editorWith([text("site", [link("https://a.example")])]);
+    expect(editor.commands.setLinkHref(1, 5, "https://a.example")).toBe(true);
+    expect(pending(editor)).toEqual([]);
+    expect(valuesOf(editor, "link", "href")).toEqual(["https://a.example"]);
+  });
+
+  it("sets a link back to its agreed address without proposing to remove it", () => {
+    const link = (href: string): DocNode => ({ type: "link", attrs: { href } });
+    const bob = editorWith([text("site", [link("https://a.example")])], "bob");
+    expect(bob.commands.setLinkHref(1, 5, "https://b.example")).toBe(true);
+    const alice = editorWith(bob.getState().doc.child(0).toJSON().content, "alice");
+    expect(alice.commands.setLinkHref(1, 5, "https://a.example")).toBe(true);
+    if (pending(alice).length > 0) decideAll(alice, "accepted");
+    expect(valuesOf(alice, "link", "href")).toEqual(["https://a.example"]);
+  });
+
+  it("restores each agreed colour under an agent's recolour of mixed text", () => {
+    const bob = editorWith([text("ab", [color("blue")]), text("cd", [color("green")])], "bob");
+    format(bob, 1, 5, "color", { color: "red" });
+    const editor = editorWith(bob.getState().doc.child(0).toJSON().content, "alice");
+    const spans: InlineSpan[] = [{ text: "abcd", marks: [{ type: "color", attrs: { color: "yellow" } }] }];
+    applyRichDiffAsSuggestion(editor.getState(), (tr) => editor.applyTransaction(tr), { edits: [{ nodeId: "a", spans }], authorID: "ai:Assistant" });
+    decideAll(editor, "rejected");
+    expect(valuesOf(editor, "color", "color")).toEqual(["blue", "green"]);
+  });
+
+  it("restores the agreed colour where a transaction sets a colour and takes it off again", () => {
+    const editor = editorWith([text("hello", [color("blue")])]);
+    const type = editor.getState().schema.marks["color"]!;
+    editor.applyTransaction(editor.getState().tr.addMark(1, 6, type.create({ color: "red" })).removeMark(3, 6, type));
+    const rejected = editorWith(editor.getState().doc.child(0).toJSON().content);
+    decideAll(rejected, "rejected");
+    expect(valuesOf(rejected, "color", "color")).toEqual(["blue"]);
+    decideAll(editor, "accepted");
+    expect(valuesOf(editor, "color", "color")).toEqual(["red", null]);
+  });
+
+  it("reads found text past typing that an earlier step of the transaction formatted", () => {
+    const editor = editorWith([text("ab", [color("blue")]), text("cd", [color("green")])]);
+    const type = editor.getState().schema.marks["color"]!;
+    editor.applyTransaction(editor.getState().tr.addMark(1, 5, type.create({ color: "yellow" })).insertText("XY", 1).addMark(1, 7, type.create({ color: "red" })));
+    decideAll(editor, "rejected");
+    expect(valuesOf(editor, "color", "color")).toEqual(["blue", "green"]);
+  });
+
+  it("tracks typing that follows found text in the node a recolour covers", () => {
+    const editor = editorWith([text("hello", [color("blue")])]);
+    const type = editor.getState().schema.marks["color"]!;
+    editor.applyTransaction(editor.getState().tr.insertText("XYZ", 6).addMark(1, 9, type.create({ color: "red" })));
+    const untrackedRed = editor.getState().doc.child(0).content.content.some((node) =>
+      node.marks.some((m) => m.type.name === "color" && m.attrs["color"] === "red" && (m.attrs["dataTracked"] ?? []).length === 0));
+    expect(untrackedRed).toBe(false);
+  });
+
+  it("keeps tracking out of the replaced marks a change offers", () => {
+    const editor = editorWith([text("hello", [color("blue")])]);
+    format(editor, 1, 6, "color", { color: "red" });
+    expect(pending(editor)[0]?.dataTracked.replaced).toEqual([{ type: "color", attrs: { color: "blue" } }]);
+  });
+
   it("restores the old colour when an agent's recolour is rejected", () => {
     const editor = editorWith([text("hello", [color("blue")])]);
     const spans: InlineSpan[] = [{ text: "hello", marks: [{ type: "color", attrs: { color: "red" } }] }];
@@ -197,10 +260,11 @@ const seeded = (start: number) => {
   };
 };
 
+const SEEDS = Number(process.env.REVIEW_PROPERTY_SEEDS ?? 300);
 const PALETTE = ["red", "green", "yellow"];
 const START = [text("ab", [color("blue")]), text("cd"), text("ef", [color("green")]), text("gh", [color("blue")])];
 
-/** Several authors recolour, clear and re-set colours, some twice in one transaction. */
+/** Several authors and an agent recolour, clear and re-set colours, some twice in one transaction. */
 function colourScenario(seed: number) {
   const random = seeded(seed);
   const pick = <T,>(items: readonly T[]) => items[Math.floor(random() * items.length)]!;
@@ -211,10 +275,18 @@ function colourScenario(seed: number) {
     const from = 1 + Math.floor(random() * 7);
     const to = Math.min(9, from + 1 + Math.floor(random() * 4));
     const kind = random();
+    if (kind < 0.12) {
+      // An agent proposes one colour, or none, for the whole paragraph.
+      const value = pick([...PALETTE, "blue", null]);
+      const spans: InlineSpan[] = [{ text: editor.getState().doc.child(0).textContent, marks: value ? [{ type: "color", attrs: { color: value } }] : [] }];
+      applyRichDiffAsSuggestion(editor.getState(), (t) => editor.applyTransaction(t), { edits: [{ nodeId: "a", spans }], authorID: "ai:Assistant" });
+      continue;
+    }
     const tr = editor.getState().tr;
     if (kind < 0.5) tr.addMark(from, to, type.create({ color: pick([...PALETTE, "blue"]) }));
-    else if (kind < 0.75) tr.removeMark(from, to, type);
-    else tr.addMark(from, to, type.create({ color: pick(PALETTE) })).addMark(from, to, type.create({ color: pick(PALETTE) }));
+    else if (kind < 0.7) tr.removeMark(from, to, type);
+    else if (kind < 0.85) tr.addMark(from, to, type.create({ color: pick(PALETTE) })).addMark(from, to, type.create({ color: pick(PALETTE) }));
+    else tr.addMark(1, 9, type.create({ color: pick(PALETTE) })).removeMark(from, to, type);
     editor.applyTransaction(tr);
   }
   return editor;
@@ -236,7 +308,7 @@ describe("any run of recolouring can be decided", () => {
   const ORIGINAL = colourByChar(editorWith(START));
 
   it("rejecting everything gives back the original colours", () => {
-    for (let seed = 1; seed <= 200; seed++) {
+    for (let seed = 1; seed <= SEEDS; seed++) {
       const editor = colourScenario(seed);
       if (pending(editor).length > 0) decideAll(editor, "rejected");
       expect(colourByChar(editor), `seed ${seed}`).toEqual(ORIGINAL);
@@ -244,7 +316,7 @@ describe("any run of recolouring can be decided", () => {
   });
 
   it("accepting everything gives the colours proposed", () => {
-    for (let seed = 1; seed <= 200; seed++) {
+    for (let seed = 1; seed <= SEEDS; seed++) {
       const editor = colourScenario(seed);
       const proposal = colourByChar(editor, true);
       if (pending(editor).length > 0) decideAll(editor, "accepted");
