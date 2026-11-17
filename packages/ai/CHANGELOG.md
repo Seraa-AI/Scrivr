@@ -1,5 +1,37 @@
 # @scrivr/ai
 
+## 1.0.24
+
+### Patch Changes
+
+- Updated dependencies [3da6dba]
+- Updated dependencies [3da6dba]
+- Updated dependencies [0b97d54]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [3da6dba]
+- Updated dependencies [fd2b37d]
+  - @scrivr/core@1.0.24
+  - @scrivr/plugins@1.0.24
+  - @scrivr/export-semantic@1.0.24
+
 ## 1.0.23
 
 ### Patch Changes
