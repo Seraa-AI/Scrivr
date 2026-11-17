@@ -2,6 +2,7 @@ import {
   Editor,
   documentFromBlocks,
   getSchema,
+  replaceFieldValues,
   hashArtifact,
   isFieldAnswered,
   isSigningKind,
@@ -116,13 +117,13 @@ export interface CertificateParts {
 export type CertificateSlot =
   /** *Verified at issue*: its title, note, both hashes, and every signature not placed in a `signature` slot. */
   | { slot: "verified" }
-  /** The record's title, naming the issuer: what follows is the host's word. */
+  /** The record's title, naming the issuer: it heads the host's record. */
   | { slot: "record" }
   /** `role`'s signatures as the executed PDF prints them, each under its field kind's label. */
   | { slot: "signature"; role: string };
 
 /** A node of the certificate's document, in the host's own schema, or a slot for one of Scrivr's parts. */
-export type CertificateNode = CertificateSlot | Record<string, unknown>;
+export type CertificateNode = CertificateSlot | { type: string; slot?: never; [key: string]: unknown };
 
 /**
  * A host's own content. Either blocks around Scrivr's layout — above the
@@ -226,9 +227,9 @@ export type CompletionCertificateResult =
  * was checked in this call — the snapshot against its hash, the executed
  * PDF's hash, every signature as it printed — and the host's record follows
  * under the issuer's name, as the host's word. The certificate is printed in
- * StarterKit with `editorOptions`' fonts and page, its drawings from the
- * bytes the executed PDF embedded. Refuses rather than certify a record that
- * disagrees with the document or with time.
+ * `editorOptions` — the signers' extensions, fonts and page — its drawings from
+ * the bytes the executed PDF embedded. Refuses rather than certify a record
+ * that disagrees with the document or with time.
  */
 export async function exportCompletionCertificate(
   snapshot: Pick<SealedSnapshot, "content" | "contentHash">,
@@ -248,7 +249,9 @@ export async function exportCompletionCertificate(
   // Printed in the signers' own setup — their extensions, fonts and page — so
   // whatever the host can put in a document it can put here; its drawings are
   // the bytes the executed PDF embedded.
-  const editor = new Editor({ ...editorOptions, content: issued.content, sealed: true });
+  const made = certificateEditor(editorOptions, issued.content);
+  if ("reason" in made) return { ok: false, refusal: made };
+  const editor = made;
   try {
     const pdf = await exportToPdf(editor, { ...pdfOptions, resolveImage: print.resolveImage });
     return {
@@ -288,6 +291,22 @@ interface Signature {
   shown: DocumentBlock;
 }
 
+/**
+ * The editor the certificate prints from, or why the host's content cannot
+ * open in it. It holds no field values: a field on the certificate shows
+ * nothing the executed PDF did not print and Scrivr check.
+ */
+function certificateEditor(editorOptions: CompletionCertificateOptions["editorOptions"], content: Record<string, unknown>): Editor | CertificateRefusal {
+  try {
+    const editor = new Editor({ ...editorOptions, content });
+    replaceFieldValues(editor, {});
+    editor.seal();
+    return editor;
+  } catch (error) {
+    return { reason: "invalid-content", message: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 interface TimedEvent {
   event: CompletionEvent;
   at: number;
@@ -295,9 +314,9 @@ interface TimedEvent {
 
 /**
  * The certificate's document and checked facts, or why it cannot be issued
- * over this printing. *Verified at issue* is laid out before the host's
- * `content` is called, from facts the host only ever sees frozen — as it
- * sees the labels, whose title for the record names the issuer.
+ * over this printing. *Verified at issue* and the record's title are built
+ * from facts the host only ever sees frozen, and the host places them without
+ * writing in them.
  */
 function certificateOf(
   contentHash: string,
@@ -307,8 +326,6 @@ function certificateOf(
   content: CompletionCertificateOptions["content"],
   schema: Schema,
 ): { content: Record<string, unknown>; verified: VerifiedFacts } | CertificateRefusal {
-  const unprintable = refusedBy(schema, documentFromBlocks(SCRIVR_PARTS));
-  if (unprintable !== null) return { reason: "unprintable-certificate", message: unprintable };
   const unknownKind = print.fields.find((f) => print.kinds[f.kind] === undefined);
   if (unknownKind) return { reason: "unknown-field-kind", kind: unknownKind.kind };
   const issuer = given(record.issuer);
@@ -330,36 +347,31 @@ function certificateOf(
   const recordTitle: DocumentBlock = { title: `${labels.record} ${issuer}`, level: 2 };
   const host = content?.({ record: recordBody, verified, labels, signingRecord: record }) ?? {};
   if (host.body === undefined) {
-    return {
-      content: withAttrs(documentFromBlocks([
-        ...(host.before ?? []),
-        { title: labels.title, level: 1 },
-        ...verifiedBlocks(verified, signatures, labels),
-        recordTitle,
-        ...(host.record ?? recordBody),
-        ...(host.after ?? []),
-      ]), host.attrs),
-      verified,
-    };
+    const document = withAttrs(documentFromBlocks([
+      ...(host.before ?? []),
+      { title: labels.title, level: 1 },
+      ...verifiedBlocks(verified, signatures, labels),
+      recordTitle,
+      ...(host.record ?? recordBody),
+      ...(host.after ?? []),
+    ]), host.attrs);
+    const unprintable = schemaErrorOf(schema, document);
+    return unprintable === null ? { content: document, verified } : { reason: "unprintable-certificate", message: unprintable };
   }
 
-  const laid = layOut(host.body, signatures, verified, labels, recordTitle);
+  const roles = new Set(record.parties.map((party) => party.role));
+  const laid = layOut(host.body, signatures, verified, labels, recordTitle, roles);
   if ("reason" in laid) return laid;
-  const document = withAttrs({ type: "doc", content: laid }, host.attrs);
-  const invalid = refusedBy(schema, document);
+  // Scrivr's own parts first: a setup that cannot hold them cannot print what was checked.
+  const unprintable = schemaErrorOf(schema, { type: "doc", content: laid.filled });
+  if (unprintable !== null) return { reason: "unprintable-certificate", message: unprintable };
+  const document = withAttrs({ type: "doc", content: laid.content }, host.attrs);
+  const invalid = schemaErrorOf(schema, document);
   return invalid === null ? { content: document, verified } : { reason: "invalid-content", message: invalid };
 }
 
-/** Every kind of block Scrivr prints its own parts in: a title, a paragraph, a labelled line, an image. */
-const SCRIVR_PARTS: readonly DocumentBlock[] = [
-  { title: "t", level: 1 },
-  { paragraph: "p" },
-  { label: "l", value: "v" },
-  { image: "data:image/png;base64,", width: 1, height: 1 },
-];
-
 /** Why `schema` does not accept `document`, or null when it does. */
-function refusedBy(schema: Schema, document: Record<string, unknown>): string | null {
+function schemaErrorOf(schema: Schema, document: Record<string, unknown>): string | null {
   try {
     schema.nodeFromJSON(document).check();
     return null;
@@ -378,8 +390,15 @@ const nodesOf = (blocks: readonly DocumentBlock[]): unknown[] => {
   return Array.isArray(content) ? content : [];
 };
 
-const isSlot = (node: CertificateNode): node is CertificateSlot =>
-  "slot" in node && (node.slot === "verified" || node.slot === "record" || node.slot === "signature");
+const isSlot = (node: CertificateNode): node is CertificateSlot => "slot" in node && node.slot !== undefined;
+
+/** Whether a body entry from a host — typed or not — is a node, or a slot Scrivr knows. */
+const wellFormed = (node: unknown): boolean => {
+  if (typeof node !== "object" || node === null) return false;
+  if (!("slot" in node) || node.slot === undefined) return true;
+  return node.slot === "verified" || node.slot === "record" ||
+    (node.slot === "signature" && "role" in node && typeof node.role === "string");
+};
 
 /**
  * The host's body with Scrivr's parts in its slots: what was checked exactly
@@ -392,25 +411,32 @@ function layOut(
   verified: VerifiedFacts,
   labels: CertificateLabels,
   recordTitle: DocumentBlock,
-): unknown[] | CertificateRefusal {
+  roles: ReadonlySet<string>,
+): { content: unknown[]; filled: unknown[] } | CertificateRefusal {
+  const malformed = body.find((node) => !wellFormed(node));
+  if (malformed !== undefined) return { reason: "invalid-content", message: `not a node or a known slot: ${JSON.stringify(malformed)}` };
   const slots = body.filter(isSlot);
   if (slots.filter((s) => s.slot === "verified").length !== 1) return { reason: "verified-slot" };
   if (slots.filter((s) => s.slot === "record").length !== 1) return { reason: "record-slot" };
   const placed = new Set<string>();
   for (const slot of slots) {
     if (slot.slot !== "signature") continue;
+    if (!roles.has(slot.role)) return { reason: "unknown-party", role: slot.role };
     if (placed.has(slot.role)) return { reason: "duplicate-signature-slot", role: slot.role };
     placed.add(slot.role);
   }
   const unplaced = signatures.filter(({ field }) => !placed.has(field.role));
-  return body.flatMap((node): unknown[] => {
-    if (!isSlot(node)) return [node];
-    if (node.slot === "verified") return nodesOf(verifiedBlocks(verified, unplaced, labels));
-    if (node.slot === "record") return nodesOf([recordTitle]);
+  const fill = (slot: CertificateSlot): unknown[] => {
+    if (slot.slot === "verified") return nodesOf(verifiedBlocks(verified, unplaced, labels));
+    if (slot.slot === "record") return nodesOf([recordTitle]);
     return nodesOf(signatures
-      .filter(({ field }) => field.role === node.role)
+      .filter(({ field }) => field.role === slot.role)
       .flatMap(({ spec, shown }): DocumentBlock[] => [{ title: spec.label, level: 3 }, shown]));
-  });
+  };
+  return {
+    content: body.flatMap((node) => (isSlot(node) ? fill(node) : [node])),
+    filled: slots.flatMap(fill),
+  };
 }
 
 /** `value`, and everything in it, made read-only. */

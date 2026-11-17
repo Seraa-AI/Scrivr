@@ -8,7 +8,6 @@ import { describe, expect, it, vi } from "vitest";
 import { createCanvas } from "@napi-rs/canvas";
 import { crc32 } from "node:zlib";
 import { PDFDocument } from "pdf-lib";
-import { writeFileSync } from "node:fs";
 import { HeaderFooter } from "@scrivr/plugins";
 import {
   BUILT_IN_FIELD_KINDS,
@@ -33,6 +32,7 @@ import {
   exportExecutedPdf,
   type CertificateContent,
   type CertificateNode,
+  type CertificateSlot,
   type CertificateLabels,
   type CertificateParts,
   type CertificateRefusal,
@@ -667,10 +667,11 @@ describe("a certificate the host lays out", () => {
   const heading = (level: number, value: string) => ({ type: "heading", attrs: { level }, content: [text(value)] });
   const layout = (body: readonly CertificateNode[], attrs?: Record<string, unknown>) => ({ content: () => ({ body, ...(attrs ? { attrs } : {}) }) });
 
+  const recordSlot: CertificateSlot = { slot: "record" };
   const body: CertificateNode[] = [
     paragraph(text("Certificate of completion")),
     heading(1, "Document signing completed"),
-    { slot: "record" },
+    recordSlot,
     heading(3, "Ada Lovelace"),
     { slot: "signature", role: "client" },
     heading(3, "Grace Hopper"),
@@ -712,6 +713,40 @@ describe("a certificate the host lays out", () => {
   it("refuses a setup with nothing to print what was checked in", async () => {
     const editorOptions = { extensions: [StarterKit.configure({ heading: false }), Field], textMeasurer: measurer() };
     expect((await refusalOf(signed, { editorOptions }))?.reason).toBe("unprintable-certificate");
+  });
+
+  it("refuses a signature slot for a role no party plays", async () => {
+    expect(await refusalOf(signed, layout([...body, { slot: "signature", role: "Client" }]))).toEqual({ reason: "unknown-party", role: "Client" });
+  });
+
+  it("refuses page-level attributes the setup cannot read, rather than throwing", async () => {
+    const footer = { content: { type: "doc", content: [{ type: "bogus" }] } };
+    const editorOptions = { extensions: [StarterKit, Field, HeaderFooter], textMeasurer: measurer() };
+    const refusal = await refusalOf(signed, {
+      editorOptions,
+      ...layout(body, { headerFooter: { enabled: true, differentFirstPage: false, differentOddEven: false, defaultFooter: footer } }),
+    });
+    expect(refusal?.reason).toBe("invalid-content");
+  });
+
+  it("never prints a field value the executed PDF did not", async () => {
+    const other = drawingOf(120, 40);
+    const editorOptions = { extensions: [StarterKit, Field.configure({ values: { "client-sig": { kind: "image", src: other, signedAt: "2026-11-15T01:30:00+03:00" } } })], textMeasurer: measurer() };
+    const result = await issued(signed, {
+      editorOptions,
+      ...layout([{ type: "paragraph", content: [field("client-sig", "client", "signature")] }, ...body]),
+    });
+    // The same certificate without the field: the field adds no image of its own.
+    const control = await issued(signed, { editorOptions, ...layout(body) });
+    const images = async (pdf: Uint8Array) => (await PDFDocument.load(pdf)).context.enumerateIndirectObjects()
+      .filter(([, object]) => String(object).includes("/Subtype /Image")).length;
+    expect(await images(result.certificate.pdf)).toBe(await images(control.certificate.pdf));
+  });
+
+  it("prints the block form in a setup without images when no signature is drawn", async () => {
+    const typed: Record<string, FieldValue> = { ...signed, "client-sig": { kind: "text", text: "Ada Lovelace", signedAt: "2026-11-15T01:30:00+03:00" } };
+    const editorOptions = { extensions: [StarterKit.configure({ image: false }), Field], textMeasurer: measurer() };
+    expect((await issue(typed, { editorOptions })).ok).toBe(true);
   });
 
   it("prints in the host's own setup: its extensions, tables, colour, links and page chrome", async () => {
@@ -758,6 +793,6 @@ describe("a certificate the host lays out", () => {
     expect(lines.slice(verified)).not.toContain("Signature");
     const pdf = await PDFDocument.load(result.certificate.pdf);
     expect(pdf.getPageCount()).toBeGreaterThan(0);
-    if (process.env.CERTIFICATE_OUT) writeFileSync(process.env.CERTIFICATE_OUT, result.certificate.pdf);
+    expect(result.certificate.content["attrs"]).toEqual(expect.objectContaining({ headerFooter: expect.objectContaining({ defaultFooter: footer }) }));
   });
 });

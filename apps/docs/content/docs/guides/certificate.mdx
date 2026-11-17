@@ -21,7 +21,7 @@ A certificate has two sections, and the difference between them is the whole poi
 
 **Signing record — as recorded by** *your issuer* holds your word: the document's title and id, your parties and their details, when each signature was given, and your events. Scrivr checks that the record fits the document and time (see [What is checked](#what-is-checked)), and prints it as you gave it.
 
-*Verified at issue* names no person as a fact. Each signature is shown as the executed PDF prints it — a typed signature's words, a drawing at the size it printed — headed by its kind and role ("Signature — client"), because which person holds that role is your fact, not Scrivr's. No email, IP address or signing time appears there.
+*Verified at issue* names no person as a fact. Each signature is shown as the executed PDF prints it — a typed signature's words, a drawing at the size it printed — headed by its kind and role ("Signature — client"), because which person holds that role is your fact, not Scrivr's. No email, IP address or signing time appears there. In [your own layout](#your-own-layout) you can place a role's signatures in that signer's card instead, where they are headed by their kind alone, under your card's heading.
 
 Only signatures are shown — fields whose kind is a signature line. Initials, ticked boxes and every other answer are in the executed PDF, and they are covered by its hash, which the certificate does verify; they are not repeated on the certificate.
 
@@ -232,7 +232,7 @@ const result = await exportCompletionCertificate(snapshot, values, { editorOptio
 
 - Blocks are `DocumentBlock`s from `@scrivr/core`: `{ title, level: 1 | 2 | 3 }`, `{ paragraph }`, `{ label, value }` (a bold label and its value) and `{ image, width, height }`. An image is fetched like any image in an export — prefer an inline PNG or JPEG `data:` URL, so the certificate depends on nothing at a URL.
 - `record` is the body of the record section as Scrivr lays it out — keep it, filter it, add to it, or replace it with your own built from `signingRecord`. Leave out any of `before`, `record`, `after` and that part stays Scrivr's.
-- **What you cannot change:** what *Verified at issue* holds, and the record's title naming your issuer. The section is laid out before `content` is called, and `verified` and `labels` are handed to you frozen, so your content can sit around what was checked and never inside it. The checks run on your `record` data whatever you print, so content cannot print its way past a refusal.
+- **What you cannot change:** what *Verified at issue* holds, and the record's title naming your issuer. Scrivr builds it from `verified` and `labels`, which are handed to you frozen, and you only ever place it, so your content can sit around what was checked and never inside it. The checks run on your `record` data whatever you print, so content cannot print its way past a refusal.
 
 ### Your own layout
 
@@ -262,7 +262,8 @@ const content = ({ signingRecord }: CertificateParts): CertificateContent => ({
 
 - Your nodes are checked against your schema, and a body that does not make a valid document is refused, not printed with parts missing. A node your setup can lay out prints as it would in any document — your own blocks need what core's have: a layout strategy, block styles and a PDF handler.
 - Every signature prints exactly once: in its role's slot, or under *Verified at issue* when its role has none. `verified` and `record` must each appear exactly once.
-- You place the slots; you never write inside them. Scrivr fills them after `content` returns, from the same frozen facts.
+- You place the slots; you never write inside them. Scrivr fills them after `content` returns, from the same frozen facts. A signature slot must name a role one of your parties plays (`unknown-party` otherwise), so a mistyped role is caught, not left as an empty card.
+- A field node on the certificate shows no value: the certificate prints only the signatures the executed PDF printed, in their slots.
 
 Your content is yours to keep honest. Scrivr cannot stop a block that *says* "verified", so do not word your own content as if Scrivr had checked it.
 

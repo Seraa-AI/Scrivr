@@ -99,12 +99,13 @@ const result = await exportCompletionCertificate(snapshot, values, {
 | `verified-slot` | a `body` has no `verified` slot, or more than one |
 | `record-slot` | a `body` has no `record` slot, or more than one |
 | `duplicate-signature-slot { role }` | a role's signatures are placed twice |
-| `invalid-content { message }` | the body is not a document the host's schema accepts |
+| `invalid-content { message }` | the body, or its page attributes, is not a document the host's setup accepts |
+| `unknown-party { role }` | a signature slot names a role no party plays (an existing refusal, reused) |
 
 ## Invariants
 
-- Everything in the first RFC's invariants holds: *Verified at issue* is laid
-  out from checked facts before `content` runs; the host's record never
+- Everything in the first RFC's invariants holds: *Verified at issue* is built
+  only from checked facts, which the host sees frozen; the host's record never
   appears in it; the signatures are the bytes the executed PDF embedded.
 - Every checked signature is printed exactly once.
 - A host cannot write inside a slot; it can only choose where the slot goes.
@@ -114,8 +115,9 @@ const result = await exportCompletionCertificate(snapshot, values, {
 
 - Seraa's reference certificate — eyebrow, summary table, signatory cards with
   their signatures, activity table, integrity last, header and footer — issued
-  in a setup with a host extension, and checked page by page.
-- Each refusal, one test each.
+  in a setup with a host extension; its content is checked block by block and
+  its page attributes carried through.
+- Each refusal is tested; the slot refusals share one test.
 - A signature with no slot prints in *Verified at issue*; with a slot, only
   there.
 - The block form prints as before.
@@ -132,6 +134,11 @@ const result = await exportCompletionCertificate(snapshot, values, {
   extension (core's `TextBlockStrategy`, block styles, a PDF handler), summary
   and activity tables, muted colour, signatures in signer cards, integrity
   last, a link, and a footer with the page number through `HeaderFooter`.
+- The certificate's editor holds no field values, so a field node placed on it
+  shows nothing the executed PDF did not print. Page attributes the setup
+  cannot open are refused as `invalid-content`, not thrown. A setup is
+  checked against the document actually composed, so one without images
+  still prints when no signature is drawn.
 - Not in this change: core's pagination gives up the gap before a block when
   that lets its first line fit at the foot of a page (`landingAfter`). It is a
   layout rule for every document, not a certificate one.
