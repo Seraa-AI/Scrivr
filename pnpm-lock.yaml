@@ -321,6 +321,9 @@ importers:
       '@scrivr/core':
         specifier: workspace:*
         version: link:../core
+      '@scrivr/plugins':
+        specifier: workspace:*
+        version: link:../plugins
       inter-ui:
         specifier: 4.1.1
         version: 4.1.1

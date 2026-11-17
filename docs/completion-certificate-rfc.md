@@ -109,6 +109,8 @@ A library does not, so it must.
 4. **A Scrivr document, printed by the same exporter.** The certificate is
    built as an ordinary document — headings, labelled lines, the drawn
    signatures as images, nothing beyond StarterKit — and printed in StarterKit
+   (since [The certificate in the host's own document](./certificate-host-layout-rfc.md),
+   in the signers' own setup)
    with the executed record's fonts and page setup, its drawings from the
    bytes the executed PDF embedded, so it needs no second renderer. Its JSON is returned too, to show in a
    viewer.

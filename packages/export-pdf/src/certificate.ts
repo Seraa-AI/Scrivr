@@ -1,7 +1,8 @@
 import {
   Editor,
-  StarterKit,
   documentFromBlocks,
+  getSchema,
+  replaceFieldValues,
   hashArtifact,
   isFieldAnswered,
   isSigningKind,
@@ -13,6 +14,7 @@ import {
   type SignerFieldDescriptor,
   type SigningMoment,
 } from "@scrivr/core";
+import type { Schema } from "@scrivr/core/pm";
 import { PDFDocument } from "pdf-lib";
 import { containedSize } from "./contain";
 import { printExecuted, type ExecutedPdfOptions, type ExecutedPdfRefusal, type ExecutedPrint } from "./executed";
@@ -107,11 +109,36 @@ export interface CertificateParts {
   signingRecord: CompletionRecord;
 }
 
-/** A host's own content: blocks above the title, a record body of its own, blocks at the end. Any left out stays as Scrivr's. */
+/**
+ * Where Scrivr's own parts go in a certificate the host lays out. The host
+ * places a slot; Scrivr fills it after `content` has run, from facts the host
+ * only ever sees frozen, so nothing the host writes appears inside one.
+ */
+export type CertificateSlot =
+  /** *Verified at issue*: its title, note, both hashes, and every signature not placed in a `signature` slot. */
+  | { slot: "verified" }
+  /** The record's title, naming the issuer: it heads the host's record. */
+  | { slot: "record" }
+  /** `role`'s signatures as the executed PDF prints them, each under its field kind's label. */
+  | { slot: "signature"; role: string };
+
+/** A node of the certificate's document, in the host's own schema, or a slot for one of Scrivr's parts. */
+export type CertificateNode = CertificateSlot | { type: string; slot?: never; [key: string]: unknown };
+
+/**
+ * A host's own content. Either blocks around Scrivr's layout — above the
+ * title, a record body of its own, at the end; any left out stays as
+ * Scrivr's — or a `body`: the whole certificate as the host lays it out, in
+ * its own schema, with slots for Scrivr's parts.
+ */
 export interface CertificateContent {
   before?: DocumentBlock[];
   record?: DocumentBlock[];
   after?: DocumentBlock[];
+  /** The certificate as a document's content, in the host's schema, with exactly one `verified` and one `record` slot. */
+  body?: readonly CertificateNode[];
+  /** The certificate document's attributes — page-level state such as a header and footer. */
+  attrs?: Record<string, unknown>;
 }
 
 export interface CompletionCertificateOptions extends ExecutedPdfOptions {
@@ -165,7 +192,17 @@ export type CertificateRefusal =
   /** A signature dated after `completed`. */
   | { reason: "signed-after-completed"; fieldId: string }
   /** A party first sent, viewing or consenting only after it signed, or a host `signed` event after `completed`. */
-  | { reason: "events-out-of-order"; event: CompletionEvent };
+  | { reason: "events-out-of-order"; event: CompletionEvent }
+  /** The editor setup cannot hold the titles, paragraphs, labelled lines and images Scrivr's parts are printed in. */
+  | { reason: "unprintable-certificate"; message: string }
+  /** A `body` without a `verified` slot, or with more than one: what was checked must be printed, once. */
+  | { reason: "verified-slot" }
+  /** A `body` without a `record` slot, or with more than one: the issuer's name heads the host's word. */
+  | { reason: "record-slot" }
+  /** A role's signatures placed in two slots. */
+  | { reason: "duplicate-signature-slot"; role: string }
+  /** A `body` that is no document the host's schema accepts. */
+  | { reason: "invalid-content"; message: string };
 
 /** The executed PDF and its certificate from one printing, or why there is neither — an answer the host shows someone. */
 export type CompletionCertificateResult =
@@ -190,9 +227,9 @@ export type CompletionCertificateResult =
  * was checked in this call — the snapshot against its hash, the executed
  * PDF's hash, every signature as it printed — and the host's record follows
  * under the issuer's name, as the host's word. The certificate is printed in
- * StarterKit with `editorOptions`' fonts and page, its drawings from the
- * bytes the executed PDF embedded. Refuses rather than certify a record that
- * disagrees with the document or with time.
+ * `editorOptions` — the signers' extensions, fonts and page — its drawings from
+ * the bytes the executed PDF embedded. Refuses rather than certify a record
+ * that disagrees with the document or with time.
  */
 export async function exportCompletionCertificate(
   snapshot: Pick<SealedSnapshot, "content" | "contentHash">,
@@ -204,14 +241,17 @@ export async function exportCompletionCertificate(
   if (!printed.ok) return printed;
   const { print } = printed;
 
-  const issued = certificateOf(snapshot.contentHash, print, record, labelsOf(labels), content);
+  const { editorOptions, ...pdfOptions } = executedOptions;
+  const schema = getSchema(editorOptions.extensions ?? []);
+  const issued = certificateOf(snapshot.contentHash, print, record, labelsOf(labels), content, schema);
   if ("reason" in issued) return { ok: false, refusal: issued };
 
-  // Printed in StarterKit alone — the certificate is titles, paragraphs and
-  // images — with the signers' fonts and page, so it matches the record; its
-  // drawings are the bytes the executed PDF embedded.
-  const { editorOptions, ...pdfOptions } = executedOptions;
-  const editor = new Editor({ ...editorOptions, extensions: [StarterKit], content: issued.content, sealed: true });
+  // Printed in the signers' own setup — their extensions, fonts and page — so
+  // whatever the host can put in a document it can put here; its drawings are
+  // the bytes the executed PDF embedded.
+  const made = certificateEditor(editorOptions, issued.content);
+  if ("reason" in made) return { ok: false, refusal: made };
+  const editor = made;
   try {
     const pdf = await exportToPdf(editor, { ...pdfOptions, resolveImage: print.resolveImage });
     return {
@@ -251,6 +291,22 @@ interface Signature {
   shown: DocumentBlock;
 }
 
+/**
+ * The editor the certificate prints from, or why the host's content cannot
+ * open in it. It holds no field values: a field on the certificate shows
+ * nothing the executed PDF did not print and Scrivr check.
+ */
+function certificateEditor(editorOptions: CompletionCertificateOptions["editorOptions"], content: Record<string, unknown>): Editor | CertificateRefusal {
+  try {
+    const editor = new Editor({ ...editorOptions, content });
+    replaceFieldValues(editor, {});
+    editor.seal();
+    return editor;
+  } catch (error) {
+    return { reason: "invalid-content", message: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 interface TimedEvent {
   event: CompletionEvent;
   at: number;
@@ -258,9 +314,9 @@ interface TimedEvent {
 
 /**
  * The certificate's document and checked facts, or why it cannot be issued
- * over this printing. *Verified at issue* is laid out before the host's
- * `content` is called, from facts the host only ever sees frozen — as it
- * sees the labels, whose title for the record names the issuer.
+ * over this printing. *Verified at issue* and the record's title are built
+ * from facts the host only ever sees frozen, and the host places them without
+ * writing in them.
  */
 function certificateOf(
   contentHash: string,
@@ -268,6 +324,7 @@ function certificateOf(
   record: CompletionRecord,
   labels: CertificateLabels,
   content: CompletionCertificateOptions["content"],
+  schema: Schema,
 ): { content: Record<string, unknown>; verified: VerifiedFacts } | CertificateRefusal {
   const unknownKind = print.fields.find((f) => print.kinds[f.kind] === undefined);
   if (unknownKind) return { reason: "unknown-field-kind", kind: unknownKind.kind };
@@ -286,19 +343,99 @@ function certificateOf(
     artifactHash: print.artifactHash,
     signatures: signatures.map(({ field }) => ({ fieldId: field.id, role: field.role, kind: field.kind })),
   });
-  const checked = verifiedBlocks(verified, signatures, labels);
   const recordBody = recordBlocks(signatures, record, timeline, labels);
+  const recordTitle: DocumentBlock = { title: `${labels.record} ${issuer}`, level: 2 };
   const host = content?.({ record: recordBody, verified, labels, signingRecord: record }) ?? {};
-  return {
-    content: documentFromBlocks([
+  if (host.body === undefined) {
+    const document = withAttrs(documentFromBlocks([
       ...(host.before ?? []),
       { title: labels.title, level: 1 },
-      ...checked,
-      { title: `${labels.record} ${issuer}`, level: 2 },
+      ...verifiedBlocks(verified, signatures, labels),
+      recordTitle,
       ...(host.record ?? recordBody),
       ...(host.after ?? []),
-    ]),
-    verified,
+    ]), host.attrs);
+    const unprintable = schemaErrorOf(schema, document);
+    return unprintable === null ? { content: document, verified } : { reason: "unprintable-certificate", message: unprintable };
+  }
+
+  const roles = new Set(record.parties.map((party) => party.role));
+  const laid = layOut(host.body, signatures, verified, labels, recordTitle, roles);
+  if ("reason" in laid) return laid;
+  // Scrivr's own parts first: a setup that cannot hold them cannot print what was checked.
+  const unprintable = schemaErrorOf(schema, { type: "doc", content: laid.filled });
+  if (unprintable !== null) return { reason: "unprintable-certificate", message: unprintable };
+  const document = withAttrs({ type: "doc", content: laid.content }, host.attrs);
+  const invalid = schemaErrorOf(schema, document);
+  return invalid === null ? { content: document, verified } : { reason: "invalid-content", message: invalid };
+}
+
+/** Why `schema` does not accept `document`, or null when it does. */
+function schemaErrorOf(schema: Schema, document: Record<string, unknown>): string | null {
+  try {
+    schema.nodeFromJSON(document).check();
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+}
+
+/** `document` with the host's attributes, when it gave any. */
+const withAttrs = (document: Record<string, unknown>, attrs: Record<string, unknown> | undefined) =>
+  attrs === undefined ? document : { ...document, attrs };
+
+/** Nodes of the blocks Scrivr lays out for a slot. */
+const nodesOf = (blocks: readonly DocumentBlock[]): unknown[] => {
+  const content = documentFromBlocks(blocks)["content"];
+  return Array.isArray(content) ? content : [];
+};
+
+const isSlot = (node: CertificateNode): node is CertificateSlot => "slot" in node && node.slot !== undefined;
+
+/** Whether a body entry from a host — typed or not — is a node, or a slot Scrivr knows. */
+const wellFormed = (node: unknown): boolean => {
+  if (typeof node !== "object" || node === null) return false;
+  if (!("slot" in node) || node.slot === undefined) return true;
+  return node.slot === "verified" || node.slot === "record" ||
+    (node.slot === "signature" && "role" in node && typeof node.role === "string");
+};
+
+/**
+ * The host's body with Scrivr's parts in its slots: what was checked exactly
+ * once, the issuer's title exactly once, and every signature exactly once —
+ * in its role's slot, or in *Verified at issue* when its role has none.
+ */
+function layOut(
+  body: readonly CertificateNode[],
+  signatures: readonly Signature[],
+  verified: VerifiedFacts,
+  labels: CertificateLabels,
+  recordTitle: DocumentBlock,
+  roles: ReadonlySet<string>,
+): { content: unknown[]; filled: unknown[] } | CertificateRefusal {
+  const malformed = body.find((node) => !wellFormed(node));
+  if (malformed !== undefined) return { reason: "invalid-content", message: `not a node or a known slot: ${JSON.stringify(malformed)}` };
+  const slots = body.filter(isSlot);
+  if (slots.filter((s) => s.slot === "verified").length !== 1) return { reason: "verified-slot" };
+  if (slots.filter((s) => s.slot === "record").length !== 1) return { reason: "record-slot" };
+  const placed = new Set<string>();
+  for (const slot of slots) {
+    if (slot.slot !== "signature") continue;
+    if (!roles.has(slot.role)) return { reason: "unknown-party", role: slot.role };
+    if (placed.has(slot.role)) return { reason: "duplicate-signature-slot", role: slot.role };
+    placed.add(slot.role);
+  }
+  const unplaced = signatures.filter(({ field }) => !placed.has(field.role));
+  const fill = (slot: CertificateSlot): unknown[] => {
+    if (slot.slot === "verified") return nodesOf(verifiedBlocks(verified, unplaced, labels));
+    if (slot.slot === "record") return nodesOf([recordTitle]);
+    return nodesOf(signatures
+      .filter(({ field }) => field.role === slot.role)
+      .flatMap(({ spec, shown }): DocumentBlock[] => [{ title: spec.label, level: 3 }, shown]));
+  };
+  return {
+    content: body.flatMap((node) => (isSlot(node) ? fill(node) : [node])),
+    filled: slots.flatMap(fill),
   };
 }
 

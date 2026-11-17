@@ -8,12 +8,14 @@ import { describe, expect, it, vi } from "vitest";
 import { createCanvas } from "@napi-rs/canvas";
 import { crc32 } from "node:zlib";
 import { PDFDocument } from "pdf-lib";
+import { HeaderFooter } from "@scrivr/plugins";
 import {
   BUILT_IN_FIELD_KINDS,
   Field,
   Extension,
   ServerEditor,
   StarterKit,
+  TextBlockStrategy,
   TextMeasurer,
   createSnapshot,
   hashArtifact,
@@ -29,6 +31,8 @@ import {
   exportCompletionCertificate,
   exportExecutedPdf,
   type CertificateContent,
+  type CertificateNode,
+  type CertificateSlot,
   type CertificateLabels,
   type CertificateParts,
   type CertificateRefusal,
@@ -653,5 +657,142 @@ describe("the certificate's contract", () => {
     expect(hook({ record: [], verified, labels, signingRecord: record() })).toEqual({ record: [] });
 
     expect([signature?.role, labels.eventKinds[kind], refusal.reason]).toEqual(["client", "Sent", "unknown-field-kind"]);
+  });
+});
+
+/** Bug class: a host's own certificate that drops, repeats or rewrites what was checked. */
+describe("a certificate the host lays out", () => {
+  const text = (value: string, marks?: Record<string, unknown>[]) => ({ type: "text", text: value, ...(marks ? { marks } : {}) });
+  const paragraph = (...content: Record<string, unknown>[]) => ({ type: "paragraph", content });
+  const heading = (level: number, value: string) => ({ type: "heading", attrs: { level }, content: [text(value)] });
+  const layout = (body: readonly CertificateNode[], attrs?: Record<string, unknown>) => ({ content: () => ({ body, ...(attrs ? { attrs } : {}) }) });
+
+  const recordSlot: CertificateSlot = { slot: "record" };
+  const body: CertificateNode[] = [
+    paragraph(text("Certificate of completion")),
+    heading(1, "Document signing completed"),
+    recordSlot,
+    heading(3, "Ada Lovelace"),
+    { slot: "signature", role: "client" },
+    heading(3, "Grace Hopper"),
+    heading(2, "Activity history"),
+    { slot: "verified" },
+  ];
+
+  it("lays out the host's body around Scrivr's parts, integrity last", async () => {
+    const lines = linesOf((await issued(signed, layout(body))).certificate.content);
+    expect(lines[0]).toBe("Certificate of completion");
+    expect(lines.indexOf(`${DEFAULT_CERTIFICATE_LABELS.record} Acme Sign`)).toBe(2);
+    expect(lines.indexOf(DEFAULT_CERTIFICATE_LABELS.verified)).toBeGreaterThan(lines.indexOf("Activity history"));
+  });
+
+  it("prints each signature once: in its role's slot, else in Verified at issue", async () => {
+    const lines = linesOf((await issued(signed, layout(body))).certificate.content);
+    const ada = lines.indexOf("Ada Lovelace");
+    // The client's drawn signature sits in Ada's card; the vendor's, with no slot, under what was checked.
+    expect(lines[ada + 1]).toBe("Signature");
+    expect(lines.filter((line) => line === "Grace Hopper")).toHaveLength(2); // her card's heading, and her typed signature
+    expect(lines.indexOf("Grace Hopper", ada)).toBeLessThan(lines.indexOf(DEFAULT_CERTIFICATE_LABELS.verified));
+    expect(lines.lastIndexOf("Grace Hopper")).toBeGreaterThan(lines.indexOf(DEFAULT_CERTIFICATE_LABELS.verified));
+  });
+
+  it("refuses a body that leaves out, or repeats, what must be printed once", async () => {
+    const without = (slot: string) => body.filter((node) => !("slot" in node && node.slot === slot));
+    expect(await refusalOf(signed, layout(without("verified")))).toEqual({ reason: "verified-slot" });
+    expect(await refusalOf(signed, layout([...body, { slot: "verified" }]))).toEqual({ reason: "verified-slot" });
+    expect(await refusalOf(signed, layout(without("record")))).toEqual({ reason: "record-slot" });
+    expect(await refusalOf(signed, layout([...body, { slot: "signature", role: "client" }])))
+      .toEqual({ reason: "duplicate-signature-slot", role: "client" });
+  });
+
+  it("refuses a body its own schema does not accept, rather than dropping what it cannot read", async () => {
+    const refusal = await refusalOf(signed, layout([{ type: "eyebrow", content: [text("Certificate")] }, ...body]));
+    expect(refusal?.reason).toBe("invalid-content");
+  });
+
+  it("refuses a setup with nothing to print what was checked in", async () => {
+    const editorOptions = { extensions: [StarterKit.configure({ heading: false }), Field], textMeasurer: measurer() };
+    expect((await refusalOf(signed, { editorOptions }))?.reason).toBe("unprintable-certificate");
+  });
+
+  it("refuses a signature slot for a role no party plays", async () => {
+    expect(await refusalOf(signed, layout([...body, { slot: "signature", role: "Client" }]))).toEqual({ reason: "unknown-party", role: "Client" });
+  });
+
+  it("refuses page-level attributes the setup cannot read, rather than throwing", async () => {
+    const footer = { content: { type: "doc", content: [{ type: "bogus" }] } };
+    const editorOptions = { extensions: [StarterKit, Field, HeaderFooter], textMeasurer: measurer() };
+    const refusal = await refusalOf(signed, {
+      editorOptions,
+      ...layout(body, { headerFooter: { enabled: true, differentFirstPage: false, differentOddEven: false, defaultFooter: footer } }),
+    });
+    expect(refusal?.reason).toBe("invalid-content");
+  });
+
+  it("never prints a field value the executed PDF did not", async () => {
+    const other = drawingOf(120, 40);
+    const editorOptions = { extensions: [StarterKit, Field.configure({ values: { "client-sig": { kind: "image", src: other, signedAt: "2026-11-15T01:30:00+03:00" } } })], textMeasurer: measurer() };
+    const result = await issued(signed, {
+      editorOptions,
+      ...layout([{ type: "paragraph", content: [field("client-sig", "client", "signature")] }, ...body]),
+    });
+    // The same certificate without the field: the field adds no image of its own.
+    const control = await issued(signed, { editorOptions, ...layout(body) });
+    const images = async (pdf: Uint8Array) => (await PDFDocument.load(pdf)).context.enumerateIndirectObjects()
+      .filter(([, object]) => String(object).includes("/Subtype /Image")).length;
+    expect(await images(result.certificate.pdf)).toBe(await images(control.certificate.pdf));
+  });
+
+  it("prints the block form in a setup without images when no signature is drawn", async () => {
+    const typed: Record<string, FieldValue> = { ...signed, "client-sig": { kind: "text", text: "Ada Lovelace", signedAt: "2026-11-15T01:30:00+03:00" } };
+    const editorOptions = { extensions: [StarterKit.configure({ image: false }), Field], textMeasurer: measurer() };
+    expect((await issue(typed, { editorOptions })).ok).toBe(true);
+  });
+
+  it("prints in the host's own setup: its extensions, tables, colour, links and page chrome", async () => {
+    // A host's own block, built as core's own are: laid out as text, drawn as its lines.
+    const Eyebrow = Extension.create({
+      name: "eyebrow",
+      addNodes: () => ({ eyebrow: { group: "block", content: "inline*", attrs: { nodeId: { default: null } }, toDOM: () => ["p", 0] } }),
+      addLayoutHandlers: () => ({ eyebrow: TextBlockStrategy }),
+      addBlockStyles: () => ({ eyebrow: { font: "bold 10px", spaceBefore: 0, spaceAfter: 6, align: "left" as const } }),
+      addExports: () => ({ pdf: { nodes: { eyebrow: (block, ctx) => ctx.draw.lines(block, ctx) } } }),
+    });
+    const cell = (value: string) => ({ type: "tableCell", content: [paragraph(text(value))] });
+    const row = (...values: string[]) => ({ type: "tableRow", content: values.map(cell) });
+    const muted = [{ type: "color", attrs: { color: "#6b7280" } }];
+    const footer = { content: { type: "doc", content: [paragraph(text("AGR-2026-0042 · page "), { type: "pageNumber" })] } };
+    const editorOptions = {
+      extensions: [StarterKit.configure({ table: true }), Field, Eyebrow, HeaderFooter],
+      textMeasurer: measurer(),
+    };
+    const result = await issued(signed, {
+      editorOptions,
+      ...layout([
+        { type: "eyebrow", content: [text("CERTIFICATE OF COMPLETION", muted)] },
+        heading(1, "Document signing completed"),
+        paragraph(text("All required signatures received", muted)),
+        { type: "table", content: [row("Document", "Master Services Agreement"), row("Certificate ID", "AGR-2026-0042")] },
+        { slot: "record" },
+        heading(3, "Ada Lovelace"),
+        paragraph(text("ada@example.com", muted)),
+        { slot: "signature", role: "client" },
+        heading(3, "Grace Hopper"),
+        { slot: "signature", role: "vendor" },
+        heading(2, "Activity history"),
+        { type: "table", content: [row("Sent", "14 Nov 2026"), row("Completed", "15 Nov 2026")] },
+        { slot: "verified" },
+        paragraph(text("Verify at "), text("seraa.ai/verify", [{ type: "link", attrs: { href: "https://seraa.ai/verify" } }])),
+      ], { headerFooter: { enabled: true, differentFirstPage: false, differentOddEven: false, defaultFooter: footer } }),
+    });
+    const lines = linesOf(result.certificate.content);
+    expect(lines[0]).toBe("CERTIFICATE OF COMPLETION");
+    expect(lines.at(-1)).toBe("Verify at seraa.ai/verify");
+    // Every signature is in its signer's card, so none is left under what was checked.
+    const verified = lines.indexOf(DEFAULT_CERTIFICATE_LABELS.verified);
+    expect(lines.slice(verified)).not.toContain("Signature");
+    const pdf = await PDFDocument.load(result.certificate.pdf);
+    expect(pdf.getPageCount()).toBeGreaterThan(0);
+    expect(result.certificate.content["attrs"]).toEqual(expect.objectContaining({ headerFooter: expect.objectContaining({ defaultFooter: footer }) }));
   });
 });
