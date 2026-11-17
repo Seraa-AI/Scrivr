@@ -72,7 +72,7 @@ const { executed, certificate } = result;
 - `values` are every party's answers, as for [`exportExecutedPdf`](/docs/guides/fields#the-executed-document). Each signature's `signedAt` must be a full timestamp with its zone (see [Times](#times)), and its time must fit your events: a party is sent or views the document before it signs.
 - `certificate.verified` is *Verified at issue* as data: `contentHash`, `artifactHash`, and each signature's `fieldId`, `role` and `kind`.
 - `certificate.content` is the certificate as a document's JSON — open it in a read-only `Editor` to show it on screen as well as in print. Signature images carry the bytes resolved for this printing as self-contained data URLs, including when your `resolveImage` transforms the original image.
-- Like the executed PDF, printing needs a browser `Editor`: a page, or a server with a headless DOM and a canvas. The certificate itself is printed in StarterKit with your `editorOptions`' fonts and page setup.
+- Like the executed PDF, printing needs a browser `Editor`: a page, or a server with a headless DOM and a canvas. The certificate is printed in your `editorOptions` — the extensions, fonts and page setup the signers saw — so whatever you can put in a document you can put on it (see [Your own layout](#your-own-layout)).
 
 Do not build the executed PDF and the certificate in separate calls and pair them yourself. There is no API for that on purpose: nothing could prove the two belong together.
 
@@ -152,6 +152,9 @@ Before issuing, Scrivr checks the document, then your record against it and agai
 | A party first comes to the document — its first `sent`, `viewed` or `consented` — before its first signing, whether that is a printed signature or your `signed` event | `events-out-of-order { event }` |
 | No signature is dated after `completed` | `signed-after-completed { fieldId }` |
 | No `signed` event follows `completed` | `events-out-of-order { event }` |
+| The editor setup can hold the titles, paragraphs, labelled lines and images what was checked is printed in | `unprintable-certificate { message }` |
+| A `body` has exactly one `verified` slot and one `record` slot, and no role's signatures in two slots | `verified-slot`, `record-slot`, `duplicate-signature-slot { role }` |
+| A `body` makes a document your schema accepts | `invalid-content { message }` |
 
 What passes, on purpose, because signing tools record it: a party viewing the document again after signing, or after completion; a party with no fields of its own; a party with no `sent` or `viewed` event at all. `declined` is labelled, not checked: whether a declined party may still complete is your rule.
 
@@ -174,6 +177,11 @@ const words: Record<string, string> = {
   "undated-signature": "A signature was recorded without a time.",
   "signed-after-completed": "A signature is dated after the signing completed.",
   "events-out-of-order": "The record's events are out of order.",
+  "unprintable-certificate": "This editor setup cannot print a certificate.",
+  "verified-slot": "The certificate layout must place the verified section exactly once.",
+  "record-slot": "The certificate layout must place the record's title exactly once.",
+  "duplicate-signature-slot": "A signer's signature is placed twice in the certificate layout.",
+  "invalid-content": "The certificate layout is not a valid document.",
 };
 ```
 
@@ -225,6 +233,36 @@ const result = await exportCompletionCertificate(snapshot, values, { editorOptio
 - Blocks are `DocumentBlock`s from `@scrivr/core`: `{ title, level: 1 | 2 | 3 }`, `{ paragraph }`, `{ label, value }` (a bold label and its value) and `{ image, width, height }`. An image is fetched like any image in an export — prefer an inline PNG or JPEG `data:` URL, so the certificate depends on nothing at a URL.
 - `record` is the body of the record section as Scrivr lays it out — keep it, filter it, add to it, or replace it with your own built from `signingRecord`. Leave out any of `before`, `record`, `after` and that part stays Scrivr's.
 - **What you cannot change:** what *Verified at issue* holds, and the record's title naming your issuer. The section is laid out before `content` is called, and `verified` and `labels` are handed to you frozen, so your content can sit around what was checked and never inside it. The checks run on your `record` data whatever you print, so content cannot print its way past a refusal.
+
+### Your own layout
+
+To lay out the whole certificate — a summary first, a card per signer with their signature in it, integrity details last — return a `body` instead: the certificate's content as document nodes in your own schema, with slots where Scrivr's parts go.
+
+```ts
+const content = ({ signingRecord }: CertificateParts): CertificateContent => ({
+  attrs: { headerFooter: certificateFooter(signingRecord.documentId) }, // page-level state, as for any document
+  body: [
+    { type: "eyebrow", content: [{ type: "text", text: "Certificate of completion" }] }, // your own extension
+    { type: "heading", attrs: { level: 1 }, content: [{ type: "text", text: "Document signing completed" }] },
+    summaryTable(signingRecord),
+    { slot: "record" },
+    ...signingRecord.parties.flatMap((party) => [signerCard(party), { slot: "signature", role: party.role }]),
+    activityTable(signingRecord.events),
+    { slot: "verified" },
+    verificationLink(signingRecord.documentId),
+  ],
+});
+```
+
+| Slot | Scrivr fills it with |
+|---|---|
+| `{ slot: "verified" }` | *Verified at issue*: its title, note, both hashes, and every signature not placed in a signature slot |
+| `{ slot: "record" }` | the record's title, naming your issuer: what follows is your word |
+| `{ slot: "signature", role }` | that role's signatures as the executed PDF prints them, each under its field kind's label |
+
+- Your nodes are checked against your schema, and a body that does not make a valid document is refused, not printed with parts missing. A node your setup can lay out prints as it would in any document — your own blocks need what core's have: a layout strategy, block styles and a PDF handler.
+- Every signature prints exactly once: in its role's slot, or under *Verified at issue* when its role has none. `verified` and `record` must each appear exactly once.
+- You place the slots; you never write inside them. Scrivr fills them after `content` returns, from the same frozen facts.
 
 Your content is yours to keep honest. Scrivr cannot stop a block that *says* "verified", so do not word your own content as if Scrivr had checked it.
 

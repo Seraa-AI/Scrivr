@@ -39,6 +39,8 @@ export type { ExecutedPdfOptions, ExecutedPdfRefusal, ExecutedPdfResult } from "
 export { bundleCertificate, exportCompletionCertificate, DEFAULT_CERTIFICATE_LABELS } from "./certificate";
 export type {
   CertificateContent,
+  CertificateNode,
+  CertificateSlot,
   CertificateLabels,
   CertificateParts,
   CertificateRefusal,
