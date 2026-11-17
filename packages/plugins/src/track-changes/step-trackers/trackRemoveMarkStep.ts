@@ -151,8 +151,9 @@ export function trackAddMarkStep(
   });
   const newStep = new AddMarkStep(step.from, step.to, newMark);
   try {
-    const inverted = step.invert();
-    newTr.step(inverted);
+    // Not `step.invert()`: from prosemirror-transform 1.12.3 it needs the
+    // pre-step doc. The untracked mark comes off the whole range either way.
+    newTr.step(new RemoveMarkStep(step.from, step.to, step.mark));
     newTr.step(newStep);
   } catch (e) {
     console.error("trackAddMarkStep failed: " + e);

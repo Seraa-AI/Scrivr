@@ -47,12 +47,20 @@ describe("review's write boundary", () => {
   });
 
   const invalidAttributes = () => {
+    // prosemirror-model validates on create, so the check is armed only once
+    // the invalid content exists — as content that arrived from elsewhere would.
+    let armed = false;
+    const weight = (value: unknown) => {
+      if (armed && typeof value !== "number") throw new RangeError(`weight must be a number, got ${typeof value}`);
+    };
     const checked = new Schema({
       nodes: schema.spec.nodes,
-      marks: schema.spec.marks.update("bold", { attrs: { weight: { default: 1, validate: "number" } } }),
+      marks: schema.spec.marks.update("bold", { attrs: { weight: { default: 1, validate: weight } } }),
     });
     const text = checked.text("x", [checked.marks.bold!.create({ weight: "invalid" })]);
-    return checked.node("doc", null, checked.node("paragraph", null, text));
+    const built = checked.node("doc", null, checked.node("paragraph", null, text));
+    armed = true;
+    return built;
   };
 
   it("checks mark writes despite their empty position maps", () => {
