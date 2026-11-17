@@ -61,6 +61,7 @@ export type {
   TrackingResult,
   TrackingRefusal,
   ListLevel,
+  ReplacedMark,
 } from "./types";
 
 // Rich (leaf-based) semantic edits → tracked suggestions. The write-side merge
