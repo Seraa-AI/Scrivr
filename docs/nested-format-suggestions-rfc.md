@@ -40,8 +40,9 @@ its author's records.
 
 ## 2. Decision — one rule settles a mark
 
-Every decision about a mark goes through `settle(mark, decisions)`, which
-returns the marks the text carries instead:
+Every decision about a formatting mark on text goes through
+`settle(mark, decided)`, which returns the marks the text carries instead (a
+node mark, on an image, keeps its own simpler path):
 
 | Records decided | Result |
 |---|---|
@@ -61,8 +62,9 @@ whichever is applied first.
 ## 3. Decision — a held suggestion is listed and decidable
 
 `findChanges` lists a suggestion held in `replaced` as a mark change of its
-own, `within` the change that holds it, over that change's range. It is
-reviewed like any other:
+own, with `within` naming every change that holds it. A suggestion that still
+shows somewhere on the text is listed there, once; its held copies are the same
+record and are decided by the same id. It is reviewed like any other:
 
 - **Decided with the holder** — settled as §2 says.
 - **Decided alone, the holder still pending** — the holder's `replaced` entry
@@ -71,9 +73,17 @@ reviewed like any other:
   shown exactly as before.
 - **Accepting the holder** discards what it holds: both cannot apply.
 
-A held change is not an overlap. Review's dependency and conflict logic, and
-the popover's conflict grouping, skip `within` changes; the popover shows a
-holder with what it holds: "Alice: red → green, over Bob's blue → red".
+A decision can leave no place for an undecided suggestion — one held by an
+accepted change, one on a mark whose removal is accepted, a removal over a
+rejected suggestion that restores nothing. The plan finds these by settling
+the marks as the review will, and lists them as rejected, so a host previewing
+a decision sees every change it decides and the review never drops one
+undecided.
+
+A held change is not on the text. The popover never offers one at the caret,
+leaves it out of conflicts, and gives a holder its `heldChanges`, so a host can
+show "Alice: red → green, over Bob's blue → red". Acts never join a held piece
+with one on the text.
 
 ## Non-goals
 
@@ -87,7 +97,8 @@ holder with what it holds: "Alice: red → green, over Bob's blue → red".
 - No pending record is dropped by another author's edit.
 - Rejecting every pending change returns the agreed formatting; accepting
   every one returns what was shown — at any nesting depth, in one review.
-- `settle` is the only place a mark's decided records become marks.
+- `settle` is the only place a formatting mark's decided records become marks,
+  in review and in its preview alike.
 - A record read from `replaced` is checked as any record from a saved
   document is: a malformed one is left out, never trusted.
 
@@ -101,20 +112,27 @@ holder with what it holds: "Alice: red → green, over Bob's blue → red".
 - The seeded colour property with several authors over each other's
   suggestions: reject-all gives the original, accept-all the proposal, and no
   pending record is ever lost without a decision.
-- Listing: a held change is listed `within` its holder, not as a conflict.
+- Listing: a held change is listed `within` every holder; one shown anywhere
+  is offered where it shows, and never joined into an act with a held piece.
+- The preview names every change the review decides.
 
 ## What shipped
 
-- `settle` (`helpers.ts`) is the one place decided records become marks; review settles every
-  mark a decision reaches (`applyChanges`), whatever change brought it there.
-- `restoredOnReject` holds another author's pending work whole and folds the author's own;
-  `proposeRemoval` stacks a removal on another author's mark.
-- `findChanges` lists held suggestions with `within`; the planner treats a holder and what it
-  holds, and records on one mark, as settled together rather than overlapping work.
-- What a decision leaves no place for — held by an accepted change, or on a mark a decision took
-  away, at any depth — is reported rejected with it. Anything else gone undecided still fails
-  the review's identity check.
-- Found on the way: `mergeTrackedMarks` fused neighbours by their last record only, dropping
-  the rest of a mark carrying several authors' records. Such marks are no longer fused.
-- The popover never offers a held suggestion at the caret, leaves it out of conflicts, and
-  gives a holder's `heldChanges`.
+- `formatSuggestions.ts` holds the rule: what a suggestion keeps when it is
+  recorded (`restoredOnReject`, `proposeRemoval`, `restoreRuns`) and what
+  deciding it leaves (`settle`, `hasDecision`), with one `DecisionOf` type.
+- Review settles every mark a decision reaches, anywhere in the document, once
+  per pass. The plan settles a scratch copy the same way to find what a
+  decision displaces, so preview and outcome cannot disagree.
+- `findChanges` keeps held and shown pieces of an id apart, lists a held copy
+  only when the record shows nowhere, and names every holder. The repair pass
+  never rewrites a held piece onto the text.
+- Found on the way, older than this RFC: `mergeTrackedMarks` fused neighbours
+  by their last record only, dropping the rest of a mark carrying several
+  records, and renamed other authors' ids. It now fuses only single records
+  of the author writing. Cloning a document re-keys held records too.
+- The semantic lane lists held suggestions and reads the agreed formatting as
+  what the text had before.
+- Not changed: core's sealing count reads top-level records only. A held
+  record always has a pending holder, so sealing is still refused, but the
+  count is lower than `findChanges` reports.

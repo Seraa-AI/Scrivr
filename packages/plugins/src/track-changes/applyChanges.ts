@@ -5,7 +5,8 @@ import { Mapping } from "@scrivr/core/pm";
 import { revertWrapNodeChange } from "./lib/revertChanges";
 import { restoreNode, updateChangeChildrenAttributes } from "./engine/updateAttributes";
 import { ChangeSet } from "./ChangeSet";
-import { excludeFromTracked, hasDecision, isValidTrackableMark, settle } from "./helpers";
+import { excludeFromTracked, isValidTrackableMark } from "./helpers";
+import { type DecisionOf, hasDecision, settle } from "./formatSuggestions";
 import { deleteNode } from "./lib/deleteNode";
 import { clearTextChange } from "./lib/clearTextChange";
 import { rejectMove } from "./engine/moveIdentity";
@@ -37,10 +38,14 @@ function isEntirelyGone(change: TrackedChange, deleteMap: Mapping) {
   return deleted && !(spansText && deleteMap.map(change.to, -1) > pos);
 }
 
-/** Each change's decision in this review, by id; `pending` for one left undecided. */
-function statusLookup(changeSet: ChangeSet): (id: string) => CHANGE_STATUS | undefined {
-  const statuses = new Map(changeSet.changes.map(change => [change.id, change.dataTracked.status]));
-  return id => statuses.get(id);
+/** Each change's decision in this review, by id. */
+function decisionsIn(changeSet: ChangeSet): DecisionOf {
+  const decided = new Map<string, CHANGE_STATUS.accepted | CHANGE_STATUS.rejected>();
+  for (const change of changeSet.changes) {
+    const status = change.dataTracked.status;
+    if (status === CHANGE_STATUS.accepted || status === CHANGE_STATUS.rejected) decided.set(change.id, status);
+  }
+  return id => decided.get(id);
 }
 
 /**
@@ -48,19 +53,19 @@ function statusLookup(changeSet: ChangeSet): (id: string) => CHANGE_STATUS | und
  * decision in this review reaches — on the mark, or held by it — so a mark is
  * settled once from all its decisions, whichever of its changes comes first.
  */
-function settleMarks(tr: Transaction, from: number, to: number, statusOf: (id: string) => CHANGE_STATUS | undefined) {
+export function settleMarks(tr: Transaction, from: number, to: number, decided: DecisionOf) {
   const reached: { from: number; to: number; mark: Mark }[] = [];
   tr.doc.nodesBetween(from, to, (node, pos) => {
     if (!node.isInline) return;
     for (const mark of node.marks) {
-      if (isValidTrackableMark(mark) && hasDecision(mark, statusOf)) {
+      if (isValidTrackableMark(mark) && hasDecision(mark, decided)) {
         reached.push({ from: Math.max(pos, from), to: Math.min(pos + node.nodeSize, to), mark });
       }
     }
   });
   for (const { from: start, to: end, mark } of reached) {
     tr.removeMark(start, end, mark);
-    for (const settled of settle(mark, statusOf)) tr.addMark(start, end, settled);
+    for (const settled of settle(mark, decided)) tr.addMark(start, end, settled);
   }
 }
 
@@ -85,7 +90,8 @@ export function applyChanges(
     return c1.dataTracked.updatedAt - c2.dataTracked.updatedAt;
   });
 
-  const statusOf = statusLookup(changeSet);
+  const decided = decisionsIn(changeSet);
+  let settledAll = false;
 
   // ── First pass — everything except move/structure ──────────────────────────
   changes.forEach(change => {
@@ -159,23 +165,24 @@ export function applyChanges(
         node.marks,
       );
     } else if (ChangeSet.isMarkChange(change)) {
-      // The mark keeps what it says — a colour, a size, a link — and loses only this record.
-      const newMark = change.mark.type.create({
-        ...change.mark.attrs,
-        // A formatting mark keeps its records as a list, `[]` when none are left, so it joins its neighbours.
-        dataTracked: excludeFromTracked(change.mark.attrs.dataTracked, change.id) ?? [],
-      });
+      if (ChangeSet.isInlineMarkChange(change)) {
+        // A decision reaches every copy of its record — on the text, or held — wherever it is.
+        if (!settledAll) settleMarks(tr, 0, tr.doc.content.size, decided);
+        settledAll = true;
+        return;
+      }
+      // A node mark keeps what it says and loses only this record.
       const isInsert = change.dataTracked.operation === CHANGE_OPERATION.insert;
       const isDelete = change.dataTracked.operation === CHANGE_OPERATION.delete;
       const toBeRestored =
         (change.dataTracked.status === CHANGE_STATUS.accepted && isInsert) ||
         (change.dataTracked.status === CHANGE_STATUS.rejected && isDelete);
-
-      if (ChangeSet.isInlineMarkChange(change)) {
-        settleMarks(tr, from, deleteMap.map(change.to), statusOf);
-      } else {
-        tr.removeNodeMark(from, change.mark);
-        if (toBeRestored) tr.addNodeMark(from, newMark);
+      tr.removeNodeMark(from, change.mark);
+      if (toBeRestored) {
+        tr.addNodeMark(from, change.mark.type.create({
+          ...change.mark.attrs,
+          dataTracked: excludeFromTracked(change.mark.attrs.dataTracked, change.id) ?? [],
+        }));
       }
     }
   });

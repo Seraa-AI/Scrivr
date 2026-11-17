@@ -5,7 +5,7 @@ import type { Node as PMNode } from "@scrivr/core/pm";
 import { trackChangesPluginKey } from "./engine/trackChangesPlugin";
 import { describeAttrChanges } from "./attrChanges";
 import { changeActs } from "./reviewPlan";
-import { marksToRestore, toReplacedMark } from "./helpers";
+import { marksToRestore, toReplacedMark } from "./formatSuggestions";
 import {
   CHANGE_OPERATION,
   CHANGE_STATUS,
@@ -358,7 +358,7 @@ export function createChangePopover(
       }
 
       // ── Mark change fields ───────────────────────────────────────────────────
-      const held = pending.filter((p) => p.type === "mark-change" && p.within === c.id);
+      const held = pending.filter((p) => p.type === "mark-change" && !!p.within?.includes(c.id));
       let markName: string | undefined;
       let replacedMarks: ReplacedMark[] | undefined;
       if (c.type === "mark-change") {

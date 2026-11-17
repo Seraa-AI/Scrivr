@@ -45,15 +45,17 @@ import {
   createNewPendingAttrs,
   createNewUpdateAttrs,
   getBlockInlineTrackedData,
-  excludes,
   proposedForDeletion,
+  type NewEmptyAttrs,
+} from "../helpers";
+import {
+  excludes,
   proposeRemoval,
   restoreRuns,
   toReplacedMark,
   untracked,
   type FoundPiece,
-  type NewEmptyAttrs,
-} from "../helpers";
+} from "../formatSuggestions";
 import { isMarkRemoved } from "../semanticChanges";
 import { CHANGE_STATUS } from "../types";
 import { breakOf, findNodeById } from "@scrivr/core";

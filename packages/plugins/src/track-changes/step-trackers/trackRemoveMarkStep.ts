@@ -11,17 +11,19 @@ import {
 import {
   createNewDeleteAttrs,
   createNewInsertAttrs,
-  excludes,
   genId,
   isValidTrackableMark,
   NewEmptyAttrs,
+} from "../helpers";
+import {
+  excludes,
   proposeRemoval,
   restoredOnReject,
   restoreRuns,
   toReplacedMark,
   type FoundPiece,
   type RestoreRun,
-} from "../helpers";
+} from "../formatSuggestions";
 import { CHANGE_OPERATION, DataTrackedAttrs } from "../types";
 
 function markHasOp(mark: Mark, operation: CHANGE_OPERATION) {

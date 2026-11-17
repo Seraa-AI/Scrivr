@@ -193,14 +193,14 @@ function trackOneStep(
     trackAddMarkStep(step, i, tr, baseAttrs, newTr, replayBridge);
     // Fuse this tracked mark with same-author/same-attrs neighbours so a run
     // built from several edits stays one change (as typing already does).
-    mergeTrackedMarks(placed.from, newTr.doc, newTr, oldState.schema);
-    mergeTrackedMarks(placed.to, newTr.doc, newTr, oldState.schema);
+    mergeTrackedMarks(placed.from, newTr.doc, newTr, oldState.schema, baseAttrs.authorID);
+    mergeTrackedMarks(placed.to, newTr.doc, newTr, oldState.schema, baseAttrs.authorID);
   } else if (step instanceof RemoveMarkStep) {
     const placed = step.map(replayBridge);
     if (!(placed instanceof RemoveMarkStep)) return;
     trackRemoveMarkStep(step, i, tr, baseAttrs, newTr, replayBridge);
-    mergeTrackedMarks(placed.from, newTr.doc, newTr, oldState.schema);
-    mergeTrackedMarks(placed.to, newTr.doc, newTr, oldState.schema);
+    mergeTrackedMarks(placed.from, newTr.doc, newTr, oldState.schema, baseAttrs.authorID);
+    mergeTrackedMarks(placed.to, newTr.doc, newTr, oldState.schema, baseAttrs.authorID);
   } else if (step instanceof RemoveNodeMarkStep) {
     trackRemoveNodeMarkStep(step, baseAttrs, newTr, tr.docs[i]!, replayBridge);
   } else if (step instanceof AddNodeMarkStep) {

@@ -3,10 +3,12 @@
  * cannot stand beside it. The change over it holds it instead, and every
  * author's suggestion stays until someone decides it.
  */
+import "@scrivr/export-semantic/augment";
 import { describe, expect, it } from "vitest";
 import { ServerEditor, StarterKit } from "@scrivr/core";
 import type { Node as PMNode } from "@scrivr/core/pm";
-import { reviewChanges, TrackChanges, TrackChangesStatus } from "../index";
+import { toSemanticUnits } from "@scrivr/export-semantic";
+import { planReview, reviewChanges, TrackChanges, TrackChangesStatus } from "../index";
 import { findChanges } from "../findChanges";
 import { changeAtCaret } from "../createChangePopover";
 import type { TrackedChange } from "../types";
@@ -41,7 +43,7 @@ const by = (editor: ServerEditor, author: string, operation = "insert"): Tracked
   return change;
 };
 
-/** The colour along the text, and whether any of it is still a suggestion. */
+/** The colour along the text: one value, or the runs of it. */
 function shown(editor: ServerEditor) {
   const values: (unknown | null)[] = [];
   editor.getState().doc.descendants((node: PMNode) => {
@@ -74,7 +76,7 @@ describe("a suggestion over another author's", () => {
     expect(shown(editor)).toBe("green");
     const alice = by(editor, "alice");
     const bob = by(editor, "bob");
-    expect(bob.type === "mark-change" && bob.within).toBe(alice.id);
+    expect(bob.type === "mark-change" && bob.within).toEqual([alice.id]);
     expect(alice.type === "mark-change" && alice.within).toBeUndefined();
   });
 
@@ -203,5 +205,107 @@ describe("removing another author's suggestion", () => {
     expect(pending(editor).map((c) => [c.dataTracked.authorID, c.dataTracked.operation])).toEqual([["alice", "delete"]]);
     decide(editor, [by(editor, "alice", "delete")], []);
     expect(shown(editor)).toBe(null);
+  });
+});
+
+function recolourRange(editor: ServerEditor, from: number, to: number, value: string) {
+  const type = editor.getState().schema.marks["color"]!;
+  editor.applyTransaction(editor.getState().tr.addMark(from, to, type.create({ color: value })));
+}
+
+/** Each character's colour. */
+function colourAt(editor: ServerEditor) {
+  const chars: (unknown | null)[] = [];
+  editor.getState().doc.descendants((node: PMNode) => {
+    if (!node.isText) return;
+    const mark = node.marks.find((m) => m.type.name === "color");
+    for (let i = 0; i < node.nodeSize; i++) chars.push(mark ? mark.attrs["color"] : null);
+  });
+  return chars;
+}
+
+/** Bug class: a held suggestion treated as if it stood on the text — written over another's, hidden where it shows, or merged with what shows. */
+describe("a suggestion held over part of its range", () => {
+  /** Blue agreed; Bob red over all of it; Alice green over `from`–`to`. */
+  function partlyHeld(from: number, to: number) {
+    const bob = editorWith([blue()], "bob");
+    recolourRange(bob, 1, 6, "red");
+    const alice = handTo(bob, "alice");
+    recolourRange(alice, from, to, "green");
+    return alice;
+  }
+
+  it("keeps the holder when the held author edits elsewhere in their own suggestion", () => {
+    const bob = handTo(partlyHeld(4, 6), "bob");
+    recolourRange(bob, 3, 4, "yellow");
+    expect(colourAt(bob).slice(3)).toEqual(["green", "green"]);
+    expect(by(bob, "alice").dataTracked.replaced?.[0]?.attrs["color"]).toBe("red");
+  });
+
+  it("offers the held author's suggestion where it shows", () => {
+    const editor = partlyHeld(1, 3);
+    for (const listed of [pending(editor), [...pending(editor)].reverse()]) {
+      expect(changeAtCaret(listed, 2)?.dataTracked.authorID).toBe("alice");
+      for (const head of [4, 5]) expect(changeAtCaret(listed, head)?.dataTracked.authorID).toBe("bob");
+    }
+  });
+
+  it("names every change that holds a suggestion", () => {
+    const alice = partlyHeld(1, 3);
+    const carol = handTo(alice, "carol");
+    recolourRange(carol, 3, 6, "yellow");
+    const bob = by(carol, "bob");
+    const holders = [by(carol, "alice").id, by(carol, "carol").id];
+    expect(bob.type === "mark-change" && [...(bob.within ?? [])].sort()).toEqual([...holders].sort());
+  });
+
+  it("never offers a held piece as the act of a suggestion that shows", () => {
+    const bob = editorWith([blue()], "bob");
+    recolourRange(bob, 1, 3, "red");
+    const alice = handTo(bob, "alice");
+    recolourRange(alice, 1, 3, "green");
+    const again = handTo(alice, "bob");
+    recolourRange(again, 3, 6, "red");
+    for (const head of [4, 5]) {
+      const offered = changeAtCaret(pending(again), head);
+      expect(offered?.type === "mark-change" && offered.within).toBeUndefined();
+    }
+  });
+});
+
+describe("what else reads a held suggestion", () => {
+  it("re-keys held records when the document is cloned", () => {
+    const source = aliceOverBob();
+    const clone = new ServerEditor({
+      extensions: [StarterKit, TrackChanges.configure({ userID: "carol", initialStatus: TrackChangesStatus.enabled })],
+      content: source.getState().doc.toJSON(),
+      clone: { generate: ({ kind, oldId }) => `${kind}:${oldId}:clone` },
+    });
+    const ids = pending(clone).map((c) => c.id);
+    expect(ids).toHaveLength(2);
+    for (const id of ids) expect(id.endsWith(":clone")).toBe(true);
+  });
+
+  it("tells an agent of both suggestions, each against the agreed colour", () => {
+    const unit = toSemanticUnits(aliceOverBob(), { groupBlocks: false }).find((u) => u.id === "a");
+    const changes = unit?.changes ?? [];
+    expect(changes.map((c) => c.authorId).sort()).toEqual(["alice", "bob"]);
+    for (const change of changes) expect(change.oldAttrs).toEqual({ marks: [{ type: "color", attrs: { color: "blue" } }] });
+  });
+
+  it("previews the suggestions a decision discards", () => {
+    const editor = aliceOverBob();
+    const plan = planReview(editor, { accepted: [by(editor, "alice").id], rejected: [] });
+    expect(plan.status === "ready" && plan.rejected).toEqual([by(editor, "bob").id]);
+  });
+
+  it("keeps two removals by one author apart when another author sets the value they remove", () => {
+    const record = (id: string) => [{ id, authorID: "carol", operation: "delete", status: "pending", createdAt: 1, updatedAt: 1, statusUpdateAt: 0, reviewedByID: null }];
+    const editor = editorWith([
+      { type: "text", text: "a", marks: [{ type: "color", attrs: { color: "blue", dataTracked: record("carol-1") } }] },
+      { type: "text", text: "b", marks: [{ type: "color", attrs: { color: "blue", dataTracked: record("carol-2") } }] },
+    ], "bob");
+    recolourRange(editor, 2, 3, "blue");
+    expect(pending(editor).map((c) => c.id).sort()).toEqual(["carol-1", "carol-2"]);
   });
 });
