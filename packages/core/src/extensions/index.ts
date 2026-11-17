@@ -11,6 +11,7 @@ export {
   fieldDrawingAt,
   fieldKindsOf,
   fieldValues,
+  observeFieldPrint,
   isFieldAnswered,
   listSignerFields,
   paintCheckbox,
@@ -24,7 +25,7 @@ export {
   valuesOnRecordOf,
 } from "./built-in/Field";
 export { importedFieldValues } from "./built-in/fieldDocx";
-export type { FieldFill, FieldValues, InsertFieldOptions, SignerFieldDescriptor } from "./built-in/Field";
+export type { FieldFill, FieldValues, InsertFieldOptions, PrintedFieldValue, SignerFieldDescriptor } from "./built-in/Field";
 export {
   BUILT_IN_FIELD_KINDS,
   FieldChoiceSchema,

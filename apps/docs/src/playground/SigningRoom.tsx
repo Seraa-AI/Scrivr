@@ -444,6 +444,7 @@ function signersSetup(values: Record<string, FieldValue> = {}) {
 const REFUSAL_WORDS: Record<Exclude<ExecutedPdfRefusal["reason"] | CertificateRefusal["reason"], "unanswered-fields">, string> = {
   "snapshot-altered": "the sealed snapshot no longer matches its hash.",
   "unknown-field-kind": "a field is of a kind this room does not know.",
+  "unverified-signature-print": "a signature was not printed by the standard field renderer.",
   "unnamed-issuer": "the record names no issuer.",
   "duplicate-party": "two parties are recorded for one role.",
   "unknown-event": "the record holds an event no certificate can name.",

@@ -144,6 +144,8 @@ export interface VerifiedFacts {
 
 /** Why no certificate was issued, beyond why there is no executed document. */
 export type CertificateRefusal =
+  /** An answered signature was not drawn by the standard field printer. */
+  | { reason: "unverified-signature-print"; fieldId: string }
   /** A field's kind is not one the editor setup knows: the certificate could not tell whether it is a signature. */
   | { reason: "unknown-field-kind"; kind: string }
   /** The record names no issuer: its facts would be printed under nobody's name. */
@@ -310,12 +312,15 @@ function deepFreeze<T>(value: T): T {
 }
 
 /** The signatures the record printed, each dated by its full `signedAt`. Unknown kinds were refused before. */
-function signaturesOf({ fields, kinds, onRecord, drawings, boxes }: ExecutedPrint): Signature[] | CertificateRefusal {
+function signaturesOf({ fields, kinds, onRecord, drawings, printedFields }: ExecutedPrint): Signature[] | CertificateRefusal {
   const signatures: Signature[] = [];
   for (const field of fields) {
-    const value = onRecord[field.id];
+    const answer = onRecord[field.id];
     const spec = kinds[field.kind];
-    if (!spec || !isSigningKind(kinds, field.kind) || !isFieldAnswered(field, value, kinds)) continue;
+    if (!spec || !isSigningKind(kinds, field.kind) || !isFieldAnswered(field, answer, kinds)) continue;
+    const printed = printedFields.get(field.id);
+    if (!printed) return { reason: "unverified-signature-print", fieldId: field.id };
+    const value = printed.value;
     // A signature line holds words or a drawing; anything else is no signature to show.
     if (value?.kind !== "text" && value?.kind !== "image") continue;
     if (value.signedAt === undefined) return { reason: "undated-signature", fieldId: field.id };
@@ -326,10 +331,11 @@ function signaturesOf({ fields, kinds, onRecord, drawings, boxes }: ExecutedPrin
       signatures.push({ field, spec, moment: { ...moment, time }, shown: { paragraph: value.text } });
       continue;
     }
-    // Every drawing on record was embedded and every field has its box; the maps cannot say so.
-    const drawn = drawings.get(field.id);
-    const box = boxes.get(field.id);
-    if (drawn && box) signatures.push({ field, spec, moment: { ...moment, time }, shown: { image: value.src, ...containedSize(drawn, box) } });
+    // The observed drawing must be one whose bytes this printing captured.
+    const drawn = drawings.get(value.src);
+    const box = printed.box;
+    if (!drawn) return { reason: "unverified-signature-print", fieldId: field.id };
+    signatures.push({ field, spec, moment: { ...moment, time }, shown: { image: value.src, ...containedSize(drawn, box) } });
   }
   return signatures;
 }

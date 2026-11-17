@@ -2,7 +2,7 @@ import {
   Editor,
   Field,
   fieldKindsOf,
-  fieldSize,
+  observeFieldPrint,
   flattenExtensions,
   hashArtifact,
   isFieldAnswered,
@@ -15,12 +15,14 @@ import {
   type EditorOptions,
   type FieldKinds,
   type FieldValue,
+  type PrintedFieldValue,
   type SealedSnapshot,
   type SignerFieldDescriptor,
 } from "@scrivr/core";
 import { PDFDocument } from "pdf-lib";
 import { embedImage } from "./embedImage";
-import { createDefaultImageResolver, resolveOnce, type ImageResolver } from "./fetchImage";
+import { createDefaultImageResolver, type ImageResolver } from "./fetchImage";
+import { printedImages, type PrintedImages } from "./printedImages";
 import { exportToPdf, type PdfExportOptions } from "./pdf";
 
 export interface ExecutedPdfOptions extends PdfExportOptions {
@@ -73,12 +75,12 @@ export interface ExecutedPrint {
   artifactHash: string;
   fields: SignerFieldDescriptor[];
   kinds: FieldKinds;
-  /** The values as the record printed them: a drawing as embedded, none that could not be, each date signed derived. */
+  /** The values offered for printing: captured drawings, none that could not embed, each date signed derived. */
   onRecord: Readonly<Record<string, FieldValue>>;
-  /** Each printed drawing's own pixel size, from its embedding. */
+  /** Each captured drawing's pixel size, keyed by its self-contained URL. */
   drawings: ReadonlyMap<string, { width: number; height: number }>;
-  /** Each field's box as Field lays it out (`fieldSize`) — what its drawing is fitted to when printed. */
-  boxes: ReadonlyMap<string, { width: number; height: number }>;
+  /** Values actually drawn by the standard field printer, with their printed boxes. */
+  printedFields: ReadonlyMap<string, PrintedFieldValue>;
   /** The images as this printing resolved them, each once: a later printing beside it shows the same bytes. */
   resolveImage: ImageResolver;
 }
@@ -100,7 +102,8 @@ export async function printExecuted(
   const editor = new Editor({ ...editorOptions, content: snapshotDocument(snapshot.content), sealed: true });
   try {
     // So the drawing checked is the drawing printed.
-    const resolveImage = resolveOnce(pdfOptions.resolveImage ?? createDefaultImageResolver(pdfOptions.onImageRefused));
+    const images = printedImages(pdfOptions.resolveImage ?? createDefaultImageResolver(pdfOptions.onImageRefused));
+    const resolveImage = images.resolve;
     const scratch = await PDFDocument.create();
     const printable: Record<string, FieldValue> = {};
     const drawings = new Map<string, { width: number; height: number }>();
@@ -110,10 +113,10 @@ export async function printExecuted(
         continue;
       }
       // A drawing the PDF cannot embed is no value: the record would print it blank, and it dates no one.
-      const drawing = await embeddedDrawing(scratch, resolveImage, value.src);
+      const drawing = await embeddedDrawing(scratch, images, value.src);
       if (drawing === null) continue;
       printable[id] = { ...value, src: drawing.src };
-      drawings.set(id, { width: drawing.width, height: drawing.height });
+      drawings.set(drawing.src, { width: drawing.width, height: drawing.height });
     }
     // One authoritative record, including an empty one: configured values
     // cannot fill omissions or stand in for drawings that could not embed.
@@ -121,17 +124,18 @@ export async function printExecuted(
     const kinds = fieldKindsOf(editor);
     const doc = editor.getState().doc;
     const fields = listSignerFields(doc);
-    const boxes = new Map<string, { width: number; height: number }>();
-    doc.descendants((node) => {
-      const id = node.attrs["nodeId"];
-      if (node.type.name === "field" && typeof id === "string") boxes.set(id, fieldSize(kinds, node));
-    });
     // The record Field prints — its kinds, its date format — so what is checked is what prints.
     const onRecord = valuesOnRecordOf(editor);
     const missing = fields.filter((f) => f.required && !isFieldAnswered(f, onRecord[f.id], kinds));
     if (missing.length > 0) return { ok: false, refusal: { reason: "unanswered-fields", missing } };
-    const pdf = await exportToPdf(editor, { ...pdfOptions, resolveImage });
-    return { ok: true, print: { pdf, artifactHash: await hashArtifact(pdf), fields, kinds, onRecord, drawings, boxes, resolveImage } };
+    const printedFields = new Map<string, PrintedFieldValue>();
+    const stop = observeFieldPrint(editor, (printed) => printedFields.set(printed.id, printed));
+    try {
+      const pdf = await exportToPdf(editor, { ...pdfOptions, resolveImage });
+      return { ok: true, print: { pdf, artifactHash: await hashArtifact(pdf), fields, kinds, onRecord, drawings, printedFields, resolveImage } };
+    } finally {
+      stop();
+    }
   } finally {
     editor.destroy();
   }
@@ -142,10 +146,17 @@ export async function printExecuted(
  * own embedding — with its size; `null` when it cannot embed, or has no area
  * to show (a 0-pixel side would print nothing, and fit to no box).
  */
-async function embeddedDrawing(scratch: PDFDocument, resolveImage: ImageResolver, src: string): Promise<{ src: string; width: number; height: number } | null> {
+async function embeddedDrawing(scratch: PDFDocument, images: PrintedImages, src: string): Promise<{ src: string; width: number; height: number } | null> {
   const drawing = safeDrawingUrl(src);
   if (drawing === null) return null;
-  const image = await embedImage(scratch, resolveImage, drawing);
+  let captured: string | null;
+  try {
+    captured = await images.capture(drawing);
+  } catch {
+    return null;
+  }
+  if (captured === null || safeDrawingUrl(captured) === null) return null;
+  const image = await embedImage(scratch, images.resolve, captured);
   if (!image || image.width <= 0 || image.height <= 0) return null;
-  return { src: drawing, width: image.width, height: image.height };
+  return { src: captured, width: image.width, height: image.height };
 }

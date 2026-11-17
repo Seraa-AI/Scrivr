@@ -71,7 +71,7 @@ const { executed, certificate } = result;
 
 - `values` are every party's answers, as for [`exportExecutedPdf`](/docs/guides/fields#the-executed-document). Each signature's `signedAt` must be a full timestamp with its zone (see [Times](#times)), and its time must fit your events: a party is sent or views the document before it signs.
 - `certificate.verified` is *Verified at issue* as data: `contentHash`, `artifactHash`, and each signature's `fieldId`, `role` and `kind`.
-- `certificate.content` is the certificate as a document's JSON — open it in a read-only `Editor` to show it on screen as well as in print.
+- `certificate.content` is the certificate as a document's JSON — open it in a read-only `Editor` to show it on screen as well as in print. Signature images carry the bytes resolved for this printing as self-contained data URLs, including when your `resolveImage` transforms the original image.
 - Like the executed PDF, printing needs a browser `Editor`: a page, or a server with a headless DOM and a canvas. The certificate itself is printed in StarterKit with your `editorOptions`' fonts and page setup.
 
 Do not build the executed PDF and the certificate in separate calls and pair them yourself. There is no API for that on purpose: nothing could prove the two belong together.
@@ -143,6 +143,7 @@ Before issuing, Scrivr checks the document, then your record against it and agai
 | Every required field is answered, as the executed PDF would print it — a drawing it cannot embed answers nothing | `unanswered-fields { missing }` |
 | Every field's kind is one the editor setup knows — or it could not tell a signature from text | `unknown-field-kind { kind }` |
 | The record names an issuer | `unnamed-issuer` |
+| Every answered signature was drawn by Field's standard PDF renderer | `unverified-signature-print { fieldId }` |
 | Every printed signature carries a `signedAt`, written as [Times](#times) says | `undated-signature { fieldId }`, `unzoned-time { at }` |
 | Every event is one of the six kinds, or a `custom` step with a label, at a time written as [Times](#times) says | `unknown-event { event }`, `unzoned-time { at }` |
 | One party per role | `duplicate-party { role }` |
@@ -154,6 +155,8 @@ Before issuing, Scrivr checks the document, then your record against it and agai
 
 What passes, on purpose, because signing tools record it: a party viewing the document again after signing, or after completion; a party with no fields of its own; a party with no `sent` or `viewed` event at all. `declined` is labelled, not checked: whether a declined party may still complete is your rule.
 
+A custom `Field.configure({ print })` hook must return `false` for signatures so the standard renderer prints them. A hook that takes over a signature, or an extension that replaces the field PDF handler, cannot supply verified signature evidence and causes `unverified-signature-print`. Ordinary `exportExecutedPdf` still supports custom printing. Certificate evidence comes from the standard renderer's emitted value and actual box, rather than assuming that every stored answer was drawn.
+
 A refusal is an answer, not an exception — show it to whoever can fix it:
 
 ```ts
@@ -162,6 +165,7 @@ const words: Record<string, string> = {
   "unanswered-fields": "Some required fields are still empty.",
   "unknown-field-kind": "A field is of a kind this app does not know.",
   "unnamed-issuer": "The record does not say who issued it.",
+  "unverified-signature-print": "A signature was not printed by the standard field renderer.",
   "duplicate-party": "Two people are recorded for the same role.",
   "unknown-event": "The record holds an event that cannot be named.",
   "missing-party": "A party who signed is missing from the record.",

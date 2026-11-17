@@ -204,6 +204,7 @@ come first.
 | `snapshot-altered` | `verifySnapshot(content, contentHash)` fails |
 | `unanswered-fields { missing }` | a required field is unanswered, or holds a drawing the PDF cannot embed |
 | `unknown-field-kind { kind }` | a field's kind is not in the editor setup — a signature could not be told from text |
+| `unverified-signature-print { fieldId }` | an answered signature was not drawn by Field's standard PDF renderer — a `print` hook took it over, or another handler replaced the field's |
 | `unnamed-issuer` | the record names no issuer, so its facts would sit under nobody's name |
 | `undated-signature { fieldId }` | a printed signature carries no `signedAt` |
 | `unzoned-time { at }` | an event time or a `signedAt` is not `YYYY-MM-DDThh:mm[:ss[.fff]]` with `Z` or `±hh:mm` |
@@ -221,10 +222,15 @@ come first.
   print, checks completeness against `valuesOnRecordOf`, prints, and hands
   the certificate what it read — fields, kinds, the values on record, each
   drawing's embedded size, each field's box, and the resolver that fetched
-  each image once, so the certificate prints the very bytes embedded.
+  each image once, so the certificate prints the very bytes embedded. What
+  it hands on of each signature is what Field's standard renderer reported
+  drawing (`observeFieldPrint`) — the value and the box it used — never an
+  assumption that every stored answer printed; a drawing is captured as a
+  self-contained URL of the bytes resolved, so the returned document reads
+  the same image with no resolver.
 - **A field's box** is Field's: `fieldSize` — its authored size, or its
-  kind's where that is no size — sizes layout, the executed PDF, the
-  certificate's fitting and Word's signature line alike.
+  kind's where that is no size — sizes layout, and so the box the executed
+  PDF prints in and the certificate fits to, and Word's signature line.
 - **The grammar of `signedAt`** is core's: `readSigningMoment`, beside
   `parseSignedAt` and built on the same one reader, gives the instant, the
   day, and the clock and zone together when a time was written.
@@ -282,7 +288,10 @@ come first.
   kept; a refusal still fires whatever it prints.
 - A drawing with no area answers nothing; a signature fits its field's own
   box, or its kind's when the field has no size — as layout and Word size
-  it; the host's resolver is asked once for both PDFs; the guide's own
+  it; the host's resolver is asked once for both PDFs, and the bytes it
+  returned are the ones both PDFs and the returned document carry; a
+  signature a custom printer drew is refused, while `exportExecutedPdf`
+  still prints it; the guide's own
   example record is issued.
 - The host's `content` gets the labels in use, so a translated label finds
   its blocks; neither they nor the verified facts can be written, in type or
@@ -339,7 +348,10 @@ covers them. A fourth review then made the certificate print each drawing
 from the bytes the executed PDF embedded, sized every field by one rule
 (`fieldSize`), handed `content` the labels in use, typed the frozen facts
 read-only, and the playground offers issued documents only while the
-answers they were printed from are still the answers.
+answers they were printed from are still the answers. Last, the certificate
+takes its signatures from what Field's renderer reports printing, and
+refuses (`unverified-signature-print`) one a custom printer drew; each
+drawing is captured once per printing as a self-contained URL.
 
 ## Sources
 

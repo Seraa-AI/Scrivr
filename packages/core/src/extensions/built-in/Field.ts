@@ -387,6 +387,33 @@ interface FieldSetup {
 const setupByContext = new WeakMap<object, FieldSetup>();
 const setupByEditor = new WeakMap<IBaseEditor, FieldSetup>();
 
+/** Text or a drawing emitted by Field's standard PDF renderer, with the box it actually used. */
+export interface PrintedFieldValue {
+  id: string;
+  value: FieldValue;
+  box: FieldBox;
+}
+
+const printObservers = new WeakMap<IBaseEditor, Set<(printed: PrintedFieldValue) => void>>();
+
+/**
+ * Observe text and drawings emitted by Field's standard PDF renderer. Custom
+ * printers do not produce this evidence: their output is theirs to describe. Dispose
+ * after the printing finishes, including on failure.
+ */
+export function observeFieldPrint(editor: IBaseEditor, observe: (printed: PrintedFieldValue) => void): () => void {
+  let observers = printObservers.get(editor);
+  if (!observers) {
+    observers = new Set();
+    printObservers.set(editor, observers);
+  }
+  observers.add(observe);
+  return () => {
+    observers.delete(observe);
+    if (observers.size === 0) printObservers.delete(editor);
+  };
+}
+
 /** The kinds `editor`'s `Field` knows — the built-ins and the host's own — or the built-ins alone without one. */
 export const fieldKindsOf = (editor: IBaseEditor): FieldKinds => setupByEditor.get(editor)?.kinds ?? BUILT_IN_FIELD_KINDS;
 
@@ -692,7 +719,7 @@ const valueOf = (kinds: FieldKinds, values: FieldValues, node: PmNode): FieldVal
  * field showing a value prints the value instead: the executed document.
  */
 const fieldPdf =
-  (kinds: FieldKinds, options: FieldOptions, values: () => FieldValues): PdfNodeHandler =>
+  (kinds: FieldKinds, options: FieldOptions, values: () => FieldValues, printed: (drawing: FieldDrawing) => void): PdfNodeHandler =>
   (block, ctx) => {
     const { node, x, y, width, height } = block;
     const drawing = drawingOf(kinds, options, values(), node, { box: { x, y, width, height }, baselineY: ctx.baselineY ?? y + height, theme: ctx.theme });
@@ -713,6 +740,7 @@ const fieldPdf =
     if (value?.kind === "image") {
       // `value.src` passed `safeDrawingUrl` on its way here, through `shownValue`.
       ctx.draw.image({ x, y, width, height, image: { src: value.src }, fit: "contain" });
+      printed(drawing);
       return;
     }
     const text = valueText(value, fieldChoices(node.attrs["options"]));
@@ -720,6 +748,7 @@ const fieldPdf =
       if (!ctx.font) return;
       const set = fieldValueLayout({ x, y, width, height }, ctx.font.cssFont, ctx.baselineY);
       ctx.draw.text({ text, x: set.x, baselineY: set.baselineY, sizePx: set.sizePx, font: ctx.font, color: ink });
+      printed(drawing);
       return;
     }
     // A blank on a printed form: its line, and what goes on it.
@@ -988,7 +1017,16 @@ export const Field = Extension.create<FieldOptions>({
     const kinds = resolveKinds(this.options);
     return {
       pdf: {
-        nodes: { field: fieldPdf(kinds, this.options, () => valuesIn(this, this.options)) },
+        nodes: {
+          field: fieldPdf(kinds, this.options, () => valuesIn(this, this.options), (drawing) => {
+            const editor = setupByContext.get(this)?.editor;
+            const id = drawing.node.attrs["nodeId"];
+            if (!editor || typeof id !== "string" || !drawing.value) return;
+            for (const observe of printObservers.get(editor) ?? []) {
+              observe({ id, value: { ...drawing.value }, box: { ...drawing.box } });
+            }
+          }),
+        },
         marks: { fieldRange: fieldRangePdf },
         // A drawn signature's bytes are fetched before the pages are written.
         embeds: {

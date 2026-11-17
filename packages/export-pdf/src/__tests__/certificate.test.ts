@@ -11,6 +11,7 @@ import { PDFDocument } from "pdf-lib";
 import {
   BUILT_IN_FIELD_KINDS,
   Field,
+  Extension,
   ServerEditor,
   StarterKit,
   TextMeasurer,
@@ -26,6 +27,7 @@ import {
   DEFAULT_CERTIFICATE_LABELS,
   bundleCertificate,
   exportCompletionCertificate,
+  exportExecutedPdf,
   type CertificateContent,
   type CertificateLabels,
   type CertificateParts,
@@ -40,7 +42,7 @@ import {
   type VerifiedSignature,
 } from "../index";
 import { recordDrawOps } from "./opLog";
-import { createDefaultImageResolver } from "../fetchImage";
+import { createDefaultImageResolver, type ImageBytes } from "../fetchImage";
 
 const measureContext = (ctx: { font: string; measureText: (text: string) => TextMetrics }): TextMeasureContext => ctx;
 const measurer = () => new TextMeasurer({ lineHeightMultiplier: 1.2, context: measureContext(createCanvas(800, 600).getContext("2d")) });
@@ -394,6 +396,27 @@ describe("a host's own content on the certificate", () => {
 });
 
 describe("exportCompletionCertificate refuses", () => {
+  it("refuses a custom signature printer, while ordinary executed export still supports it", async () => {
+    const print = vi.fn(() => true);
+    const editorOptions = { extensions: [StarterKit, Field.configure({ print })], textMeasurer: measurer() };
+    expect(await refusalOf(signed, { editorOptions })).toEqual({ reason: "unverified-signature-print", fieldId: "client-sig" });
+    expect(print).toHaveBeenCalled();
+    expect((await exportExecutedPdf(await sealed(), signed, { editorOptions })).ok).toBe(true);
+  });
+
+  it("accepts a print hook that delegates signatures to the standard renderer", async () => {
+    const print = vi.fn(() => false);
+    const result = await issued(signed, { editorOptions: { extensions: [StarterKit, Field.configure({ print })], textMeasurer: measurer() } });
+    expect(print).toHaveBeenCalled();
+    expect(result.certificate.verified.signatures).toHaveLength(2);
+  });
+
+  it("refuses a replacement field export handler that bypasses Field's printer", async () => {
+    const override = Extension.create({ name: "customFieldExport", addExports: () => ({ pdf: { nodes: { field: () => {} } } }) });
+    expect(await refusalOf(signed, { editorOptions: { extensions: [StarterKit, Field, override], textMeasurer: measurer() } }))
+      .toEqual({ reason: "unverified-signature-print", fieldId: "client-sig" });
+  });
+
   it("as the executed PDF does: an altered snapshot, an incomplete signing", async () => {
     const snapshot = await sealed();
     const altered = await exportCompletionCertificate({ ...snapshot, content: snapshot.content.replace("Terms.", "Terms!") }, signed, options());
@@ -485,6 +508,28 @@ describe("exportCompletionCertificate refuses a record it could not print honest
 });
 
 describe("exportCompletionCertificate prints a signature as the executed PDF does", () => {
+  it("returns a self-contained viewer document with the resolver's bytes, also embedded in both PDFs", async () => {
+    const canvas = createCanvas(60, 20);
+    const context = canvas.getContext("2d");
+    context.fillStyle = "red";
+    context.fillRect(0, 0, 60, 20);
+    const bytes = new Uint8Array(canvas.toBuffer("image/png"));
+    const resolvedUrl = `data:image/png;base64,${Buffer.from(bytes).toString("base64")}`;
+    const resolveImage = vi.fn(async (): Promise<ImageBytes> => ({ bytes, format: "png" }));
+    const result = await issued(signed, { resolveImage });
+    expect(imagesOf(result.certificate.content)[0]?.["src"]).toBe(resolvedUrl);
+    expect(resolveImage).toHaveBeenCalledTimes(1);
+    // Read the returned document with the default resolver, as a viewer would.
+    expect(await createDefaultImageResolver()(resolvedUrl)).toEqual({ bytes, format: "png" });
+    // Both PDFs embedded the resolved 60px image, not the input's 240px drawing.
+    for (const pdf of [result.executed.pdf, result.certificate.pdf]) {
+      const loaded = await PDFDocument.load(pdf);
+      const images = loaded.context.enumerateIndirectObjects().filter(([, object]) => String(object).includes("/Subtype /Image"));
+      expect(images.some(([, object]) => String(object).includes("/Width 60"))).toBe(true);
+      expect(images.some(([, object]) => String(object).includes("/Width 240"))).toBe(false);
+    }
+  });
+
   /** The drawing the certificate shows for a 3:1 signature in a field of this size. */
   const shownIn = async (size: { width: unknown; height: unknown }) => {
     const author = new ServerEditor({
