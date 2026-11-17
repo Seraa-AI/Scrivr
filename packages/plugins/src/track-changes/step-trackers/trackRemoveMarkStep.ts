@@ -13,9 +13,12 @@ import {
   createNewInsertAttrs,
   genId,
   isValidTrackableMark,
+  markRecords,
   NewEmptyAttrs,
+  replacedMarks,
+  toReplacedMark,
 } from "../helpers";
-import { CHANGE_OPERATION, DataTrackedAttrs } from "../types";
+import { CHANGE_OPERATION, CHANGE_STATUS, DataTrackedAttrs } from "../types";
 
 function markHasOp(mark: Mark, operation: CHANGE_OPERATION) {
   if (mark.attrs.dataTracked && Array.isArray(mark.attrs.dataTracked)) {
@@ -132,29 +135,81 @@ export function trackRemoveNodeMarkStep(
   }
 }
 
+const untracked = (mark: Mark) =>
+  isValidTrackableMark(mark) ? mark.type.create({ ...mark.attrs, dataTracked: [] }) : mark;
+
+/**
+ * What rejecting `mark` must put back on a node that carries `marks`: the
+ * settled formatting it pushes off. A pushed-off suggestion was never agreed,
+ * so it is superseded and gives back what it replaced in turn; anything else
+ * returns without its tracking, unless it is the value `mark` sets anyway.
+ */
+function pushedOff(mark: Mark, marks: readonly Mark[]): Mark[] {
+  const kept = mark.addToSet(marks);
+  return marks
+    .filter(m => !m.eq(mark) && !m.isInSet(kept))
+    .flatMap(m => {
+      const suggested = markRecords(m).filter(r => r.status === CHANGE_STATUS.pending && r.operation === CHANGE_OPERATION.insert);
+      if (suggested.length > 0) return suggested.flatMap(r => replacedMarks(r, m.type.schema));
+      const settled = untracked(m);
+      return settled.eq(untracked(mark)) ? [] : [settled];
+    });
+}
+
+const sameMarks = (a: readonly Mark[], b: readonly Mark[]) =>
+  a.length === b.length && a.every(m => b.some(o => o.eq(m)));
+
+/**
+ * `step` is read in `doc`, the document it applied to; it is written in the
+ * replayed document through `replayBridge`. A mark that excludes others (a
+ * colour, a size) replaces them inside its own step, so what it pushed off is
+ * read from `doc` — and from the replayed text, where a removal tracked earlier
+ * in the same transaction stands — and kept on its record for rejection to
+ * restore. Text that lost different marks is a change of its own.
+ */
 export function trackAddMarkStep(
   step: AddMarkStep,
   emptyAttrs: NewEmptyAttrs,
   newTr: Transaction,
+  doc: PMNode,
+  replayBridge: Mapping,
 ) {
   if (!isValidTrackableMark(step.mark)) return;
 
-  const markName = step.mark.type.name;
-  const markSource = step.mark.type.schema.marks[markName];
-
-  const newDataTracked = createNewInsertAttrs(emptyAttrs);
-  // Preserve the original mark's attrs (e.g. color value, font size) so the
-  // tracked version looks and behaves identically to the original.
-  const newMark = markSource!.create({
-    ...step.mark.attrs,
-    dataTracked: [{ ...newDataTracked, id: genId() }],
+  const runs: { from: number; to: number; replaced: Mark[] }[] = [];
+  doc.nodesBetween(step.from, step.to, (node, pos, parent) => {
+    if (!node.isInline || !parent?.type.allowsMarkType(step.mark.type)) return;
+    const from = replayBridge.map(Math.max(pos, step.from), 1);
+    const to = replayBridge.map(Math.min(pos + node.nodeSize, step.to), -1);
+    if (from >= to) return;
+    const replaced = [...pushedOff(step.mark, node.marks), ...pushedOff(step.mark, newTr.doc.nodeAt(from)?.marks ?? [])]
+      .filter((mark, i, all) => all.findIndex(other => other.eq(mark)) === i);
+    const last = runs[runs.length - 1];
+    if (last && last.to === from && sameMarks(last.replaced, replaced)) last.to = to;
+    else runs.push({ from, to, replaced });
   });
-  const newStep = new AddMarkStep(step.from, step.to, newMark);
+
+  const ids: { replaced: Mark[]; id: string }[] = [];
+  const idFor = (replaced: Mark[]) => {
+    const known = ids.find(entry => sameMarks(entry.replaced, replaced));
+    if (known) return known.id;
+    const id = genId();
+    ids.push({ replaced, id });
+    return id;
+  };
+
   try {
-    // Not `step.invert()`: from prosemirror-transform 1.12.3 it needs the
-    // pre-step doc. The untracked mark comes off the whole range either way.
-    newTr.step(new RemoveMarkStep(step.from, step.to, step.mark));
-    newTr.step(newStep);
+    for (const { from, to, replaced } of runs) {
+      const record = {
+        ...createNewInsertAttrs(emptyAttrs),
+        id: idFor(replaced),
+        ...(replaced.length > 0 ? { replaced: replaced.map(toReplacedMark) } : {}),
+      };
+      // Not `step.invert(doc)`: `doc` is in the source frame, these positions in the replayed one.
+      newTr.step(new RemoveMarkStep(from, to, step.mark));
+      // The mark keeps its own attrs (a colour, a size), so the tracked one looks as the plain one did.
+      newTr.step(new AddMarkStep(from, to, step.mark.type.create({ ...step.mark.attrs, dataTracked: [record] })));
+    }
   } catch (e) {
     console.error("trackAddMarkStep failed: " + e);
   }

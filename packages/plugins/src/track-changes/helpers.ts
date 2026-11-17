@@ -1,13 +1,36 @@
 import { Attrs, Fragment, Mark, Node as PMNode, Schema, type Transaction } from "@scrivr/core/pm";
 
-import { CHANGE_OPERATION, CHANGE_STATUS, TrackedAttrs } from "./types";
+import { CHANGE_OPERATION, CHANGE_STATUS, type ReplacedMark, TrackedAttrs } from "./types";
 
 export function genId(): string {
   return crypto.randomUUID();
 }
 
-import { isTrackedMark } from "@scrivr/core";
+import { isTrackedMark, stableStringify } from "@scrivr/core";
 export { isTrackedMark } from "@scrivr/core";
+
+export const toReplacedMark = (mark: Mark): ReplacedMark => ({ type: mark.type.name, attrs: { ...mark.attrs } });
+
+/**
+ * The marks a record replaced, as `schema` makes them. Records arrive from
+ * saved and synced documents, so an entry the schema cannot make — an unknown
+ * type, attrs it refuses — is left out rather than failing the review.
+ */
+export function replacedMarks(record: Partial<TrackedAttrs>, schema: Schema): Mark[] {
+  const replaced: unknown = record.replaced;
+  if (!Array.isArray(replaced)) return [];
+  return replaced.flatMap((entry: unknown) => {
+    if (typeof entry !== "object" || entry === null || !("type" in entry) || !("attrs" in entry)) return [];
+    const { type, attrs } = entry;
+    const markType = typeof type === "string" ? schema.marks[type] : undefined;
+    if (!markType || typeof attrs !== "object" || attrs === null) return [];
+    try {
+      return [markType.create(attrs)];
+    } catch {
+      return [];
+    }
+  });
+}
 
 export function isValidTrackableMark(mark: Mark) {
   const spec = mark.type.spec;
@@ -226,7 +249,9 @@ export function shouldMergeTrackedAttributes(
     left.continuesId === right.continuesId &&
     left.moveId === right.moveId &&
     left.foldingClosed === right.foldingClosed &&
-    JSON.stringify(left.dependsOn ?? []) === JSON.stringify(right.dependsOn ?? [])
+    JSON.stringify(left.dependsOn ?? []) === JSON.stringify(right.dependsOn ?? []) &&
+    // A record restores what it replaced, so two that replaced different marks stay two.
+    stableStringify(left.replaced ?? []) === stableStringify(right.replaced ?? [])
   );
 }
 

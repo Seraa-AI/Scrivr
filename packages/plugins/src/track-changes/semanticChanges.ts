@@ -11,7 +11,7 @@ import { EditorState } from "@scrivr/core/pm";
 import type { Mark, Node as PMNode } from "@scrivr/core/pm";
 
 import { findChanges } from "./findChanges";
-import { getBlockInlineTrackedData, isTrackedRecord, isValidTrackableMark, markRecords } from "./helpers";
+import { getBlockInlineTrackedData, isTrackedRecord, isValidTrackableMark, markRecords, replacedMarks } from "./helpers";
 import { changeActs } from "./reviewPlan";
 import { CHANGE_OPERATION, CHANGE_STATUS, type TrackedAttrs } from "./types";
 
@@ -181,8 +181,13 @@ const NODE_CHANGES = new Map<string, NodeReading>([
 function formattingChanges(node: PMNode, ctx: UnitCtx): SemanticNodeChange[] {
   const formatting = node.marks.filter((mark) => !isTrackedMark(mark.type.name));
   // What the text had before any pending formatting change: without the marks
-  // proposed as added. Every change on this text states the same.
-  const before = { marks: formatting.filter((m) => !hasPending(m, CHANGE_OPERATION.insert)).map(describeInlineMark) };
+  // proposed as added, with what they replaced. Every change on this text states the same.
+  const replaced = formatting.flatMap((mark) =>
+    markRecords(mark)
+      .filter((record) => isPending(record) && record.operation === CHANGE_OPERATION.insert)
+      .flatMap((record) => replacedMarks(record, node.type.schema)));
+  const kept = formatting.filter((m) => !hasPending(m, CHANGE_OPERATION.insert));
+  const before = { marks: [...kept, ...replaced].map(describeInlineMark) };
   return formatting.filter(isValidTrackableMark).flatMap((mark) =>
     markRecords(mark)
       .filter((record) => isPending(record) && FORMATTING_OPERATIONS.has(record.operation))

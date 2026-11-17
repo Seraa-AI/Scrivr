@@ -46,6 +46,7 @@ import {
   createNewUpdateAttrs,
   getBlockInlineTrackedData,
   proposedForDeletion,
+  toReplacedMark,
   type NewEmptyAttrs,
 } from "../helpers";
 import { isMarkRemoved } from "../semanticChanges";
@@ -378,13 +379,29 @@ function emitKeepMarkChanges(
       if (range) {
         const from = range.from + insertedChars;
         const to = range.to + insertedChars;
-        for (const m of added) if (addTrackedMark(tr, schema, from, to, m, "insert", base(), onWarn)) applied = true;
-        for (const m of removed) if (addTrackedMark(tr, schema, from, to, m, "delete", base(), onWarn)) applied = true;
+        // A mark that pushes a removed one off (red over blue) records it, to restore
+        // on rejection: a separate tracked removal would push the addition off in turn.
+        const replacedByAdded = new Set<InlineMark>();
+        for (const m of added) {
+          const replaced = removed.filter((r) => pushesOff(schema, m, r));
+          replaced.forEach((r) => replacedByAdded.add(r));
+          if (addTrackedMark(tr, schema, from, to, m, "insert", base(), onWarn, replaced)) applied = true;
+        }
+        for (const m of removed) {
+          if (!replacedByAdded.has(m) && addTrackedMark(tr, schema, from, to, m, "delete", base(), onWarn)) applied = true;
+        }
       }
     }
     k = j;
   }
   return applied;
+}
+
+/** Whether applying `added` takes `removed` off the text, as a colour does another colour. */
+function pushesOff(schema: Schema, added: InlineMark, removed: InlineMark): boolean {
+  const add = resolveInlineMark(added, schema);
+  const remove = resolveInlineMark(removed, schema);
+  return !!add && !!remove && !remove.isInSet(add.addToSet([remove]));
 }
 
 /** Re-create `mark` with tracking data and apply it (exclusion replaces the plain mark). */
@@ -397,10 +414,15 @@ function addTrackedMark(
   operation: "insert" | "delete",
   base: NewEmptyAttrs,
   onWarn?: (message: string) => void,
+  replaced: readonly InlineMark[] = [],
 ): boolean {
   const real = resolveInlineMark(inline, schema, onWarn);
   if (!real) return false;
-  const dt = operation === "insert" ? createNewInsertAttrs(base) : createNewDeleteAttrs(base);
+  const records = replaced.flatMap((m) => resolveInlineMark(m, schema, onWarn) ?? []).map(toReplacedMark);
+  const dt = {
+    ...(operation === "insert" ? createNewInsertAttrs(base) : createNewDeleteAttrs(base)),
+    ...(records.length > 0 ? { replaced: records } : {}),
+  };
   const tracked = real.type.create({ ...real.attrs, dataTracked: [addTrackIdIfDoesntExist(dt)] });
   tr.addMark(from, to, tracked);
   return true;

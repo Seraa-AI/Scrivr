@@ -9,7 +9,7 @@ import {
   CHANGE_OPERATION,
   CHANGE_STATUS,
 } from "./types";
-import type { TrackedChange } from "./types";
+import type { ReplacedMark, TrackedChange } from "./types";
 
 export interface ChangePopoverInfo {
   id: string;
@@ -79,6 +79,11 @@ export interface ChangePopoverInfo {
    * mark type name, e.g. "bold", "italic", "underline".
    */
   markName?: string;
+  /**
+   * For an added mark that replaced others (a recolour, a new size): the marks
+   * the text had before, which rejecting it restores — the "from" of "blue → red".
+   */
+  replacedMarks?: ReplacedMark[];
   /**
    * Discriminator for the change kind — mirrors TrackedChange.type without the
    * "-change" suffix. Lets UI components render the correct label and preview
@@ -343,8 +348,10 @@ export function createChangePopover(
 
       // ── Mark change fields ───────────────────────────────────────────────────
       let markName: string | undefined;
+      let replacedMarks: ReplacedMark[] | undefined;
       if (c.type === "mark-change") {
         markName = c.mark.type.name;
+        if (c.dataTracked.replaced?.length) replacedMarks = c.dataTracked.replaced;
       }
 
       // ── Text preview — kind-aware ────────────────────────────────────────────
@@ -390,6 +397,7 @@ export function createChangePopover(
         ...(c.dataTracked.moveId !== undefined ? { moveId: c.dataTracked.moveId } : {}),
         ...(moveRole !== undefined ? { moveRole } : {}),
         ...(markName !== undefined ? { markName } : {}),
+        ...(replacedMarks !== undefined ? { replacedMarks } : {}),
         ...(c.type === "node-change" || c.type === "node-attr-change" ? { nodeTypeName: c.node.type.name } : {}),
       };
     };

@@ -55,6 +55,12 @@ export enum TrackChangesStatus {
 
 // ── TrackedAttrs ──────────────────────────────────────────────────────────────
 
+/** A mark as a record keeps it, to put back: its type's name and its attrs, tracking included. */
+export type ReplacedMark = {
+  type: string;
+  attrs: Record<string, unknown>;
+};
+
 type InsertDeleteAttrs = {
   id: string;
   authorID: string;
@@ -65,6 +71,12 @@ type InsertDeleteAttrs = {
   createdAt: number;
   updatedAt: number;
   moveNodeId?: string;
+  /**
+   * On an added formatting mark: the marks it pushed off the text — the colour
+   * a recolour replaced — which rejecting it puts back. A mark that excludes
+   * another cannot stand beside it, so the old value lives here, not on the text.
+   */
+  replaced?: ReplacedMark[];
   /**
    * Links the two halves of moved content that is not carried as a block: its
    * deletion where it was and its insertion where it went, as Word's
