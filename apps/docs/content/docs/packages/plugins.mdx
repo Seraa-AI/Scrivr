@@ -367,9 +367,11 @@ When `info.isConflict` is `true`, `info.conflictChanges` contains one entry per 
 act — render controls for each. Keeping one is accepting it and rejecting the others in a single
 `reviewChanges` call.
 
-A colour, a size or a font replaces the one it is set over, so a tracked recolour remembers what it
-replaced: `info.replacedMarks` lists the marks the text had before (the "blue" of "blue → red"),
-and rejecting the change puts them back. Text that had several colours becomes one change per colour.
+A colour, a size, a font or a link replaces the one it is set over, so a tracked recolour remembers
+the agreed value it replaced: `info.replacedMarks` lists the marks it replaced (the "blue" of
+"blue → red"), and rejecting the change puts them back. Text that had several colours becomes one
+change per colour. A recolour over someone's pending recolour supersedes it, and rejecting it
+returns to the agreed colour, not to the suggestion.
 
 `reviewChanges` reports what actually happened, so it is what a review button should call. The
 `setChangeStatuses` command only returns whether it dispatched, and `false` when the decision is

@@ -1,4 +1,5 @@
 import type { Mark } from "@scrivr/core/pm";
+import { stableStringify } from "@scrivr/core";
 
 import type { ChangeSet } from "./ChangeSet";
 import { isMoveShadow } from "./helpers";
@@ -121,7 +122,8 @@ const markValue = (mark: Mark) =>
 
 /**
  * Neighbouring pieces of one formatting change, which a word-by-word diff
- * stamps under separate ids: same author, same proposal, same value, touching.
+ * stamps under separate ids: same author, same proposal, same value, same
+ * replaced formatting, touching.
  */
 const sameFormattingRun = (a: TrackedChange, b: TrackedChange) =>
   a.type === "mark-change" && b.type === "mark-change" &&
@@ -129,6 +131,8 @@ const sameFormattingRun = (a: TrackedChange, b: TrackedChange) =>
   a.dataTracked.authorID === b.dataTracked.authorID &&
   a.dataTracked.operation === b.dataTracked.operation &&
   markValue(a.mark) === markValue(b.mark) &&
+  // Each restores what it replaced, so pieces that replaced different marks are decided apart.
+  stableStringify(a.dataTracked.replaced ?? []) === stableStringify(b.dataTracked.replaced ?? []) &&
   (a.to === b.from || b.to === a.from);
 
 /** The two halves of one replacement: the words taken out and the words put in. */

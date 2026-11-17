@@ -12,25 +12,60 @@ export { isTrackedMark } from "@scrivr/core";
 export const toReplacedMark = (mark: Mark): ReplacedMark => ({ type: mark.type.name, attrs: { ...mark.attrs } });
 
 /**
- * The marks a record replaced, as `schema` makes them. Records arrive from
- * saved and synced documents, so an entry the schema cannot make — an unknown
- * type, attrs it refuses — is left out rather than failing the review.
+ * The marks a record says to put back, as `schema` makes them, untracked.
+ * Records arrive from saved and synced documents, so an entry the schema
+ * cannot make — an unknown or review type, attrs it refuses — is left out
+ * rather than failing the review.
  */
-export function replacedMarks(record: Partial<TrackedAttrs>, schema: Schema): Mark[] {
+export function marksToRestore(record: Partial<TrackedAttrs>, schema: Schema): Mark[] {
   const replaced: unknown = record.replaced;
   if (!Array.isArray(replaced)) return [];
   return replaced.flatMap((entry: unknown) => {
     if (typeof entry !== "object" || entry === null || !("type" in entry) || !("attrs" in entry)) return [];
     const { type, attrs } = entry;
-    const markType = typeof type === "string" ? schema.marks[type] : undefined;
-    if (!markType || typeof attrs !== "object" || attrs === null) return [];
+    const markType = typeof type === "string" && !isTrackedMark(type) ? schema.marks[type] : undefined;
+    if (!markType || typeof attrs !== "object" || attrs === null) {
+      console.warn("track-changes: a replaced mark this schema cannot restore was left out", entry);
+      return [];
+    }
     try {
-      return [markType.create(attrs)];
-    } catch {
+      return [untracked(markType.create(attrs))];
+    } catch (e) {
+      console.warn("track-changes: a replaced mark this schema refuses was left out", entry, e);
       return [];
     }
   });
 }
+
+/** A mark as agreed text carries it: without the records that track it. */
+export const untracked = (mark: Mark): Mark =>
+  isValidTrackableMark(mark) ? mark.type.create({ ...mark.attrs, dataTracked: [] }) : mark;
+
+/** Whether setting `mark` takes `other` off the text, as a colour does another colour. */
+export const excludes = (mark: Mark, other: Mark): boolean => !other.eq(mark) && !other.isInSet(mark.addToSet([other]));
+
+/**
+ * What rejecting `mark`, set over text carrying `marks`, must put back: the
+ * agreed formatting it takes off, as one ordered set. A suggestion it takes
+ * off was never agreed, so it gives back what it replaced in turn.
+ */
+export function restoredOnReject(mark: Mark, marks: readonly Mark[]): readonly Mark[] {
+  return Mark.setFrom(
+    marks
+      .filter(other => excludes(mark, other))
+      .flatMap(other => {
+        const suggested = markRecords(other).filter(r => r.status === CHANGE_STATUS.pending && r.operation === CHANGE_OPERATION.insert);
+        return suggested.length > 0 ? suggested.flatMap(r => marksToRestore(r, other.type.schema)) : [untracked(other)];
+      }),
+  );
+}
+
+/** Whether rejecting `mark` would leave what setting it leaves: then there is nothing to propose. */
+export const restoresItself = (mark: Mark, restored: readonly Mark[]): boolean =>
+  restored.length === 1 && !!restored[0]?.eq(untracked(mark));
+
+/** One key for a set of restored marks, so runs, merges and acts agree on what is the same. */
+export const restoredKey = (restored: readonly Mark[]): string => stableStringify(restored.map(toReplacedMark));
 
 export function isValidTrackableMark(mark: Mark) {
   const spec = mark.type.spec;

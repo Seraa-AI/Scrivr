@@ -5,6 +5,7 @@ import type { Node as PMNode } from "@scrivr/core/pm";
 import { trackChangesPluginKey } from "./engine/trackChangesPlugin";
 import { describeAttrChanges } from "./attrChanges";
 import { changeActs } from "./reviewPlan";
+import { marksToRestore, toReplacedMark } from "./helpers";
 import {
   CHANGE_OPERATION,
   CHANGE_STATUS,
@@ -81,7 +82,7 @@ export interface ChangePopoverInfo {
   markName?: string;
   /**
    * For an added mark that replaced others (a recolour, a new size): the marks
-   * the text had before, which rejecting it restores — the "from" of "blue → red".
+   * it replaced, which rejecting it restores — the "blue" of "blue → red".
    */
   replacedMarks?: ReplacedMark[];
   /**
@@ -351,7 +352,8 @@ export function createChangePopover(
       let replacedMarks: ReplacedMark[] | undefined;
       if (c.type === "mark-change") {
         markName = c.mark.type.name;
-        if (c.dataTracked.replaced?.length) replacedMarks = c.dataTracked.replaced;
+        const restored = marksToRestore(c.dataTracked, c.mark.type.schema);
+        if (restored.length > 0) replacedMarks = restored.map(toReplacedMark);
       }
 
       // ── Text preview — kind-aware ────────────────────────────────────────────

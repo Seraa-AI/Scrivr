@@ -3,19 +3,24 @@ import { Transaction } from "@scrivr/core/pm";
 import {
   AddMarkStep,
   AddNodeMarkStep,
-  type Mapping,
+  Mapping,
   RemoveMarkStep,
   RemoveNodeMarkStep,
+  type Step,
 } from "@scrivr/core/pm";
 
 import {
   createNewDeleteAttrs,
   createNewInsertAttrs,
+  excludes,
   genId,
   isValidTrackableMark,
   markRecords,
+  marksToRestore,
   NewEmptyAttrs,
-  replacedMarks,
+  restoredKey,
+  restoredOnReject,
+  restoresItself,
   toReplacedMark,
 } from "../helpers";
 import { CHANGE_OPERATION, CHANGE_STATUS, DataTrackedAttrs } from "../types";
@@ -67,24 +72,55 @@ export function trackRemoveMarkStep(
     ...existingAttrs,
     dataTracked: [{ ...newDataTracked, id: genId() }],
   });
-  let newStep = new AddMarkStep(placed.from, placed.to, newMark);
-
-  if (sameMark) {
-    if (markHasOp(sameMark, CHANGE_OPERATION.delete)) {
+  const pending = sameMark;
+  const stepsOver = (from: number, to: number): Step[] => {
+    if (pending && markHasOp(pending, CHANGE_OPERATION.insert)) {
+      // Removing a pending insert cancels it; what it replaced was agreed, so its removal is proposed instead.
+      const agreed = markRecords(pending).flatMap(record => marksToRestore(record, pending.type.schema));
+      return [
+        new RemoveMarkStep(from, to, pending),
+        ...agreed.map(mark => new AddMarkStep(from, to, mark.type.create({
+          ...mark.attrs,
+          dataTracked: [{ ...createNewDeleteAttrs(emptyAttrs), id: genId() }],
+        }))),
+      ];
+    }
+    if (pending && markHasOp(pending, CHANGE_OPERATION.delete)) {
       // Mark was already pending delete — clear the tracking data.
-      newStep = new AddMarkStep(placed.from, placed.to, markSource!.create({ ...existingAttrs, dataTracked: [] }));
+      return [new AddMarkStep(from, to, markSource!.create({ ...existingAttrs, dataTracked: [] }))];
     }
-    if (markHasOp(sameMark, CHANGE_OPERATION.insert)) {
-      // Mark was a pending insert — removing it cancels the insert entirely.
-      newStep = new RemoveMarkStep(placed.from, placed.to, sameMark);
-    }
-  }
+    return [new AddMarkStep(from, to, newMark)];
+  };
 
   try {
-    newTr.step(newStep);
+    for (const [from, to] of notSuperseded(step.mark, placed.from, placed.to, newTr.doc)) {
+      for (const written of stepsOver(from, to)) newTr.step(written);
+    }
   } catch (e) {
     console.error("trackRemoveMarkStep failed: " + e);
   }
+}
+
+/**
+ * The stretches of `from`–`to` where no mark proposed by a later step of the
+ * transaction stands over `removed`. There, that mark's record already restores
+ * what was removed (a link's address changed by removing the old link and
+ * adding the new), and tracking the removal too would push it off.
+ */
+function notSuperseded(removed: Mark, from: number, to: number, doc: PMNode): [number, number][] {
+  const ranges: [number, number][] = [];
+  doc.nodesBetween(from, to, (node, pos) => {
+    if (!node.isInline) return;
+    const superseded = node.marks.some(mark =>
+      excludes(mark, removed) && markRecords(mark).some(r => r.status === CHANGE_STATUS.pending && r.operation === CHANGE_OPERATION.insert));
+    if (superseded) return;
+    const start = Math.max(pos, from);
+    const end = Math.min(pos + node.nodeSize, to);
+    const last = ranges[ranges.length - 1];
+    if (last && last[1] === start) last[1] = end;
+    else ranges.push([start, end]);
+  });
+  return ranges;
 }
 
 export function trackRemoveNodeMarkStep(
@@ -135,75 +171,87 @@ export function trackRemoveNodeMarkStep(
   }
 }
 
-const untracked = (mark: Mark) =>
-  isValidTrackableMark(mark) ? mark.type.create({ ...mark.attrs, dataTracked: [] }) : mark;
-
 /**
- * What rejecting `mark` must put back on a node that carries `marks`: the
- * settled formatting it pushes off. A pushed-off suggestion was never agreed,
- * so it is superseded and gives back what it replaced in turn; anything else
- * returns without its tracking, unless it is the value `mark` sets anyway.
+ * A mark that excludes others (a colour, a size, a link) replaces them inside
+ * its own step, so the step says nothing of what was there. What rejecting it
+ * restores is read from the document as the transaction found it — text this
+ * transaction wrote has only what it was written with — and kept on its
+ * record. It writes only where its own mark still stands in the replayed text:
+ * a later step that set the same kind there has the last word. Text whose
+ * restore differs is a change of its own; where rejecting would restore the
+ * value it sets, there is nothing to propose.
  */
-function pushedOff(mark: Mark, marks: readonly Mark[]): Mark[] {
-  const kept = mark.addToSet(marks);
-  return marks
-    .filter(m => !m.eq(mark) && !m.isInSet(kept))
-    .flatMap(m => {
-      const suggested = markRecords(m).filter(r => r.status === CHANGE_STATUS.pending && r.operation === CHANGE_OPERATION.insert);
-      if (suggested.length > 0) return suggested.flatMap(r => replacedMarks(r, m.type.schema));
-      const settled = untracked(m);
-      return settled.eq(untracked(mark)) ? [] : [settled];
-    });
+/**
+ * The marks the text from `from` to `to` of `tr.docs[index]` had when the
+ * transaction found it, piece by piece. Text the transaction wrote has only
+ * what `node`, which holds it, carries.
+ */
+function asFound(
+  tr: Transaction,
+  index: number,
+  node: PMNode,
+  from: number,
+  to: number,
+): { from: number; to: number; marks: readonly Mark[] }[] {
+  const start = tr.docs[0];
+  // Its own maps, not `slice(0, index)`: `invert()` reads a slice's every map, past its end too.
+  const forward = new Mapping(tr.mapping.maps.slice(0, index));
+  const back = forward.invert();
+  const found = back.mapResult(from, 1);
+  const written = [{ from, to, marks: node.marks }];
+  if (!start || found.deletedAfter) return written;
+  const end = back.map(to, -1);
+  const pieces: { from: number; to: number; marks: readonly Mark[] }[] = [];
+  start.nodesBetween(found.pos, end, (startNode, at) => {
+    if (!startNode.isInline) return;
+    const pieceFrom = Math.max(from, forward.map(Math.max(at, found.pos), 1));
+    const pieceTo = Math.min(to, forward.map(Math.min(at + startNode.nodeSize, end), -1));
+    if (pieceFrom < pieceTo) pieces.push({ from: pieceFrom, to: pieceTo, marks: startNode.marks });
+  });
+  return pieces.length > 0 ? pieces : written;
 }
 
-const sameMarks = (a: readonly Mark[], b: readonly Mark[]) =>
-  a.length === b.length && a.every(m => b.some(o => o.eq(m)));
-
-/**
- * `step` is read in `doc`, the document it applied to; it is written in the
- * replayed document through `replayBridge`. A mark that excludes others (a
- * colour, a size) replaces them inside its own step, so what it pushed off is
- * read from `doc` — and from the replayed text, where a removal tracked earlier
- * in the same transaction stands — and kept on its record for rejection to
- * restore. Text that lost different marks is a change of its own.
- */
 export function trackAddMarkStep(
   step: AddMarkStep,
+  index: number,
+  tr: Transaction,
   emptyAttrs: NewEmptyAttrs,
   newTr: Transaction,
-  doc: PMNode,
   replayBridge: Mapping,
 ) {
   if (!isValidTrackableMark(step.mark)) return;
+  const doc = tr.docs[index];
+  if (!doc) return;
 
-  const runs: { from: number; to: number; replaced: Mark[] }[] = [];
+  const runs: { from: number; to: number; restored: readonly Mark[]; key: string }[] = [];
   doc.nodesBetween(step.from, step.to, (node, pos, parent) => {
     if (!node.isInline || !parent?.type.allowsMarkType(step.mark.type)) return;
-    const from = replayBridge.map(Math.max(pos, step.from), 1);
-    const to = replayBridge.map(Math.min(pos + node.nodeSize, step.to), -1);
-    if (from >= to) return;
-    const replaced = [...pushedOff(step.mark, node.marks), ...pushedOff(step.mark, newTr.doc.nodeAt(from)?.marks ?? [])]
-      .filter((mark, i, all) => all.findIndex(other => other.eq(mark)) === i);
-    const last = runs[runs.length - 1];
-    if (last && last.to === from && sameMarks(last.replaced, replaced)) last.to = to;
-    else runs.push({ from, to, replaced });
+    for (const piece of asFound(tr, index, node, Math.max(pos, step.from), Math.min(pos + node.nodeSize, step.to))) {
+      // Text that had this very mark agreed changes nothing; nor does one that would restore it.
+      if (step.mark.isInSet(piece.marks)) continue;
+      const restored = restoredOnReject(step.mark, piece.marks);
+      if (restoresItself(step.mark, restored)) continue;
+      const key = restoredKey(restored);
+      const from = replayBridge.map(piece.from, 1);
+      const to = replayBridge.map(piece.to, -1);
+      if (from >= to) continue;
+      newTr.doc.nodesBetween(from, to, (replayed, at) => {
+        if (!replayed.isInline || !step.mark.isInSet(replayed.marks)) return;
+        const runFrom = Math.max(at, from);
+        const runTo = Math.min(at + replayed.nodeSize, to);
+        const last = runs[runs.length - 1];
+        if (last && last.to === runFrom && last.key === key) last.to = runTo;
+        else runs.push({ from: runFrom, to: runTo, restored, key });
+      });
+    }
   });
 
-  const ids: { replaced: Mark[]; id: string }[] = [];
-  const idFor = (replaced: Mark[]) => {
-    const known = ids.find(entry => sameMarks(entry.replaced, replaced));
-    if (known) return known.id;
-    const id = genId();
-    ids.push({ replaced, id });
-    return id;
-  };
-
   try {
-    for (const { from, to, replaced } of runs) {
+    for (const { from, to, restored } of runs) {
       const record = {
         ...createNewInsertAttrs(emptyAttrs),
-        id: idFor(replaced),
-        ...(replaced.length > 0 ? { replaced: replaced.map(toReplacedMark) } : {}),
+        id: genId(),
+        ...(restored.length > 0 ? { replaced: restored.map(toReplacedMark) } : {}),
       };
       // Not `step.invert(doc)`: `doc` is in the source frame, these positions in the replayed one.
       newTr.step(new RemoveMarkStep(from, to, step.mark));

@@ -55,7 +55,7 @@ export enum TrackChangesStatus {
 
 // ── TrackedAttrs ──────────────────────────────────────────────────────────────
 
-/** A mark as a record keeps it, to put back: its type's name and its attrs, tracking included. */
+/** A mark as a record keeps it, to put back: its type's name and its attrs. Rejection restores it as agreed formatting, untracked. */
 export type ReplacedMark = {
   type: string;
   attrs: Record<string, unknown>;
@@ -72,8 +72,8 @@ type InsertDeleteAttrs = {
   updatedAt: number;
   moveNodeId?: string;
   /**
-   * On an added formatting mark: the marks it pushed off the text — the colour
-   * a recolour replaced — which rejecting it puts back. A mark that excludes
+   * On an added formatting mark: the agreed formatting it replaced — the colour
+   * a recolour took off — which rejecting it puts back. A mark that excludes
    * another cannot stand beside it, so the old value lives here, not on the text.
    */
   replaced?: ReplacedMark[];

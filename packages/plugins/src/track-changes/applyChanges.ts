@@ -5,7 +5,7 @@ import { Mapping } from "@scrivr/core/pm";
 import { revertWrapNodeChange } from "./lib/revertChanges";
 import { restoreNode, updateChangeChildrenAttributes } from "./engine/updateAttributes";
 import { ChangeSet } from "./ChangeSet";
-import { excludeFromTracked, replacedMarks } from "./helpers";
+import { excludeFromTracked, marksToRestore } from "./helpers";
 import { deleteNode } from "./lib/deleteNode";
 import { clearTextChange } from "./lib/clearTextChange";
 import { rejectMove } from "./engine/moveIdentity";
@@ -145,8 +145,9 @@ export function applyChanges(
         const to = deleteMap.map(change.to);
         tr.removeMark(from, to, change.mark);
         if (toBeRestored) tr.addMark(from, to, newMark);
-        else if (isInsert) {
-          for (const mark of replacedMarks(change.dataTracked, tr.doc.type.schema)) tr.addMark(from, to, mark);
+        const isRejectedInsert = isInsert && change.dataTracked.status === CHANGE_STATUS.rejected;
+        if (isRejectedInsert) {
+          for (const mark of marksToRestore(change.dataTracked, tr.doc.type.schema)) tr.addMark(from, to, mark);
         }
       } else {
         tr.removeNodeMark(from, change.mark);

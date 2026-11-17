@@ -190,7 +190,7 @@ function trackOneStep(
     // those of the document this iteration's bridge maps from.
     const placed = step.map(replayBridge);
     if (!(placed instanceof AddMarkStep)) return;
-    trackAddMarkStep(step, baseAttrs, newTr, tr.docs[i]!, replayBridge);
+    trackAddMarkStep(step, i, tr, baseAttrs, newTr, replayBridge);
     // Fuse this tracked mark with same-author/same-attrs neighbours so a run
     // built from several edits stays one change (as typing already does).
     mergeTrackedMarks(placed.from, newTr.doc, newTr, oldState.schema);

@@ -45,8 +45,12 @@ import {
   createNewPendingAttrs,
   createNewUpdateAttrs,
   getBlockInlineTrackedData,
+  excludes,
   proposedForDeletion,
+  restoredOnReject,
+  restoresItself,
   toReplacedMark,
+  untracked,
   type NewEmptyAttrs,
 } from "../helpers";
 import { isMarkRemoved } from "../semanticChanges";
@@ -379,16 +383,26 @@ function emitKeepMarkChanges(
       if (range) {
         const from = range.from + insertedChars;
         const to = range.to + insertedChars;
-        // A mark that pushes a removed one off (red over blue) records it, to restore
-        // on rejection: a separate tracked removal would push the addition off in turn.
-        const replacedByAdded = new Set<InlineMark>();
+        // An added mark that takes a removed one off (red over blue) carries what rejecting it
+        // restores; a separate tracked removal would push the addition off in turn.
+        const takenOff = new Set<InlineMark>();
         for (const m of added) {
-          const replaced = removed.filter((r) => pushesOff(schema, m, r));
-          replaced.forEach((r) => replacedByAdded.add(r));
-          if (addTrackedMark(tr, schema, from, to, m, "insert", base(), onWarn, replaced)) applied = true;
+          const real = resolveInlineMark(m, schema, onWarn);
+          if (!real) continue;
+          for (const r of removed) {
+            const other = resolveInlineMark(r, schema);
+            if (other && excludes(real, other)) takenOff.add(r);
+          }
+          const restored = restoredOnReject(real, marksIn(tr.doc, from, to));
+          if (restoresItself(real, restored)) tr.addMark(from, to, untracked(real));
+          else addTrackedMark(tr, from, to, real, createNewInsertAttrs(base()), restored);
+          applied = true;
         }
         for (const m of removed) {
-          if (!replacedByAdded.has(m) && addTrackedMark(tr, schema, from, to, m, "delete", base(), onWarn)) applied = true;
+          const real = takenOff.has(m) ? null : resolveInlineMark(m, schema, onWarn);
+          if (!real) continue;
+          addTrackedMark(tr, from, to, real, createNewDeleteAttrs(base()));
+          applied = true;
         }
       }
     }
@@ -397,35 +411,26 @@ function emitKeepMarkChanges(
   return applied;
 }
 
-/** Whether applying `added` takes `removed` off the text, as a colour does another colour. */
-function pushesOff(schema: Schema, added: InlineMark, removed: InlineMark): boolean {
-  const add = resolveInlineMark(added, schema);
-  const remove = resolveInlineMark(removed, schema);
-  return !!add && !!remove && !remove.isInSet(add.addToSet([remove]));
+/** Every mark on the inline content between `from` and `to`. */
+function marksIn(doc: PMNode, from: number, to: number): Mark[] {
+  const found: Mark[] = [];
+  doc.nodesBetween(from, to, (node) => {
+    if (node.isInline) found.push(...node.marks);
+  });
+  return found;
 }
 
-/** Re-create `mark` with tracking data and apply it (exclusion replaces the plain mark). */
+/** Apply `mark` with a tracking record (exclusion replaces the plain mark). */
 function addTrackedMark(
   tr: Transaction,
-  schema: Schema,
   from: number,
   to: number,
-  inline: InlineMark,
-  operation: "insert" | "delete",
-  base: NewEmptyAttrs,
-  onWarn?: (message: string) => void,
-  replaced: readonly InlineMark[] = [],
-): boolean {
-  const real = resolveInlineMark(inline, schema, onWarn);
-  if (!real) return false;
-  const records = replaced.flatMap((m) => resolveInlineMark(m, schema, onWarn) ?? []).map(toReplacedMark);
-  const dt = {
-    ...(operation === "insert" ? createNewInsertAttrs(base) : createNewDeleteAttrs(base)),
-    ...(records.length > 0 ? { replaced: records } : {}),
-  };
-  const tracked = real.type.create({ ...real.attrs, dataTracked: [addTrackIdIfDoesntExist(dt)] });
-  tr.addMark(from, to, tracked);
-  return true;
+  mark: Mark,
+  record: NewEmptyAttrs,
+  restored: readonly Mark[] = [],
+) {
+  const dt = { ...record, ...(restored.length > 0 ? { replaced: restored.map(toReplacedMark) } : {}) };
+  tr.addMark(from, to, mark.type.create({ ...mark.attrs, dataTracked: [addTrackIdIfDoesntExist(dt)] }));
 }
 
 // ── Mark-set helpers ──────────────────────────────────────────────────────────
