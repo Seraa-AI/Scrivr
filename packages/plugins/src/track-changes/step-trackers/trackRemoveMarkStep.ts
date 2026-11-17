@@ -208,7 +208,7 @@ export function trackAddMarkStep(
         id: genId(),
         ...(restored.length > 0 ? { replaced: restored.map(toReplacedMark) } : {}),
       };
-      // Not `step.invert(doc)`: `doc` is in the source frame, these positions in the replayed one.
+      // Not `step.invert()`: its positions are in the source frame, these in the replayed one.
       newTr.step(new RemoveMarkStep(from, to, step.mark));
       // The mark keeps its own attrs (a colour, a size), so the tracked one looks as the plain one did.
       newTr.step(new AddMarkStep(from, to, step.mark.type.create({ ...step.mark.attrs, dataTracked: [record] })));

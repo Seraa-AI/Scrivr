@@ -405,9 +405,11 @@ function emitKeepMarkChanges(
         for (const m of removed) {
           const real = takenOff.has(m) ? null : resolveInlineMark(m, schema, onWarn);
           if (!real) continue;
-          // Taken off as the text carries it, so a suggestion there is withdrawn, not struck.
+          // Taken off as the text carries it, so a suggestion there is withdrawn, not struck;
+          // text that does not carry it (another author's deletion inside the range) is left alone.
           for (const piece of inlinePieces(tr.doc, from, to)) {
-            const carried = piece.marks.find((mark) => untracked(mark).eq(untracked(real))) ?? real;
+            const carried = piece.marks.find((mark) => untracked(mark).eq(untracked(real)));
+            if (!carried) continue;
             for (const step of proposeRemoval(carried, piece.from, piece.to, base())) tr.step(step);
           }
           applied = true;

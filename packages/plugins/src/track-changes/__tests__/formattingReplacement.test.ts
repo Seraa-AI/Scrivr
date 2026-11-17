@@ -240,6 +240,17 @@ describe("setting a format over another of its kind", () => {
     expect(pending(editor)[0]?.dataTracked.replaced).toEqual([{ type: "color", attrs: { color: "blue" } }]);
   });
 
+  it("leaves text another author is deleting alone when an agent clears a colour around it", () => {
+    const bob = editorWith([text("ab", [color("red")]), text("XX", [color("blue")]), text("cd", [color("red")])], "bob");
+    bob.applyTransaction(bob.getState().tr.delete(3, 5));
+    const editor = editorWith(bob.getState().doc.child(0).toJSON().content, "alice");
+    const spans: InlineSpan[] = [{ text: "abcd", marks: [] }];
+    applyRichDiffAsSuggestion(editor.getState(), (tr) => editor.applyTransaction(tr), { edits: [{ nodeId: "a", spans }], authorID: "ai:Assistant" });
+    decideAll(editor, "rejected");
+    expect(editor.getState().doc.child(0).textContent).toBe("abXXcd");
+    expect(valuesOf(editor, "color", "color")).toEqual(["red", "blue", "red"]);
+  });
+
   it("restores the old colour when an agent's recolour is rejected", () => {
     const editor = editorWith([text("hello", [color("blue")])]);
     const spans: InlineSpan[] = [{ text: "hello", marks: [{ type: "color", attrs: { color: "red" } }] }];
