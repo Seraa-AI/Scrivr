@@ -133,7 +133,8 @@ export function applyChanges(
       // The mark keeps what it says — a colour, a size, a link — and loses only this record.
       const newMark = change.mark.type.create({
         ...change.mark.attrs,
-        dataTracked: excludeFromTracked(change.mark.attrs.dataTracked, change.id),
+        // A formatting mark keeps its records as a list, `[]` when none are left, so it joins its neighbours.
+        dataTracked: excludeFromTracked(change.mark.attrs.dataTracked, change.id) ?? [],
       });
       const isInsert = change.dataTracked.operation === CHANGE_OPERATION.insert;
       const isDelete = change.dataTracked.operation === CHANGE_OPERATION.delete;

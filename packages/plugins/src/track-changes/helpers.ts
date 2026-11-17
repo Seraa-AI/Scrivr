@@ -91,26 +91,39 @@ export function proposeRemoval(mark: Mark, from: number, to: number, emptyAttrs:
 /** Text from `from` to `to` and the marks it had before the edit being recorded. */
 export type FoundPiece = { from: number; to: number; marks: readonly Mark[] };
 
-/** A stretch where setting `mark` changes something, and what rejecting it there restores. */
-export type RestoreRun = { from: number; to: number; restored: readonly Mark[] };
+/**
+ * A stretch where setting `mark` is written: proposed, with what rejecting it
+ * restores, or — where the text already showed that value under someone's
+ * records — given back the mark it `carried`, records and authors intact.
+ */
+export type RestoreRun = { from: number; to: number; restored: readonly Mark[]; carried?: Mark };
 
 /**
- * The stretches of `pieces` where setting `mark` is a change to propose, each
- * with what rejecting it restores, neighbours that restore the same joined.
- * Text that had `mark`, or whose restore is `mark` itself, has nothing to propose.
+ * The stretches of `pieces` where setting `mark` is written, neighbours alike
+ * joined. Text that had `mark` itself, or whose restore is `mark`, has nothing
+ * to propose; text that showed its value with records keeps them, since
+ * setting what is already shown changes nothing, and takes no one's
+ * suggestion from them.
  */
 export function restoreRuns(mark: Mark, pieces: Iterable<FoundPiece>): RestoreRun[] {
   const runs: (RestoreRun & { key: string })[] = [];
-  for (const piece of pieces) {
-    if (mark.isInSet(piece.marks)) continue;
-    const restored = restoredOnReject(mark, piece.marks);
-    if (restoresItself(mark, restored)) continue;
-    const key = restoredKey(restored);
+  const push = (piece: FoundPiece, run: Omit<RestoreRun, "from" | "to">, key: string) => {
     const last = runs[runs.length - 1];
     if (last && last.to === piece.from && last.key === key) last.to = piece.to;
-    else runs.push({ from: piece.from, to: piece.to, restored, key });
+    else runs.push({ from: piece.from, to: piece.to, ...run, key });
+  };
+  for (const piece of pieces) {
+    if (mark.isInSet(piece.marks)) continue;
+    const carried = piece.marks.find(other => !other.eq(mark) && untracked(other).eq(untracked(mark)));
+    if (carried) {
+      push(piece, { restored: [], carried }, `carried:${stableStringify(carried.toJSON())}`);
+      continue;
+    }
+    const restored = restoredOnReject(mark, piece.marks);
+    if (restoresItself(mark, restored)) continue;
+    push(piece, { restored }, restoredKey(restored));
   }
-  return runs.map(({ from, to, restored }) => ({ from, to, restored }));
+  return runs.map(({ key: _key, ...run }) => run);
 }
 
 export function isValidTrackableMark(mark: Mark) {

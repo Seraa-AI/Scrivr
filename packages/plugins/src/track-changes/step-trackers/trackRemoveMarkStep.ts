@@ -196,13 +196,18 @@ export function trackAddMarkStep(
       const runFrom = Math.max(at, from);
       const runTo = Math.min(at + replayed.nodeSize, to);
       const last = runs[runs.length - 1];
-      if (last && last.to === runFrom && last.restored === run.restored) last.to = runTo;
-      else runs.push({ from: runFrom, to: runTo, restored: run.restored });
+      if (last && last.to === runFrom && last.restored === run.restored && last.carried === run.carried) last.to = runTo;
+      else runs.push({ ...run, from: runFrom, to: runTo });
     });
   }
 
   try {
-    for (const { from, to, restored } of runs) {
+    for (const { from, to, restored, carried } of runs) {
+      if (carried) {
+        newTr.step(new RemoveMarkStep(from, to, step.mark));
+        newTr.step(new AddMarkStep(from, to, carried));
+        continue;
+      }
       const record = {
         ...createNewInsertAttrs(emptyAttrs),
         id: genId(),

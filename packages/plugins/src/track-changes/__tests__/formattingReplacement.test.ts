@@ -251,6 +251,28 @@ describe("setting a format over another of its kind", () => {
     expect(valuesOf(editor, "color", "color")).toEqual(["red", "blue", "red"]);
   });
 
+  it("leaves another author's suggestion theirs when its value is set again", () => {
+    const link = (href: string): DocNode => ({ type: "link", attrs: { href } });
+    const bob = editorWith([text("ab", [color("blue")]), text("site", [link("https://a.example")])], "bob");
+    format(bob, 1, 3, "color", { color: "red" });
+    format(bob, 1, 3, "bold", {});
+    expect(bob.commands.setLinkHref(3, 7, "https://b.example")).toBe(true);
+    const before = pending(bob).map((c) => [c.dataTracked.authorID, c.dataTracked.replaced ?? []]);
+    const alice = editorWith(bob.getState().doc.child(0).toJSON().content, "alice");
+    format(alice, 1, 3, "color", { color: "red" });
+    format(alice, 1, 3, "bold", {});
+    expect(alice.commands.setLinkHref(3, 7, "https://b.example")).toBe(true);
+    expect(pending(alice).map((c) => [c.dataTracked.authorID, c.dataTracked.replaced ?? []])).toEqual(before);
+  });
+
+  it("joins text whose formatting a review settled back into one node", () => {
+    const editor = editorWith([text("hello", [color("blue")])]);
+    const type = editor.getState().schema.marks["color"]!;
+    editor.applyTransaction(editor.getState().tr.addMark(1, 6, type.create({ color: "red" })).removeMark(3, 6, type));
+    decideAll(editor, "rejected");
+    expect(editor.getState().doc.child(0).childCount).toBe(1);
+  });
+
   it("restores the old colour when an agent's recolour is rejected", () => {
     const editor = editorWith([text("hello", [color("blue")])]);
     const spans: InlineSpan[] = [{ text: "hello", marks: [{ type: "color", attrs: { color: "red" } }] }];

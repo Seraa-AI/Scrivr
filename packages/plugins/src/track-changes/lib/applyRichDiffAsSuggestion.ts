@@ -398,7 +398,8 @@ function emitKeepMarkChanges(
           const runs = restoreRuns(real, inlinePieces(tr.doc, from, to));
           tr.addMark(from, to, untracked(real));
           for (const run of runs) {
-            addTrackedMark(tr, run.from, run.to, real, createNewInsertAttrs(base()), run.restored);
+            if (run.carried) tr.addMark(run.from, run.to, run.carried);
+            else addTrackedMark(tr, run.from, run.to, real, createNewInsertAttrs(base()), run.restored);
           }
           applied = true;
         }
