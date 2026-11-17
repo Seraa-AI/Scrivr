@@ -294,6 +294,22 @@ export function shownValue(kinds: FieldKinds, kind: string, value: FieldValue | 
   return value && SHOWN_BY[controlOfKind(kinds, kind)].has(value.kind) ? value : undefined;
 }
 
+/**
+ * A field's box as its author sized it — or, where that is no size, its
+ * kind's, as a field pasted in without one gets. Layout and print both read
+ * it, so a field never prints at a size it was not laid out at.
+ */
+export function fieldSize(kinds: FieldKinds, node: PmNode): { width: number; height: number } {
+  const kindSize = (kinds[String(node.attrs["kind"])] ?? BUILT_IN_FIELD_KINDS.text).size;
+  return { width: sizeOr(node.attrs["width"], kindSize.width), height: sizeOr(node.attrs["height"], kindSize.height) };
+}
+
+/** A length given as a size, or the fallback when it is none: blank, zero, negative or not a number. */
+export function sizeOr(given: unknown, fallback: number): number {
+  const length = Number(given);
+  return Number.isFinite(length) && length > 0 ? length : fallback;
+}
+
 /** What a field is, as its label says it: "Signature". */
 export const fieldLabel = (kinds: FieldKinds, node: PmNode): string =>
   kinds[String(node.attrs["kind"])]?.label ?? String(node.attrs["kind"]);

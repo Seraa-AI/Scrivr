@@ -40,6 +40,9 @@ interface Reading {
   reachedEnd: boolean;
 }
 
+/** How a signature that waits is tagged — on the page and in the room's list alike. */
+const waitingTag = (count: number): string => `After ${count} field${count === 1 ? "" : "s"}`;
+
 const KIND_LABEL: Record<string, string> = {
   signature: "Signature",
   initials: "Initials",
@@ -68,9 +71,13 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
   });
   const [request, setRequest] = useState<FieldRequest | null>(null);
   const [verified, setVerified] = useState<boolean | null>(null);
-  // The executed PDF and its certificate, issued together from one printing.
-  const [executed, setExecuted] = useState<{ hash: string; url: string } | null>(null);
-  const [certificate, setCertificate] = useState<{ hash: string; url: string } | null>(null);
+  // The executed PDF and its certificate, issued together from one printing,
+  // with the answers they were printed from: offered only while those are still the answers.
+  const [issued, setIssued] = useState<{
+    from: Record<string, FieldValue>;
+    executed: { hash: string; url: string };
+    certificate: { hash: string; url: string };
+  } | null>(null);
   // The room's own record of who was sent and who viewed the document, as a
   // host keeps one; signings come from the values themselves when it issues.
   const [events, setEvents] = useState<CompletionEvent[]>(() => {
@@ -97,18 +104,12 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
     };
   }, [snapshot]);
 
-  // A changed answer makes the issued documents stale: offer them no longer.
-  useEffect(() => {
-    setExecuted(null);
-    setCertificate(null);
-  }, [values]);
-
+  const { executed, certificate } = issued?.from === values ? issued : { executed: null, certificate: null };
   useEffect(() => () => {
-    if (executed) URL.revokeObjectURL(executed.url);
-  }, [executed]);
-  useEffect(() => () => {
-    if (certificate) URL.revokeObjectURL(certificate.url);
-  }, [certificate]);
+    if (!issued) return;
+    URL.revokeObjectURL(issued.executed.url);
+    URL.revokeObjectURL(issued.certificate.url);
+  }, [issued]);
 
   // A party has viewed the document once it is opened as them.
   useEffect(() => {
@@ -135,6 +136,7 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
           fields: snapshot.fields,
           // Nothing is offered until the snapshot is proven intact.
           completable: verified ? mine.map((f) => f.id) : [],
+          waitingLabel: waitingTag,
           onFieldRequest: (field, current) =>
             new Promise<FieldValue | null>((resolve) => {
               // A click ticks the box, and a second click clears it.
@@ -182,10 +184,10 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
     unansweredBeforeSigning(mine, shown, role, kinds)[0] ??
     mine.find((f) => !isDatedWhenSigned(kinds, f.kind) && !isFieldAnswered(f, shown[f.id], kinds));
 
-  // An unanswered field's status: a signature says how many fields come first, as its tag on the page does.
+  // An unanswered field's status: a signature says how many fields come first, in its tag's words on the page.
   const statusOf = (field: SignerFieldDescriptor): string => {
-    const first = isSigningKind(kinds, field.kind) ? unansweredBeforeSigning(mine, shown, role, kinds).length : 0;
-    return first > 0 ? `After ${first} field${first === 1 ? "" : "s"}` : "Open";
+    const owed = isSigningKind(kinds, field.kind) ? unansweredBeforeSigning(mine, shown, role, kinds).length : 0;
+    return owed > 0 ? waitingTag(owed) : "Open";
   };
 
   const answer = (value: FieldValue | null) => {
@@ -230,10 +232,14 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
           ],
         }),
       });
+      // Answered again while it printed: these documents are of answers no longer given.
+      if (valuesRef.current !== values) {
+        setProblem("An answer changed while the documents were printing. Download them again.");
+        return;
+      }
       if (!result.ok) {
         const { refusal } = result;
-        setExecuted(null);
-        setCertificate(null);
+        setIssued(null);
         setProblem(
           refusal.reason === "unanswered-fields"
             ? `Still unanswered: ${refusal.missing.map((f) => KIND_LABEL[f.kind] ?? f.kind).join(", ")}.`
@@ -241,8 +247,11 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
         );
         return;
       }
-      setExecuted({ hash: result.executed.artifactHash, url: download(result.executed.pdf, "services-agreement-executed.pdf") });
-      setCertificate({ hash: result.certificate.certificateHash, url: pdfUrl(result.certificate.pdf) });
+      setIssued({
+        from: values,
+        executed: { hash: result.executed.artifactHash, url: download(result.executed.pdf, "services-agreement-executed.pdf") },
+        certificate: { hash: result.certificate.certificateHash, url: pdfUrl(result.certificate.pdf) },
+      });
     } catch (error) {
       setProblem(`The executed PDF and its certificate could not be made: ${error instanceof Error ? error.message : String(error)}. Try again.`);
     } finally {
@@ -423,9 +432,9 @@ export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; on
 }
 
 /**
- * The setup the signers see and the executed PDF and its certificate are
- * printed with — one list, so all three agree. The signing view also opens
- * with the room's values; the export hands its own.
+ * The setup the signers see and the executed PDF is printed with — one list,
+ * so the two agree; the certificate takes its fonts and page. The signing
+ * view also opens with the room's values; the export hands its own.
  */
 function signersSetup(values: Record<string, FieldValue> = {}) {
   return [StarterKit.configure({ table: true }), Field.configure({ values, formatSignedDate: signedDateInWords })];

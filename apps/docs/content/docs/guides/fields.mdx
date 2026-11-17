@@ -115,7 +115,7 @@ editor.commands.insertField({ kind: "stamp", fill: "signer", role: "client" });
 A kind you register behaves as the control it declares everywhere at once: `agree` above draws as a checkbox, can be ticked by an author, prints as one in the PDF, and exports to Word as Word's checkbox. A kind whose control is `"text"` exports as a Word text control and still comes back as your kind when the document is imported. A text kind declares `drawn: true` when it is completed by drawing, as `stamp` above and the built-in initials are: it takes an image, keeps its `size` on the baseline, and its badge says `verb` ("Draw" when it gives none). Registering a name that is already built in refines the built-in: what you give replaces what it declares, and the rest stays — relabel `initials` and they are still drawn; give it another control and it takes nothing that belonged to the old one.
 
 <Callout type="info">
-A field sits in its line like a word. A text field is as tall as the text around it, and as wide as the space its author left; a dropdown is as wide as its widest choice. A drawn field — a signature, or a kind that declares `drawn`, as initials do — keeps the size it was inserted at, from the kind's `size` or the `width` / `height` you pass. Once a field holds a value it fits that value, and the line closes up around it — on screen while signing and in the executed PDF alike.
+A field sits in its line like a word. A text field is as tall as the text around it, and as wide as the space its author left; a dropdown is as wide as its widest choice. A drawn field — a signature, or a kind that declares `drawn`, as initials do — keeps the size it was inserted at, from the kind's `size` or the `width` / `height` you pass; one whose size is zero, negative or not a number — from hand-written JSON, say — takes its kind's `size`, on screen, in the PDF and in Word alike (`fieldSize`). Once a field holds a value it fits that value, and the line closes up around it — on screen while signing and in the executed PDF alike.
 </Callout>
 
 ## Your own look
@@ -139,7 +139,7 @@ Field.configure({
 });
 ```
 
-`FieldCompletion` takes a `paint` of its own for the signing view. It is also told whether the field is this viewer's (`own`), whether it is under the pointer or keyboard focus (`active`, `focused`), whether its value is being captured (`pending`), and, for a signature, how many of the viewer's fields must be answered before it can be signed (`fieldsBeforeSigning`, 0 otherwise — the same rule pressing it applies) with the tag Scrivr would show (`waitingLabel`) — so your own look can show that a signature waits. Word that tag in your signers' language with `FieldCompletion.configure({ waitingLabel: (count) => … })`.
+`FieldCompletion` takes a `paint` of its own for the signing view. It is also told whether the field is this viewer's (`own`), whether it is under the pointer or keyboard focus (`active`, `focused`), whether its value is being captured (`pending`), and, for a signature, how many of the viewer's fields must be answered before it can be signed (`fieldsBeforeSigning`, 0 otherwise — the same rule pressing it applies) with the tag Scrivr would show (`waitingLabel`, empty when it does not wait) — so your own look can show that a signature waits. Word that tag in your signers' language with `FieldCompletion.configure({ waitingLabel: (count) => … })`.
 
 ## Reading the fields in a document
 

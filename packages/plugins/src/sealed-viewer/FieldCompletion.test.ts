@@ -654,8 +654,10 @@ describe("FieldCompletion — signing last", () => {
     expect(waiting()).toBe(1);
   });
 
-  it("words the waiting tag in the host's language", () => {
+  it("words the waiting tag in the host's language, asked only for a signature that waits", () => {
     const words: string[] = [];
+    const asked: number[] = [];
+    const drawn: SigningFieldDrawing[] = [];
     editor = new LaidOutViewer({
       extensions: [
         StarterKit,
@@ -664,7 +666,14 @@ describe("FieldCompletion — signing last", () => {
           fields: [terms, signHere],
           completable: [terms.id, signHere.id],
           onFieldRequest: async () => null,
-          waitingLabel: (count) => `Après ${count} champ${count === 1 ? "" : "s"}`,
+          waitingLabel: (count) => {
+            asked.push(count);
+            return `Après ${count} champ${count === 1 ? "" : "s"}`;
+          },
+          paint: (_ctx, field) => {
+            drawn.push(field);
+            return false;
+          },
         }),
       ],
       content: { type: "doc", content: [{ type: "paragraph", content: [terms, signHere].map((f) => ({ ...fieldNode(f), attrs: { ...fieldNode(f).attrs, options: f.options } })) }] },
@@ -676,6 +685,11 @@ describe("FieldCompletion — signing last", () => {
     editor.painters.at(-1)?.(recordingContext(words), 1, defaultPageConfig, map, editor.getResolvedTheme());
 
     expect(words.some((w) => w.includes("Après 1 champ"))).toBe(true);
+    expect(asked).toEqual([1]);
+    expect(drawn.map((f) => [f.kind, f.fieldsBeforeSigning, f.waitingLabel])).toEqual([
+      [terms.kind, 0, ""],
+      [signHere.kind, 1, "Après 1 champ"],
+    ]);
   });
 
   it("never ticks a required box for the signer on the way to signing", () => {

@@ -4,7 +4,7 @@
  * printing, so it can only describe the document beside it — what Scrivr
  * checked, kept apart from the host's own record of the signing.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createCanvas } from "@napi-rs/canvas";
 import { crc32 } from "node:zlib";
 import { PDFDocument } from "pdf-lib";
@@ -16,6 +16,7 @@ import {
   TextMeasurer,
   createSnapshot,
   hashArtifact,
+  type FieldKinds,
   type FieldValue,
   type SealedSnapshot,
   type TextMeasureContext,
@@ -39,6 +40,7 @@ import {
   type VerifiedSignature,
 } from "../index";
 import { recordDrawOps } from "./opLog";
+import { createDefaultImageResolver } from "../fetchImage";
 
 const measureContext = (ctx: { font: string; measureText: (text: string) => TextMetrics }): TextMeasureContext => ctx;
 const measurer = () => new TextMeasurer({ lineHeightMultiplier: 1.2, context: measureContext(createCanvas(800, 600).getContext("2d")) });
@@ -56,10 +58,12 @@ const zeroWidthPng = (): string => {
 const brokenPng = "data:image/png;base64,iVBORw0KGgoAAAAAAAA";
 
 /** A signer field with its kind's size, as inserting one gives it. */
-const field = (id: string, role: string, kind: string, required = true) => {
-  const { width, height } = BUILT_IN_FIELD_KINDS[kind === "dateSigned" ? "dateSigned" : kind === "initials" ? "initials" : "signature"].size;
-  return { type: "field", attrs: { nodeId: id, kind, fill: "signer", role, required, width, height } };
-};
+const knownKinds: FieldKinds = BUILT_IN_FIELD_KINDS;
+/** A signer field sized as inserting it would size it; a kind no one knows keeps the schema's default. */
+const field = (id: string, role: string, kind: string, required = true) => ({
+  type: "field",
+  attrs: { nodeId: id, kind, fill: "signer", role, required, ...knownKinds[kind]?.size },
+});
 
 let sealedOnce: Promise<SealedSnapshot> | null = null;
 /** A client signature with its date signed, and a vendor signature — sealed for both. */
@@ -336,12 +340,22 @@ describe("a host's own content on the certificate", () => {
     expect(linesOf(certificate.content)).toContain("2 parties signed.");
   });
 
+  it("hands the host the labels in use, so it finds its own words in Scrivr's blocks — a translation too", async () => {
+    const { certificate } = await issued(signed, {
+      labels: { ip: "Adresse IP" },
+      content: ({ record, labels }) => ({ record: record.filter((block) => !("label" in block && block.label === labels.ip)) }),
+    });
+
+    expect(linesOf(certificate.content).join("\n")).not.toContain("203.0.113.7");
+  });
+
   it("cannot change what was verified: the hook sees the facts, never the ones printed or kept", async () => {
     const { executed, certificate } = await issued(signed, {
-      content: ({ verified }) => {
+      content: ({ verified, labels }) => {
         try {
           Reflect.set(verified, "artifactHash", "sha256:forged");
           Reflect.set(verified.signatures, 0, { fieldId: "forged", role: "client", kind: "signature" });
+          Reflect.set(labels, "record", "Signing record — forged by");
         } catch {
           // Frozen: a write may throw, or be ignored.
         }
@@ -352,6 +366,23 @@ describe("a host's own content on the certificate", () => {
     expect(certificate.verified.artifactHash).toBe(executed.artifactHash);
     expect(certificate.verified.signatures[0]?.fieldId).toBe("client-sig");
     expect(linesOf(certificate.content).join("\n")).not.toContain("forged");
+    expect(linesOf(certificate.content)).toContain(RECORD);
+  });
+
+  it("says so in its types: what was verified, and the labels it is printed under, are read-only", () => {
+    // Never called: tsc is the check, failing if any of these writes compiles.
+    const tamper = (verified: VerifiedFacts, labels: CertificateParts["labels"]) => {
+      // @ts-expect-error the executed PDF's hash is read-only
+      verified.artifactHash = "sha256:forged";
+      // @ts-expect-error the signatures are read-only
+      verified.signatures.push({ fieldId: "forged", role: "client", kind: "signature" });
+      // @ts-expect-error each signature is read-only
+      verified.signatures[0]!.role = "forged";
+      // @ts-expect-error the labels are read-only
+      labels.record = "Signing record — forged by";
+    };
+
+    expect(tamper).toBeTypeOf("function");
   });
 
   it("still refuses a record that does not fit the document, whatever the host prints", async () => {
@@ -454,32 +485,53 @@ describe("exportCompletionCertificate refuses a record it could not print honest
 });
 
 describe("exportCompletionCertificate prints a signature as the executed PDF does", () => {
-  it("in the field's own box, not its kind's default", async () => {
+  /** The drawing the certificate shows for a 3:1 signature in a field of this size. */
+  const shownIn = async (size: { width: unknown; height: unknown }) => {
     const author = new ServerEditor({
       extensions: [StarterKit, Field],
       content: {
         type: "doc",
-        content: [
-          { type: "paragraph", content: [{ type: "field", attrs: { nodeId: "wide", kind: "signature", fill: "signer", role: "client", required: true, width: 300, height: 60 } }] },
-        ],
+        content: [{ type: "paragraph", content: [{ type: "field", attrs: { nodeId: "sig", kind: "signature", fill: "signer", role: "client", required: true, ...size } }] }],
       },
     });
-    const sealedWide = await createSnapshot(author.getState().doc, { kinds: BUILT_IN_FIELD_KINDS, assignedRoles: ["client"] });
-    if (!sealedWide.ok) throw new Error(sealedWide.refusal.reason);
+    const sealedOne = await createSnapshot(author.getState().doc, { kinds: BUILT_IN_FIELD_KINDS, assignedRoles: ["client"] });
+    if (!sealedOne.ok) throw new Error(sealedOne.refusal.reason);
     const result = await exportCompletionCertificate(
-      sealedWide.snapshot,
-      { wide: { kind: "image", src: drawing, signedAt: "2026-11-15T09:00:00Z" } },
+      sealedOne.snapshot,
+      { sig: { kind: "image", src: drawing, signedAt: "2026-11-15T09:00:00Z" } },
       options({ record: record({ parties: [{ role: "client", name: "Ada" }], events: [] }) }),
     );
     if (!result.ok) throw new Error(JSON.stringify(result.refusal));
-
-    // A 3:1 drawing in a 300 × 60 box: 60 high sets the scale, so 180 × 60.
     const image = imagesOf(result.certificate.content)[0];
-    expect(image?.["width"]).toBeCloseTo(180, 6);
-    expect(image?.["height"]).toBeCloseTo(60, 6);
+    return { width: Number(image?.["width"]), height: Number(image?.["height"]) };
+  };
+
+  it("from the very drawing the executed PDF embedded: the host's resolver is asked once, for both", async () => {
+    const resolveImage = vi.fn(createDefaultImageResolver());
+    await issued(signed, { resolveImage });
+
+    expect(resolveImage.mock.calls.filter(([src]) => src === drawing)).toHaveLength(1);
   });
 
-  it("as the drawing it embedded, cleaned of stray whitespace", async () => {
+  it("in the field's own box, not its kind's default", async () => {
+    // A 3:1 drawing in a 300 × 60 box: 60 high sets the scale, so 180 × 60.
+    const { width, height } = await shownIn({ width: 300, height: 60 });
+
+    expect(width).toBeCloseTo(180, 6);
+    expect(height).toBeCloseTo(60, 6);
+  });
+
+  it("in its kind's box when the field has no size of its own, as the page lays it out", async () => {
+    // A 3:1 drawing in the signature's 180 × 44: 44 high sets the scale, so 132 × 44.
+    for (const unsized of [0, Number.NaN, "wide"]) {
+      const { width, height } = await shownIn({ width: unsized, height: unsized });
+
+      expect(width).toBeCloseTo(132, 6);
+      expect(height).toBeCloseTo(44, 6);
+    }
+  });
+
+  it("from the drawing as the executed PDF embedded it — the cleaned URL, not the one the host gave", async () => {
     const client: FieldValue = { kind: "image", src: `  ${drawing}\n`, signedAt: "2026-11-15T01:30:00+03:00" };
     const { certificate } = await issued({ ...signed, "client-sig": client });
 
@@ -488,7 +540,7 @@ describe("exportCompletionCertificate prints a signature as the executed PDF doe
 });
 
 describe("the guide's own example", () => {
-  // The record docs/guides/certificate.mdx shows a host — kept here so the guide never shows one that is refused.
+  // The record apps/docs/content/docs/guides/certificate.mdx shows a host — kept here so the guide never shows one that is refused.
   const guideRecord: CompletionRecord = {
     issuer: "Acme Sign",
     title: "Master Services Agreement",
@@ -553,7 +605,7 @@ describe("the certificate's contract", () => {
     const labels: CertificateLabels = DEFAULT_CERTIFICATE_LABELS;
     const refusal: CertificateRefusal = { reason: "unknown-field-kind", kind: "stamp" };
     const hook = (parts: CertificateParts): CertificateContent => ({ record: parts.record });
-    expect(hook({ record: [], verified, signingRecord: record() })).toEqual({ record: [] });
+    expect(hook({ record: [], verified, labels, signingRecord: record() })).toEqual({ record: [] });
 
     expect([signature?.role, labels.eventKinds[kind], refusal.reason]).toEqual(["client", "Sent", "unknown-field-kind"]);
   });

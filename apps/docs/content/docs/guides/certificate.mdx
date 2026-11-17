@@ -21,7 +21,7 @@ A certificate has two sections, and the difference between them is the whole poi
 
 **Signing record — as recorded by** *your issuer* holds your word: the document's title and id, your parties and their details, when each signature was given, and your events. Scrivr checks that the record fits the document and time (see [What is checked](#what-is-checked)), and prints it as you gave it.
 
-*Verified at issue* names no person as a fact. Each signature is shown exactly as the executed PDF prints it — a typed signature's words, a drawing — headed by its kind and role ("Signature — client"), because which person holds that role is your fact, not Scrivr's. No email, IP address or signing time appears there.
+*Verified at issue* names no person as a fact. Each signature is shown as the executed PDF prints it — a typed signature's words, a drawing at the size it printed — headed by its kind and role ("Signature — client"), because which person holds that role is your fact, not Scrivr's. No email, IP address or signing time appears there.
 
 Only signatures are shown — fields whose kind is a signature line. Initials, ticked boxes and every other answer are in the executed PDF, and they are covered by its hash, which the certificate does verify; they are not repeated on the certificate.
 
@@ -36,8 +36,8 @@ import { Field, StarterKit } from "@scrivr/core";
 import { exportCompletionCertificate } from "@scrivr/export-pdf";
 
 const result = await exportCompletionCertificate(sealed.snapshot, values, {
-  // The setup the signers saw — Field with the same kinds and date format.
-  // Both PDFs are printed with it.
+  // The setup the signers saw — Field with the same kinds and date format —
+  // which prints the executed PDF; the certificate takes its fonts and page.
   editorOptions: { extensions: [StarterKit, Field.configure({ kinds })], fonts, pageConfig },
   record: {
     issuer: "Acme Sign",
@@ -135,7 +135,7 @@ Events print in UTC, in time order — ties in the order you gave them — as Do
 
 ## What is checked
 
-Before issuing, Scrivr checks the document, then your record against it and against time, in about this order — the first that fails is the refusal.
+Before issuing, Scrivr checks the document, then your record against it and against time, in this order — the first that fails is the refusal.
 
 | Check | Refusal |
 |---|---|
@@ -197,17 +197,15 @@ Translating `verified` or `verifiedNote` is fine. Rewording them to claim more t
 `content` lets you add your own blocks around the certificate, or lay out the record your own way. It is handed what Scrivr would print and the facts behind it (`CertificateParts`), and returns your blocks (`CertificateContent`):
 
 ```ts
-import { DEFAULT_CERTIFICATE_LABELS, exportCompletionCertificate, type CertificateContent, type CertificateParts } from "@scrivr/export-pdf";
+import { exportCompletionCertificate, type CertificateContent, type CertificateParts } from "@scrivr/export-pdf";
 import type { DocumentBlock } from "@scrivr/core";
 
-// The IP label as it is printed — your translation if you gave one, else the default.
-const ipLabel = DEFAULT_CERTIFICATE_LABELS.ip;
-
-const content = ({ record }: CertificateParts): CertificateContent => ({
+const content = ({ record, labels }: CertificateParts): CertificateContent => ({
   // Above the certificate's title: your logo, an introduction.
   before: [{ image: logoDataUrl, width: 120, height: 40 }, { paragraph: "Acme Sign — completion record" }],
-  // The record's body, your way: here Scrivr's own, less the IP addresses.
-  record: record.filter((block: DocumentBlock) => !("label" in block && block.label === ipLabel)),
+  // The record's body, your way: here Scrivr's own, less the IP addresses —
+  // found by the label they are printed under, your translation if you gave one.
+  record: record.filter((block: DocumentBlock) => !("label" in block && block.label === labels.ip)),
   // At the end: your disclosure, consent text, support contact.
   after: [
     { title: "Electronic record and signature disclosure", level: 3 },
@@ -218,11 +216,11 @@ const content = ({ record }: CertificateParts): CertificateContent => ({
 const result = await exportCompletionCertificate(snapshot, values, { editorOptions, record: signingRecord, content });
 ```
 
-`CertificateParts` also hands you `verified` (the checked facts, frozen) and `signingRecord` (your record as you gave it), to lay the record out from scratch.
+`CertificateParts` hands you `record`, the `labels` it is printed under (yours where you gave them), `verified` (the checked facts) and `signingRecord` (your record as you gave it), to lay the record out from scratch. `verified` and `labels` are frozen and typed read-only.
 
 - Blocks are `DocumentBlock`s from `@scrivr/core`: `{ title, level: 1 | 2 | 3 }`, `{ paragraph }`, `{ label, value }` (a bold label and its value) and `{ image, width, height }`. An image is fetched like any image in an export — prefer an inline PNG or JPEG `data:` URL, so the certificate depends on nothing at a URL.
 - `record` is the body of the record section as Scrivr lays it out — keep it, filter it, add to it, or replace it with your own built from `signingRecord`. Leave out any of `before`, `record`, `after` and that part stays Scrivr's.
-- **What you cannot change:** what *Verified at issue* holds, and the record's title naming your issuer. The section is laid out before `content` is called, and `verified` is handed to you frozen, so your content can sit around what was checked and never inside it. The checks run on your `record` data whatever you print, so content cannot print its way past a refusal.
+- **What you cannot change:** what *Verified at issue* holds, and the record's title naming your issuer. The section is laid out before `content` is called, and `verified` and `labels` are handed to you frozen, so your content can sit around what was checked and never inside it. The checks run on your `record` data whatever you print, so content cannot print its way past a refusal.
 
 Your content is yours to keep honest. Scrivr cannot stop a block that *says* "verified", so do not word your own content as if Scrivr had checked it.
 

@@ -33,6 +33,7 @@ export {
   fieldIconStrokes,
   fieldInk,
   fieldRoleColor,
+  fieldSize,
   fieldValueLayout,
   fieldVerb,
   isDatedWhenSigned,

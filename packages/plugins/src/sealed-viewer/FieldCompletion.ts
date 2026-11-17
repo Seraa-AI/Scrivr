@@ -65,7 +65,7 @@ export interface FieldCompletionOptions {
    * role on your server when you record the signature.
    */
   onSignatureBlocked?: (signature: SignerFieldDescriptor, missing: SignerFieldDescriptor[]) => void;
-  /** The tag on a signature that waits, given how many fields come first. Default: "After 2 fields". */
+  /** The tag on a signature that waits, given how many fields come first (never 0). Default: `After 1 field`, `After 2 fields`. */
   waitingLabel?: (count: number) => string;
   /** Colour of the viewer's own fields. Defaults to their party's colour, as the author saw it. */
   accentColor?: string;
@@ -91,11 +91,11 @@ export interface SigningFieldDrawing extends FieldDrawing {
   datedWhenSigned: boolean;
   /**
    * How many of this viewer's fields must be answered before this signature
-   * can be signed — what pressing it would wait on. 0 for any other field,
-   * or a signature ready to sign.
+   * can be signed — what pressing it would wait on, signed already or not.
+   * 0 for any other field, or a signature ready to sign.
    */
   fieldsBeforeSigning: number;
-  /** The tag for a signature that waits, worded as the host configured it. */
+  /** The tag for a signature that waits, worded as the host configured it; empty when it does not wait. */
   waitingLabel: string;
 }
 
@@ -353,7 +353,7 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
           answered,
           datedWhenSigned: isDated(field),
           fieldsBeforeSigning: before,
-          waitingLabel: waitingLabel(before),
+          waitingLabel: before > 0 ? waitingLabel(before) : "",
         };
         if (!paint?.(ctx, signing)) paintField(ctx, signing);
       }
@@ -419,10 +419,10 @@ function paintField(ctx: CanvasRenderingContext2D, f: SigningFieldDrawing): void
     }
   } else if (f.own) {
     paintFieldInk(ctx, box, { control, label: f.label, color: f.color, solid: true, faint: 1, baselineY: f.baselineY });
-    // Said once: a label that is already the verb needs no badge repeating it,
-    // and a date signed asks nothing of the signer.
     // A signature that must wait says so, muted, rather than inviting a press that cannot sign.
     if (f.fieldsBeforeSigning > 0) paintBadge(ctx, box, f.waitingLabel, f.theme.imagePlaceholderBorder, f.theme.pageBg);
+    // Said once: a label that is already the verb needs no badge repeating it,
+    // and a date signed asks nothing of the signer.
     else if (f.verb !== f.label && !f.datedWhenSigned) paintBadge(ctx, box, f.verb, f.color, f.theme.pageBg);
   } else {
     paintFieldInk(ctx, box, { control, label: roleName(f.role), color: f.theme.imagePlaceholderBorder, faint: 0.8, baselineY: f.baselineY });

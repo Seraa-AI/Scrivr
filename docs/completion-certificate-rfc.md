@@ -98,8 +98,8 @@ A library does not, so it must.
 
 3. **Issued with the executed PDF, from one printing.** One call,
    `exportCompletionCertificate(snapshot, values, options)`, prints the
-   executed record and then its certificate from the same editor, fields,
-   kinds and printed values — so a certificate can only describe the
+   executed record and then its certificate from the same printing — its
+   fields, kinds, printed values and embedded drawings — so a certificate can only describe the
    document it was issued beside, and a mismatched pair cannot be built.
    The certificate is its own PDF that names the executed one by its
    `artifactHash`; the executed record stays verifiable alone. A host that
@@ -108,9 +108,9 @@ A library does not, so it must.
 
 4. **A Scrivr document, printed by the same exporter.** The certificate is
    built as an ordinary document — headings, labelled lines, the drawn
-   signatures as images, nothing beyond StarterKit — and printed with the
-   executed record's `editorOptions`, so the two share fonts and page setup
-   and need no second renderer. Its JSON is returned too, to show in a
+   signatures as images, nothing beyond StarterKit — and printed in StarterKit
+   with the executed record's fonts and page setup, its drawings from the
+   bytes the executed PDF embedded, so it needs no second renderer. Its JSON is returned too, to show in a
    viewer.
 
 5. **A signature's time is the host's.** With the default `formatSignedDate`
@@ -169,7 +169,7 @@ const result = await exportCompletionCertificate(snapshot, values, {
       { at: "2026-11-15T09:44:12Z", kind: "completed" },
     ],
   },
-  content: ({ record }) => ({ after: [{ title: "Disclosure", level: 3 }, { paragraph: disclosure }] }),
+  content: () => ({ after: [{ title: "Disclosure", level: 3 }, { paragraph: disclosure }] }),
   labels,                                                   // optional overrides of the English defaults
 });
 // { ok: true, executed: { pdf, artifactHash }, certificate: { pdf, certificateHash, verified, content } }
@@ -220,7 +220,11 @@ come first.
   snapshot, opens it with the signers' extensions, holds the values it can
   print, checks completeness against `valuesOnRecordOf`, prints, and hands
   the certificate what it read — fields, kinds, the values on record, each
-  drawing's embedded size, each field's own box.
+  drawing's embedded size, each field's box, and the resolver that fetched
+  each image once, so the certificate prints the very bytes embedded.
+- **A field's box** is Field's: `fieldSize` — its authored size, or its
+  kind's where that is no size — sizes layout, the executed PDF, the
+  certificate's fitting and Word's signature line alike.
 - **The grammar of `signedAt`** is core's: `readSigningMoment`, beside
   `parseSignedAt` and built on the same one reader, gives the instant, the
   day, and the clock and zone together when a time was written.
@@ -240,7 +244,8 @@ come first.
 | `export-pdf/src/pdf.ts` (new) | `exportToPdf` and `buildPdf`, moved out of the barrel so the modules that print import them without a cycle |
 | `core/src/sealing/snapshot.ts` | `snapshotDocument`, the snapshot's document object, shared by every reader |
 | `core/src/model/documentFromBlocks.ts` (new) | `documentFromBlocks`: a plain document from titles, paragraphs, labelled lines and images — core owns StarterKit's vocabulary, so the exporter names no node |
-| `core/src/extensions/built-in/fieldKinds.ts` | `readSigningMoment`, `SigningMoment` |
+| `core/src/extensions/built-in/fieldKinds.ts` | `readSigningMoment`, `SigningMoment`, `fieldSize` |
+| `core/src/extensions/built-in/Field.ts`, `fieldDocx.ts` | layout, pasting and Word's signature line size a field by `fieldSize` |
 | `plugins/src/sealed-viewer/FieldCompletion.ts` | the signing walkthrough: `fieldsBeforeSigning`, `waitingLabel`, a held-back signature opening the first field owed |
 | `docs/guides/certificate.mdx` (new) | the certificate's own guide; `sealing.mdx` points to it, `fields.mdx` describes the walkthrough |
 | playground *Signing* demo | the executed PDF and its certificate from one click |
@@ -252,8 +257,10 @@ come first.
   Its title and note are labels the host may translate.
 - The certificate's `artifactHash` is the hash of the executed PDF issued
   with it.
-- The signatures it shows are the ones that PDF prints, fitted to the same
-  field boxes.
+- The signatures it shows are the ones that PDF prints — the same bytes,
+  fitted to the same field boxes.
+- What the host is handed of the verified section, and the labels it is
+  printed under, are frozen and typed read-only.
 - With the default `formatSignedDate`, a party's latest signature's
   recorded day is the day its date-signed field prints.
 - No refusal case yields either PDF.
@@ -274,9 +281,15 @@ come first.
   the facts handed over frozen — a write to them changes nothing printed or
   kept; a refusal still fires whatever it prints.
 - A drawing with no area answers nothing; a signature fits its field's own
-  box; the guide's own example record is issued.
+  box, or its kind's when the field has no size — as layout and Word size
+  it; the host's resolver is asked once for both PDFs; the guide's own
+  example record is issued.
+- The host's `content` gets the labels in use, so a translated label finds
+  its blocks; neither they nor the verified facts can be written, in type or
+  at runtime.
 - The walkthrough: a held-back signature opens the first field owed (a
-  checkbox only focused), and its tag counts what pressing it waits on.
+  checkbox only focused), and its tag counts what pressing it waits on; the
+  host's wording is asked only for a signature that waits.
 
 ## Out of scope
 
@@ -322,7 +335,11 @@ certificate with one click. A full click-through as both parties issued
 both PDFs; from it, a signature's time in the record is headed by its kind
 alone ("Signature: …"), and the guide says why initials and other answers
 are not repeated on the certificate — the executed PDF's verified hash
-covers them.
+covers them. A fourth review then made the certificate print each drawing
+from the bytes the executed PDF embedded, sized every field by one rule
+(`fieldSize`), handed `content` the labels in use, typed the frozen facts
+read-only, and the playground offers issued documents only while the
+answers they were printed from are still the answers.
 
 ## Sources
 

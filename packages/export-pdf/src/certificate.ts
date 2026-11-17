@@ -8,7 +8,6 @@ import {
   readSigningMoment,
   type DocumentBlock,
   type FieldKindSpec,
-  type FieldKinds,
   type FieldValue,
   type SealedSnapshot,
   type SignerFieldDescriptor,
@@ -58,22 +57,22 @@ export interface CompletionRecord {
  * label, and a party by its name.
  */
 export interface CertificateLabels {
-  title: string;
-  verified: string;
-  verifiedNote: string;
-  contentHash: string;
-  artifactHash: string;
+  readonly title: string;
+  readonly verified: string;
+  readonly verifiedNote: string;
+  readonly contentHash: string;
+  readonly artifactHash: string;
   /** Followed by the issuer's name. */
-  record: string;
-  documentTitle: string;
-  documentId: string;
-  role: string;
-  email: string;
-  authentication: string;
-  ip: string;
-  userAgent: string;
-  events: string;
-  eventKinds: Readonly<Record<StandardEventKind, string>>;
+  readonly record: string;
+  readonly documentTitle: string;
+  readonly documentId: string;
+  readonly role: string;
+  readonly email: string;
+  readonly authentication: string;
+  readonly ip: string;
+  readonly userAgent: string;
+  readonly events: string;
+  readonly eventKinds: Readonly<Record<StandardEventKind, string>>;
 }
 
 /** The English labels a certificate uses unless given others — a base to spread for a full translation. */
@@ -102,6 +101,8 @@ export interface CertificateParts {
   record: DocumentBlock[];
   /** What was checked, as data. */
   verified: VerifiedFacts;
+  /** The labels this certificate is printed under — the host's own where it gave them — to find Scrivr's blocks by. */
+  labels: CertificateLabels;
   /** The host's record as it was given. */
   signingRecord: CompletionRecord;
 }
@@ -129,16 +130,16 @@ export interface CompletionCertificateOptions extends ExecutedPdfOptions {
 
 /** A signature as checked: which field, whose role, what kind. When it was given is the host's record, printed there. */
 export interface VerifiedSignature {
-  fieldId: string;
-  role: string;
-  kind: string;
+  readonly fieldId: string;
+  readonly role: string;
+  readonly kind: string;
 }
 
 /** The certificate's checked section as data, to keep beside it. */
 export interface VerifiedFacts {
-  contentHash: string;
-  artifactHash: string;
-  signatures: VerifiedSignature[];
+  readonly contentHash: string;
+  readonly artifactHash: string;
+  readonly signatures: readonly VerifiedSignature[];
 }
 
 /** Why no certificate was issued, beyond why there is no executed document. */
@@ -186,9 +187,10 @@ export type CompletionCertificateResult =
  * same refusals), then the certificate: *Verified at issue* holds only what
  * was checked in this call — the snapshot against its hash, the executed
  * PDF's hash, every signature as it printed — and the host's record follows
- * under the issuer's name, as the host's word. Both PDFs are printed with
- * `editorOptions`. Refuses rather than certify a record that disagrees with
- * the document or with time.
+ * under the issuer's name, as the host's word. The certificate is printed in
+ * StarterKit with `editorOptions`' fonts and page, its drawings from the
+ * bytes the executed PDF embedded. Refuses rather than certify a record that
+ * disagrees with the document or with time.
  */
 export async function exportCompletionCertificate(
   snapshot: Pick<SealedSnapshot, "content" | "contentHash">,
@@ -204,11 +206,12 @@ export async function exportCompletionCertificate(
   if ("reason" in issued) return { ok: false, refusal: issued };
 
   // Printed in StarterKit alone — the certificate is titles, paragraphs and
-  // images — with the signers' fonts and page, so it matches the record.
+  // images — with the signers' fonts and page, so it matches the record; its
+  // drawings are the bytes the executed PDF embedded.
   const { editorOptions, ...pdfOptions } = executedOptions;
   const editor = new Editor({ ...editorOptions, extensions: [StarterKit], content: issued.content, sealed: true });
   try {
-    const pdf = await exportToPdf(editor, pdfOptions);
+    const pdf = await exportToPdf(editor, { ...pdfOptions, resolveImage: print.resolveImage });
     return {
       ok: true,
       executed: { pdf: print.pdf, artifactHash: print.artifactHash },
@@ -236,12 +239,11 @@ export async function bundleCertificate(executed: Uint8Array, certificate: Uint8
 
 // ── Checking the record ──────────────────────────────────────────────────────
 
-/** A signature as the executed record printed it: its field, its kind, its value, its moment, and its size there. */
+/** A signature the executed record printed. */
 interface Signature {
   field: SignerFieldDescriptor;
   spec: FieldKindSpec;
-  value: Extract<FieldValue, { kind: "text" | "image" }>;
-  signedAt: string;
+  /** When it was given, to the second: an undated or unzoned signature was refused. */
   moment: SigningMoment & { time: NonNullable<SigningMoment["time"]> };
   /** The signature as the executed PDF prints it: its words, or its drawing fitted to the field's box. */
   shown: DocumentBlock;
@@ -255,7 +257,8 @@ interface TimedEvent {
 /**
  * The certificate's document and checked facts, or why it cannot be issued
  * over this printing. *Verified at issue* is laid out before the host's
- * `content` is called, from facts the host only ever sees frozen.
+ * `content` is called, from facts the host only ever sees frozen — as it
+ * sees the labels, whose title for the record names the issuer.
  */
 function certificateOf(
   contentHash: string,
@@ -283,7 +286,7 @@ function certificateOf(
   });
   const checked = verifiedBlocks(verified, signatures, labels);
   const recordBody = recordBlocks(signatures, record, timeline, labels);
-  const host = content?.({ record: recordBody, verified, signingRecord: record }) ?? {};
+  const host = content?.({ record: recordBody, verified, labels, signingRecord: record }) ?? {};
   return {
     content: documentFromBlocks([
       ...(host.before ?? []),
@@ -318,12 +321,15 @@ function signaturesOf({ fields, kinds, onRecord, drawings, boxes }: ExecutedPrin
     if (value.signedAt === undefined) return { reason: "undated-signature", fieldId: field.id };
     const moment = readSigningMoment(value.signedAt);
     if (!moment?.time) return { reason: "unzoned-time", at: value.signedAt };
-    // Every drawing on record was embedded, so it has its size; one without was never printed.
-    const drawn = value.kind === "image" ? drawings.get(field.id) : undefined;
-    const shown: DocumentBlock | null =
-      value.kind === "text" ? { paragraph: value.text } : drawn ? { image: value.src, ...containedSize(drawn, boxes.get(field.id) ?? spec.size) } : null;
-    if (!shown) continue;
-    signatures.push({ field, spec, value, signedAt: value.signedAt, moment: { ...moment, time: moment.time }, shown });
+    const time = moment.time;
+    if (value.kind === "text") {
+      signatures.push({ field, spec, moment: { ...moment, time }, shown: { paragraph: value.text } });
+      continue;
+    }
+    // Every drawing on record was embedded and every field has its box; the maps cannot say so.
+    const drawn = drawings.get(field.id);
+    const box = boxes.get(field.id);
+    if (drawn && box) signatures.push({ field, spec, moment: { ...moment, time }, shown: { image: value.src, ...containedSize(drawn, box) } });
   }
   return signatures;
 }
@@ -339,7 +345,8 @@ function instantOf(at: string): number | null {
 }
 
 /** The kinds of event a certificate labels itself. */
-const STANDARD_EVENTS: ReadonlySet<string> = new Set<StandardEventKind>(["sent", "viewed", "consented", "signed", "declined", "completed"]);
+// Every kind that has a label: the labels' type names each one, so none is missed.
+const STANDARD_EVENTS: ReadonlySet<string> = new Set(Object.keys(DEFAULT_CERTIFICATE_LABELS.eventKinds));
 
 /** The events by time — ties in the host's order — or the first that is not an instant, or not an event a certificate can name. */
 function timelineOf(events: readonly CompletionEvent[]): TimedEvent[] | CertificateRefusal {
@@ -410,7 +417,8 @@ function labelsOf(overrides: CompletionCertificateOptions["labels"] = {}): Certi
   const o = overrides;
   const e = o.eventKinds ?? {};
   const pick = (value: string | undefined, fallback: string): string => given(value) ?? fallback;
-  return {
+  // Frozen: the host is handed them, and the record's title among them names the issuer.
+  return deepFreeze({
     title: pick(o.title, d.title),
     verified: pick(o.verified, d.verified),
     verifiedNote: pick(o.verifiedNote, d.verifiedNote),
@@ -433,7 +441,7 @@ function labelsOf(overrides: CompletionCertificateOptions["labels"] = {}): Certi
       declined: pick(e.declined, d.eventKinds.declined),
       completed: pick(e.completed, d.eventKinds.completed),
     },
-  };
+  });
 }
 
 /** An instant as a reader reads it in UTC: `2026-11-14 22:30:00 UTC`. */
@@ -443,8 +451,8 @@ const readableUtc = (at: number): string => `${new Date(at).toISOString().slice(
 const asSigned = ({ day, time }: Signature["moment"]): string => `${day} ${time.clock} (UTC${time.zone})`;
 
 /**
- * *Verified at issue*: what was checked, and each signature exactly as the
- * executed PDF prints it, headed by its kind and role — no person is named
+ * *Verified at issue*: what was checked, and each signature as the executed
+ * PDF prints it — its words, or its drawing at the size it printed — headed by its kind and role — no person is named
  * as a fact here; who holds a role is the host's word, kept to the record.
  */
 function verifiedBlocks(verified: VerifiedFacts, signatures: readonly Signature[], labels: CertificateLabels): DocumentBlock[] {

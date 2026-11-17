@@ -2,6 +2,7 @@ import {
   Editor,
   Field,
   fieldKindsOf,
+  fieldSize,
   flattenExtensions,
   hashArtifact,
   isFieldAnswered,
@@ -76,8 +77,10 @@ export interface ExecutedPrint {
   onRecord: Readonly<Record<string, FieldValue>>;
   /** Each printed drawing's own pixel size, from its embedding. */
   drawings: ReadonlyMap<string, { width: number; height: number }>;
-  /** Each field's box as the document gives it — what a drawing is fitted to when printed. */
+  /** Each field's box as Field lays it out (`fieldSize`) — what its drawing is fitted to when printed. */
   boxes: ReadonlyMap<string, { width: number; height: number }>;
+  /** The images as this printing resolved them, each once: a later printing beside it shows the same bytes. */
+  resolveImage: ImageResolver;
 }
 
 /** `exportExecutedPdf`'s printing, keeping what it read — so a certificate is issued from this printing and no other. */
@@ -121,14 +124,14 @@ export async function printExecuted(
     const boxes = new Map<string, { width: number; height: number }>();
     doc.descendants((node) => {
       const id = node.attrs["nodeId"];
-      if (node.type.name === "field" && typeof id === "string") boxes.set(id, { width: Number(node.attrs["width"]), height: Number(node.attrs["height"]) });
+      if (node.type.name === "field" && typeof id === "string") boxes.set(id, fieldSize(kinds, node));
     });
     // The record Field prints — its kinds, its date format — so what is checked is what prints.
     const onRecord = valuesOnRecordOf(editor);
     const missing = fields.filter((f) => f.required && !isFieldAnswered(f, onRecord[f.id], kinds));
     if (missing.length > 0) return { ok: false, refusal: { reason: "unanswered-fields", missing } };
     const pdf = await exportToPdf(editor, { ...pdfOptions, resolveImage });
-    return { ok: true, print: { pdf, artifactHash: await hashArtifact(pdf), fields, kinds, onRecord, drawings, boxes } };
+    return { ok: true, print: { pdf, artifactHash: await hashArtifact(pdf), fields, kinds, onRecord, drawings, boxes, resolveImage } };
   } finally {
     editor.destroy();
   }

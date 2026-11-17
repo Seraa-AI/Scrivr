@@ -21,6 +21,7 @@ import {
   fieldLabel,
   fieldRoleColor,
   fieldChoices,
+  fieldSize,
   fieldValueLayout,
   fieldVerb,
   isDatedWhenSigned,
@@ -29,6 +30,7 @@ import {
   setsLike,
   signedAtOf,
   shownValue,
+  sizeOr,
   valueText,
   type FieldBox,
   type FieldChoice,
@@ -478,7 +480,7 @@ function textFieldWidth(
   measurer: { measureWidth(text: string, font: string): number },
 ): number {
   if (text !== null) return Math.ceil(measurer.measureWidth(text, line.font)) + 4;
-  const authored = Number(field.attrs["width"]);
+  const authored = fieldSize(kinds, field).width;
   if (controlOf(kinds, field) !== "dropdown") return authored;
   const ink = fieldInk({ x: 0, y: 0, width: authored, height: line.height });
   const widest = Math.max(0, ...fieldChoices(field.attrs["options"]).map((c) => measurer.measureWidth(c.label, line.font)));
@@ -499,7 +501,7 @@ const fieldStrategy = (kinds: FieldKinds, options: FieldOptions, values: () => F
     const like = text !== null ? "text" : setsLike(kinds, String(node.attrs["kind"]));
     switch (like) {
       case "picture":
-        return { width: Number(node.attrs["width"]), height: Number(node.attrs["height"]) };
+        return fieldSize(kinds, node);
       case "glyph": {
         // About as tall as the text's ascenders, as a native checkbox sits beside its label.
         const side = Math.round(ascent * 0.95);
@@ -791,8 +793,8 @@ export const Field = Extension.create<FieldOptions>({
                 required: fill === "signer" && dom.hasAttribute("data-required"),
                 checked: fill === "author" && dom.hasAttribute("data-checked"),
                 options: choicesFromHtml(dom.getAttribute("data-options")),
-                width: Number(dom.getAttribute("data-width")) || spec.size.width,
-                height: Number(dom.getAttribute("data-height")) || spec.size.height,
+                width: sizeOr(dom.getAttribute("data-width"), spec.size.width),
+                height: sizeOr(dom.getAttribute("data-height"), spec.size.height),
               };
             },
           },
