@@ -1,0 +1,232 @@
+{"op":"page","page":1,"width":794,"height":1123,"margins":{"top":72,"right":72,"bottom":72,"left":72}}
+{"op":"block","page":1,"depth":0,"type":"paragraph","x":72,"y":72,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":1,"depth":0,"type":"paragraph","x":72,"y":98.8,"width":650,"height":22.8,"spaceBefore":0,"spaceAfter":10,"lines":["27 October 2017"]}
+{"op":"block","page":1,"depth":0,"type":"paragraph","x":72,"y":131.6,"width":650,"height":25.2,"spaceBefore":0,"spaceAfter":10,"lines":["Enrollment MEPRS"]}
+{"op":"block","page":1,"depth":0,"type":"paragraph","x":72,"y":166.8,"width":650,"height":25.2,"spaceBefore":0,"spaceAfter":10,"lines":["(Version 1.0101)"]}
+{"op":"block","page":1,"depth":0,"type":"paragraph","x":72,"y":202,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":1,"depth":0,"type":"paragraph","x":72,"y":228.8,"width":650,"height":22.8,"spaceBefore":0,"spaceAfter":10,"lines":["Current Specific"]}
+{"op":"block","page":1,"depth":0,"type":"paragraph","x":72,"y":261.6,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":1,"depth":0,"type":"paragraph","x":72,"y":288.4,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["Revision History"]}
+{"op":"block","page":1,"depth":0,"type":"paragraph","x":72,"y":314,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":1,"depth":0,"type":"tableRow","x":72,"y":340.8,"width":650,"height":32.4,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":78,"y":4,"width":49.721,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["Version"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":139.721,"y":4,"width":77.688,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["Date "]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":229.409,"y":4,"width":126.872,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["Para/Tbl/Fig"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":368.282,"y":4,"width":80.582,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["Originator"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":460.864,"y":4,"width":255.136,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["Description of C"]}
+{"op":"block","page":1,"depth":0,"type":"tableRow","x":72,"y":373.2,"width":650,"height":32.4,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":78,"y":4,"width":49.721,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["100"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":139.721,"y":4,"width":77.688,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["4/10/2012"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":229.409,"y":4,"width":126.872,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["Whole Document"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":368.282,"y":4,"width":80.582,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["K. Hofmann"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":460.864,"y":4,"width":255.136,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["Initial version"]}
+{"op":"block","page":1,"depth":0,"type":"tableRow","x":72,"y":405.6,"width":650,"height":110,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":78,"y":4,"width":49.721,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["1001"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":139.721,"y":4,"width":77.688,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["9/10/2012"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":229.409,"y":4,"width":126.872,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["Section VIII, Ta"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":229.409,"y":28.4,"width":126.872,"height":43.2,"spaceBefore":0,"spaceAfter":10,"lines":["Section VI, ","Paragraph 7; Sec","VIII, Table 4"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":229.409,"y":81.6,"width":126.872,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["Section IV, Tabl"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":368.282,"y":4,"width":80.582,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["K. Hofmann"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":460.864,"y":4,"width":255.136,"height":28.8,"spaceBefore":0,"spaceAfter":10,"lines":["Add MED_HOME and","format file"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":460.864,"y":42.8,"width":255.136,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["Add FY and FM to"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":460.864,"y":67.2,"width":255.136,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["Update output fi"]}
+{"op":"block","page":1,"depth":0,"type":"tableRow","x":72,"y":515.6,"width":650,"height":46.8,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":78,"y":4,"width":49.721,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["1.00.02"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":139.721,"y":4,"width":77.688,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["9/26/2012"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":229.409,"y":4,"width":126.872,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["Appendix A"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":368.282,"y":4,"width":80.582,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["K. Hofmann"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":460.864,"y":4,"width":255.136,"height":28.8,"spaceBefore":0,"spaceAfter":10,"lines":["Add information ","Enrollment MEPRS"]}
+{"op":"block","page":1,"depth":0,"type":"tableRow","x":72,"y":562.4,"width":650,"height":71.2,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":78,"y":4,"width":49.721,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["1.01.00"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":139.721,"y":4,"width":77.688,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["11/14/2014"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":229.409,"y":4,"width":126.872,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["Whole Document"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":368.282,"y":4,"width":80.582,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["J. Hufford"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":460.864,"y":4,"width":255.136,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["Removed CHCS dat"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":460.864,"y":28.4,"width":255.136,"height":28.8,"spaceBefore":0,"spaceAfter":10,"lines":["Revised approach","enrollment end d"]}
+{"op":"block","page":1,"depth":0,"type":"tableRow","x":72,"y":633.6,"width":650,"height":32.4,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":78,"y":4,"width":49.721,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["1.01.01"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":139.721,"y":4,"width":77.688,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["10/27/2017"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":229.409,"y":4,"width":126.872,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["Table 2"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":368.282,"y":4,"width":80.582,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["W. Funk"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":460.864,"y":4,"width":255.136,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["Changed extracti"]}
+{"op":"block","page":1,"depth":0,"type":"paragraph","x":72,"y":666,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":1,"depth":0,"type":"paragraph","x":72,"y":692.8,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"page","page":2,"width":794,"height":1123,"margins":{"top":72,"right":72,"bottom":72,"left":72}}
+{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":72,"width":650,"height":18,"spaceBefore":0,"spaceAfter":10,"lines":["Enrollment MEPRS"]}
+{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":100,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":2,"depth":0,"type":"paragraph","x":120,"y":126.8,"width":602,"height":15.6,"spaceBefore":0,"spaceAfter":4,"lines":["Background:"]}
+{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":146.4,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":173.2,"width":650,"height":156,"spaceBefore":0,"spaceAfter":10,"lines":["The purpose of t","primary care man","Enrollment Site ","Reporting System","however, the MEP","data, on the oth","This specificati","Longitudinal VM6","then be used to ","identifier.  "]}
+{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":339.2,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":2,"depth":0,"type":"paragraph","x":120,"y":366,"width":602,"height":15.6,"spaceBefore":0,"spaceAfter":4,"lines":["Source:"]}
+{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":385.6,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":412.4,"width":650,"height":31.2,"spaceBefore":0,"spaceAfter":10,"lines":["There are two pr","Cumulative Annua"]}
+{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":453.6,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":480.4,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["Transmission (Fo"]}
+{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":506,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":532.8,"width":650,"height":46.8,"spaceBefore":0,"spaceAfter":10,"lines":["Both the MDR CHC","respective funct","functional speci"]}
+{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":589.6,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["\t"]}
+{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":615.2,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["Organization and"]}
+{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":640.8,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":667.6,"width":650,"height":31.2,"spaceBefore":0,"spaceAfter":10,"lines":["Output Products:","enrollment MEPRS"]}
+{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":708.8,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":735.6,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["Table 1: Enrollm"]}
+{"op":"block","page":2,"depth":0,"type":"tableRow","x":72,"y":761.2,"width":650,"height":33.6,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":2,"depth":1,"type":"paragraph","x":78,"y":4,"width":276.039,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["Enrollment MEPRS"]}
+{"op":"block","page":2,"depth":1,"type":"paragraph","x":366.039,"y":4,"width":197.02,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["File Naming Conv"]}
+{"op":"block","page":2,"depth":1,"type":"paragraph","x":575.059,"y":4,"width":140.941,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["Member Name"]}
+{"op":"block","page":2,"depth":0,"type":"tableRow","x":72,"y":794.8,"width":650,"height":33.6,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":2,"depth":1,"type":"paragraph","x":78,"y":4,"width":276.039,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["Enrollment MEPRS"]}
+{"op":"block","page":2,"depth":1,"type":"paragraph","x":366.039,"y":4,"width":197.02,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["/mdr/pub/pcmh/fy"]}
+{"op":"block","page":2,"depth":1,"type":"paragraph","x":575.059,"y":4,"width":140.941,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["enr_meprs.fmt"]}
+{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":828.4,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":855.2,"width":650,"height":31.2,"spaceBefore":0,"spaceAfter":10,"lines":["Archival of file","etc) are also lo"]}
+{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":896.4,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":923.2,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["Receiving Filter"]}
+{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":948.8,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":975.6,"width":650,"height":31.2,"spaceBefore":0,"spaceAfter":10,"lines":["Include records ","corresponding to"]}
+{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":1016.8,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"page","page":3,"width":794,"height":1123,"margins":{"top":72,"right":72,"bottom":72,"left":72}}
+{"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":72,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["Table 2: Receivi"]}
+{"op":"block","page":3,"depth":0,"type":"tableRow","x":72,"y":97.6,"width":650,"height":33.6,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":3,"depth":1,"type":"paragraph","x":78,"y":4,"width":212.029,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["Source"]}
+{"op":"block","page":3,"depth":1,"type":"paragraph","x":302.029,"y":4,"width":413.971,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["Receiving Filter"]}
+{"op":"block","page":3,"depth":0,"type":"tableRow","x":72,"y":131.2,"width":650,"height":33.6,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":3,"depth":1,"type":"paragraph","x":78,"y":4,"width":212.029,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["CHCS Enrollment "]}
+{"op":"block","page":3,"depth":1,"type":"paragraph","x":302.029,"y":4,"width":413.971,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["None"]}
+{"op":"block","page":3,"depth":0,"type":"tableRow","x":72,"y":164.8,"width":650,"height":96,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":3,"depth":1,"type":"paragraph","x":78,"y":4,"width":212.029,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["DEERS LVM"]}
+{"op":"block","page":3,"depth":1,"type":"paragraph","x":302.029,"y":4,"width":413.971,"height":78,"spaceBefore":0,"spaceAfter":10,"lines":["Keep only record","indicates ACV is","enrollees) prior","only records whe","group of P or L."]}
+{"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":260.8,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":287.6,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["\tOnly the follow"]}
+{"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":313.2,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":340,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["Table 3: Variabl"]}
+{"op":"block","page":3,"depth":0,"type":"tableRow","x":72,"y":365.6,"width":650,"height":33.6,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":3,"depth":1,"type":"paragraph","x":78,"y":4,"width":212.029,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["Source"]}
+{"op":"block","page":3,"depth":1,"type":"paragraph","x":302.029,"y":4,"width":413.971,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["Variables/Fields"]}
+{"op":"block","page":3,"depth":0,"type":"tableRow","x":72,"y":399.2,"width":650,"height":33.6,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":3,"depth":1,"type":"paragraph","x":78,"y":4,"width":212.029,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["CHCS Enrollment "]}
+{"op":"block","page":3,"depth":1,"type":"paragraph","x":302.029,"y":4,"width":413.971,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["All"]}
+{"op":"block","page":3,"depth":0,"type":"tableRow","x":72,"y":432.8,"width":650,"height":84.8,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":3,"depth":1,"type":"paragraph","x":78,"y":4,"width":212.029,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["DEERS Enrollment"]}
+{"op":"block","page":3,"depth":1,"type":"paragraph","x":302.029,"y":4,"width":413.971,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["EDIPN;"]}
+{"op":"block","page":3,"depth":1,"type":"paragraph","x":302.029,"y":29.6,"width":413.971,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["LENRMTF, LBGNDT,"]}
+{"op":"block","page":3,"depth":1,"type":"paragraph","x":302.029,"y":55.2,"width":413.971,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["LPCMID (from seg"]}
+{"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":517.6,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":544.4,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["Update Process"]}
+{"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":570,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":596.8,"width":650,"height":46.8,"spaceBefore":0,"spaceAfter":10,"lines":["Obtain the most ","Merge them based","DEERS LVM file),"]}
+{"op":"block","page":3,"depth":0,"type":"paragraph","x":120,"y":653.6,"width":602,"height":15.6,"spaceBefore":0,"spaceAfter":4,"lines":["LVM LENRMTF=CHCS"]}
+{"op":"block","page":3,"depth":0,"type":"paragraph","x":120,"y":673.2,"width":602,"height":15.6,"spaceBefore":0,"spaceAfter":4,"lines":["LVM LBGNDT= CHCS"]}
+{"op":"block","page":3,"depth":0,"type":"paragraph","x":120,"y":692.8,"width":602,"height":15.6,"spaceBefore":0,"spaceAfter":4,"lines":["LVM LPCMID=PCM_E"]}
+{"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":712.4,"width":650,"height":46.8,"spaceBefore":0,"spaceAfter":10,"lines":["Retain each CHCS","above, adding th","records that do "]}
+{"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":769.2,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["Field Transforma"]}
+{"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":794.8,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":821.6,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["None."]}
+{"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":847.2,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":874,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["Record Layout an"]}
+{"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":899.6,"width":650,"height":109.2,"spaceBefore":0,"spaceAfter":10,"lines":["The MDR Enrollme","VI above, made l","for each FY is e","the fiscal year ","be at person-lev","information abou","given year. "]}
+{"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":1018.8,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":1035.6,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":0,"lines":["The first line i"]}
+{"op":"page","page":4,"width":794,"height":1123,"margins":{"top":72,"right":72,"bottom":72,"left":72}}
+{"op":"block","page":4,"depth":0,"type":"paragraph","x":72,"y":72,"width":650,"height":31.2,"spaceBefore":0,"spaceAfter":10,"lines":["where YY represe","concatenated str"]}
+{"op":"block","page":4,"depth":0,"type":"paragraph","x":72,"y":113.2,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["Table 5: Values "]}
+{"op":"block","page":4,"depth":0,"type":"tableRow","x":72,"y":138.8,"width":650,"height":32.4,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":4,"depth":1,"type":"paragraph","x":78,"y":4,"width":301.067,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["Variable"]}
+{"op":"block","page":4,"depth":1,"type":"paragraph","x":391.067,"y":4,"width":125.581,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["SAS Name"]}
+{"op":"block","page":4,"depth":1,"type":"paragraph","x":528.648,"y":4,"width":101.715,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["Start Position"]}
+{"op":"block","page":4,"depth":1,"type":"paragraph","x":642.363,"y":4,"width":73.637,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["Length"]}
+{"op":"block","page":4,"depth":0,"type":"tableRow","x":72,"y":171.2,"width":650,"height":32.4,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":4,"depth":1,"type":"paragraph","x":78,"y":4,"width":301.067,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["Number of Enroll"]}
+{"op":"block","page":4,"depth":1,"type":"paragraph","x":391.067,"y":4,"width":125.581,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["N/A"]}
+{"op":"block","page":4,"depth":1,"type":"paragraph","x":528.648,"y":4,"width":101.715,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["1"]}
+{"op":"block","page":4,"depth":1,"type":"paragraph","x":642.363,"y":4,"width":73.637,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["3"]}
+{"op":"block","page":4,"depth":0,"type":"tableRow","x":72,"y":203.6,"width":650,"height":32.4,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":4,"depth":1,"type":"paragraph","x":78,"y":4,"width":301.067,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["First Begin Date"]}
+{"op":"block","page":4,"depth":1,"type":"paragraph","x":391.067,"y":4,"width":125.581,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["BDATE"]}
+{"op":"block","page":4,"depth":1,"type":"paragraph","x":528.648,"y":4,"width":101.715,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["4"]}
+{"op":"block","page":4,"depth":1,"type":"paragraph","x":642.363,"y":4,"width":73.637,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["8"]}
+{"op":"block","page":4,"depth":0,"type":"tableRow","x":72,"y":236,"width":650,"height":32.4,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":4,"depth":1,"type":"paragraph","x":78,"y":4,"width":301.067,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["First End Date o"]}
+{"op":"block","page":4,"depth":1,"type":"paragraph","x":391.067,"y":4,"width":125.581,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["EDATE"]}
+{"op":"block","page":4,"depth":1,"type":"paragraph","x":528.648,"y":4,"width":101.715,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["12"]}
+{"op":"block","page":4,"depth":1,"type":"paragraph","x":642.363,"y":4,"width":73.637,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["8"]}
+{"op":"block","page":4,"depth":0,"type":"tableRow","x":72,"y":268.4,"width":650,"height":32.4,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":4,"depth":1,"type":"paragraph","x":78,"y":4,"width":301.067,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["First Enrollment"]}
+{"op":"block","page":4,"depth":1,"type":"paragraph","x":391.067,"y":4,"width":125.581,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["MEPRS_CODE"]}
+{"op":"block","page":4,"depth":1,"type":"paragraph","x":528.648,"y":4,"width":101.715,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["20"]}
+{"op":"block","page":4,"depth":1,"type":"paragraph","x":642.363,"y":4,"width":73.637,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["4"]}
+{"op":"block","page":4,"depth":0,"type":"tableRow","x":72,"y":300.8,"width":650,"height":32.4,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":4,"depth":1,"type":"paragraph","x":78,"y":4,"width":301.067,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["Second Begin Dat"]}
+{"op":"block","page":4,"depth":1,"type":"paragraph","x":391.067,"y":4,"width":125.581,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["BDATE"]}
+{"op":"block","page":4,"depth":1,"type":"paragraph","x":528.648,"y":4,"width":101.715,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["24"]}
+{"op":"block","page":4,"depth":1,"type":"paragraph","x":642.363,"y":4,"width":73.637,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["8"]}
+{"op":"block","page":4,"depth":0,"type":"tableRow","x":72,"y":333.2,"width":650,"height":32.4,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":4,"depth":1,"type":"paragraph","x":78,"y":4,"width":301.067,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["Second End Date "]}
+{"op":"block","page":4,"depth":1,"type":"paragraph","x":391.067,"y":4,"width":125.581,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["EDATE"]}
+{"op":"block","page":4,"depth":1,"type":"paragraph","x":528.648,"y":4,"width":101.715,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["32"]}
+{"op":"block","page":4,"depth":1,"type":"paragraph","x":642.363,"y":4,"width":73.637,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["8"]}
+{"op":"block","page":4,"depth":0,"type":"tableRow","x":72,"y":365.6,"width":650,"height":32.4,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":4,"depth":1,"type":"paragraph","x":78,"y":4,"width":301.067,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["Second Enrollmen"]}
+{"op":"block","page":4,"depth":1,"type":"paragraph","x":391.067,"y":4,"width":125.581,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["MEPRS_CODE"]}
+{"op":"block","page":4,"depth":1,"type":"paragraph","x":528.648,"y":4,"width":101.715,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["40"]}
+{"op":"block","page":4,"depth":1,"type":"paragraph","x":642.363,"y":4,"width":73.637,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["4"]}
+{"op":"block","page":4,"depth":0,"type":"tableRow","x":72,"y":398,"width":650,"height":32.4,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":4,"depth":1,"type":"paragraph","x":78,"y":4,"width":301.067,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["Nth Begin Date o"]}
+{"op":"block","page":4,"depth":1,"type":"paragraph","x":391.067,"y":4,"width":125.581,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["BDATE"]}
+{"op":"block","page":4,"depth":1,"type":"paragraph","x":528.648,"y":4,"width":101.715,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["(n-1)*20 + 4"]}
+{"op":"block","page":4,"depth":1,"type":"paragraph","x":642.363,"y":4,"width":73.637,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["8"]}
+{"op":"block","page":4,"depth":0,"type":"tableRow","x":72,"y":430.4,"width":650,"height":32.4,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":4,"depth":1,"type":"paragraph","x":78,"y":4,"width":301.067,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["Nth End Date of "]}
+{"op":"block","page":4,"depth":1,"type":"paragraph","x":391.067,"y":4,"width":125.581,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["EDATE"]}
+{"op":"block","page":4,"depth":1,"type":"paragraph","x":528.648,"y":4,"width":101.715,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["(n-1)*20 + 12"]}
+{"op":"block","page":4,"depth":1,"type":"paragraph","x":642.363,"y":4,"width":73.637,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["8"]}
+{"op":"block","page":4,"depth":0,"type":"tableRow","x":72,"y":462.8,"width":650,"height":32.4,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":4,"depth":1,"type":"paragraph","x":78,"y":4,"width":301.067,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["Nth Enrollment M"]}
+{"op":"block","page":4,"depth":1,"type":"paragraph","x":391.067,"y":4,"width":125.581,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["MEPRS_CODE"]}
+{"op":"block","page":4,"depth":1,"type":"paragraph","x":528.648,"y":4,"width":101.715,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["(n-1)*20 + 20"]}
+{"op":"block","page":4,"depth":1,"type":"paragraph","x":642.363,"y":4,"width":73.637,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["4"]}
+{"op":"block","page":4,"depth":0,"type":"paragraph","x":72,"y":495.2,"width":650,"height":46.8,"spaceBefore":0,"spaceAfter":10,"lines":["The last line in","is used by SAS t","file."]}
+{"op":"block","page":4,"depth":0,"type":"paragraph","x":72,"y":552,"width":650,"height":31.2,"spaceBefore":0,"spaceAfter":10,"lines":["For example, the","real data):"]}
+{"op":"block","page":4,"depth":0,"type":"paragraph","x":72,"y":593.2,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["proc format;"]}
+{"op":"block","page":4,"depth":0,"type":"paragraph","x":72,"y":618.8,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["\tvalue enmep12x"]}
+{"op":"block","page":4,"depth":0,"type":"paragraph","x":72,"y":644.4,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["\t‘1234567890’ = "]}
+{"op":"block","page":4,"depth":0,"type":"paragraph","x":72,"y":670,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["‘201106012011101"]}
+{"op":"block","page":4,"depth":0,"type":"paragraph","x":72,"y":695.6,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["‘201110162012080"]}
+{"op":"block","page":4,"depth":0,"type":"paragraph","x":72,"y":721.2,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["\t‘1234567891’ = "]}
+{"op":"block","page":4,"depth":0,"type":"paragraph","x":72,"y":746.8,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["\t."]}
+{"op":"block","page":4,"depth":0,"type":"paragraph","x":72,"y":772.4,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["\t."]}
+{"op":"block","page":4,"depth":0,"type":"paragraph","x":72,"y":798,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["\t."]}
+{"op":"block","page":4,"depth":0,"type":"paragraph","x":72,"y":823.6,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["\tother = ‘   ‘;"]}
+{"op":"block","page":4,"depth":0,"type":"paragraph","x":72,"y":849.2,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["run;"]}
+{"op":"block","page":4,"depth":0,"type":"paragraph","x":72,"y":874.8,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":4,"depth":0,"type":"paragraph","x":72,"y":901.6,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["Refresh Frequenc"]}
+{"op":"block","page":4,"depth":0,"type":"paragraph","x":72,"y":927.2,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":4,"depth":0,"type":"paragraph","x":120,"y":954,"width":602,"height":31.2,"spaceBefore":0,"spaceAfter":4,"lines":["The MDR Enrollme","the previous fis"]}
+{"op":"block","page":4,"depth":0,"type":"paragraph","x":72,"y":989.2,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":4,"depth":0,"type":"paragraph","x":120,"y":1016,"width":602,"height":31.2,"spaceBefore":0,"spaceAfter":0,"lines":["The MDR Enrollme","semi-annually, i"]}
+{"op":"page","page":5,"width":794,"height":1123,"margins":{"top":72,"right":72,"bottom":72,"left":72}}
+{"op":"block","page":5,"depth":0,"type":"paragraph","x":120,"y":72,"width":602,"height":15.6,"spaceBefore":0,"spaceAfter":4,"lines":["from that period"]}
+{"op":"block","page":5,"depth":0,"type":"paragraph","x":72,"y":91.6,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":5,"depth":0,"type":"paragraph","x":120,"y":118.4,"width":602,"height":15.6,"spaceBefore":0,"spaceAfter":4,"lines":["Quality Review R"]}
+{"op":"block","page":5,"depth":0,"type":"paragraph","x":72,"y":138,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":5,"depth":0,"type":"paragraph","x":72,"y":164.8,"width":650,"height":31.2,"spaceBefore":0,"spaceAfter":10,"lines":["In order to ensu","presented in thi"]}
+{"op":"block","page":5,"depth":0,"type":"paragraph","x":72,"y":206,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":5,"depth":0,"type":"paragraph","x":120,"y":232.8,"width":602,"height":62.4,"spaceBefore":0,"spaceAfter":4,"lines":["Basic Data Flow ","associated with ","should be record","explored. "]}
+{"op":"block","page":5,"depth":0,"type":"paragraph","x":120,"y":299.2,"width":602,"height":15.6,"spaceBefore":0,"spaceAfter":4,"lines":["File Size: Recor"]}
+{"op":"block","page":5,"depth":0,"type":"paragraph","x":120,"y":318.8,"width":602,"height":15.6,"spaceBefore":0,"spaceAfter":4,"lines":["Proc contents sh"]}
+{"op":"block","page":5,"depth":0,"type":"paragraph","x":120,"y":338.4,"width":602,"height":31.2,"spaceBefore":0,"spaceAfter":4,"lines":["Frequency tabula","being processed)"]}
+{"op":"block","page":5,"depth":0,"type":"paragraph","x":120,"y":373.6,"width":602,"height":31.2,"spaceBefore":0,"spaceAfter":4,"lines":["Routine feed and","Code processor."]}
+{"op":"block","page":5,"depth":0,"type":"paragraph","x":72,"y":408.8,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":5,"depth":0,"type":"paragraph","x":72,"y":435.6,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["Data Marts"]}
+{"op":"block","page":5,"depth":0,"type":"paragraph","x":72,"y":461.2,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":5,"depth":0,"type":"paragraph","x":72,"y":488,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":5,"depth":0,"type":"paragraph","x":72,"y":514.8,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["Special Outputs"]}
+{"op":"block","page":5,"depth":0,"type":"paragraph","x":72,"y":540.4,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":5,"depth":0,"type":"paragraph","x":72,"y":567.2,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["N/A"]}
+{"op":"block","page":5,"depth":0,"type":"paragraph","x":72,"y":592.8,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"page","page":6,"width":794,"height":1123,"margins":{"top":72,"right":72,"bottom":72,"left":72}}
+{"op":"block","page":6,"depth":0,"type":"paragraph","x":72,"y":72,"width":650,"height":18,"spaceBefore":0,"spaceAfter":10,"lines":["Appendix A: How "]}
+{"op":"block","page":6,"depth":0,"type":"paragraph","x":72,"y":100,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":6,"depth":0,"type":"paragraph","x":72,"y":126.8,"width":650,"height":78,"spaceBefore":0,"spaceAfter":10,"lines":["To append inform","should be merged","variable MEPRS_C","all three variab","or that their en"]}
+{"op":"block","page":6,"depth":0,"type":"paragraph","x":72,"y":214.8,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
