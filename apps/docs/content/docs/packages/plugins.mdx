@@ -218,7 +218,7 @@ says where it sits:
 | `id` | The act's id: the one to pass to `reviewChanges`. Every piece of one act shares it, including both halves of a replacement or a move |
 | `authorId`, `createdAt` | Whose, and when |
 | `groupId` / `moveId` | Which kind of pair it belongs to: a replacement (`groupId`) or a move (`moveId`) |
-| `oldAttrs` | For `suggestedAttrs`, what it was: a block's former styling (`{ nodeType: "paragraph" }`, `{ level: 1 }`), a list change's lists (`{ list: ["bulletList"] }`, `[]` for none), or a formatting change's marks (`{ marks: [{ type: "italic" }] }`) |
+| `oldAttrs` | For `suggestedAttrs`, what it was: a block's former styling (`{ nodeType: "paragraph" }`, `{ level: 1 }`), a list change's lists (`{ list: ["bulletList"] }`, `[]` for none), or a formatting change's marks (`{ marks: [{ type: "italic" }] }`) — for a recolour, resize or font change, the colour, size or font it replaced |
 | `image` | The image an inserted or deleted image is; an act that adds or removes several images lists one change per image, under its id |
 
 An agent decides changes by those ids. A replacement or a move lists two
@@ -366,6 +366,20 @@ rejectBtn.onclick = () => reviewChanges(editor, { accepted: [], rejected: [info.
 When `info.isConflict` is `true`, `info.conflictChanges` contains one entry per overlapping
 act — render controls for each. Keeping one is accepting it and rejecting the others in a single
 `reviewChanges` call.
+
+A colour, a size, a font or a link replaces the one it is set over, so a tracked recolour remembers
+the agreed value it replaced: `info.replacedMarks` lists the marks it replaced (the "blue" of
+"blue → red"), and rejecting the change puts them back. Text that had several colours becomes one
+change per colour.
+
+A suggestion set over another author's keeps theirs: Alice's green over Bob's pending red holds
+Bob's red. It is listed as its own change, with `within` naming the changes that hold it, and
+offered under Alice's as `info.heldChanges` — a list of changes should nest it there rather than
+show it on the text. Rejecting Alice's gives Bob's back, still his; accepting hers discards it,
+and when the review left Bob's undecided, the plan and the outcome list it as rejected. Either
+can be decided alone, and "reject all" returns the agreed colour in one review. Removing another
+author's suggestion adds a removal beside it on the same mark rather than dropping it. A later
+edit to your own suggestion folds into it.
 
 `reviewChanges` reports what actually happened, so it is what a review button should call. The
 `setChangeStatuses` command only returns whether it dispatched, and `false` when the decision is

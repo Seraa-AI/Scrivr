@@ -298,12 +298,27 @@ describe("a first word that does not fit after its number (Word leaves the numbe
    * An item numbered 32767 whose first word fits a whole line but not the
    * rest of its number's line — found by measuring, so on any machine's fonts.
    */
-  function numberAloneText(): string {
-    for (let length = 20; length <= 120; length++) {
+  function numberAloneText(itemOf: (text: string) => Json = (text) => item(text)): string {
+    for (let length = 4; length <= 120; length++) {
       const text = `${"w".repeat(length)} tail`;
-      if (textOf(blockOf(laidOut([olFrom(32767, item(text))]), text).lines[1]).startsWith("w".repeat(length))) return text;
+      if (textOf(blockOf(laidOut([olFrom(32767, itemOf(text))]), text).lines[1]).startsWith("w".repeat(length))) return text;
     }
     throw new Error("no word fills a line but not the rest of its number's");
+  }
+
+  /**
+   * A page whose content ends halfway down the item's word line, so its number
+   * is the page's last line. Built from the measured layout rather than
+   * searched for, since which filler counts land there depends on the fonts.
+   */
+  function pageEndingAfterNumber(content: Json[], text: string): typeof defaultPageConfig {
+    const tall = { ...defaultPageConfig, pageHeight: 5000 };
+    const layout = runPipeline(schema.nodeFromJSON({ type: "doc", content }), { pageConfig: tall, measurer: createMeasurer(), fontConfig });
+    const block = blockOf(layout.pages.flatMap((page) => page.blocks), text);
+    const [numberLine, wordLine] = block.lines;
+    const bottom = layout.metrics?.[0]?.contentBottom;
+    if (!numberLine || !wordLine || bottom === undefined) throw new Error("the item has no number line and word line");
+    return { ...defaultPageConfig, pageHeight: tall.pageHeight - bottom + block.y + numberLine.lineHeight + wordLine.lineHeight / 2 };
   }
   const numberAloneDoc = (text: string) => schema.nodeFromJSON({ type: "doc", content: [p("before"), olFrom(32767, item(text)), p("after")] });
 
@@ -352,39 +367,29 @@ describe("a first word that does not fit after its number (Word leaves the numbe
 
   it("moves Up past a number left alone at the bottom of a page, onto the line above it", () => {
     const text = numberAloneText();
-    // Fill page 1 until the number's line is its last line and the word starts page 2.
-    for (let fillers = 1; fillers < 80; fillers++) {
-      const content = [...Array.from({ length: fillers }, (_, i) => p(`Filler ${i}`)), olFrom(32767, item(text))];
-      const editor = createTestEditor({ content: { type: "doc", content } });
-      const parts = editor.layout.pages.flatMap((page) => page.blocks.filter((b) => b.node.textContent === text).map((b) => ({ page: page.pageNumber, b })));
-      const [onFirst, onNext] = parts;
-      if (!onFirst || !onNext || onFirst.b.lines.some((line) => line.spans.length > 0)) { editor.destroy(); continue; }
-      editor.ensurePagePopulated(onFirst.page);
-      editor.ensurePagePopulated(onNext.page);
-      const start = onFirst.b.nodePos + 1;
-      const x = editor.charMap.coordsAtPos(start + 3)?.x ?? 0;
-      const above = editor.charMap.posAbove(start + 3, x);
-      expect(above).not.toBeNull();
-      expect(above ?? start).toBeLessThan(start);
-      editor.destroy();
-      return;
-    }
-    throw new Error("no layout leaves the number alone at a page bottom");
+    const content = [p("Filler 0"), p("Filler 1"), olFrom(32767, item(text))];
+    const editor = createTestEditor({ content: { type: "doc", content }, pageConfig: pageEndingAfterNumber(content, text) });
+    const parts = editor.layout.pages.flatMap((page) => page.blocks.filter((b) => b.node.textContent === text).map((b) => ({ page: page.pageNumber, b })));
+    const [onFirst, onNext] = parts;
+    if (!onFirst || !onNext) throw new Error("the item did not split across pages");
+    expect(onFirst.b.lines.every((line) => line.spans.length === 0)).toBe(true);
+    editor.ensurePagePopulated(onFirst.page);
+    editor.ensurePagePopulated(onNext.page);
+    const start = onFirst.b.nodePos + 1;
+    const x = editor.charMap.coordsAtPos(start + 3)?.x ?? 0;
+    const above = editor.charMap.posAbove(start + 3, x);
+    expect(above).not.toBeNull();
+    expect(above ?? start).toBeLessThan(start);
+    editor.destroy();
   });
 
   it("draws a number left alone at the bottom of a page in its text's face", () => {
-    for (let fillers = 1; fillers < 80; fillers++) {
-      for (let length = 8; length <= 60; length++) {
-        const text = `${"w".repeat(length)} tail`;
-        const content = [...Array.from({ length: fillers }, (_, i) => p(`Filler ${i}`)), olFrom(32767, li(sized(28, text)))];
-        const parts = laidOut(content).filter((block) => block.node.textContent === text);
-        const [numberPart, wordPart] = parts;
-        if (!numberPart || !wordPart || numberPart.lines.some((line) => line.spans.length > 0)) continue;
-        expect(markerAnchorOf(numberPart)?.font).toBe(fontOf(wordPart));
-        return;
-      }
-    }
-    throw new Error("no layout leaves the number alone at a page bottom");
+    const text = numberAloneText((t) => li(sized(28, t)));
+    const content = [p("Filler 0"), p("Filler 1"), olFrom(32767, li(sized(28, text)))];
+    const [numberPart, wordPart] = laidOut(content, pageEndingAfterNumber(content, text)).filter((block) => block.node.textContent === text);
+    if (!numberPart || !wordPart) throw new Error("the item did not split across pages");
+    expect(numberPart.lines.every((line) => line.spans.length === 0)).toBe(true);
+    expect(markerAnchorOf(numberPart)?.font).toBe(fontOf(wordPart));
   });
 
   it("draws the number on the item's first text line when a full-width image covers its top", () => {

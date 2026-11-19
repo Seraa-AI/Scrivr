@@ -948,21 +948,17 @@ describe("runPipeline — line splitting (first on page)", () => {
   });
 });
 
-// ── Gap suppression at page boundary (linesFit=0 dead zone) ──────────────────
+// ── The gap at the page foot is kept, as in Word ────────────────────────────
 //
-// When the inter-block gap (prevSpaceAfter + spaceBefore) pushes targetY into
-// the "dead zone" where not even one line fits, but lines WOULD fit starting
-// from y (gap-free), the gap is suppressed and the block starts at y instead
-// of jumping entirely to the next page.
-//
-// This is the second missing-link bug: "paragraphs moved to next page when
-// they can fit the current page."
+// When the inter-block gap leaves no room for the next block's first line, the
+// block starts the next page and the gap is dropped there. The gap is never
+// given up to squeeze the line in flush against the block above: Word moves
+// the paragraph (measured with Word for Mac, compatibility mode 15).
 //
 // Same splitPage geometry (3 lines per page, lineHeight=18, pageBottom=64).
-// Key boundary: targetY must be > pageBottom - lineHeight = 64 - 18 = 46
-// for linesFit=0. But y must be <= pageBottom - lineHeight = 46 for the
-// gap-suppression fix to kick in.
-describe("runPipeline — gap suppression at page boundary", () => {
+// A 2-line intro ends at y = 46 = pageBottom - LH: one more line fits only
+// without the gap.
+describe("runPipeline — the gap at the page foot", () => {
   const LH = DEFAULT_PARAGRAPH_LINE_HEIGHT;
 
   const splitPage = {
@@ -971,50 +967,27 @@ describe("runPipeline — gap suppression at page boundary", () => {
     margins: { top: 10, right: 10, bottom: 10, left: 10 },
   };
 
-  // 2-line intro: y = margins.top + 2×LH = 10 + 36 = 46 = pageBottom - LH
-  // gap = prevSpaceAfter(10) → targetY = 56 → pageAvailable = 8 < 18 → dead zone
-  // BUT pageBottom - y = 18 >= LH → gap-suppression applies → 1 line on page 1
   const twoLineIntro = "aaaaaaaaa bbbbbbbbb";
   const fourLineText = "aaaaaaaaa bbbbbbbbb ccccccccc ddddddddd";
 
-  it("splits a paragraph whose gap pushed targetY into the dead zone", () => {
+  it("moves a paragraph whose first line fits only without its gap to the next page", () => {
     // twoLineIntro → y=46. gap=10 → targetY=56. pageAvailable=8 < LH.
-    // pageBottom - y = 18 = LH → fix kicks in: block starts at y=46, 1 line on p1.
     const layout = runPipeline(doc(p(twoLineIntro), p(fourLineText)), {
       pageConfig: splitPage,
       measurer: createMeasurer(),
     });
 
-    expect(layout.pages).toHaveLength(2);
+    expect(layout.pages).toHaveLength(3);
+    expect(layout.pages[0]!.blocks).toHaveLength(1);
 
-    // Page 1: intro (2 lines) + first line of second para
-    expect(layout.pages[0]!.blocks).toHaveLength(2);
-    const gapPart = layout.pages[0]!.blocks[1]!;
-    expect(gapPart.lines).toHaveLength(1);
-    expect(gapPart.continuesOnNextPage).toBe(true);
-    expect(gapPart.isContinuation).toBeUndefined();
-
-    // Page 2: remaining 3 lines
-    const cont = layout.pages[1]!.blocks[0]!;
-    expect(cont.lines).toHaveLength(3);
-    expect(cont.isContinuation).toBe(true);
+    const moved = layout.pages[1]!.blocks[0]!;
+    expect(moved.y).toBe(splitPage.margins.top);
+    expect(moved.isContinuation).toBeUndefined();
+    expect(moved.lines).toHaveLength(3);
+    expect(layout.pages[2]!.blocks[0]!.isContinuation).toBe(true);
   });
 
-  it("block starts at y (gap suppressed), not at targetY", () => {
-    // Block 2 must visually start directly after block 1 — the gap that
-    // would normally be inserted gets suppressed when there's no room for
-    // the next block's first line in the leftover space.
-    const layout = runPipeline(doc(p(twoLineIntro), p(fourLineText)), {
-      pageConfig: splitPage,
-      measurer: createMeasurer(),
-    });
-
-    const intro = layout.pages[0]!.blocks[0]!;
-    const expectedY = intro.y + intro.height;
-    expect(layout.pages[0]!.blocks[1]!.y).toBeCloseTo(expectedY, 4);
-  });
-
-  it("all lines are conserved when gap suppression applies", () => {
+  it("all lines are conserved when the paragraph moves", () => {
     const layout = runPipeline(doc(p(twoLineIntro), p(fourLineText)), {
       pageConfig: splitPage,
       measurer: createMeasurer(),
@@ -1025,12 +998,9 @@ describe("runPipeline — gap suppression at page boundary", () => {
     expect(totalLines).toBe(2 + 4); // intro + four-line para
   });
 
-  it("gap suppression applies when spaceBefore (not prevSpaceAfter) causes the dead zone", () => {
-    // The test isolates spaceBefore as the gap source: heading_1 has a
-    // 24px spaceBefore that exceeds the paragraph's 10px spaceAfter, which
-    // is what creates the dead zone. Use a custom fontConfig that matches
-    // heading_1's font to paragraph's so both blocks share the same line
-    // height — the only varying signal is spaceBefore.
+  it("keeps a heading's spaceBefore: the heading moves rather than sit flush against the paragraph", () => {
+    // heading_1's font matches the paragraph's, so spaceBefore is the only
+    // varying signal: it alone leaves no room for the heading's first line.
     const fontConfig: typeof defaultFontConfig = {
       ...starter.fontConfig,
       heading_1: {
@@ -1038,27 +1008,21 @@ describe("runPipeline — gap suppression at page boundary", () => {
         font: starter.fontConfig.paragraph!.font,
       },
     };
-    const oneLineIntro = "aaaaaaaaa";
-    const layout = runPipeline(doc(p(oneLineIntro), heading(1, fourLineText)), {
+    const layout = runPipeline(doc(p("aaaaaaaaa"), heading(1, fourLineText)), {
       pageConfig: splitPage,
       measurer: createMeasurer(),
       fontConfig,
     });
 
-    expect(layout.pages).toHaveLength(2);
-    expect(layout.pages[0]!.blocks).toHaveLength(2);
-
-    const headingPart1 = layout.pages[0]!.blocks[1]!;
-    expect(headingPart1.lines.length).toBeGreaterThanOrEqual(1);
-    expect(headingPart1.continuesOnNextPage).toBe(true);
-
-    const headingPart2 = layout.pages[1]!.blocks[0]!;
-    expect(headingPart2.isContinuation).toBe(true);
+    expect(layout.pages[0]!.blocks).toHaveLength(1);
+    const headingStart = layout.pages[1]!.blocks[0]!;
+    expect(headingStart.node.type.name).toBe("heading");
+    expect(headingStart.y).toBe(splitPage.margins.top);
+    expect(headingStart.isContinuation).toBeUndefined();
   });
 
-  it("block still jumps to next page when no room even at y (regression guard)", () => {
+  it("a block after a page filled exactly starts the next page", () => {
     // Three-line intro fills page 1 exactly: y = 10 + 54 = 64 = pageBottom.
-    // pageBottom - y = 0 < LH → gap-suppression does NOT apply → block jumps.
     // fourLineText (4 lines) then splits normally across pages 2 and 3 (3 + 1).
     const threeLineIntro = "aaaaaaaaa bbbbbbbbb ccccccccc";
     const layout = runPipeline(doc(p(threeLineIntro), p(fourLineText)), {

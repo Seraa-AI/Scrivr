@@ -1,4 +1,5 @@
 import type { Mark } from "@scrivr/core/pm";
+import { stableStringify } from "@scrivr/core";
 
 import type { ChangeSet } from "./ChangeSet";
 import { isMoveShadow } from "./helpers";
@@ -121,7 +122,8 @@ const markValue = (mark: Mark) =>
 
 /**
  * Neighbouring pieces of one formatting change, which a word-by-word diff
- * stamps under separate ids: same author, same proposal, same value, touching.
+ * stamps under separate ids: same author, same proposal, same value, same
+ * replaced formatting, touching.
  */
 const sameFormattingRun = (a: TrackedChange, b: TrackedChange) =>
   a.type === "mark-change" && b.type === "mark-change" &&
@@ -129,6 +131,10 @@ const sameFormattingRun = (a: TrackedChange, b: TrackedChange) =>
   a.dataTracked.authorID === b.dataTracked.authorID &&
   a.dataTracked.operation === b.dataTracked.operation &&
   markValue(a.mark) === markValue(b.mark) &&
+  // A held piece is not on the text, so it is never a run with one that is.
+  JSON.stringify(a.within ?? []) === JSON.stringify(b.within ?? []) &&
+  // Each restores what it replaced, so pieces that replaced different marks are decided apart.
+  stableStringify(a.dataTracked.replaced ?? []) === stableStringify(b.dataTracked.replaced ?? []) &&
   (a.to === b.from || b.to === a.from);
 
 /** The two halves of one replacement: the words taken out and the words put in. */
@@ -191,7 +197,10 @@ export function changeActs(changes: readonly TrackedChange[]): ChangeAct[] {
       }
     }
     const inOrder = changes.filter(c => records.includes(c));
-    acts.push({ primary: inOrder.find(c => !isPartOfAct(c)) ?? inOrder[0]!, records: inOrder });
+    // An act that shows on the text is offered where it shows, never by a piece held under another change.
+    const shown = inOrder.filter(c => c.type !== "mark-change" || c.within === undefined);
+    const candidates = shown.length > 0 ? shown : inOrder;
+    acts.push({ primary: candidates.find(c => !isPartOfAct(c)) ?? candidates[0]!, records: inOrder });
   }
   return acts;
 }
@@ -312,6 +321,9 @@ const placementDependents = (
  * linked record takes the decision of the change it belongs to. Naming a change
  * on either side authorizes deciding it, so it is never reported as a
  * dependent of another change in the same decision.
+ *
+ * It plans from the change set alone, so it cannot see which formatting
+ * suggestions a decision displaces; `planReview` and `planReviewIn` add them.
  */
 export function planChangeReview(changeSet: ChangeSet, decisions: ReviewDecisions): ReviewPlan {
   const changes = changeSet.pending;
