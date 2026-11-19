@@ -1,7 +1,8 @@
 # Suggestion Lanes RFC — every suggestion is recorded by the engine
 
-Status: Draft (2026-11-16). Answers part 1 of #252. Parts 2 (block-level
-previews) and 3 (structural previews on revision projection) follow separately.
+Status: Draft (2026-11-16, updated 2026-11-19 for 1.0.25). Answers part 1 of
+#252. Parts 2 (block-level previews) and 3 (structural previews on revision
+projection) follow separately.
 
 ## Question
 
@@ -36,7 +37,11 @@ The hand-written copy of the engine's rules only knows text. The gaps still open
   `showHideApply.ts` `insertedContent`).
 - **Every new rule lands four extra times.** Images, deletion ownership,
   conflicts and composition were each added to the engine and then re-derived,
-  or missed, in the lanes.
+  or missed, in the lanes. Formatting is the latest: #265 (1.0.25) taught the
+  engine to remember a replaced value and to hold another author's suggestion,
+  and `applyRichDiffAsSuggestion` had to call the same rules itself
+  (`restoreRuns`, `proposeRemoval` from `formatSuggestions.ts`, beside
+  `trackAddMarkStep` / `trackRemoveMarkStep`) to keep up.
 - **Typing discipline.** `_applyTracked` needs `as Record<string, unknown>`
   casts to attach a `groupId` to records it builds itself.
 
@@ -57,6 +62,8 @@ Read from `engine/processReplaceStep.ts`, `lib/deleteTextIfInserted.ts` and
 | Deleting the author's own pending insertion removes it (`clearAuthorPendingMarks`) | Same — `deleteTextIfInserted` takes back the author's own insertion |
 | Deletion and insertion share a `groupId` from `diffText` | **No pairing.** The two halves of a replace step get unrelated ids |
 | Author's earlier pending deletion is withdrawn by removing its mark | **Not an edit.** Nothing to record; the engine has no step for it |
+| Formatting on kept text (rich): hand-applied with `restoreRuns` / `proposeRemoval` | Same rules — `tr.addMark` / `tr.removeMark` recorded by `trackAddMarkStep` / `trackRemoveMarkStep`, which call those helpers (since #265) |
+| Block attrs (rich): a hand-built tracked `set_node_attributes` | Same — `tr.setNodeMarkup` recorded by `trackAttrsChangeStep` / `trackSetNodeMarkupStep` |
 
 Two rows need a decision. Everything else moves to the engine unchanged.
 
@@ -64,7 +71,9 @@ Two rows need a decision. Everything else moves to the engine unchanged.
 
 1. **The four lanes make plain edits under `trackAsSuggestion(tr, authorID)`.**
    Delete with `tr.delete`, insert with `tr.insert` of plain content built by
-   `spansToFragment` (a `"\n"` becomes the block's break). No lane builds a
+   `spansToFragment` (a `"\n"` becomes the block's break). The rich lane sets
+   formatting with `tr.addMark` / `tr.removeMark` and block attrs with
+   `tr.setNodeMarkup`. No lane builds a
    tracked mark or record. `skipTracking` and the hand-built
    `refreshChanges` go from these four call sites.
 
@@ -113,7 +122,9 @@ Two rows need a decision. Everything else moves to the engine unchanged.
 - *Can tracking refuse a lane's edit?* It can, as for any suggesting edit; the
   lane then reports `applied: false` instead of writing unrecorded marks.
 - *Conflicts with another author's pending text?* The engine's existing rules
-  apply, the same as two people typing.
+  apply, the same as two people typing. Formatting set over another author's
+  pending suggestion holds it (`within` on `findChanges().pending`, since
+  #265), whichever lane set it.
 
 ## Tests (written first, failing before the change)
 
@@ -126,11 +137,13 @@ Two rows need a decision. Everything else moves to the engine unchanged.
   directions (own insertion, own deletion).
 - Each lane produces the same records as the same plain edit typed in
   suggesting mode.
+- A rich recolour of another author's pending colour holds their suggestion;
+  rejecting it brings theirs back (the #265 behaviour, kept through the move).
 
 ## Release
 
-Docs only in this PR: an empty changeset. The implementation PR lists every
-`@scrivr/*` package as `patch`.
+This PR is docs only: no changeset, and the PR carries the `no-release` label.
+The implementation PR lists every `@scrivr/*` package as `patch`.
 
 ## Files to create / modify
 
@@ -141,4 +154,5 @@ Docs only in this PR: an empty changeset. The implementation PR lists every
   (`_applyTracked`) — plain edits under `trackAsSuggestion`.
 - `plugins/src/track-changes/lib/acceptedTextMap.ts` — breaks read as `"\n"`.
 - `lib/splitRangeForNewMark.ts` (`applyTrackedDelete`) — removed if no caller
-  remains.
+  remains. So is `applyRichDiffAsSuggestion`'s own `addTrackedMark` and
+  `inlinePieces`.
