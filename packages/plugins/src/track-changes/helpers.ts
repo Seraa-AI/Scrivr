@@ -228,7 +228,9 @@ export function shouldMergeTrackedAttributes(
     left.foldingClosed === right.foldingClosed &&
     JSON.stringify(left.dependsOn ?? []) === JSON.stringify(right.dependsOn ?? []) &&
     // A record restores what it replaced, so two that replaced different marks stay two.
-    stableStringify(left.replaced ?? []) === stableStringify(right.replaced ?? [])
+    stableStringify(left.replaced ?? []) === stableStringify(right.replaced ?? []) &&
+    // Text typed on from a replacement joins it; two replacements stay two.
+    (left.groupId === undefined || right.groupId === undefined || left.groupId === right.groupId)
   );
 }
 
