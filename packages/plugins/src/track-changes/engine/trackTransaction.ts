@@ -1,4 +1,4 @@
-import { EditorState, Selection, Transaction } from "@scrivr/core/pm";
+import { EditorState, Selection, Transaction, type Node as PMNode } from "@scrivr/core/pm";
 import {
   AddMarkStep,
   AddNodeMarkStep,
@@ -17,7 +17,7 @@ import {
   excludeFromTracking,
   passThroughMeta,
 } from "./transactionProcessing";
-import { createNewPendingAttrs, NewEmptyAttrs } from "../helpers";
+import { createNewPendingAttrs, genId, NewEmptyAttrs } from "../helpers";
 import { diffChangeSteps } from "../lib/structuralChange";
 import { mergeTrackedMarks } from "../lib/mergeTrackedMarks";
 import { isSetNodeMarkupStep } from "../step-trackers/qualifiers";
@@ -52,6 +52,18 @@ function caretBeforeStepEnd(tr: Transaction, i: number, step: ReplaceStep): numb
   return insertedFrom < selection.head && selection.head < end && !tr.doc.resolve(selection.head).sameParent(tr.doc.resolve(end))
     ? end - selection.head
     : null;
+}
+
+/**
+ * Whether `step` replaces text inside one block with inline content: it takes
+ * something out and puts something in at the same place. A step across blocks
+ * also joins or splits them, which is not a word swap.
+ */
+function replacesInline(step: ReplaceStep, doc: PMNode): boolean {
+  if (step.from === step.to || step.slice.size === 0) return false;
+  if (step.slice.openStart !== 0 || step.slice.openEnd !== 0) return false;
+  const $from = doc.resolve(step.from);
+  return $from.parent.inlineContent && $from.sameParent(doc.resolve(step.to));
 }
 
 /**
@@ -118,12 +130,18 @@ function trackOneStep(
       return;
     }
 
+    const moveNodeId = trContext.stepsByGroupIDMap.get(step);
+    const moveId = trContext.textMoves.get(step);
+    const moved = !!moveNodeId || !!moveId || !!trContext.pastedMove;
+    // The words a step takes out and the words it puts in are one replacement.
+    const stepAttrs = !moved && replacesInline(step, tr.docs[i]!) ? { ...baseAttrs, groupId: genId() } : baseAttrs;
+
     const [initialTrackedContent, newSelectionPos] = trackReplaceStep(
       i,
       step,
       oldState,
       newTr,
-      baseAttrs,
+      stepAttrs,
       tr,
       trContext,
     );
@@ -134,13 +152,11 @@ function trackOneStep(
     if (onlyNode && excludeFromTracking(onlyNode)) return;
     trackedContent = diffChangeSteps(trackedContent);
 
-    const moveNodeId = trContext.stepsByGroupIDMap.get(step);
-    const moveId = trContext.textMoves.get(step);
     const recordedFrom = newTr.mapping.maps.length;
     const [, updatedSelectionPos] = processChangeSteps(
       trackedContent,
       newTr,
-      { ...baseAttrs, ...(moveNodeId ? { moveNodeId } : {}), ...(moveId ? { moveId } : {}) },
+      { ...stepAttrs, ...(moveNodeId ? { moveNodeId } : {}), ...(moveId ? { moveId } : {}) },
       oldState.schema,
       trContext.replayedSelection.restamps,
     );
