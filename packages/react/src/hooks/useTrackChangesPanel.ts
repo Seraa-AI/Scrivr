@@ -7,7 +7,7 @@ import {
   trackChangesPluginKey,
 } from "@scrivr/plugins";
 import { useReviewAction } from "./useReviewAction";
-import type { TextChange, TrackedChange } from "@scrivr/plugins";
+import type { ReplacementView, TextChange, TrackedChange } from "@scrivr/plugins";
 
 export type TrackChangesDisplayItem =
   | {
@@ -33,6 +33,7 @@ export type TrackChangesDisplayItem =
 
 export function useTrackChangesPanel(editor: IBaseEditor | null) {
   const [changes, setChanges] = useState<TrackedChange[]>([]);
+  const [view, setView] = useState<ReplacementView>("paired");
 
   useEffect(() => {
     if (!editor) return;
@@ -42,12 +43,13 @@ export function useTrackChangesPanel(editor: IBaseEditor | null) {
       setChanges(
         all.filter((c) => c.dataTracked.status === CHANGE_STATUS.pending),
       );
+      setView(pluginState?.replacementView ?? "paired");
     };
     update();
     return editor.subscribe(update);
   }, [editor]);
 
-  const items = buildDisplayItems(changes);
+  const items = buildDisplayItems(changes, view);
   const allIds = changes.map((c) => c.id);
   const review = useReviewAction(editor);
 
@@ -71,8 +73,8 @@ export function useTrackChangesPanel(editor: IBaseEditor | null) {
 }
 
 /** One act is one card, whatever it took to record it. */
-function singles(changes: TrackedChange[]): TrackChangesDisplayItem[] {
-  return changeActs(changes).map(({ primary, records }) => ({ kind: "single", change: primary, pieces: records }));
+function singles(changes: TrackedChange[], view: ReplacementView): TrackChangesDisplayItem[] {
+  return changeActs(changes, view).map(({ primary, records }) => ({ kind: "single", change: primary, pieces: records }));
 }
 
 const textOf = (changes: TrackedChange[], operation: CHANGE_OPERATION) =>
@@ -81,7 +83,9 @@ const textOf = (changes: TrackedChange[], operation: CHANGE_OPERATION) =>
     .map(c => c.text)
     .join("");
 
-function buildDisplayItems(changes: TrackedChange[]): TrackChangesDisplayItem[] {
+function buildDisplayItems(changes: TrackedChange[], view: ReplacementView): TrackChangesDisplayItem[] {
+  // Split, a replacement is its deletion and its insertion, each its own card.
+  if (view === "split") return singles(changes, "split");
   const byGroupId = new Map<string, TrackedChange[]>();
   const ungrouped: TrackedChange[] = [];
 
@@ -122,11 +126,11 @@ function buildDisplayItems(changes: TrackedChange[]): TrackChangesDisplayItem[] 
         authorID: del.dataTracked.authorID,
       });
     } else {
-      items.push(...singles(group));
+      items.push(...singles(group, view));
     }
   }
 
-  items.push(...singles(ungrouped));
+  items.push(...singles(ungrouped, view));
 
   items.sort((a, b) => {
     const af =

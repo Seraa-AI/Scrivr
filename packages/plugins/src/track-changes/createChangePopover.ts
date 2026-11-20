@@ -10,7 +10,7 @@ import {
   CHANGE_OPERATION,
   CHANGE_STATUS,
 } from "./types";
-import type { ReplacedMark, TrackedChange } from "./types";
+import type { ReplacedMark, ReplacementView, TrackedChange } from "./types";
 
 export interface ChangePopoverInfo {
   id: string;
@@ -133,7 +133,11 @@ const isHeld = (change: TrackedChange) => change.type === "mark-change" && chang
  * added, that is the row — its words are part of adding it — while an edit
  * someone else made inside the row is its own act and shows as itself.
  */
-export function changeAtCaret(pending: readonly TrackedChange[], head: number): TrackedChange | undefined {
+export function changeAtCaret(
+  pending: readonly TrackedChange[],
+  head: number,
+  view: ReplacementView = "paired",
+): TrackedChange | undefined {
   // A held suggestion is not on the text: its holder is, and shows it.
   const atCaret = pending.filter((c) => head >= c.from && head <= c.to && !isHeld(c));
   const innermost = atCaret.reduce<TrackedChange | undefined>(
@@ -141,7 +145,7 @@ export function changeAtCaret(pending: readonly TrackedChange[], head: number): 
     undefined,
   );
   if (!innermost) return undefined;
-  return changeActs(pending).find((act) => act.records.includes(innermost))?.primary ?? innermost;
+  return changeActs(pending, view).find((act) => act.records.includes(innermost))?.primary ?? innermost;
 }
 
 /**
@@ -212,7 +216,8 @@ export function createChangePopover(
       (c) => c.dataTracked.status === CHANGE_STATUS.pending,
     );
 
-    const primary = changeAtCaret(pending, head);
+    const view = pluginState.replacementView;
+    const primary = changeAtCaret(pending, head, view);
 
     if (!primary) {
       if (visible) {
@@ -280,9 +285,10 @@ export function createChangePopover(
     };
 
     // Build group information for the primary change.
-    // A replacement's deletion and insertion share a groupId; aggregate them so
-    // the popover shows the whole replacement. Deciding either half decides both.
-    const primaryGroupId = primary.dataTracked.groupId;
+    // A replacement's deletion and insertion share a groupId; in the paired
+    // view the popover shows the whole replacement, and deciding either half
+    // decides both.
+    const primaryGroupId = view === "paired" ? primary.dataTracked.groupId : undefined;
     let groupIds: string[] = [primary.id];
     let replacedText: string | undefined;
     let insertedText: string | undefined;

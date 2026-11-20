@@ -3,7 +3,7 @@ import { stableStringify } from "@scrivr/core";
 
 import type { ChangeSet } from "./ChangeSet";
 import { isMoveShadow } from "./helpers";
-import type { TrackedChange } from "./types";
+import type { ReplacementView, TrackedChange } from "./types";
 
 /** What deciding a change does to the document, which settles what it can take with it. */
 export type ChangeEffect = "create" | "delete" | "content" | "placement" | "presentation";
@@ -153,14 +153,14 @@ const splitReference = (reference: TrackedChange, split: TrackedChange) =>
  * Two records of one act. Whichever a reviewer reaches, they are deciding the
  * act, so the relation holds in both directions.
  */
-const sameAct = (a: TrackedChange, b: TrackedChange) =>
+const sameAct = (a: TrackedChange, b: TrackedChange, view: ReplacementView) =>
   representsCreation(a, b) || representsCreation(b, a) ||
   representsDeletion(a, b) || representsDeletion(b, a) ||
   samePieces(a, b) ||
   pairedMove(a, b) ||
   sameMove(a, b) ||
   sameFormattingRun(a, b) ||
-  sameReplacement(a, b) ||
+  (view === "paired" && sameReplacement(a, b)) ||
   splitReference(a, b) || splitReference(b, a);
 
 /** A record that is secondary within its act: others name the act, this one follows it. */
@@ -182,8 +182,11 @@ export interface ChangeAct {
   records: TrackedChange[];
 }
 
-/** Groups changes into acts. The one answer to "what does one decision cover?" */
-export function changeActs(changes: readonly TrackedChange[]): ChangeAct[] {
+/**
+ * Groups changes into acts. The one answer to "what does one decision cover?"
+ * In the `"split"` view a replacement's deletion and insertion are two acts.
+ */
+export function changeActs(changes: readonly TrackedChange[], view: ReplacementView = "paired"): ChangeAct[] {
   const remaining = new Set(changes);
   const acts: ChangeAct[] = [];
   for (const change of changes) {
@@ -191,7 +194,7 @@ export function changeActs(changes: readonly TrackedChange[]): ChangeAct[] {
     const records = [change];
     for (const record of records) {
       for (const other of remaining) {
-        if (!sameAct(record, other)) continue;
+        if (!sameAct(record, other, view)) continue;
         remaining.delete(other);
         records.push(other);
       }
@@ -325,7 +328,11 @@ const placementDependents = (
  * It plans from the change set alone, so it cannot see which formatting
  * suggestions a decision displaces; `planReview` and `planReviewIn` add them.
  */
-export function planChangeReview(changeSet: ChangeSet, decisions: ReviewDecisions): ReviewPlan {
+export function planChangeReview(
+  changeSet: ChangeSet,
+  decisions: ReviewDecisions,
+  view: ReplacementView = "paired",
+): ReviewPlan {
   const changes = changeSet.pending;
   const decisionOf = new Map<string, ReviewDecision>();
   const contradictory = new Set<string>();
@@ -358,7 +365,7 @@ export function planChangeReview(changeSet: ChangeSet, decisions: ReviewDecision
       for (const related of changes) {
         // Representation links, not overlaps: these are the same act recorded
         // in more than one place, so reviewing it covers all of them.
-        if (!sameAct(related, change)) continue;
+        if (!sameAct(related, change, view)) continue;
         if (!decisionOf.has(related.id)) expanded = true;
         decide(related.id, decision);
       }
