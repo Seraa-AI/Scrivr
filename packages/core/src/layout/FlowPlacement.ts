@@ -94,7 +94,7 @@ export function advanceFlowGlobalY(
       const [first] = remaining;
       // paginateFlow forces one line at a page top (a line taller than the
       // page) and a first line within its sub-pixel tolerance of fitting.
-      const forced = first && (cursor === top || fitsWithoutGap(pageBottom(page), cursor, first.lineHeight));
+      const forced = first && (cursor === top || lineFitsAt(pageBottom(page), cursor, first.lineHeight));
       if (forced) {
         fitted = [first];
         rest = remaining.slice(1);
@@ -135,21 +135,16 @@ export function flowCursorAfter(
   };
 }
 
-/**
- * Whether a first line `lineHeight` tall fits when the gap before it is given
- * up and it starts right where its predecessor ended.
- */
-export function fitsWithoutGap(pageBottom: number, prevEnd: number, lineHeight: number): boolean {
-  return pageBottom - prevEnd >= lineHeight - 0.5;
+/** Whether a line `lineHeight` tall starting at `y` fits, within half a pixel. */
+export function lineFitsAt(pageBottom: number, y: number, lineHeight: number): boolean {
+  return pageBottom - y >= lineHeight - 0.5;
 }
 
 /**
  * Where a flow starts when its predecessor ends at `prevEnd` and the collapsed
- * gap before it is `gap` — where `paginateFlow` paints it:
- * - a gap that reaches the bottom of the page the predecessor ended on is
- *   dropped, and the flow starts the next page;
- * - a first line that does not fit gives up the gap if that brings it within
- *   `fitsWithoutGap`, and otherwise starts the next page.
+ * gap before it is `gap` — where `paginateFlow` paints it. As in Word, the gap
+ * is never given up to fit a line: a first line that does not fit after it
+ * starts the next page, where the gap is dropped.
  * The first line is the flow's own, so a flow laid out again is landed again.
  */
 export function landingAfter(
@@ -170,8 +165,7 @@ export function landingAfter(
 
   const firstLine = flow.kind === "text" ? flow.lines[0] : undefined;
   if (!firstLine) return advanceFlowGlobalY(flow, start, pageConfig, geometry).startGlobalY;
-  if (start === geometry.startOf(page) || start + firstLine.lineHeight <= bottom) return start;
-  if (fitsWithoutGap(bottom, prevEnd, firstLine.lineHeight)) return prevEnd;
+  if (start === geometry.startOf(page) || lineFitsAt(bottom, start, firstLine.lineHeight)) return start;
   return geometry.startOf(page + 1);
 }
 

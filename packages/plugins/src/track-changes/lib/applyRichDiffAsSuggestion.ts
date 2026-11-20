@@ -48,6 +48,14 @@ import {
   proposedForDeletion,
   type NewEmptyAttrs,
 } from "../helpers";
+import {
+  excludes,
+  proposeRemoval,
+  restoreRuns,
+  toReplacedMark,
+  untracked,
+  type FoundPiece,
+} from "../formatSuggestions";
 import { isMarkRemoved } from "../semanticChanges";
 import { CHANGE_STATUS } from "../types";
 import { breakOf, findNodeById } from "@scrivr/core";
@@ -378,8 +386,37 @@ function emitKeepMarkChanges(
       if (range) {
         const from = range.from + insertedChars;
         const to = range.to + insertedChars;
-        for (const m of added) if (addTrackedMark(tr, schema, from, to, m, "insert", base(), onWarn)) applied = true;
-        for (const m of removed) if (addTrackedMark(tr, schema, from, to, m, "delete", base(), onWarn)) applied = true;
+        // An added mark that takes a removed one off (red over blue) carries what rejecting it
+        // restores; a separate tracked removal would push the addition off in turn.
+        const takenOff = new Set<InlineMark>();
+        for (const m of added) {
+          const real = resolveInlineMark(m, schema, onWarn);
+          if (!real) continue;
+          for (const r of removed) {
+            const other = resolveInlineMark(r, schema);
+            if (other && excludes(real, other)) takenOff.add(r);
+          }
+          // Where it changes nothing it is set plain; elsewhere it is proposed, restoring what each stretch had.
+          const runs = restoreRuns(real, inlinePieces(tr.doc, from, to), base().authorID);
+          tr.addMark(from, to, untracked(real));
+          for (const run of runs) {
+            if (run.carried) tr.addMark(run.from, run.to, run.carried);
+            else addTrackedMark(tr, run.from, run.to, real, createNewInsertAttrs(base()), run.restored);
+          }
+          applied = true;
+        }
+        for (const m of removed) {
+          const real = takenOff.has(m) ? null : resolveInlineMark(m, schema, onWarn);
+          if (!real) continue;
+          // Taken off as the text carries it, so a suggestion there is withdrawn, not struck;
+          // text that does not carry it (another author's deletion inside the range) is left alone.
+          for (const piece of inlinePieces(tr.doc, from, to)) {
+            const carried = piece.marks.find((mark) => untracked(mark).eq(untracked(real)));
+            if (!carried) continue;
+            for (const step of proposeRemoval(carried, piece.from, piece.to, base())) tr.step(step);
+          }
+          applied = true;
+        }
       }
     }
     k = j;
@@ -387,23 +424,26 @@ function emitKeepMarkChanges(
   return applied;
 }
 
-/** Re-create `mark` with tracking data and apply it (exclusion replaces the plain mark). */
+/** The inline content between `from` and `to`, piece by piece, with its marks. */
+function inlinePieces(doc: PMNode, from: number, to: number): FoundPiece[] {
+  const pieces: FoundPiece[] = [];
+  doc.nodesBetween(from, to, (node, at) => {
+    if (node.isInline) pieces.push({ from: Math.max(at, from), to: Math.min(at + node.nodeSize, to), marks: node.marks });
+  });
+  return pieces;
+}
+
+/** Apply `mark` with a tracking record (exclusion replaces the plain mark). */
 function addTrackedMark(
   tr: Transaction,
-  schema: Schema,
   from: number,
   to: number,
-  inline: InlineMark,
-  operation: "insert" | "delete",
-  base: NewEmptyAttrs,
-  onWarn?: (message: string) => void,
-): boolean {
-  const real = resolveInlineMark(inline, schema, onWarn);
-  if (!real) return false;
-  const dt = operation === "insert" ? createNewInsertAttrs(base) : createNewDeleteAttrs(base);
-  const tracked = real.type.create({ ...real.attrs, dataTracked: [addTrackIdIfDoesntExist(dt)] });
-  tr.addMark(from, to, tracked);
-  return true;
+  mark: Mark,
+  record: NewEmptyAttrs,
+  restored: readonly Mark[] = [],
+) {
+  const dt = { ...record, ...(restored.length > 0 ? { replaced: restored.map(toReplacedMark) } : {}) };
+  tr.addMark(from, to, mark.type.create({ ...mark.attrs, dataTracked: [addTrackIdIfDoesntExist(dt)] }));
 }
 
 // ── Mark-set helpers ──────────────────────────────────────────────────────────

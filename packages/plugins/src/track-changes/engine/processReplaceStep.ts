@@ -55,7 +55,7 @@ export function processChangeSteps(
           mapping.appendMap(newTr.steps[i]!.getMap());
         }
 
-        mergeTrackedMarks(mapping.map(c.pos), newTr.doc, newTr, schema);
+        mergeTrackedMarks(mapping.map(c.pos), newTr.doc, newTr, schema, emptyAttrs.authorID);
 
         break;
       }
@@ -75,13 +75,14 @@ export function processChangeSteps(
           return;
         }
         if (c.undoMapIndex !== undefined) restamps.set(newTr.mapping.maps.length - 1, c.undoMapIndex);
-        mergeTrackedMarks(mapping.map(c.from), newTr.doc, newTr, schema);
+        mergeTrackedMarks(mapping.map(c.from), newTr.doc, newTr, schema, emptyAttrs.authorID);
         const to = mapping.map(c.to) + c.slice.size;
         mergeTrackedMarks(
           mapping.map(c.to) + (to < newTr.doc.nodeSize ? c.slice.size : 0),
           newTr.doc,
           newTr,
           schema,
+          emptyAttrs.authorID,
         );
         selectionPos = mapping.map(c.caretAt ?? c.to) + c.slice.size;
         break;
@@ -115,7 +116,7 @@ export function processChangeSteps(
           mapping.appendMap(textNewestStep!.getMap());
           step = textNewestStep;
         }
-        mergeTrackedMarks(where, newTr.doc, newTr, schema);
+        mergeTrackedMarks(where, newTr.doc, newTr, schema, emptyAttrs.authorID);
         break;
       }
       case "merge-fragment": {

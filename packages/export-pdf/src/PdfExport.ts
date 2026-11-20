@@ -17,7 +17,7 @@
  */
 import { Extension } from "@scrivr/core";
 import type { IBaseEditor, IEditor } from "@scrivr/core";
-import { exportToPdf, type PdfExportOptions } from "./index";
+import { exportToPdf, type PdfExportOptions } from "./pdf";
 
 /** Options the extension itself is configured with. */
 interface PdfExportExtensionOptions {

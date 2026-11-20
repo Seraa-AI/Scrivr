@@ -55,6 +55,12 @@ export enum TrackChangesStatus {
 
 // ── TrackedAttrs ──────────────────────────────────────────────────────────────
 
+/** A mark as a record keeps it, to put back: its type's name and its attrs. Rejection restores it as agreed formatting, untracked. */
+export type ReplacedMark = {
+  type: string;
+  attrs: Record<string, unknown>;
+};
+
 type InsertDeleteAttrs = {
   id: string;
   authorID: string;
@@ -65,6 +71,12 @@ type InsertDeleteAttrs = {
   createdAt: number;
   updatedAt: number;
   moveNodeId?: string;
+  /**
+   * On an added formatting mark: the agreed formatting it replaced — the colour
+   * a recolour took off — which rejecting it puts back. A mark that excludes
+   * another cannot stand beside it, so the old value lives here, not on the text.
+   */
+  replaced?: ReplacedMark[];
   /**
    * Links the two halves of moved content that is not carried as a block: its
    * deletion where it was and its insertion where it went, as Word's
@@ -230,6 +242,12 @@ export type MarkChange = Change & {
   mark: Mark;
   node: Node;
   text: string;
+  /**
+   * For a suggestion held by other changes — set over it by other authors —
+   * and shown nowhere on the text: the ids of the changes that hold it. It is
+   * decided with them, or alone while they stay pending.
+   */
+  within?: readonly string[];
 };
 
 export type TrackedChange =
