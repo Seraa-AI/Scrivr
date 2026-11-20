@@ -12,11 +12,16 @@
 
 import type { IBaseEditor } from "@scrivr/core";
 import { assignBlockIds, planDuplicateIdAssignments } from "@scrivr/core";
-import { DOMParser as PMDOMParser, Mapping, Transform, type Node as PmNode } from "@scrivr/core/pm";
+import { Mapping, Transform, type Node as PmNode } from "@scrivr/core/pm";
+import { watchedParser, type HtmlImportDiagnostic } from "./diagnostics";
 import { withHtmlBody } from "./parseHtml";
+
+export type { HtmlImportDiagnostic };
 
 export interface HtmlImportResult {
   doc: PmNode;
+  /** What the HTML said that the document could not carry. */
+  diagnostics: HtmlImportDiagnostic[];
 }
 
 /**
@@ -29,14 +34,15 @@ export interface HtmlImportResult {
  *
  * @example
  *   const editor = new ServerEditor();
- *   const { doc } = await importHtml(editor, html);
+ *   const { doc, diagnostics } = await importHtml(editor, html);
  *   applyImportedDocument(editor, doc);
  */
 export async function importHtml(editor: IBaseEditor, html: string): Promise<HtmlImportResult> {
-  let doc = await withHtmlBody(html, (body) => PMDOMParser.fromSchema(editor.schema).parse(body));
-  doc = reidDuplicates(doc);
+  const { parser, report } = watchedParser(editor.schema);
+  const parsed = await withHtmlBody(html, (body) => ({ doc: parser.parse(body), diagnostics: report(body) }));
+  let doc = reidDuplicates(parsed.doc);
   if (editor.findExtension("uniqueId")) doc = assignBlockIds(doc);
-  return { doc };
+  return { doc, diagnostics: parsed.diagnostics };
 }
 
 /** Every block after the first that carries an id an earlier one has. */

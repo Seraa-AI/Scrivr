@@ -211,5 +211,16 @@ in HTML isn't finished.
 - **D4 isn't needed with happy-dom.** Its `el.style` reads alignment, margin
   and indent correctly, which the tests confirm. `readStyle` would only matter
   for a DOM that doesn't implement `style`.
-- **Still open in Phase 1:** D6 diagnostics. `HtmlImportResult` carries only
-  `doc` until those are reported.
+- **D6 diagnostics, with no hand-kept list.** The schema's rules decide what
+  "supported" means. A style rule names the property it reads, and each tag
+  rule's `getAttrs` is watched through a proxy for the `style` properties it
+  reads off the element it was given. Anything the HTML says that no rule read
+  is reported once per kind, with a count:
+  - `html-style-unsupported`
+  - `html-element-unknown`
+  - `html-element-ignored`
+  - `html-element-rejected`
+
+  A style is judged on the element that carries it, so `margin-left` counts
+  as indent on a `<p>` but is reported on a `<span>`. Under D10, a feature that
+  ships its parse rule stops being reported automatically.

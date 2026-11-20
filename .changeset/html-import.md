@@ -9,3 +9,5 @@ New `@scrivr/html` package: `importHtml(editor, html)` loads a whole document fr
 `applyImportedDocument` now lives in `@scrivr/core`, so both importers share it; `@scrivr/docx` still exports it.
 
 Parse rules no longer use `instanceof Element` / `HTMLElement`, which threw on a server: links, images, tables, fields, section breaks and sourced blocks now parse from any DOM. The check is exported as `isHtmlElement`.
+
+`importHtml` also returns `diagnostics`: every style property and element the HTML used that the schema's rules did not read, counted, so an agent can see what did not land.
