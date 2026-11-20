@@ -98,22 +98,30 @@ take them as a person's edits would. Decision 7 answers the first.
 2. **The engine pairs a replacement.** A step that types over a selection inside
    one block, and records a deletion there, gives the deletion and the insertion
    one `groupId`.
-   - Text typed on from the replacement, or retyped inside it, joins it.
-   - An earlier edit beside it stays its own change, and so does another
-     replacement, even side by side.
+   - Text typed right beside the replacement's typed words, or retyped inside
+     them, joins it. This is decided when the edit is recorded.
+   - Only records of the same replacement merge. Any other edit beside it,
+     earlier or later, stays its own change, and so does another replacement,
+     even side by side.
    - Typing over text already struck, or over the author's own insertion,
      starts no replacement: there is no new deletion to pair.
-   - A selection across blocks is not paired: replacing it also joins the
-     blocks. A move is not paired: its halves pair through the move id.
+   - A selection across blocks, or a paste that brings blocks in, is not
+     paired: it also joins or splits blocks. A move is not paired: its halves
+     pair through the move id.
    - The lanes stop stamping `groupId`. Each phrase they write is one step, so
      each phrase that deletes agreed text is one replacement. A phrase that only
      rewrites the author's own earlier lane insertion continues that
      replacement.
-   - Word writes a typed-over selection as an adjacent `w:del` / `w:ins` pair of
-     one author and date, which Scrivr already imports as one replacement (D11
-     in `docs/tracked-changes-agents-docx-rfc.md`). Google Docs shows it as one
-     suggestion. Today a replacement typed in Scrivr is two cards; after this it
-     is one.
+   - **Word and Google Docs disagree here, and this follows Google Docs.** Word
+     keeps a typed-over selection as two revisions, an adjacent `w:del` and
+     `w:ins` of one author and date, each accepted or rejected on its own.
+     Google Docs shows it as one suggestion. Scrivr already treats a
+     replacement as one act: the lanes pair their diffs (D8 in
+     `docs/tracked-changes-agents-docx-rfc.md`), and D11 there decides that
+     DOCX import will read Word's adjacent pair as one replacement. D11 is
+     decided but not built. Pairing typed replacements makes a person's swap
+     match an agent's. Today a replacement typed in Scrivr is two cards; after
+     this it is one.
    - Built and tested on branch `suggestion-lanes-252-engine`
      (`replacementPairing.test.ts`).
 
@@ -262,8 +270,8 @@ Delivery, each PR stacked on the one before:
 ## Files to create / modify
 
 - `packages/plugins/src/track-changes/engine/trackTransaction.ts`,
-  `helpers.ts`, `lib/mergeTrackedMarks.ts`, `lib/deleteTextIfInserted.ts` —
-  pair a replacement (PR 2).
+  `lib/deletionPolicy.ts`, `helpers.ts`, `lib/mergeTrackedMarks.ts`,
+  `types.ts` — pair a replacement (PR 2).
 - `packages/plugins/src/track-changes/lib/applyDiffAsSuggestion.ts`,
   `lib/applyRichDiffAsSuggestion.ts`, `TrackChanges.ts` (`insertAsSuggestion`),
   `packages/ai/src/ai-suggestion/showHideApply.ts` (`_applyTracked`,
