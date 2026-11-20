@@ -12,34 +12,45 @@
  *   `align`, and its defaults — a link keeps its colour, a heading its size.
  */
 
-import { HTML_BLOCK_TAGS, HTML_IGNORED_TAGS, htmlShows, isHtmlElement } from "@scrivr/core";
+import { HTML_BLOCK_TAGS, HTML_IGNORED_TAGS, htmlShows, isHtmlBlock, isHtmlElement, safeUrl } from "@scrivr/core";
 import { parseDeclarations, serializeDeclarations } from "./stylesheet";
 
 const TEXT = new Set(["color", "font-family", "font-size", "font-style", "font-weight"]);
-const BLOCK = new Set(["text-align", "text-indent"]);
+/** Block properties, which the cascade carries since the parse does not. */
+export const BLOCK_PROPERTIES: ReadonlySet<string> = new Set(["text-align", "text-indent"]);
 
-/** Text properties an element sets by default, so it takes none from outside. A bare `<a name>` is a bookmark, not a link. */
-const OWN_DEFAULTS: Array<[selector: string, properties: string[]]> = [
-  ["a[href]", ["color"]],
-  ["h1, h2, h3, h4, h5, h6", ["font-size"]],
+const HEADINGS = ["h1", "h2", "h3", "h4", "h5", "h6"];
+
+/**
+ * Text properties an element sets by default, so it takes none from outside.
+ * Only a link the editor keeps is one: a bare `<a name>` is a bookmark, and an
+ * unsafe link is read as plain text.
+ */
+const OWN_DEFAULTS: Array<[(el: Element) => boolean, string[]]> = [
+  [(el) => el.matches("a[href]") && safeUrl(el.getAttribute("href")) !== null, ["color"]],
+  [(el) => HEADINGS.includes(el.tagName.toLowerCase()), ["font-size"]],
 ];
 
-/** Attributes that state a block property, and the elements they state it on — a table's `align` places the table. */
+/**
+ * Attributes that state a block property, and the elements they state it on —
+ * a table's `align` places the table. The parse reads only style, so they are
+ * written as style.
+ */
 const PRESENTATIONAL: Record<string, { attribute: string; on: ReadonlySet<string> }> = {
-  "text-align": { attribute: "align", on: new Set(["div", "p", "h1", "h2", "h3", "h4", "h5", "h6", "td", "th"]) },
+  "text-align": {
+    attribute: "align",
+    on: new Set(["div", "p", ...HEADINGS, "td", "th", "tr", "thead", "tbody", "tfoot"]),
+  },
 };
 
-/** Blocks that never hold text of their own: text-only blocks, whose text is already a paragraph, and a table's frame. */
-const NO_LOOSE_TEXT = new Set(["p", "pre", "h1", "h2", "h3", "h4", "h5", "h6", "table", "thead", "tbody", "tfoot", "tr"]);
+/** Blocks whose loose text needs no paragraph: a text block already is one, and a table's frame holds none. */
+const NO_LOOSE_TEXT = new Set(["p", "pre", ...HEADINGS, "table", "thead", "tbody", "tfoot", "tr"]);
 
 /** For each element a block property was written onto, the element it came from. */
 export type Carried = Map<Element, Map<string, Element>>;
 
 type InheritedValue = { value: string; source: Element };
 type Inherited = Map<string, InheritedValue>;
-
-export const isBlockElement = (node: Node): boolean =>
-  isHtmlElement(node) && HTML_BLOCK_TAGS.has(node.tagName.toLowerCase());
 
 /**
  * Hands inherited styles down. Returns where each block property was carried
@@ -51,7 +62,7 @@ export function cascadeInherited(body: HTMLElement): {
 } {
   const doc = body.ownerDocument;
   const page = new Map([doc.documentElement, body].flatMap((el) => [...parseDeclarations(el.getAttribute("style") ?? "")]));
-  const inherited = new Map([...page].filter(([property]) => TEXT.has(property) || BLOCK.has(property)));
+  const inherited = new Map([...page].filter(([property]) => TEXT.has(property) || BLOCK_PROPERTIES.has(property)));
   if (inherited.size > 0) {
     const wrapper = doc.createElement("div");
     wrapper.setAttribute("style", serializeDeclarations(inherited));
@@ -71,28 +82,32 @@ function visit(el: Element, outer: Inherited, carried: Carried): void {
   if (HTML_IGNORED_TAGS.has(tag)) return;
 
   const own = parseDeclarations(el.getAttribute("style") ?? "");
-  const stated = (property: string): string | null => {
-    const presentational = PRESENTATIONAL[property];
-    return own.get(property)?.value ?? (presentational?.on.has(tag) ? el.getAttribute(presentational.attribute) : null);
-  };
+  const presented = Object.entries(PRESENTATIONAL).flatMap(([property, { attribute, on }]) => {
+    const value = on.has(tag) && !own.has(property) ? el.getAttribute(attribute) : null;
+    return value === null ? [] : [{ property, value }];
+  });
+  if (presented.length > 0) {
+    for (const { property, value } of presented) own.set(property, { value, important: false });
+    el.setAttribute("style", serializeDeclarations(own));
+  }
   let inner = outer;
 
   if (HTML_BLOCK_TAGS.has(tag)) {
     inner = new Map(outer);
-    for (const property of BLOCK) {
-      const value = stated(property);
-      if (value !== null) inner.set(property, { value, source: el });
+    for (const property of BLOCK_PROPERTIES) {
+      const value = own.get(property)?.value;
+      if (value !== undefined) inner.set(property, { value, source: el });
     }
-    carryOnto(el, own, [...outer].filter(([property]) => stated(property) === null), carried);
+    carryOnto(el, own, [...outer].filter(([property]) => !own.has(property)), carried);
     if (!NO_LOOSE_TEXT.has(tag) && inner.size > 0) paragraphLooseText(el, inner, carried);
   }
 
   // An ancestor's colour or size reaches this text as a mark; `initial` is
   // what the reset rules read to clear it, as the element's own default would.
-  const defaults = OWN_DEFAULTS.flatMap(([selector, properties]) => (el.matches(selector) ? properties : []));
-  const unset = defaults.filter((property) => !own.has(property));
-  if (unset.length > 0) {
-    for (const property of unset) own.set(property, { value: "initial", important: false });
+  const defaults = OWN_DEFAULTS.flatMap(([setsOwn, properties]) => (setsOwn(el) ? properties : []));
+  const unstated = defaults.filter((property) => !own.has(property));
+  if (unstated.length > 0) {
+    for (const property of unstated) own.set(property, { value: "initial", important: false });
     el.setAttribute("style", serializeDeclarations(own));
   }
 
@@ -107,7 +122,7 @@ function visit(el: Element, outer: Inherited, carried: Carried): void {
  */
 function paragraphLooseText(el: HTMLElement, values: Inherited, carried: Carried): void {
   const children = Array.from(el.childNodes);
-  if (el.tagName.toLowerCase() === "div" && !children.some(isBlockElement)) return;
+  if (el.tagName.toLowerCase() === "div" && !children.some(isHtmlBlock)) return;
 
   let run: ChildNode[] = [];
   const flush = () => {
@@ -121,7 +136,7 @@ function paragraphLooseText(el: HTMLElement, values: Inherited, carried: Carried
     run = [];
   };
   for (const child of children) {
-    if (isBlockElement(child)) flush();
+    if (isHtmlBlock(child)) flush();
     else run.push(child);
   }
   flush();

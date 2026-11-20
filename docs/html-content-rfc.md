@@ -284,26 +284,35 @@ in HTML isn't finished.
       table's frame (`table`, `tr`, …) holds no loose text, so its
       `<colgroup>` stays its column widths.
     - What an element states beats what it inherits: its style, its `align`
-      (on a paragraph, div, heading or cell — a table's places the table),
-      a `<font>`'s attributes.
+      (on a paragraph, div, heading, cell, row or row group — a table's
+      places the table, which the editor does not model), a `<font>`'s
+      attributes. The cascade writes `align` as `text-align` style, since
+      the parse rules read only style.
+    - A link's own colour applies only to a link the editor keeps: a bare
+      `<a name>` or an unsafe href inherits like a span.
   - Diagnostics report what was lost and nothing else:
     - A declaration is judged longhand by longhand: `margin: 24px 0` is
       reported when only the left margin was taken; `background: yellow` is
       not, since its other longhands state nothing.
     - A style rule must accept the value, not just name the property:
       `font-size: large` and `text-decoration: underline dotted` are reported.
-    - A block property the cascade carried down is reported when any block
-      it reached shows something and took none of it — a centred `<div>`'s
-      `<pre>`, though a `<p>` beside it was centred. A container it only
-      passed through, or a rule line, loses nothing.
-    - `normal`, like a CSS-wide keyword, states nothing — on the page too.
+    - A block property is reported where something shown takes none of it:
+      the block's own text, or a block it was carried to — a centred
+      `<div>`'s `<pre>`, though a `<p>` beside it was centred. One that only
+      passes through containers, reaches a rule line or an empty div, or that
+      every block inside overrides, loses nothing.
+    - `normal` (and a weight's `400`), like a CSS-wide keyword, states
+      nothing — on the page too. A rule that only clears a mark takes
+      nothing: a light weight clears bold and is still reported, since it is
+      drawn regular.
     - Reads a rule makes through elements it reaches from its own (a table's
       `<col>`, a Word table's cell widths) are watched, through one stand-in
       per element so a rule comparing elements finds them equal.
   - A `div` rule no longer turns a div that shows nothing (empty, or holding
     only empty elements), or a div with blocks nested inside an inline
     wrapper, into a blank paragraph. What shows is text, a break, an image or
-    a field (`htmlShows` in core, shared with the cascade). This applies to
+    a field, and a non-breaking space holds a line (`htmlShows` in core,
+    shared with the cascade and diagnostics). This applies to
     paste too, with tests in core (`PasteRules.test.ts`).
   - The highlight rule turns down invisible backgrounds.
   - `isHtmlElement` checks for `style`.
@@ -313,8 +322,9 @@ in HTML isn't finished.
   - A CSS-wide keyword (`inherit`, `initial`) is not a colour, size or family.
     `initial` clears an inherited colour, size or family; `revert` on inline
     text inherits, as in a browser.
-  - `font-weight: normal` (or `lighter`, or below 500) undoes an enclosing
-    bold, and `font-style: normal` an enclosing italic.
+  - `font-weight: normal` (or `lighter`, or below 500) undoes bold and
+    `font-style: normal` italic, on the `<b>`/`<strong>`/`<i>`/`<em>` itself
+    or around it; any weight from 500 to 1000 is bold.
   - A `div` holding only an inline atom, such as a field, is a paragraph.
   - A selector list with an empty entry (`p, { }`) is invalid whole, as in a
     browser, and reported.

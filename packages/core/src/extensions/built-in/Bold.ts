@@ -15,6 +15,9 @@ interface BoldOptions {
  * Font rendering is handled by StyleResolver (font weight → "bold 14px Georgia").
  * No MarkDecorator needed — bold is purely a font metric change, not a visual overlay.
  */
+/** A weight below bold: the editor draws it regular. */
+const isRegularWeight = (weight: string) => /^(normal|lighter|[1-4]\d{2})$/i.test(weight);
+
 export const Bold = Extension.create<BoldOptions>({
   name: "bold",
 
@@ -27,14 +30,14 @@ export const Bold = Extension.create<BoldOptions>({
       bold: {
         attrs: { dataTracked: { default: [] } },
         parseDOM: [
-          { tag: "strong" },
-          { tag: "b", getAttrs: (node) => (node as HTMLElement).style.fontWeight !== "normal" && null },
+          { tag: "strong", getAttrs: (node) => !isRegularWeight(node.style.fontWeight) && null },
+          { tag: "b", getAttrs: (node) => !isRegularWeight(node.style.fontWeight) && null },
           {
             style: "font-weight",
-            getAttrs: (value) => /^(normal|lighter|[1-4]\d{2})$/.test(value) && null,
+            getAttrs: (value) => isRegularWeight(value) && null,
             clearMark: (m) => m.type.name === "bold",
           },
-          { style: "font-weight", getAttrs: (value) => /^(bold(er)?|[5-9]\d{2})$/.test(value as string) && null },
+          { style: "font-weight", getAttrs: (value) => /^(bold(er)?|[5-9]\d{2}|1000)$/i.test(value) && null },
         ],
         toDOM: () => ["strong", 0],
       },

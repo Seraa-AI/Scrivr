@@ -14,12 +14,17 @@ export const HTML_BLOCK_TAGS: ReadonlySet<string> = new Set([
 /** Elements the parse drops with everything in them when no rule takes them. */
 export const HTML_IGNORED_TAGS: ReadonlySet<string> = new Set(["head", "noscript", "object", "script", "style", "title"]);
 
-/** Inline atoms that show with nothing inside them: a break, an image, a field. */
-const SHOWS_EMPTY = "br, img, span[data-field]";
+/** Atoms that show though empty, as an empty span does not. */
+const SHOWS_EMPTY = "br, img[src], span[data-field]";
+
+/** Whether `node` is an element that opens a block of its own. */
+export const isHtmlBlock = (node: Node): boolean =>
+  isHtmlElement(node) && HTML_BLOCK_TAGS.has(node.tagName.toLowerCase());
 
 /** Whether `node` puts something on the page: text, or an inline atom, at any depth. */
 export function htmlShows(node: Node): boolean {
-  if (node.nodeType === 3 /* TEXT_NODE */) return (node.textContent ?? "").trim() !== "";
+  // CSS whitespace only: a non-breaking space holds a line.
+  if (node.nodeType === 3 /* TEXT_NODE */) return /[^ \t\n\r\f]/.test(node.textContent ?? "");
   if (!isHtmlElement(node) || HTML_IGNORED_TAGS.has(node.tagName.toLowerCase())) return false;
   return node.matches(SHOWS_EMPTY) || Array.from(node.childNodes).some(htmlShows);
 }

@@ -171,4 +171,10 @@ describe("inherited styles", () => {
     expect(marksOf(doc, "r")).toMatchObject({ color: { color: "#ff0000" } });
     expect(diagnostics).toEqual([expect.objectContaining({ code: "html-element-unknown", tag: "a", count: 2 })]);
   });
+
+  it("a link turned away for its URL keeps the colour it inherits", async () => {
+    const { doc, diagnostics } = await load(`<p><span style="color:#ff0000"><a href="javascript:alert(1)">t</a></span></p>`);
+    expect(marksOf(doc, "t")).toEqual({ color: expect.objectContaining({ color: "#ff0000" }) });
+    expect(diagnostics).toEqual([expect.objectContaining({ code: "html-element-rejected", tag: "a" })]);
+  });
 });

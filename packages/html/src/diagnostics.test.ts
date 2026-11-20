@@ -144,4 +144,33 @@ describe("importHtml diagnostics", () => {
       await diagnosticsOf(`<p><b>x<span style="font-weight:normal">y</span></b><i>a<span style="font-style:normal">b</span></i></p>`),
     ).toEqual([]);
   });
+
+  it("an alignment written as an attribute is reported where it is lost, as a style is", async () => {
+    expect(await diagnosticsOf(`<div align="center"><p>a</p><pre>code</pre></div>`)).toEqual([
+      expect.objectContaining({ code: "html-style-unsupported", property: "text-align", count: 1 }),
+    ]);
+  });
+
+  it("a light weight is reported — the editor draws it regular", async () => {
+    expect(await diagnosticsOf(`<p><span style="font-weight:300">thin</span></p>`)).toEqual([
+      expect.objectContaining({ code: "html-style-unsupported", property: "font-weight", count: 1 }),
+    ]);
+  });
+
+  it("an alignment nothing shown inherits loses nothing", async () => {
+    for (const html of [
+      `<div style="text-align:center"><div style="text-align:right">x</div></div>`,
+      `<div style="text-align:center"></div><p>a</p>`,
+      `<div style="text-align:center"><!-- c --></div><p>a</p>`,
+      `<div style="text-align:center"><span></span></div><p>a</p>`,
+    ]) {
+      expect(await diagnosticsOf(html)).toEqual([]);
+    }
+  });
+
+  it("an alignment on a block that shows its text and cannot hold it is reported", async () => {
+    expect(await diagnosticsOf(`<pre style="text-align:center">code</pre>`)).toEqual([
+      expect.objectContaining({ code: "html-style-unsupported", property: "text-align", count: 1 }),
+    ]);
+  });
 });

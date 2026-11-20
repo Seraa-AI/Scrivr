@@ -22,6 +22,7 @@ describe("@scrivr/html exports", () => {
     expect(core.HTML_BLOCK_TAGS.has("td")).toBe(true);
     expect(core.HTML_IGNORED_TAGS.has("script")).toBe(true);
     expect(typeof core.htmlShows).toBe("function");
+    expect(typeof core.isHtmlBlock).toBe("function");
     expect(typeof core.pickFile).toBe("function");
     expect(docx.applyImportedDocument).toBe(core.applyImportedDocument);
   });

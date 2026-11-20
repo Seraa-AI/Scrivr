@@ -11,7 +11,7 @@
  * reported with no change here.
  */
 
-import { HTML_IGNORED_TAGS, htmlShows, isHtmlElement } from "@scrivr/core";
+import { HTML_IGNORED_TAGS, htmlShows, isHtmlBlock, isHtmlElement } from "@scrivr/core";
 import {
   DOMParser as PMDOMParser,
   type ParseRule,
@@ -19,7 +19,7 @@ import {
   type StyleParseRule,
   type TagParseRule,
 } from "@scrivr/core/pm";
-import { isBlockElement, type Carried } from "./cascade";
+import { BLOCK_PROPERTIES, type Carried } from "./cascade";
 import { parseDeclarations } from "./stylesheet";
 
 export type HtmlDiagnosticCode =
@@ -199,20 +199,19 @@ function collect(body: HTMLElement, preparse: Preparse, seen: Seen, styleRules: 
   };
 
   const takenBy = (el: HTMLElement) => new Set([...(seen.readStyles.get(el) ?? []), ...takenByStyleRules(el, styleRules)]);
-  // A value carried down is lost wherever it reached something shown and no
-  // rule took it there. A container it only passed through loses nothing.
-  const reached = new Pairs();
+  // A block property is lost where something shown takes none of it: the
+  // block's own text, or a block it was carried to. One that only passes
+  // through containers, or that every block inside overrides, loses nothing.
   const missed = new Pairs();
   for (const [target, origins] of preparse.carried) {
-    if (!isHtmlElement(target)) continue;
+    if (!isHtmlElement(target) || !holdsContent(target)) continue;
     const taken = takenBy(target);
-    const holdsContent = Array.from(target.childNodes).some((child) => !isBlockElement(child) && htmlShows(child));
-    for (const [property, source] of origins) {
-      reached.add(source, property);
-      if (holdsContent && !covers(taken, property)) missed.add(source, property);
-    }
+    for (const [property, source] of origins) if (!covers(taken, property)) missed.add(source, property);
   }
-  const carriedOff = (el: Element, property: string) => reached.has(el, property) && !missed.has(el, property);
+  const lost = (el: HTMLElement, property: string, value: string, taken: Set<string>) =>
+    BLOCK_PROPERTIES.has(property) && isHtmlBlock(el)
+      ? !statesNothing(property, value) && (missed.has(el, property) || (holdsContent(el) && !covers(taken, property)))
+      : longhands(el, property, value).some((longhand) => !covers(taken, longhand));
 
   const visit = (el: Element) => {
     const tag = el.tagName.toLowerCase();
@@ -225,10 +224,7 @@ function collect(body: HTMLElement, preparse: Preparse, seen: Seen, styleRules: 
       const taken = takenBy(el);
       const written = preparse.carried.get(el);
       for (const [property, { value }] of parseDeclarations(el.getAttribute("style") ?? "")) {
-        if (written?.has(property) || carriedOff(el, property)) continue;
-        if (longhands(el, property, value).some((longhand) => !covers(taken, longhand))) {
-          note("html-style-unsupported", { property });
-        }
+        if (!written?.has(property) && lost(el, property, value, taken)) note("html-style-unsupported", { property });
       }
     }
     if (!seen.opaque.has(el)) for (const child of Array.from(el.children)) visit(child);
@@ -242,6 +238,8 @@ function collect(body: HTMLElement, preparse: Preparse, seen: Seen, styleRules: 
   return [...found.values()].map(({ entry, subject }) => ({ ...entry, message: MESSAGES[entry.code](subject, entry.count) }));
 }
 
+const holdsContent = (el: Element) => Array.from(el.childNodes).some((child) => !isHtmlBlock(child) && htmlShows(child));
+
 class Pairs {
   private readonly byElement = new Map<Element, Set<string>>();
   add(el: Element, property: string): void {
@@ -254,9 +252,14 @@ class Pairs {
   }
 }
 
-/** The properties of `el`'s style a style rule takes, as the parse matches them. */
+/**
+ * The properties of `el`'s style a style rule takes, as the parse matches them.
+ * A rule that only clears a mark carries nothing of the value: a light weight
+ * clears bold, but is drawn regular.
+ */
 function takenByStyleRules(el: HTMLElement, rules: StyleParseRule[]): string[] {
   return rules.flatMap((rule) => {
+    if (rule.clearMark) return [];
     const [property = "", only] = rule.style.split("=");
     const value = el.style.getPropertyValue(property);
     if (!value || (only !== undefined && only !== value)) return [];
@@ -269,8 +272,10 @@ function covers(taken: Set<string>, longhand: string): boolean {
   return [...taken].some((name) => name === longhand || longhand.startsWith(`${name}-`));
 }
 
-/** A CSS-wide keyword, or `normal` — the default a shorthand fills in, and what the rules that undo a mark read. */
-const statesNothing = (value: string) => /^\s*(inherit|initial|unset|revert|revert-layer|normal)\s*$/i.test(value);
+/** A CSS-wide keyword, or the property's default — `normal`, as a shorthand fills it in, or a weight's `400`. */
+const statesNothing = (property: string, value: string) =>
+  /^\s*(inherit|initial|unset|revert|revert-layer|normal)\s*$/i.test(value) ||
+  (property === "font-weight" && value.trim() === "400");
 
 /**
  * What one declaration sets, longhand by longhand, leaving out what states
@@ -281,6 +286,6 @@ function longhands(el: HTMLElement, property: string, value: string): string[] {
   probe.setAttribute("style", `${property}: ${value}`);
   const names = Array.from({ length: probe.style.length }, (_, i) => probe.style.item(i));
   // A property the DOM does not know expands to nothing; it is still a loss.
-  if (names.length === 0) return statesNothing(value) ? [] : [property];
-  return names.filter((name) => !statesNothing(probe.style.getPropertyValue(name)));
+  if (names.length === 0) return statesNothing(property, value) ? [] : [property];
+  return names.filter((name) => !statesNothing(name, probe.style.getPropertyValue(name)));
 }

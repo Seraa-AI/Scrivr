@@ -62,7 +62,7 @@ describe("pasted divs", () => {
   });
 
   it("a div holding only empty elements shows nothing and adds no blank line", () => {
-    for (const empty of [`<span></span>`, `<a id="x"></a>`, `<input type="hidden">`]) {
+    for (const empty of [`<span></span>`, `<a id="x"></a>`, `<input type="hidden">`, `<img>`]) {
       expect(blocks(paste(`<p>a</p><div>${empty}</div><p>b</p>`))).toEqual(["paragraph:a", "paragraph:b"]);
     }
   });
@@ -148,5 +148,19 @@ describe("pasted formatting", () => {
     expect(marksOf(doc, "c")).toEqual([]);
     expect(marksOf(doc, "d")).toEqual(["italic"]);
     expect(marksOf(doc, "e")).toEqual([]);
+  });
+
+  it("a bold or italic tag set to normal weight or style is not bold or italic", () => {
+    const doc = paste(
+      `<p><b style="font-weight:300">a</b><strong style="font-weight:normal">b</strong>` +
+        `<em style="font-style:normal">c</em><i style="font-style:NORMAL">d</i>` +
+        `<b>e<span style="font-weight:NORMAL">f</span></b></p>`,
+    );
+    for (const text of ["a", "b", "c", "d", "f"]) expect(marksOf(doc, text)).toEqual([]);
+    expect(marksOf(doc, "e")).toEqual(["bold"]);
+  });
+
+  it("any weight from 500 up is bold", () => {
+    expect(marksOf(paste(`<p><span style="font-weight:1000">a</span></p>`), "a")).toEqual(["bold"]);
   });
 });

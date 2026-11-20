@@ -108,6 +108,16 @@ describe("HTML formatting the schema holds", () => {
 });
 
 describe("what an element states beats what it inherits", () => {
+  it("an align attribute aligns a paragraph, heading or div of text", async () => {
+    const doc = await load(`<p align="right">p</p><h1 align="center">h</h1><div align="justify">d</div>`);
+    expect([0, 1, 2].map((i) => doc.child(i).attrs["align"])).toEqual(["right", "center", "justify"]);
+  });
+
+  it("a heading's align beats its container's", async () => {
+    const doc = await load(`<div style="text-align:center"><h1 align="right">H</h1></div>`);
+    expect(doc.child(0).attrs["align"]).toBe("right");
+  });
+
   it("<font> keeps its colour, face and size under a page style", async () => {
     const doc = await load(
       `<body style="color:#333333;font-family:Georgia;font-size:10px">` +
@@ -180,7 +190,7 @@ describe("alignment reaches text that sits straight in its container", () => {
     }
   });
 
-  it("a table's align places the table, not the text in its cells", async () => {
+  it("a table's align does not align the text in its cells", async () => {
     const doc = await load(`<table align="center"><tr><td>x</td></tr></table>`);
     let align: unknown = null;
     doc.descendants((node) => {
@@ -188,6 +198,29 @@ describe("alignment reaches text that sits straight in its container", () => {
       return true;
     });
     expect(align).toBe("left");
+  });
+
+  it("a row's or row group's align aligns its cells' text", async () => {
+    for (const html of [
+      `<table><tr align="center"><td>x</td></tr></table>`,
+      `<table><tbody align="center"><tr><td>x</td></tr></tbody></table>`,
+    ]) {
+      let align: unknown = null;
+      (await load(html)).descendants((node) => {
+        if (node.type.name === "paragraph") align = node.attrs["align"];
+        return true;
+      });
+      expect(align).toBe("center");
+    }
+  });
+
+  it("a cell holding a non-breaking space keeps the alignment that reaches it", async () => {
+    let align: unknown = null;
+    (await load(`<table style="text-align:center"><tr><td>&nbsp;</td></tr></table>`)).descendants((node) => {
+      if (node.type.name === "paragraph") align = node.attrs["align"];
+      return true;
+    });
+    expect(align).toBe("center");
   });
 
   it("a container with only empty elements in it adds no blank line", async () => {
