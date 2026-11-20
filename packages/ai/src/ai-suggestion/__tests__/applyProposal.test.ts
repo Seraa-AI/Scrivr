@@ -74,6 +74,24 @@ describe("applying an AI suggestion", () => {
     expect(changeActs(trackChangesPluginKey.getState(editor.getState())!.changeSet.pending)).toHaveLength(1);
   });
 
+  it("records a swap to mixed formatting as one act, new words before the struck one", () => {
+    const editor = build("The cat sat.");
+    propose(editor, [{ text: "The ", marks: [] }, { text: "big", marks: [{ type: "bold" }] }, { text: " dog sat.", marks: [] }]);
+    applyAiSuggestion(editor, { mode: "tracked" });
+
+    expect(laidOut(editor)).toBe("The big dogcat sat.");
+    expect(changeActs(trackChangesPluginKey.getState(editor.getState())!.changeSet.pending)).toHaveLength(1);
+  });
+
+  it("records an insertion of mixed formatting as one act", () => {
+    const editor = build("an idea");
+    propose(editor, [{ text: "an ", marks: [] }, { text: "very", marks: [{ type: "bold" }] }, { text: " good idea", marks: [] }]);
+    applyAiSuggestion(editor, { mode: "tracked" });
+
+    expect(laidOut(editor)).toBe("an very good idea");
+    expect(changeActs(trackChangesPluginKey.getState(editor.getState())!.changeSet.pending)).toHaveLength(1);
+  });
+
   it.each(["direct", "tracked"] as const)("writes a line break as a break in %s mode", (mode) => {
     const editor = build("one two");
     propose(editor, [{ text: "one\ntwo", marks: [] }]);

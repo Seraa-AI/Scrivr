@@ -10,8 +10,9 @@ import type { PairedDiffOp } from "./diffText";
  * positions are mapped through what was written since, as a deletion removes
  * its text.
  *
- * Each phrase (a deletion and the insertion sharing its `groupId`) starts with
- * one step, the unit the engine pairs as one replacement. A deletion takes only the
+ * Each phrase (the ops sharing a `groupId`: a deletion, and an insertion in
+ * one op or several) starts with one step, the unit the engine pairs as one
+ * replacement. A deletion takes only the
  * characters the map read: an image or another author's struck text between
  * them is left in place, since the proposal never saw it.
  *
@@ -39,12 +40,14 @@ export function writeProposal(
       proposed += op.text.length;
       continue;
     }
-    // A phrase: this op and the next when they are the two halves of one replacement.
-    const next = ops[i + 1];
-    const paired = op.type === "delete" && next?.type === "insert" && !!op.groupId && next.groupId === op.groupId;
-    const removed = op.type === "delete" ? op.text.length : 0;
-    const added = op.type === "insert" ? op.text.length : paired && next ? next.text.length : 0;
-    if (paired) i++;
+    // A phrase: this op and those after it sharing its `groupId` — an insertion
+    // may come in several ops, one per run of formatting.
+    let end = i;
+    while (op.groupId && ops[end + 1]?.type !== "keep" && ops[end + 1]?.groupId === op.groupId) end++;
+    const phrase = ops.slice(i, end + 1);
+    const removed = length(phrase, "delete");
+    const added = length(phrase, "insert");
+    i = end;
 
     const runs = docRuns(map, accepted, accepted + removed);
     const content = added > 0 ? contentFor(proposed, proposed + added) : null;
@@ -65,6 +68,10 @@ export function writeProposal(
     proposed += added;
   }
   return written;
+}
+
+function length(ops: readonly PairedDiffOp[], type: "delete" | "insert"): number {
+  return ops.reduce((sum, op) => sum + (op.type === type ? op.text.length : 0), 0);
 }
 
 /** The doc ranges holding accepted characters `from`–`to`, split wherever the map skips content. */
