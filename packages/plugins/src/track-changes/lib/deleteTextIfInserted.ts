@@ -35,9 +35,7 @@ export function deleteTextIfInserted(
   const leftNode = newTr.doc.resolve(start).nodeBefore;
   const leftMarks = getMergeableMarkTrackedAttrs(leftNode, deleteAttrs, schema);
   const rightNode = newTr.doc.resolve(end).nodeAfter;
-  const rightMergeable = getMergeableMarkTrackedAttrs(rightNode, deleteAttrs, schema);
-  // Joining both sides makes them one record, so two replacements' deletions are never bridged.
-  const rightMarks = leftMarks && rightMergeable && leftMarks.groupId !== rightMergeable.groupId ? null : rightMergeable;
+  const rightMarks = getMergeableMarkTrackedAttrs(rightNode, deleteAttrs, schema);
 
   const fromStartOfMark = start - (leftNode && leftMarks ? leftNode.nodeSize : 0);
   const toEndOfMark = end + (rightNode && rightMarks ? rightNode.nodeSize : 0);
