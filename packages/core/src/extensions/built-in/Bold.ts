@@ -32,6 +32,8 @@ export const Bold = Extension.create<BoldOptions>({
       bold: {
         attrs: { dataTracked: { default: [] } },
         parseDOM: [
+          // A tag set to normal weight is declined outright, not skipped: a skipped
+          // element's own style is never read, so it would lose its colour too.
           { tag: "strong", getAttrs: (node) => !isRegularWeight(node.style.fontWeight) && null },
           { tag: "b", getAttrs: (node) => !isRegularWeight(node.style.fontWeight) && null },
           {

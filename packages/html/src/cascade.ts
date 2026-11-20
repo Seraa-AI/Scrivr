@@ -17,8 +17,10 @@ import {
   HTML_IGNORED_TAGS,
   htmlAlign,
   htmlShows,
+  isCssWideKeyword,
   isHtmlBlock,
   isHtmlElement,
+  parseTextAlign,
   safeUrl,
 } from "@scrivr/core";
 import { parseDeclarations, serializeDeclarations } from "./stylesheet";
@@ -27,7 +29,7 @@ const TEXT_PROPERTIES = new Set(["color", "font-family", "font-size", "font-styl
 /** Block properties, which the cascade carries since the parse does not. */
 export const BLOCK_PROPERTIES: ReadonlySet<string> = new Set(["text-align", "text-indent"]);
 
-export const HEADINGS = ["h1", "h2", "h3", "h4", "h5", "h6"];
+export const HEADINGS: ReadonlyArray<string> = ["h1", "h2", "h3", "h4", "h5", "h6"];
 
 /**
  * Text properties an element sets by default, so it takes none from outside.
@@ -39,11 +41,17 @@ const OWN_DEFAULTS: Array<[setsOwn: (el: Element) => boolean, properties: string
   [(el) => HEADINGS.includes(el.tagName.toLowerCase()), ["font-size"]],
 ];
 
+/** The block property values a browser reads; a declaration it cannot read, it drops. */
+const READABLE: Record<string, (value: string) => boolean> = {
+  "text-align": (value) => isCssWideKeyword(value) || parseTextAlign(value) !== null,
+};
+
 /**
  * Attributes that state a block property, the elements they state it on — a
- * table's `align` places the table — and how a browser reads their value, as
- * CSS; one it ignores states nothing. Written as style, so diagnostics judge
- * them as they judge a style.
+ * table's `align` places the table — and how a browser reads their value into
+ * CSS; one it ignores states nothing. Moved into the style, so diagnostics
+ * judge them as they judge a style, and the parse sees only what the cascade
+ * decided.
  */
 const PRESENTATIONAL: Record<
   string,
@@ -97,12 +105,17 @@ function visit(el: Element, outer: Inherited, carried: Carried): void {
   const tag = el.tagName.toLowerCase();
   if (HTML_IGNORED_TAGS.has(tag)) return;
 
-  const original = serializeDeclarations(parseDeclarations(el.getAttribute("style") ?? ""));
-  const own = parseDeclarations(original);
+  const own = parseDeclarations(el.getAttribute("style") ?? "");
+  const original = serializeDeclarations(own);
+  for (const [property, readable] of Object.entries(READABLE)) {
+    if (!readable(own.get(property)?.value ?? "")) own.delete(property);
+  }
   // An attribute counts only where the style says nothing — even `inherit` beats it.
   for (const [property, { attribute, on, read }] of Object.entries(PRESENTATIONAL)) {
-    const presented = on.has(tag) && !own.has(property) ? read(el.getAttribute(attribute) ?? "") : null;
+    if (!on.has(tag)) continue;
+    const presented = own.has(property) ? null : read(el.getAttribute(attribute) ?? "");
     if (presented !== null) own.set(property, { value: presented, important: false });
+    el.removeAttribute(attribute);
   }
   for (const property of BLOCK_PROPERTIES) {
     if (INHERITING_KEYWORD.test(own.get(property)?.value ?? "")) own.delete(property);

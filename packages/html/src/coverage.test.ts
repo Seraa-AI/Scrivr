@@ -127,6 +127,20 @@ describe("what an element states beats what it inherits", () => {
     expect(inherited.child(0).attrs["align"]).toBe("center");
   });
 
+  it("text-align: inherit beats align even with nothing to inherit", async () => {
+    const doc = await load(`<p align="center" style="text-align:inherit">a</p>`);
+    expect(doc.child(0).attrs["align"]).toBe("left");
+  });
+
+  it("a text-align the browser cannot read leaves the align attribute", async () => {
+    for (const value of ["bogus", "middle"]) {
+      const doc = await load(`<p align="center" style="text-align:${value}">a</p>`);
+      expect(doc.child(0).attrs["align"]).toBe("center");
+    }
+    const nested = await load(`<div style="text-align:right"><p style="text-align:bogus">a</p></div>`);
+    expect(nested.child(0).attrs["align"]).toBe("right");
+  });
+
   it("text-align: inherit keeps what the block inherits", async () => {
     for (const keyword of ["inherit", "unset"]) {
       const doc = await load(`<div style="text-align:center"><p style="text-align:${keyword}">a</p></div>`);

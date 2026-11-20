@@ -89,6 +89,11 @@ describe("pasted divs", () => {
     expect([0, 1, 2].map((i) => doc.child(i).attrs["align"])).toEqual(["left", "left", "left"]);
   });
 
+  it("a text-align the browser cannot read leaves the align attribute; a keyword beats it", () => {
+    const doc = paste(`<p align="center" style="text-align:bogus">a</p><p align="center" style="text-align:inherit">b</p>`);
+    expect([0, 1].map((i) => doc.child(i).attrs["align"])).toEqual(["center", "left"]);
+  });
+
   it("a div whose blocks sit inside an inline wrapper is read through", () => {
     expect(blocks(paste(`<div><a href="https://x.y"><h2>T</h2><p>y</p></a></div>`))).toEqual([
       "heading:T",

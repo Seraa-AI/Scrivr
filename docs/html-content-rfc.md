@@ -287,8 +287,11 @@ in HTML isn't finished.
       (on a paragraph, div, heading, cell, row or row group — a table's
       places the table, which the editor does not model), a `<font>`'s
       attributes. The cascade writes `align` as `text-align` style, so
-      diagnostics judge it as a style. An inline style beats the attribute,
-      even `text-align: inherit`/`unset`, which inherits.
+      diagnostics judge it as a style, and removes the attribute so the parse
+      sees only its decision. An inline style beats the attribute, even
+      `text-align: inherit`/`unset`, which inherits — but only a value the
+      browser reads: an invalid `text-align` is dropped, as a browser drops
+      it, so the attribute or the inherited alignment still applies.
     - `align` and `text-align` take each one's own values, as a browser does:
       `align` HTML's (`middle` is centre; `end` is ignored), `text-align`
       CSS's, with the `-webkit-`/`-moz-` keywords mail clients write. One core

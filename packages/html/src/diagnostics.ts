@@ -64,7 +64,7 @@ export function watchedParser(schema: Schema): {
   const seen: Seen = {
     taken: new Set(),
     declined: new Set(),
-    declinedForStyle: new Set(),
+    declinedOnStyle: new Set(),
     opaque: new Set(),
     readStyles: new Map(),
     reading: new Map(),
@@ -84,11 +84,12 @@ interface Seen {
   /** Elements a tag rule looked at and turned away. */
   declined: Set<Element>;
   /**
-   * Of those, the ones turned away for what their own style says — a `<b>` set
-   * to normal weight. The style is the meaning, judged as a style; the element
-   * is a plain wrapper, read through.
+   * Of those, the ones whose rule read their style before turning them away —
+   * a `<b>` set to normal weight. They count as turned away for that style, so
+   * a rule reads style only to decide whether to decline. The element is a
+   * plain wrapper, read through; its style is judged as a style.
    */
-  declinedForStyle: Set<Element>;
+  declinedOnStyle: Set<Element>;
   /** Taken elements whose children the parse never reads — leaves and `ignore` rules. */
   opaque: Set<Element>;
   /** The `style` properties a rule that took its element read off each element. */
@@ -111,7 +112,7 @@ function watchTag(rule: TagParseRule, schema: Schema, seen: Seen): TagParseRule 
       const result = getAttrs ? getAttrs(watchElement(dom, seen)) : (attrs ?? null);
       if (result === false) {
         seen.declined.add(dom);
-        if (seen.reading.get(dom)?.size) seen.declinedForStyle.add(dom);
+        if ((seen.reading.get(dom)?.size ?? 0) > 0) seen.declinedOnStyle.add(dom);
         return result;
       }
       seen.taken.add(dom);
@@ -238,8 +239,8 @@ function collect(body: HTMLElement, preparse: Preparse, seen: Seen, styleRules: 
 
   const visit = (el: Element) => {
     const tag = el.tagName.toLowerCase();
-    // A container a rule turned down is still read through; nothing is lost.
-    if (!seen.taken.has(el) && !TRANSPARENT.has(tag) && !seen.declinedForStyle.has(el)) {
+    // Lost: an element no rule took, unless the parse reads through it as a plain wrapper.
+    if (!seen.taken.has(el) && !TRANSPARENT.has(tag) && !seen.declinedOnStyle.has(el)) {
       if (HTML_IGNORED_TAGS.has(tag)) return note("html-element-ignored", { tag });
       note(seen.declined.has(el) ? "html-element-rejected" : "html-element-unknown", { tag });
     }
