@@ -44,14 +44,24 @@ ChatGPT), and edited across 11 to about 1,100 Word sessions. They come from the
 public docx-corpus, 2–3 per document type (letters, forms, policies, reports,
 legal, technical and others).
 
-| Check | Result |
-|---|---|
-| Same page count as Word | 10 of 25 |
-| Pages start where Word's do (Word's saved break positions) | 13 of 30 breaks |
-| All text survives import | 21 of 25. One form keeps 2 of 8,464 characters |
-| All imported text reaches a page | 24 of 25. One letter shows 78% |
-| Same text after export → re-import | 25 of 25 |
-| Same document after export → re-import (block ids aside, which import assigns fresh) | 21 of 25. Two gain a list item; in two, a run's marks change |
+| Check | Result | Phase 2 baseline |
+|---|---|---|
+| Same page count as Word | 10 of 25 | 8 of 25 |
+| Pages start where Word's do (Word's saved break positions) | 13 of 30 breaks | 8 of 29 |
+| All text survives import | 21 of 25. One form keeps 2 of 8,464 characters | 21 of 25. The form keeps 0 of 4,232 |
+| All imported text reaches a page | 24 of 25. One letter shows 78% | 25 of 25 |
+| Same text after export → re-import | 25 of 25 | 25 of 25 |
+| Same document after export → re-import (block ids aside, which import assigns fresh) | 21 of 25. Two gain a list item; in two, a run's marks change | 20 of 25 |
+
+The Phase 2 baseline is what the test suite measures and stores, and it differs
+from the first measurement for known reasons. The suite imports with tables on
+(`StarterKit.configure({ table: true })`), which is how an app opening Word
+files would load it. It lays out in one pinned face (Inter) so its scores are
+the same on every machine, which moves page counts and page starts. It counts a
+text box's text once: Word writes each text box twice, and the first
+measurement read both copies (8,464 = 2 × 4,232). A hard page break that Word
+follows with a rendered break is one page start, not two. And nested-list text
+now reaches the page.
 
 The causes, each traced to a file:
 
@@ -260,8 +270,9 @@ or drop something different changes the snapshot.
 ```ts
 type LayoutOp =
   | { op: "page"; page: number; width: number; height: number; margins: Margins }
-  | { op: "block"; page: number; type: string; x: number; y: number; width: number;
-      height: number; spaceBefore: number; spaceAfter: number; lines: string[] };
+  | { op: "block"; page: number; depth: number; type: string; x: number; y: number;
+      width: number; height: number; spaceBefore: number; spaceAfter: number; lines: string[] };
+// depth: 0 on the page, 1 in a table cell, and so on — a table's cells follow it
 // lines: the first 16 characters of each line, so a moved line break shows up
 ```
 
@@ -279,12 +290,13 @@ split.
 **Round trip.** Import → export → re-import should give the same document,
 comparing node types, text, marks and attributes and ignoring `nodeId` (import
 assigns fresh ids). Any difference is a bug in one direction or the other.
-Today 4 of the 25 differ. Those 4 are stored as known differences, and a new
-difference fails.
+Today 5 of the 25 differ. Those differences are stored as known, by how often
+each occurs, and a new difference — or one more of a known one — fails.
 
-**The Word comparison.** Real font metrics this time. It compares Scrivr's
-layout with §4 and records, per fixture: page starts matched, page geometry
-matched, and text retained.
+**The Word comparison.** Real font metrics this time, every family measured in
+one pinned face (Inter) so the scores are the same on every machine. It
+compares Scrivr's layout with §4 and records, per fixture: page starts
+matched, page geometry matched, and text retained.
 
 **How results are judged.** All the scores above are stored per fixture. A
 known gap does not fail the build. It is logged,
@@ -439,8 +451,9 @@ Settled on 2026-11-04:
   `@scrivr/docx` (new result field), as additive API in this repo is.
 - **Phase 1:** `patch` for `@scrivr/core` and `@scrivr/docx`. Extensions start
   reporting, `trackUnread` is added, and the `ignored` list quiets diagnostics.
-- **Phase 2:** empty changeset ("No release. Test-only: …"), as with the PDF
-  op-log baseline.
+- **Phase 2:** no changeset; the PR carries the `no-release` label. It adds
+  tests and dev dependencies and changes no package code, so there is nothing
+  to release, as with this RFC and the fixtures.
 - **Phase 3+:** each fix carries its own changeset.
 
 ## Files to create / modify
@@ -472,10 +485,15 @@ Settled on 2026-11-04:
   edits and the untouched-paragraph check
 - `packages/docx/src/__tests__/fidelity/*.baseline.test.ts`,
   `*.mutation.test.ts`, `roundTrip.test.ts`, `wordComparison.test.ts`
-- `packages/docx/src/__tests__/fidelity/scores.json` — stored scores per fixture
+- `packages/docx/src/__tests__/fidelity/scores/` — stored scores per fixture,
+  one file per check, so test files running in parallel never write the same
+  file
 
 ## Dependencies
 
-None. `runPipeline` is exported from `@scrivr/core` (`layout/index.ts`) and
-takes a measurer, so the docx package can lay a document out without an editor
-or a DOM, as `LayoutCoordinator.layoutForExport` already does.
+None at runtime. `runPipeline` is exported from `@scrivr/core`
+(`layout/index.ts`) and takes a measurer, so the docx package can lay a
+document out without an editor or a DOM, as `LayoutCoordinator.layoutForExport`
+already does. The Word comparison adds two dev dependencies to `@scrivr/docx`,
+the versions `@scrivr/export-pdf` already uses: `@napi-rs/canvas` for real
+glyph metrics, and `@expo-google-fonts/inter` for the face it pins.

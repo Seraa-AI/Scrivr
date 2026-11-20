@@ -253,6 +253,12 @@ importers:
         specifier: ^0.8.2
         version: 0.8.2
     devDependencies:
+      '@expo-google-fonts/inter':
+        specifier: 0.4.2
+        version: 0.4.2
+      '@napi-rs/canvas':
+        specifier: ^1.0.0
+        version: 1.0.0
       '@scrivr/core':
         specifier: workspace:*
         version: link:../core
