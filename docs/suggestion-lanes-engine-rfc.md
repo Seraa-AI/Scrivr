@@ -239,7 +239,7 @@ today's behaviour through the change.
 - A rich edit that drops an existing break proposes deleting it; Accept removes
   it, Reject keeps it.
 - A plain edit, and `insertAsSuggestion`, with `"\n"` propose a break, not a
-  space; in a heading the break becomes a space, in a code block a newline.
+  space, where the block takes a break; in a code block, a newline.
 - A deletion spanning an image the lane did not read keeps the image.
 - A deletion spanning another author's pending deletion places the following
   edits correctly.
