@@ -121,7 +121,7 @@ export function trackChanges(
     replayedSelection,
   };
 
-  groupMoveSteps(gesture, trContext);
+  groupMoveSteps(gesture, trContext, userID);
   groupIndentationSteps(gesture, trContext);
 
   const steps = contentSteps(tx.steps).length;
