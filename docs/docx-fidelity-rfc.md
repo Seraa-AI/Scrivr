@@ -176,15 +176,23 @@ importDocx(editor, bytes, { trackUnread: true });
 With it on, `parseOoxml` returns its element tree wrapped in a `Proxy` that
 records each read. That covers the helpers (`findChild`, `attr`, …) and the 53
 places where the parser walks `.children` directly, without changing any of
-them. The helpers search the unwrapped tree and mark only what they return.
-Otherwise `findChild(pPr, "w:jc")` would count its sibling `w:spacing` as read.
+them. The helpers search the unwrapped tree: the element searched is read, a
+hit is examined, and the siblings passed over stay unread. Otherwise
+`findChild(pPr, "w:jc")` would count its sibling `w:spacing` as read.
+
+A proxy cannot tell a name that was matched and acted on from one compared and
+passed over. So an element whose name or presence is all the import takes from
+it — a run's `w:tab`, a row's `w:tblHeader` — is read only where the parser
+marks it handled (`markRead`, `hasChild`). Counting every bare element read once
+its name was looked at hid real losses: `w:noBreakHyphen` and `w:softHyphen`
+were dropped from the text and reported as read.
 
 Each element ends with one of these outcomes:
 
 | Outcome | Meaning | Example today |
 |---|---|---|
-| `read` | Its attributes or children were read, or a helper returned it. An element with nothing but its name counts as read once its name is matched | `w:jc`, a run's `w:tab` |
-| `examined` | Its name was matched, but nothing in it was read | `w:pgSz`, `w:pgMar` |
+| `read` | Its attributes or children were read, or the parser marked it handled | `w:jc`, a run's `w:tab` |
+| `examined` | Its name was seen, but nothing in it was read | `w:pgSz`, `w:pgMar`, `w:noBreakHyphen` |
 | `ignored` | On a reviewed list of properties dropped on purpose | `w:szCs`, `w:proofErr`, `rsid*` |
 | `unread` | Never looked at — a silent drop | `w:ind`, `w:keepNext`, `w:tabs`, `w:pPrDefault` |
 

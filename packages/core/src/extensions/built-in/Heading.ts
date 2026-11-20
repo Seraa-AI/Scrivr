@@ -20,7 +20,7 @@ import {
   type XmlNode,
 } from "../../exports/docx";
 import type { SemanticNodeHandler } from "../../exports/semantic";
-import { alignToJc } from "./Paragraph";
+import { alignToJc, reportUnwrittenTextblockAttrs } from "./Paragraph";
 
 export type HeadingLevel = 1 | 2 | 3 | 4 | 5 | 6;
 
@@ -168,6 +168,7 @@ export const Heading = Extension.create<HeadingOptions>({
       return levels[0] ?? 1;
     };
     const headingHandler: DocxNodeHandler = (node, children, ctx) => {
+      reportUnwrittenTextblockAttrs(node, ctx);
       const level = readLevel(node.attrs["level"]);
       const spec = HEADING_LEVEL_SPEC[level];
       const styleId = ctx.styles.paragraph.getOrCreate(`Heading ${level}`, {

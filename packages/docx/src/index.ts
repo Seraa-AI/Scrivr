@@ -17,6 +17,7 @@ export type {
   DocxReportCount,
   DocxReportEntry,
   DocxReporter,
+  DocxUnreadElement,
 } from "@scrivr/core";
 
 export type {

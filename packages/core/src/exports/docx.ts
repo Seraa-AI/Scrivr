@@ -209,7 +209,13 @@ export interface DocxReporter {
    * a whole number is ignored with a warning.
    */
   kept(kind: string, count?: number): void;
-  /** One `kind` did not make it across, and why. */
+  /**
+   * One `kind` did not make it across, and why. For content inside the item
+   * being handled — an image a code block leaves out — one is also taken off
+   * what was counted kept, and nothing is recorded if none of that kind was
+   * kept there. The import names content as the converter counts it: Word's
+   * kinds (`b`, `image`, `field`), not the editor's.
+   */
   dropped(kind: string, reason: string): void;
   /**
    * One `kind` made it across, but not as the source had it ("spacing
@@ -251,6 +257,33 @@ export interface DocxReport {
   counts: Record<string, DocxReportCount>;
   /** Every distinct drop and change, in the order the conversion first met it. */
   entries: DocxReportEntry[];
+  /**
+   * Import only, with `trackUnread` on: the Word XML the import never read,
+   * across the body, every header and footer the document references,
+   * footnotes, endnotes, comments, styles, numbering and settings. A handler
+   * can only report what it is handed, so this is where a property no code
+   * looks at shows up.
+   */
+  unread?: DocxUnreadElement[];
+}
+
+/**
+ * Word XML an import did not read, by where it sits. Repeats of one path share
+ * an entry and add to its `count`. Only the top of a skipped subtree is listed:
+ * what is inside it was skipped with it.
+ */
+export interface DocxUnreadElement {
+  /** The package part it came from: `"word/document.xml"`, `"word/styles.xml"`. */
+  part: string;
+  /** Element names from the part's root down to it: `"w:document/w:body/w:p/w:pPr/w:ind"`. */
+  path: string;
+  /**
+   * `unread`: never looked at. `examined`: its name was seen, but nothing in
+   * it was read — the import knew it was there and took nothing from it.
+   * `ignored`: dropped on purpose, on the import's reviewed list.
+   */
+  outcome: "unread" | "examined" | "ignored";
+  count: number;
 }
 
 // ── Options ─────────────────────────────────────────────────────────────────

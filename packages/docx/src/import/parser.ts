@@ -21,8 +21,12 @@ import {
   attr,
   findChild,
   findChildren,
+  findDescendant,
+  hasChild,
+  markRead,
   type OoxmlElement,
 } from "./xml";
+import { isIgnored } from "./ignored";
 import type {
   DocxBlock,
   DocxDiagnostic,
@@ -118,7 +122,7 @@ export function parseBlockContainer(
       // Section properties — page size, margins, etc. Not modeled yet.
       // Header/footer references are read separately via parseSectionReferences.
       continue;
-    } else if (IGNORABLE_BODY_CHILDREN.has(child.name)) {
+    } else if (isIgnored("w:body", child.name)) {
       continue;
     } else {
       diagnostics.warn({
@@ -179,55 +183,21 @@ function normalizeSectionType(raw: string | undefined): DocxSectionRef["type"] {
   return raw === "first" || raw === "even" ? raw : "default";
 }
 
-/**
- * Body-level elements Word may emit that don't represent content: revision
- * markers and proof errors mostly. Anything outside this set that we don't
- * model produces an `unsupported-docx-element` diagnostic instead of a
- * silent drop.
- */
-const IGNORABLE_BODY_CHILDREN = new Set([
-  "w:bookmarkStart",
-  "w:bookmarkEnd",
-  "w:proofErr",
-  "w:permStart",
-  "w:permEnd",
-  "w:commentRangeStart",
-  "w:commentRangeEnd",
-]);
-
 // ── Page-break detection ────────────────────────────────────────────────────
 
 /**
- * Allowlist of harmless paragraph-level elements that Word interleaves
- * between content. None of these contain run content; ignoring them lets
- * `isPageBreakParagraph` work on real-world DOCX, not just clean fixtures.
+ * A paragraph child that is not content: its properties, or metadata Word
+ * interleaves between runs and the import drops on purpose. Looked past so the
+ * page-break and rule detectors work on real files, not just clean fixtures.
  */
-const IGNORABLE_PARAGRAPH_CHILDREN = new Set([
-  "w:pPr",
-  "w:bookmarkStart",
-  "w:bookmarkEnd",
-  "w:proofErr",
-  "w:permStart",
-  "w:permEnd",
-  "w:commentRangeStart",
-  "w:commentRangeEnd",
-  "w:commentReference",
-  "w:smartTag",
-]);
+function isParagraphMetadata(name: string): boolean {
+  return name === "w:pPr" || isIgnored("w:p", name);
+}
 
-/**
- * Allowlist of harmless run-level elements that Word interleaves with
- * actual content. Required for tolerant page-break + run parsing.
- */
-const IGNORABLE_RUN_CHILDREN = new Set([
-  "w:rPr",
-  "w:lastRenderedPageBreak",
-  "w:proofErr",
-  "w:bookmarkStart",
-  "w:bookmarkEnd",
-  "w:commentReference",
-  "w:annotationRef",
-]);
+/** The same, for a run's children. */
+function isRunMetadata(name: string): boolean {
+  return name === "w:rPr" || isIgnored("w:r", name);
+}
 
 /**
  * Detect Word's "horizontal rule" convention — an otherwise empty
@@ -258,14 +228,14 @@ function isEffectivelyEmpty(el: OoxmlElement): boolean {
       if (child.trim().length > 0) return false;
       continue;
     }
-    if (IGNORABLE_PARAGRAPH_CHILDREN.has(child.name)) continue;
+    if (isParagraphMetadata(child.name)) continue;
     if (child.name !== "w:r") return false;
     for (const inner of child.children) {
       if (typeof inner === "string") {
         if (inner.trim().length > 0) return false;
         continue;
       }
-      if (IGNORABLE_RUN_CHILDREN.has(inner.name)) continue;
+      if (isRunMetadata(inner.name)) continue;
       return false; // any non-ignorable run child counts as content
     }
   }
@@ -279,14 +249,14 @@ function isPageBreakParagraph(el: OoxmlElement): boolean {
       if (child.trim().length > 0) return false;
       continue;
     }
-    if (IGNORABLE_PARAGRAPH_CHILDREN.has(child.name)) continue;
+    if (isParagraphMetadata(child.name)) continue;
     if (child.name !== "w:r") return false;
     for (const inner of child.children) {
       if (typeof inner === "string") {
         if (inner.trim().length > 0) return false;
         continue;
       }
-      if (IGNORABLE_RUN_CHILDREN.has(inner.name)) continue;
+      if (isRunMetadata(inner.name)) continue;
       if (inner.name === "w:br" && attr(inner, "w:type") === "page") {
         foundPageBreak = true;
         continue;
@@ -330,7 +300,7 @@ function parseTable(el: OoxmlElement, diag: ParserDiagnostics): DocxBlock {
   const rows: DocxTableRow[] = [];
   for (const tr of findChildren(el, "w:tr")) {
     const trPr = findChild(tr, "w:trPr");
-    const repeatHeader = trPr ? findChild(trPr, "w:tblHeader") !== undefined : false;
+    const repeatHeader = trPr ? hasChild(trPr, "w:tblHeader") : false;
 
     const cells: DocxTableCell[] = [];
     for (const tc of findChildren(tr, "w:tc")) {
@@ -543,7 +513,7 @@ function parseRun(el: OoxmlElement, diag: ParserDiagnostics): DocxInline[] {
   const out: DocxInline[] = [];
   for (const child of el.children) {
     if (typeof child === "string") continue;
-    if (IGNORABLE_RUN_CHILDREN.has(child.name)) continue;
+    if (isRunMetadata(child.name)) continue;
     if (child.name === "w:t") {
       const text = readWordText(child);
       if (text.length > 0) out.push({ type: "text", text, marks });
@@ -556,6 +526,7 @@ function parseRun(el: OoxmlElement, diag: ParserDiagnostics): DocxInline[] {
         out.push({ type: "hardBreak", marks });
       }
     } else if (child.name === "w:tab") {
+      markRead(child);
       out.push({ type: "text", text: "\t", marks });
     } else if (child.name === "w:drawing") {
       const image = parseDrawing(child, marks, diag);
@@ -605,10 +576,10 @@ function parseDrawing(
   // Anchored — five-mode mapping mirrors the export side.
   const behindDoc = attr(wrapper, "behindDoc") === "1";
   let wrapMode: DocxImageInline["wrapMode"] | undefined;
-  if (findChild(wrapper, "wp:wrapSquare")) wrapMode = "square";
-  else if (findChild(wrapper, "wp:wrapTopAndBottom")) wrapMode = "top-bottom";
+  if (hasChild(wrapper, "wp:wrapSquare")) wrapMode = "square";
+  else if (hasChild(wrapper, "wp:wrapTopAndBottom")) wrapMode = "top-bottom";
   else if (findChild(wrapper, "wp:wrapTight")) wrapMode = "square"; // tight → square fallback
-  else if (findChild(wrapper, "wp:wrapNone")) wrapMode = behindDoc ? "behind" : "front";
+  else if (hasChild(wrapper, "wp:wrapNone")) wrapMode = behindDoc ? "behind" : "front";
   if (!wrapMode) {
     wrapMode = "square";
     diag.warn({
@@ -684,21 +655,6 @@ function readTextChildren(el: OoxmlElement): string {
   return out;
 }
 
-/**
- * Recursive descendant lookup. Looser than the fixed graphic path in
- * earlier revisions — real-world OOXML wraps the picture in
- * `<mc:AlternateContent>` / `<mc:Choice>` blocks the rigid path missed.
- */
-function findDescendant(el: OoxmlElement, name: string): OoxmlElement | undefined {
-  for (const child of el.children) {
-    if (typeof child === "string") continue;
-    if (child.name === name) return child;
-    const found = findDescendant(child, name);
-    if (found) return found;
-  }
-  return undefined;
-}
-
 // ── Run properties → DocxMark ──────────────────────────────────────────────
 
 /**
@@ -735,9 +691,11 @@ export function parseRunProperties(rPr: OoxmlElement): DocxMark[] {
       // paragraph style may supply the same formatting and this is what
       // outranks it. Stage 2 resolves it away before making editor marks.
       const cancelled = (kind === "u" && val === "none") || !parseOnOff(val);
-      // Drop the val attr for toggles since "on" is the absence of any
-      // value semantically.
-      marks.push(cancelled ? { kind, attrs: {}, off: true } : { kind, attrs: {} });
+      // Once a toggle is on, its val says nothing more — except an underline's,
+      // which names its style (double, dotted, wave) for the handler to keep
+      // or report.
+      const attrs = kind === "u" && !cancelled && val !== undefined ? { val } : {};
+      marks.push(cancelled ? { kind, attrs: {}, off: true } : { kind, attrs });
       continue;
     }
 

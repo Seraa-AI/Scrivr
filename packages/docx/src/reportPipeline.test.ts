@@ -36,6 +36,7 @@ import {
   type DocxReportCount,
   type DocxReportEntry,
   type DocxReporter,
+  type DocxUnreadElement,
   type HandlerOwner,
   type WalkerHandlerOwners,
   type WalkerHandlers,
@@ -518,7 +519,7 @@ describe("importDocx — report", () => {
     expect(report.entries).toContainEqual({
       outcome: "dropped",
       kind: "rFonts",
-      reason: "handler returned nothing",
+      reason: "theme font not resolved",
       owner: "fontFamily",
       count: 1,
     });
@@ -638,5 +639,188 @@ describe("the report's vocabulary, as a consumer imports it", () => {
       0,
       "function",
     ]);
+  });
+});
+
+/** The entries `owner` recorded as changed, as `kind: reason`. */
+function changesBy(report: DocxReport, owner: string): string[] {
+  return report.entries
+    .filter((entry) => entry.outcome === "changed" && entry.owner === owner)
+    .map((entry) => `${entry.kind}: ${entry.reason}`);
+}
+
+const PIXEL = "data:image/png;base64,AA==";
+
+describe("exportDocx — what each extension says it could not write", () => {
+  const exportOf = async (content: unknown[], table = false) => {
+    const kit = table ? StarterKit.configure({ table: true }) : StarterKit;
+    const editor = new ServerEditor({ extensions: [kit, SourcedBlockExtension] });
+    editor.setContent({ type: "doc", content });
+    const result = await exportDocx(editor);
+    editor.destroy();
+    return result.report;
+  };
+
+  it("names the paragraph and heading attributes Word is not given", async () => {
+    const attrs = { indent: 2, textIndent: 24, fontFamily: "Georgia" };
+    const report = await exportOf([
+      { type: "paragraph", attrs, content: [{ type: "text", text: "p" }] },
+      { type: "heading", attrs: { level: 2, ...attrs }, content: [{ type: "text", text: "h" }] },
+    ]);
+
+    const unwritten = ["indent not written", "first-line indent not written", "font not written"];
+    expect(changesBy(report, "paragraph")).toEqual(unwritten.map((reason) => `paragraph: ${reason}`));
+    expect(changesBy(report, "heading")).toEqual(unwritten.map((reason) => `heading: ${reason}`));
+  });
+
+  it("says nothing about a paragraph whose attributes are all written", async () => {
+    const report = await exportOf([{ type: "paragraph", attrs: { align: "center" }, content: [{ type: "text", text: "p" }] }]);
+    expect(changesBy(report, "paragraph")).toEqual([]);
+  });
+
+  it("names the image attributes Word is not given", async () => {
+    const report = await exportOf([{
+      type: "paragraph",
+      content: [{ type: "image", attrs: { src: PIXEL, alt: "A cat", zIndex: 2, verticalAlign: "middle" } }],
+    }]);
+    expect(changesBy(report, "image")).toEqual([
+      "image: alt text not written",
+      "image: stacking order not written",
+      "image: vertical alignment not written",
+    ]);
+  });
+
+  it("drops a colour or a font it cannot write, and says why", async () => {
+    const report = await exportOf([{
+      type: "paragraph",
+      content: [
+        { type: "text", text: "a", marks: [{ type: "color", attrs: { color: "not-a-colour" } }] },
+        { type: "text", text: "b", marks: [{ type: "fontFamily", attrs: { family: "" } }] },
+      ],
+    }]);
+    expect(report.entries).toContainEqual({ outcome: "dropped", kind: "color", reason: "not a color DOCX can write", owner: "color", count: 1 });
+    expect(report.entries).toContainEqual({ outcome: "dropped", kind: "fontFamily", reason: "no font named", owner: "fontFamily", count: 1 });
+    expect(report.counts["color"]).toEqual({ kept: 0, dropped: 1, changed: 0 });
+  });
+
+  it("names what Word is given in place of what the document says", async () => {
+    const report = await exportOf([{
+      type: "paragraph",
+      content: [
+        { type: "text", text: "a", marks: [{ type: "fontSize", attrs: { size: 15 } }] },
+        { type: "text", text: "c", marks: [{ type: "link", attrs: { href: "https://example.com", title: "Example" } }] },
+      ],
+    }]);
+    expect(changesBy(report, "fontSize")).toEqual(["fontSize: rounded to a half point"]);
+    expect(changesBy(report, "link")).toEqual(["link: title not written"]);
+    // 16px is 12pt exactly, so there is nothing to say.
+    const exact = await exportOf([{ type: "paragraph", content: [{ type: "text", text: "a", marks: [{ type: "fontSize", attrs: { size: 16 } }] }] }]);
+    expect(changesBy(exact, "fontSize")).toEqual([]);
+  });
+
+  it("names a table cell background Word is given differently, or not at all", async () => {
+    const cell = (background: string) => ({ type: "tableCell", attrs: { background }, content: [{ type: "paragraph" }] });
+    const report = await exportOf(
+      [{ type: "table", attrs: { grid: [100, 100] }, content: [{ type: "tableRow", content: [cell("rgba(255, 0, 0, 0.5)"), cell("nonsense")] }] }],
+      true,
+    );
+    expect(changesBy(report, "table")).toEqual([
+      "tableCell: translucent background blended onto white",
+      "tableCell: background not written: not a color",
+    ]);
+  });
+
+  it("names a sourced block whose source link does not fit in Word", async () => {
+    const report = await exportOf([{
+      type: "sourcedBlock",
+      attrs: { instanceId: "i", kind: "clause", resourceId: "r".repeat(300), versionId: "v" },
+      content: [{ type: "paragraph", content: [{ type: "text", text: "body" }] }],
+    }]);
+    expect(changesBy(report, "sourcedBlock")).toEqual(["sourcedBlock: source link not written: over 255 characters"]);
+  });
+});
+
+describe("importDocx — what each extension says it could not keep", () => {
+  const run = (rPr: string, text = "x") => `<w:r><w:rPr>${rPr}</w:rPr><w:t>${text}</w:t></w:r>`;
+  const importOf = async (body: string) =>
+    (await importDocx(new ServerEditor({ extensions: [StarterKit] }), await docWithBody(body))).report;
+
+  it("names formatting it keeps in a simpler form", async () => {
+    const report = await importOf(
+      `<w:p>${run(`<w:u w:val="double"/>`)}${run(`<w:sz w:val="23"/>`)}` +
+        `${run(`<w:highlight w:val="green"/>`)}${run(`<w:shd w:val="pct25" w:color="auto" w:fill="FF0000"/>`)}` +
+        `${run(`<w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:eastAsia="MS Mincho"/>`)}</w:p>`,
+    );
+    expect(changesBy(report, "underline")).toEqual([`u: "double" underline imported as single`]);
+    expect(changesBy(report, "fontSize")).toEqual(["sz: rounded to a whole pixel"]);
+    expect(changesBy(report, "highlight")).toEqual([
+      "highlight: color not kept: the editor has one highlight color",
+      `shd: pattern "pct25" not kept`,
+      "shd: color not kept: the editor has one highlight color",
+    ]);
+    expect(changesBy(report, "fontFamily")).toEqual(["rFonts: one font kept of several named"]);
+  });
+
+  it("says why it built nothing for formatting it cannot read", async () => {
+    const report = await importOf(
+      `<w:p>${run(`<w:sz w:val="big"/>`)}${run(`<w:rFonts w:asciiTheme="minorHAnsi"/>`)}</w:p>` +
+        `<w:p><w:hyperlink r:id="rIdMissing">${run("")}</w:hyperlink></w:p>`,
+    );
+    expect(report.entries).toContainEqual({ outcome: "dropped", kind: "sz", reason: "not a valid size", owner: "fontSize", count: 1 });
+    expect(report.entries).toContainEqual({ outcome: "dropped", kind: "rFonts", reason: "theme font not resolved", owner: "fontFamily", count: 1 });
+    expect(report.entries).toContainEqual({ outcome: "dropped", kind: "hyperlink", reason: "no usable target", owner: "link", count: 1 });
+  });
+
+  it("says why an image it cannot find is missing", async () => {
+    const drawing =
+      `<w:drawing><wp:inline><wp:extent cx="9525" cy="9525"/><a:graphic><a:graphicData>` +
+      `<pic:pic><pic:blipFill><a:blip r:embed="rIdMissing"/></pic:blipFill></pic:pic>` +
+      `</a:graphicData></a:graphic></wp:inline></w:drawing>`;
+    const report = await importOf(`<w:p><w:r>${drawing}</w:r></w:p>`);
+    expect(report.entries).toContainEqual({ outcome: "dropped", kind: "image", reason: "image part not found", owner: "image", count: 1 });
+  });
+
+  it("takes an image out of what it kept when a code block leaves it behind", async () => {
+    const editor = new ServerEditor();
+    editor.setContent({
+      type: "doc",
+      content: [{ type: "paragraph", content: [{ type: "text", text: "code ", marks: [{ type: "bold" }] }, { type: "image", attrs: { src: PIXEL } }] }],
+    });
+    const entries = unzipSync(await exportDocxBytes(editor));
+    const documentXml = strFromU8(entries["word/document.xml"]!);
+    entries["word/document.xml"] = strToU8(documentXml.replace("<w:p>", `<w:p><w:pPr><w:pStyle w:val="CodeBlock"/></w:pPr>`));
+    const { report, doc } = await importDocx(new ServerEditor(), zipSync(entries));
+
+    expect(doc.child(0).type.name).toBe("codeBlock");
+    for (const kind of ["image", "b"]) {
+      expect(report.counts[kind], kind).toEqual({ kept: 0, dropped: 1, changed: 0 });
+      expect(report.entries).toContainEqual({ outcome: "dropped", kind, reason: "a code block holds only text", owner: "codeBlock", count: 1 });
+    }
+  });
+
+  it("reports nothing lost for a code block Scrivr wrote", async () => {
+    const editor = new ServerEditor();
+    editor.setContent({ type: "doc", content: [{ type: "codeBlock", content: [{ type: "text", text: "let x = 1;" }] }] });
+    const { report, doc } = await importDocx(new ServerEditor(), await exportDocxBytes(editor));
+
+    expect(doc.child(0).type.name).toBe("codeBlock");
+    expect(report.entries.filter((entry) => entry.owner === "codeBlock")).toEqual([]);
+  });
+
+  it("does not count a field twice when a code block leaves behind one nothing built", async () => {
+    const bytes = await docWithBody(
+      `<w:p><w:pPr><w:pStyle w:val="CodeBlock"/></w:pPr><w:r><w:t>page </w:t></w:r><w:fldSimple w:instr=" PAGE "/></w:p>`,
+    );
+    const { report } = await importDocx(new ServerEditor(), bytes);
+    expect(report.counts["field"]).toEqual({ kept: 0, dropped: 1, changed: 0 });
+  });
+});
+
+describe("importDocx — unread, as a consumer imports it", () => {
+  it("lists what the import never read, from the package entry", async () => {
+    const bytes = await docWithBody(`<w:p><w:pPr><w:keepNext/></w:pPr><w:r><w:t>x</w:t></w:r></w:p>`);
+    const { report } = await importDocx(new ServerEditor(), bytes, { trackUnread: true });
+    const keepNext: DocxUnreadElement | undefined = report.unread?.find((u) => u.path.endsWith("/w:pPr/w:keepNext"));
+    expect(keepNext).toEqual({ part: "word/document.xml", path: "w:document/w:body/w:p/w:pPr/w:keepNext", outcome: "unread", count: 1 });
   });
 });

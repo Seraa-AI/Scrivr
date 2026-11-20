@@ -5,6 +5,7 @@ import { splitBlockAs } from "prosemirror-commands";
 import { TextBlockStrategy } from "../../layout/TextBlockStrategy";
 import {
   xml,
+  type DocxContext,
   type DocxNodeHandler,
   type DocxBlockTransform,
 } from "../../exports/docx";
@@ -41,6 +42,24 @@ export function alignToJc(align: unknown): string | null {
   if (align === "right") return "right";
   if (align === "justify") return "both";
   return null;
+}
+
+/**
+ * Report the textblock attrs the Paragraph and Heading export handlers do not
+ * write yet, so a file that loses them says so. Shared because both nodes
+ * carry the same attrs and neither handler writes these.
+ */
+export function reportUnwrittenTextblockAttrs(node: PmNode, ctx: DocxContext): void {
+  const kind = node.type.name;
+  if (typeof node.attrs["indent"] === "number" && node.attrs["indent"] > 0) {
+    ctx.report.changed(kind, "indent not written");
+  }
+  if (typeof node.attrs["textIndent"] === "number" && node.attrs["textIndent"] > 0) {
+    ctx.report.changed(kind, "first-line indent not written");
+  }
+  if (typeof node.attrs["fontFamily"] === "string" && node.attrs["fontFamily"].length > 0) {
+    ctx.report.changed(kind, "font not written");
+  }
 }
 
 /**
@@ -190,7 +209,8 @@ export const Paragraph = Extension.create({
   },
 
   addExports() {
-    const handler: DocxNodeHandler = (node, children) => {
+    const handler: DocxNodeHandler = (node, children, ctx) => {
+      reportUnwrittenTextblockAttrs(node, ctx);
       const jc = alignToJc(node.attrs["align"]);
       const lead = jc ? [xml("w:pPr", undefined, [xml("w:jc", { "w:val": jc })])] : [];
       return xml("w:p", undefined, [...lead, ...children]);

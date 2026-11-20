@@ -517,6 +517,18 @@ function buildAnchoredDrawing(
   ]);
 }
 
+/** Report the image attrs the drawing this handler writes has no place for yet. */
+function reportUnwrittenImageAttrs(node: PmNode, wrapMode: string, ctx: DocxContext): void {
+  if (readString(node.attrs["alt"])) ctx.report.changed("image", "alt text not written");
+  if (typeof node.attrs["zIndex"] === "number" && node.attrs["zIndex"] !== 0) {
+    ctx.report.changed("image", "stacking order not written");
+  }
+  const verticalAlign = readString(node.attrs["verticalAlign"]);
+  if (wrapMode === "inline" && verticalAlign && verticalAlign !== "baseline") {
+    ctx.report.changed("image", "vertical alignment not written");
+  }
+}
+
 const imageDocxHandler: DocxNodeHandler = (node, _children, ctx) => {
   const src = readString(node.attrs["src"]);
   if (!src) {
@@ -525,16 +537,22 @@ const imageDocxHandler: DocxNodeHandler = (node, _children, ctx) => {
       message: "Image node has no src — dropping",
       nodeType: "image",
     });
+    ctx.report.dropped("image", "no src");
     return [];
   }
 
   const map = ctx.shared.get<DocxImageMap>(DOCX_IMAGES_KEY);
   const record = map?.get(src);
-  if (!record) return []; // fetch already recorded its own diagnostic
+  if (!record) {
+    // The fetch already recorded its own diagnostic.
+    ctx.report.dropped("image", "image bytes unavailable");
+    return [];
+  }
 
   const width = readPositiveInt(node.attrs["width"], record.width);
   const height = readPositiveInt(node.attrs["height"], record.height);
   const wrapMode = readString(node.attrs["wrapMode"]) ?? "inline";
+  reportUnwrittenImageAttrs(node, wrapMode, ctx);
   // Allocate the relationship into the OPC part currently being walked (body,
   // header, footer…) — rels are part-scoped, media is not.
   const relId = ctx.rels.addImage(record.filename);
@@ -820,6 +838,10 @@ export const Image = Extension.create({
             : "Image inline had neither src nor relId",
           nodeType: "image",
         });
+        ctx.report.dropped(
+          "image",
+          !i.relId ? "no image reference" : ctx.options.media === "drop" ? "media option is drop" : "image part not found",
+        );
         return null;
       }
 

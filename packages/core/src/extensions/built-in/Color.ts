@@ -104,7 +104,10 @@ export const Color = Extension.create<ColorOptions>({
   addExports() {
     const handler: DocxMarkHandler = (props, mark, ctx) => {
       const v = mark.attrs["color"];
-      if (typeof v !== "string" || v.length === 0) return props;
+      if (typeof v !== "string" || v.length === 0) {
+        ctx.report.dropped(mark.type.name, "no color");
+        return props;
+      }
       const hex = cssColorToDocxHex(v);
       if (hex) return { ...props, color: hex };
       ctx.diagnostics.warn({
@@ -112,6 +115,7 @@ export const Color = Extension.create<ColorOptions>({
         message: `Could not convert text color "${v}" to a DOCX hex color`,
         markType: "color",
       });
+      ctx.report.dropped(mark.type.name, "not a color DOCX can write");
       return props;
     };
     // The colour the author picked, so it outranks any a mark supplies for

@@ -73,13 +73,17 @@ export const Underline = Extension.create({
   },
 
   addImports() {
-    // `<w:u w:val="none"/>` explicitly turns underline off. Anything else
-    // (single / double / dotted / wavyDouble / …) collapses to the single
-    // Scrivr `underline` mark — style variants aren't modeled.
+    // `<w:u w:val="none"/>` turns underline off, and never reaches here. Every
+    // other style (double / dotted / wavyDouble / …) collapses to the single
+    // Scrivr `underline` mark — style variants aren't modeled — and says so.
     const handler: DocxMarkTransform = (mark, ctx) => {
-      if (mark.attrs?.["val"] === "none") return null;
+      const style = mark.attrs?.["val"];
       const t = ctx.schema.marks["underline"];
-      return t ? t.create() : null;
+      if (!t) return null;
+      if (typeof style === "string" && style !== "single") {
+        ctx.report.changed(mark.kind, `"${style}" underline imported as single`);
+      }
+      return t.create();
     };
     return { docx: { marks: { u: handler } } };
   },
