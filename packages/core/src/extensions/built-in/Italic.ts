@@ -22,7 +22,7 @@ export const Italic = Extension.create<ItalicOptions>({
       italic: {
         attrs: { dataTracked: { default: [] } },
         parseDOM: [
-          // A tag set to normal style is declined outright, not skipped: a skipped
+          // A tag set to normal style is declined, not a `skip: true` rule: a skipped
           // element's own style is never read, so it would lose its colour too.
           { tag: "em", getAttrs: (node) => !isNormalStyle(node.style.fontStyle) && null },
           { tag: "i", getAttrs: (node) => !isNormalStyle(node.style.fontStyle) && null },

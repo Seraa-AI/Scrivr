@@ -141,6 +141,21 @@ describe("what an element states beats what it inherits", () => {
     expect(nested.child(0).attrs["align"]).toBe("right");
   });
 
+  it("an unreadable text-align is dropped where it is written, so the one it would have beaten applies", async () => {
+    const html = [
+      `<p align="right" style="text-align:center;text-align:bogus">a</p>`,
+      `<style>p.x{text-align:bogus !important} .a{text-align:center} .a.b{text-align:bogus}</style>`,
+      `<p class="x" style="text-align:center">b</p><p class="a b">c</p>`,
+    ].join("");
+    const doc = await load(html);
+    expect([0, 1, 2].map((i) => doc.child(i).attrs["align"])).toEqual(["center", "center", "center"]);
+  });
+
+  it("text-align: match-parent inherits, and beats align", async () => {
+    const doc = await load(`<div style="text-align:right"><p align="center" style="text-align:match-parent">a</p></div>`);
+    expect(doc.child(0).attrs["align"]).toBe("right");
+  });
+
   it("text-align: inherit keeps what the block inherits", async () => {
     for (const keyword of ["inherit", "unset"]) {
       const doc = await load(`<div style="text-align:center"><p style="text-align:${keyword}">a</p></div>`);

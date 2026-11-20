@@ -25,8 +25,7 @@ describe("@scrivr/html exports", () => {
     expect(typeof core.isHtmlBlock).toBe("function");
     const align: core.TextAlign | null = core.htmlAlign("middle");
     expect(align).toBe("center");
-    expect(core.parseTextAlign("-webkit-right")).toBe("right");
-    expect(core.isCssWideKeyword("revert-layer")).toBe(true);
+    expect(core.isReadableTextAlign("match-parent")).toBe(true);
     expect(typeof core.pickFile).toBe("function");
     expect(docx.applyImportedDocument).toBe(core.applyImportedDocument);
   });

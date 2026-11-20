@@ -90,8 +90,11 @@ describe("pasted divs", () => {
   });
 
   it("a text-align the browser cannot read leaves the align attribute; a keyword beats it", () => {
-    const doc = paste(`<p align="center" style="text-align:bogus">a</p><p align="center" style="text-align:inherit">b</p>`);
-    expect([0, 1].map((i) => doc.child(i).attrs["align"])).toEqual(["center", "left"]);
+    const doc = paste(
+      `<p align="center" style="text-align:bogus">a</p><p align="center" style="text-align:inherit">b</p>` +
+        `<p align="center" style="text-align:match-parent">c</p>`,
+    );
+    expect([0, 1, 2].map((i) => doc.child(i).attrs["align"])).toEqual(["center", "left", "left"]);
   });
 
   it("a div whose blocks sit inside an inline wrapper is read through", () => {

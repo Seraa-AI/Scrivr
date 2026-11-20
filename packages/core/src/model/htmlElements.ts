@@ -1,4 +1,4 @@
-import { isCssWideKeyword, parseTextAlign, type TextAlign } from "./cssValues";
+import { isReadableTextAlign, parseTextAlign, type TextAlign } from "./cssValues";
 import { isHtmlElement } from "./isHtmlElement";
 
 /**
@@ -44,13 +44,8 @@ export function htmlAlign(value: string): TextAlign | null {
   return HTML_ALIGN.get(value.trim().toLowerCase()) ?? null;
 }
 
-/**
- * An element's alignment: its `text-align`, else its `align`. A browser drops
- * a value it cannot read, so the attribute still counts; a keyword such as
- * `inherit` it reads, and that beats the attribute.
- */
+/** An element's alignment: its `text-align` if a browser reads it — `inherit` included — else its `align`. */
 export function elementTextAlign(el: HTMLElement): TextAlign | null {
   const styled = el.style.textAlign;
-  if (isCssWideKeyword(styled)) return null;
-  return parseTextAlign(styled) ?? htmlAlign(el.getAttribute("align") ?? "");
+  return isReadableTextAlign(styled) ? parseTextAlign(styled) : htmlAlign(el.getAttribute("align") ?? "");
 }

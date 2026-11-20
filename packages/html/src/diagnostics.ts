@@ -85,9 +85,9 @@ interface Seen {
   declined: Set<Element>;
   /**
    * Of those, the ones whose rule read their style before turning them away —
-   * a `<b>` set to normal weight. They count as turned away for that style, so
-   * a rule reads style only to decide whether to decline. The element is a
-   * plain wrapper, read through; its style is judged as a style.
+   * a `<b>` set to normal weight. Assumes a rule reads style only to decide
+   * whether to decline, so the element is a plain wrapper and its style is
+   * judged as a style.
    */
   declinedOnStyle: Set<Element>;
   /** Taken elements whose children the parse never reads — leaves and `ignore` rules. */
@@ -239,7 +239,7 @@ function collect(body: HTMLElement, preparse: Preparse, seen: Seen, styleRules: 
 
   const visit = (el: Element) => {
     const tag = el.tagName.toLowerCase();
-    // Lost: an element no rule took, unless the parse reads through it as a plain wrapper.
+    // Lost: an element no rule took, unless its tag means nothing beyond its style.
     if (!seen.taken.has(el) && !TRANSPARENT.has(tag) && !seen.declinedOnStyle.has(el)) {
       if (HTML_IGNORED_TAGS.has(tag)) return note("html-element-ignored", { tag });
       note(seen.declined.has(el) ? "html-element-rejected" : "html-element-unknown", { tag });

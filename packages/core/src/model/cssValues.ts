@@ -52,6 +52,7 @@ export function isCssReset(value: string): boolean {
   return /^\s*initial\s*$/i.test(value);
 }
 
+/** A text block's alignment: what `htmlAlign` and a block's `align` attribute hold. */
 export type TextAlign = "left" | "center" | "right" | "justify";
 
 /** `text-align` keywords, and the browser-prefixed ones mail clients write. */
@@ -73,6 +74,15 @@ const TEXT_ALIGN = new Map<string, TextAlign>([
 /** `text-align` as one of the editor's four, or null when it names none. */
 export function parseTextAlign(value: string): TextAlign | null {
   return TEXT_ALIGN.get(value.trim().toLowerCase()) ?? null;
+}
+
+/**
+ * Whether a browser reads this `text-align`: an alignment, a CSS-wide keyword,
+ * or `match-parent`, which inherits. A value it cannot read it drops, so a
+ * presentational `align` or an inherited alignment still applies.
+ */
+export function isReadableTextAlign(value: string): boolean {
+  return isCssWideKeyword(value) || /^\s*(-webkit-)?match-parent\s*$/i.test(value) || parseTextAlign(value) !== null;
 }
 
 /** The value an element's style sets, else its presentational attribute: any author style beats one. */

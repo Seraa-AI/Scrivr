@@ -10,6 +10,8 @@
  * rest of the sheet still applies.
  */
 
+import { isReadableTextAlign } from "@scrivr/core";
+
 const SIMPLE_SELECTOR = /^(?:[a-z][a-z0-9]*)?(?:#[\w-]+)?(?:\.[\w-]+)*$/i;
 
 interface Declaration {
@@ -128,10 +130,14 @@ function topLevelRules(css: string): Array<{ prelude: string; block: string | nu
   return rules;
 }
 
+/** The values a browser reads, for properties whose unreadable values matter: it drops the rest as it parses. */
+const READABLE = new Map([["text-align", isReadableTextAlign]]);
+
 /**
  * `color: red; font-size: 12px !important` → property → declaration, with the
  * property lowercased. A `;` inside quotes or parentheses — a data URL — is
- * part of its value, not the end of it.
+ * part of its value, not the end of it. A declaration a browser would drop is
+ * dropped here, before it can outrank the one it follows.
  */
 export function parseDeclarations(block: string): Map<string, Declaration> {
   const out = new Map<string, Declaration>();
@@ -142,7 +148,7 @@ export function parseDeclarations(block: string): Map<string, Declaration> {
     const raw = declaration.slice(colon + 1).trim();
     const important = /!\s*important\s*$/i.test(raw);
     const value = raw.replace(/!\s*important\s*$/i, "").trim();
-    if (property && value) out.set(property, { value, important });
+    if (property && value && (READABLE.get(property)?.(value) ?? true)) out.set(property, { value, important });
   }
   return out;
 }
