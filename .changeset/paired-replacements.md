@@ -1,0 +1,18 @@
+---
+"@scrivr/ai": patch
+"@scrivr/core": patch
+"@scrivr/docx": patch
+"@scrivr/export-markdown": patch
+"@scrivr/export-pdf": patch
+"@scrivr/export-semantic": patch
+"@scrivr/plugins": patch
+"@scrivr/react": patch
+---
+
+A word typed over a selection in suggesting mode is now one change, as Google Docs shows it. The deleted words and the typed words share a `groupId`, so the popover shows one card and deciding either half decides both.
+
+- Text typed right beside the replacement's typed words, or retyped inside them, joins it.
+- Any other edit beside it, earlier or later, stays its own change, and so does another replacement, even side by side.
+- Typing over text already struck, or over the author's own insertion, starts no replacement: there is no new deletion to pair.
+- Pasting paragraphs over a selection, or typing over one that spans paragraphs, is not paired: it also splits or joins paragraphs.
+- Moved text is not paired; a move already pairs its two halves.

@@ -93,13 +93,11 @@ function sameOwnAttrs(a: Mark, b: Mark): boolean {
 }
 
 /**
- * Merges adjacent tracked marks at a position so one logical change isn't split
- * into many. Covers tracked insert/delete text AND formatting marks
- * (bold/highlight/color/…): a run of the same mark, same author, operation and
- * status collapses to one tracking id — the same grouping typing already gets,
- * now for formatting. Marks with different OWN attrs (e.g. two colors) never
- * merge. Merging is keyed on userID + operation + status, and fuses only the
- * single records of `authorID`, the author writing: fusing renames records.
+ * Merges adjacent tracked marks at a position so one change isn't split into
+ * many, tracked insert/delete text and formatting marks alike. Marks with
+ * different own attrs (two colors) never merge; otherwise
+ * `shouldMergeTrackedAttributes` decides, and only the single records of
+ * `authorID`, the author writing, fuse: fusing renames records.
  */
 export function mergeTrackedMarks(pos: number, doc: PMNode, newTr: Transaction, schema: Schema, authorID: string) {
   const resolved = doc.resolve(pos);

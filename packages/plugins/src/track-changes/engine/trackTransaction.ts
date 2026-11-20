@@ -1,4 +1,4 @@
-import { EditorState, Selection, Transaction } from "@scrivr/core/pm";
+import { EditorState, Selection, Transaction, type Node as PMNode } from "@scrivr/core/pm";
 import {
   AddMarkStep,
   AddNodeMarkStep,
@@ -17,7 +17,8 @@ import {
   excludeFromTracking,
   passThroughMeta,
 } from "./transactionProcessing";
-import { createNewPendingAttrs, NewEmptyAttrs } from "../helpers";
+import { createNewPendingAttrs, genId, NewEmptyAttrs } from "../helpers";
+import { alreadyProposedForDeletion, canCancelInsertion, ownReplacementOf } from "../lib/deletionPolicy";
 import { diffChangeSteps } from "../lib/structuralChange";
 import { mergeTrackedMarks } from "../lib/mergeTrackedMarks";
 import { isSetNodeMarkupStep } from "../step-trackers/qualifiers";
@@ -52,6 +53,41 @@ function caretBeforeStepEnd(tr: Transaction, i: number, step: ReplaceStep): numb
   return insertedFrom < selection.head && selection.head < end && !tr.doc.resolve(selection.head).sameParent(tr.doc.resolve(end))
     ? end - selection.head
     : null;
+}
+
+/**
+ * Whether `step` puts inline content into one block. A step across blocks, or
+ * one bringing blocks in (an open slice), also joins or splits them, which is
+ * not a word swap.
+ */
+function writesInline(step: ReplaceStep, doc: PMNode): boolean {
+  if (step.slice.size === 0) return false;
+  if (step.slice.openStart !== 0 || step.slice.openEnd !== 0) return false;
+  const $from = doc.resolve(step.from);
+  return $from.parent.inlineContent && $from.sameParent(doc.resolve(step.to));
+}
+
+/**
+ * The replacement `step` belongs to, as a `groupId`, or none. A step that types
+ * over a selection and records a deletion starts one; text already struck gets
+ * no second record, and the author's own pending insertion is taken back.
+ * Typing right beside, or over, the author's own replacement text continues it,
+ * so a word typed in several strokes stays one act.
+ */
+function replacementGroup(step: ReplaceStep, doc: PMNode, authorID: string): string | undefined {
+  if (!writesInline(step, doc)) return undefined;
+  const $from = doc.resolve(step.from);
+  if (step.from === step.to) return ownReplacementOf($from.nodeBefore, authorID) ?? ownReplacementOf($from.nodeAfter, authorID);
+  let recordsDeletion = false;
+  let continued: string | undefined;
+  doc.nodesBetween(step.from, step.to, node => {
+    if (!node.isInline) return true;
+    if (alreadyProposedForDeletion(node)) return false;
+    if (canCancelInsertion(node, authorID)) continued ??= ownReplacementOf(node, authorID);
+    else recordsDeletion = true;
+    return false;
+  });
+  return recordsDeletion ? genId() : continued;
 }
 
 /**
@@ -118,12 +154,19 @@ function trackOneStep(
       return;
     }
 
+    const moveNodeId = trContext.stepsByGroupIDMap.get(step);
+    const moveId = trContext.textMoves.get(step);
+    // A move's two halves already pair through its move id.
+    const partOfMove = !!moveNodeId || !!moveId || !!trContext.pastedMove;
+    const groupId = partOfMove ? undefined : replacementGroup(step, tr.docs[i]!, baseAttrs.authorID);
+    const stepAttrs = groupId === undefined ? baseAttrs : { ...baseAttrs, groupId };
+
     const [initialTrackedContent, newSelectionPos] = trackReplaceStep(
       i,
       step,
       oldState,
       newTr,
-      baseAttrs,
+      stepAttrs,
       tr,
       trContext,
     );
@@ -134,13 +177,11 @@ function trackOneStep(
     if (onlyNode && excludeFromTracking(onlyNode)) return;
     trackedContent = diffChangeSteps(trackedContent);
 
-    const moveNodeId = trContext.stepsByGroupIDMap.get(step);
-    const moveId = trContext.textMoves.get(step);
     const recordedFrom = newTr.mapping.maps.length;
     const [, updatedSelectionPos] = processChangeSteps(
       trackedContent,
       newTr,
-      { ...baseAttrs, ...(moveNodeId ? { moveNodeId } : {}), ...(moveId ? { moveId } : {}) },
+      { ...stepAttrs, ...(moveNodeId ? { moveNodeId } : {}), ...(moveId ? { moveId } : {}) },
       oldState.schema,
       trContext.replayedSelection.restamps,
     );

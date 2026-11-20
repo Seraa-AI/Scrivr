@@ -30,18 +30,32 @@ export function alreadyProposedForDeletion(node: Node): boolean {
 }
 
 /**
+ * The insertion records of the content itself. A formatting insertion proposes
+ * a mark, not the existence of the text, so only the content's own
+ * representation says who inserted it.
+ */
+function contentInsertions(node: Node): Partial<TrackedAttrs>[] {
+  return node.isText
+    ? node.marks.filter(mark => mark.type === node.type.schema.marks.trackedInsert).flatMap(markRecords)
+    : getBlockInlineTrackedData(node) ?? [];
+}
+
+/** The `groupId` of the replacement `authorID`'s pending insertion on `node` belongs to, if any. */
+export function ownReplacementOf(node: Node | null | undefined, authorID: string): string | undefined {
+  if (!node) return undefined;
+  return contentInsertions(node).find(record =>
+    record.authorID === authorID && record.status === CHANGE_STATUS.pending &&
+    record.operation === CHANGE_OPERATION.insert && record.groupId !== undefined,
+  )?.groupId;
+}
+
+/**
  * A deletion can cancel one's own pending insertion only while it owns all
  * pending work it would erase. Shared by text and structural writers; storage
  * shape and mark ordering must not change the authorship rule.
  */
 export function canCancelInsertion(node: Node, authorID: string): boolean {
-  // A formatting insertion proposes a mark, not the existence of the text.
-  // Only the content's own representation can establish cancellable ownership.
-  const insertions: Partial<TrackedAttrs>[] = node.isText
-    ? node.marks.filter(mark => mark.type === node.type.schema.marks.trackedInsert)
-      .flatMap(markRecords)
-    : getBlockInlineTrackedData(node) ?? [];
-  const ownInsertion = insertions.some(record =>
+  const ownInsertion = contentInsertions(node).some(record =>
     !record.foldingClosed && record.authorID === authorID && record.status === CHANGE_STATUS.pending &&
     (record.operation === CHANGE_OPERATION.insert || record.operation === CHANGE_OPERATION.wrap_with_node),
   );

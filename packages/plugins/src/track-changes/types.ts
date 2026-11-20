@@ -90,10 +90,10 @@ type InsertDeleteAttrs = {
    */
   isConflict?: boolean;
   /**
-   * Links a trackedDelete and its paired trackedInsert into one logical
-   * replacement. Set by applyDiffAsSuggestion for adjacent delete+insert pairs
-   * produced by the LCS diff. UI can use this to accept/reject the replacement
-   * as a single atomic operation.
+   * Shared by the deletion and the insertion of one replacement, so deciding
+   * either half decides both. Set by `applyDiffAsSuggestion`,
+   * `applyRichDiffAsSuggestion` and AI suggestion apply, and by the engine when
+   * an edit types over a selection.
    */
   groupId?: string;
   /**
