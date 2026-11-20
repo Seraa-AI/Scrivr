@@ -23,6 +23,7 @@ export const Italic = Extension.create<ItalicOptions>({
           { tag: "em" },
           { tag: "i", getAttrs: (node) => (node as HTMLElement).style.fontStyle !== "normal" && null },
           { style: "font-style=italic" },
+          { style: "font-style=normal", clearMark: (m) => m.type.name === "italic" },
         ],
         toDOM: () => ["em", 0],
       },

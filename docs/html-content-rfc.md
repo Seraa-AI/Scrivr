@@ -274,13 +274,17 @@ in HTML isn't finished.
     inside `url(...)` stays part of its value.
   - Inheritance follows CSS (`cascade.ts`):
     - Text styles are carried by the parse itself, as marks, from any
-      element — the page's from a wrapper around it. A link keeps its colour
-      and a heading its size because the cascade gives them `color: initial`
-      / `font-size: initial`, which the colour and size rules read as a reset.
+      element — the page's from a wrapper around it. A link (`a[href]`) keeps
+      its colour and a heading its size because the cascade gives them
+      `color: initial` / `font-size: initial`, which the colour and size rules
+      read as a reset. A bare `<a name>` bookmark inherits like a span.
     - Block properties pass from a block to the blocks inside it, and text
       sitting straight in a block (a cell, a list item, the page) gets a
-      paragraph carrying them — the one the parse would have made bare.
-    - What an element states beats what it inherits: its style, its `align`,
+      paragraph carrying them — the one the parse would have made bare. A
+      table's frame (`table`, `tr`, …) holds no loose text, so its
+      `<colgroup>` stays its column widths.
+    - What an element states beats what it inherits: its style, its `align`
+      (on a paragraph, div, heading or cell — a table's places the table),
       a `<font>`'s attributes.
   - Diagnostics report what was lost and nothing else:
     - A declaration is judged longhand by longhand: `margin: 24px 0` is
@@ -288,13 +292,18 @@ in HTML isn't finished.
       not, since its other longhands state nothing.
     - A style rule must accept the value, not just name the property:
       `font-size: large` and `text-decoration: underline dotted` are reported.
-    - A value the cascade carried down is lost only when it reached content
-      and nothing took it; with the colour extension off, colour is reported.
+    - A block property the cascade carried down is reported when any block
+      it reached shows something and took none of it — a centred `<div>`'s
+      `<pre>`, though a `<p>` beside it was centred. A container it only
+      passed through, or a rule line, loses nothing.
+    - `normal`, like a CSS-wide keyword, states nothing — on the page too.
     - Reads a rule makes through elements it reaches from its own (a table's
       `<col>`, a Word table's cell widths) are watched, through one stand-in
       per element so a rule comparing elements finds them equal.
-  - A `div` rule no longer turns an empty spacer div, or a div with blocks
-    nested inside an inline wrapper, into a blank paragraph. This applies to
+  - A `div` rule no longer turns a div that shows nothing (empty, or holding
+    only empty elements), or a div with blocks nested inside an inline
+    wrapper, into a blank paragraph. What shows is text, a break, an image or
+    a field (`htmlShows` in core, shared with the cascade). This applies to
     paste too, with tests in core (`PasteRules.test.ts`).
   - The highlight rule turns down invisible backgrounds.
   - `isHtmlElement` checks for `style`.
@@ -302,6 +311,10 @@ in HTML isn't finished.
     only when the caller knows the font size.
   - px font sizes keep their fractions; a size of zero or less is no size.
   - A CSS-wide keyword (`inherit`, `initial`) is not a colour, size or family.
+    `initial` clears an inherited colour, size or family; `revert` on inline
+    text inherits, as in a browser.
+  - `font-weight: normal` (or `lighter`, or below 500) undoes an enclosing
+    bold, and `font-style: normal` an enclosing italic.
   - A `div` holding only an inline atom, such as a field, is a paragraph.
   - A selector list with an empty entry (`p, { }`) is invalid whole, as in a
     browser, and reported.

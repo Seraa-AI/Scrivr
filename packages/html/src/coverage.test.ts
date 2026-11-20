@@ -165,6 +165,36 @@ describe("alignment reaches text that sits straight in its container", () => {
     expect([0, 1].map((i) => mixed.child(i).attrs["align"])).toEqual(["center", "center"]);
   });
 
+  it("a table's column widths and rows survive an alignment reaching it", async () => {
+    for (const html of [
+      `<table style="text-align:center">`,
+      `<table align="left">`,
+      `<div style="text-align:center"><table>`,
+    ]) {
+      const doc = await load(
+        `${html}<colgroup><col width="100"><col width="200"></colgroup><tr><td>a</td><td>b</td></tr></table>`,
+      );
+      const table = doc.child(0);
+      expect(table.childCount).toBe(1);
+      expect(table.attrs["grid"]).toHaveLength(2);
+    }
+  });
+
+  it("a table's align places the table, not the text in its cells", async () => {
+    const doc = await load(`<table align="center"><tr><td>x</td></tr></table>`);
+    let align: unknown = null;
+    doc.descendants((node) => {
+      if (node.type.name === "paragraph") align = node.attrs["align"];
+      return true;
+    });
+    expect(align).toBe("left");
+  });
+
+  it("a container with only empty elements in it adds no blank line", async () => {
+    const doc = await load(`<p>a</p><div><span></span></div><div><b></b></div><p>b</p>`);
+    expect(doc.childCount).toBe(2);
+  });
+
   it("a number in a right-aligned cell is right-aligned", async () => {
     const doc = await load(`<table><tr><td style="text-align:right">42</td></tr></table>`);
     let align: unknown = null;

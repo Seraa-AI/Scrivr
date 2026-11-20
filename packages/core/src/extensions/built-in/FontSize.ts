@@ -36,6 +36,7 @@ export const FontSize = Extension.create<FontSizeOptions>({
             style: "font-size",
             getAttrs: (value) => sizeAttrs(cssFontSizeToPx(value)),
           },
+          // A mark is inherited by the text inside it, so `initial` must remove it.
           {
             style: "font-size",
             getAttrs: (value) => isCssReset(value) && null,

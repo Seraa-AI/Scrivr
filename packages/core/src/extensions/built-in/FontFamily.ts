@@ -3,7 +3,7 @@ import { Extension } from "../Extension";
 import type { FontModifier, ToolbarItemSpec } from "../types";
 import type { ParsedFont } from "../../layout/StyleResolver";
 import type { DocxMarkHandler, DocxMarkTransform } from "../../exports/docx";
-import { cssPrimaryFamily, isCssWideKeyword } from "../../model/cssValues";
+import { cssPrimaryFamily, isCssReset, isCssWideKeyword } from "../../model/cssValues";
 
 interface FontFamilyOptions {
   /** Font family presets shown in the toolbar. */
@@ -50,6 +50,12 @@ export const FontFamily = Extension.create<FontFamilyOptions>({
           {
             style: "font-family",
             getAttrs: (value) => familyAttrs(value),
+          },
+          // A mark is inherited by the text inside it, so `initial` must remove it.
+          {
+            style: "font-family",
+            getAttrs: (value) => isCssReset(value) && null,
+            clearMark: (mark) => mark.type.name === "fontFamily",
           },
           {
             tag: "font[face]",

@@ -43,9 +43,13 @@ export function isCssWideKeyword(value: string): boolean {
   return /^\s*(inherit|initial|unset|revert|revert-layer)\s*$/i.test(value);
 }
 
-/** `initial` or `revert`: back to the default, so a value inherited from outside stops here. */
+/**
+ * `initial`: back to the property's default, so a value inherited from outside
+ * stops here. Not `revert`, which on inline text falls back to the browser's
+ * own style — and that inherits.
+ */
 export function isCssReset(value: string): boolean {
-  return /^\s*(initial|revert)\s*$/i.test(value);
+  return /^\s*initial\s*$/i.test(value);
 }
 
 export type TextAlign = "left" | "center" | "right" | "justify";

@@ -10,7 +10,7 @@ import {
 } from "../../exports/docx";
 import { semanticImage, type SemanticNodeHandler } from "../../exports/semantic";
 import type { PdfNodeHandler } from "../../exports/pdf";
-import { HTML_BLOCK_TAGS } from "../../model/htmlBlockTags";
+import { HTML_BLOCK_TAGS, htmlShows } from "../../model/htmlElements";
 import type { Node as PmNode } from "prosemirror-model";
 import { floats } from "../../layout/AnchoredObjects";
 import { blockStyleAttrs } from "./blockStyleAttrs";
@@ -255,11 +255,7 @@ declare module "@scrivr/core" {
 
 const BLOCK_SELECTOR = [...HTML_BLOCK_TAGS].join(",");
 
-/**
- * Inline content with something to show and no block anywhere inside. An
- * element with nothing in it — a line break, an image, a field — shows itself.
- */
+/** Inline content with something to show and no block anywhere inside. */
 function isParagraphDiv(el: HTMLElement): boolean {
-  if (el.querySelector(BLOCK_SELECTOR)) return false;
-  return (el.textContent ?? "").trim() !== "" || Array.from(el.querySelectorAll("*")).some((child) => !child.hasChildNodes());
+  return !el.querySelector(BLOCK_SELECTOR) && htmlShows(el);
 }

@@ -42,6 +42,7 @@ export const Color = Extension.create<ColorOptions>({
             style: "color",
             getAttrs: (value) => (isCssWideKeyword(value) ? false : { color: value }),
           },
+          // A mark is inherited by the text inside it, so `initial` must remove it.
           {
             style: "color",
             getAttrs: (value) => isCssReset(value) && null,

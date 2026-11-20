@@ -162,4 +162,13 @@ describe("inherited styles", () => {
     expect(marksOf(doc, " t")).toMatchObject({ color: { color: "#333" }, fontSize: { size: 16 } });
     expect(diagnostics).toEqual([]);
   });
+
+  it("an anchor with no link inherits its colour like any span, and is reported as a bookmark lost", async () => {
+    const { doc, diagnostics } = await load(
+      `<h1 style="color:#2F5496"><a name="_Toc1">Title</a></h1><p><span style="color:#ff0000"><a id="x">r</a></span></p>`,
+    );
+    expect(marksOf(doc, "Title")).toMatchObject({ color: { color: "#2F5496" } });
+    expect(marksOf(doc, "r")).toMatchObject({ color: { color: "#ff0000" } });
+    expect(diagnostics).toEqual([expect.objectContaining({ code: "html-element-unknown", tag: "a", count: 2 })]);
+  });
 });

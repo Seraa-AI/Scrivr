@@ -124,4 +124,24 @@ describe("importHtml diagnostics", () => {
     expect(diagnostic).toMatchObject({ code: "html-element-rejected", tag: "b" });
     expect(diagnostic?.message).not.toMatch(/URL/);
   });
+
+  it("a carried alignment one block cannot hold is reported, though another held it", async () => {
+    expect(await diagnosticsOf(`<div style="text-align:center"><p>a</p><pre>code</pre></div>`)).toEqual([
+      expect.objectContaining({ code: "html-style-unsupported", property: "text-align", count: 1 }),
+    ]);
+  });
+
+  it("an alignment that reaches only a rule line loses nothing", async () => {
+    expect(await diagnosticsOf(`<div style="text-align:center"><hr></div>`)).toEqual([]);
+  });
+
+  it("a page style set to normal states nothing", async () => {
+    expect(await diagnosticsOf(`<body style="line-height:normal"><p>a</p></body>`)).toEqual([]);
+  });
+
+  it("normal weight and style inside bold and italic are applied", async () => {
+    expect(
+      await diagnosticsOf(`<p><b>x<span style="font-weight:normal">y</span></b><i>a<span style="font-style:normal">b</span></i></p>`),
+    ).toEqual([]);
+  });
 });

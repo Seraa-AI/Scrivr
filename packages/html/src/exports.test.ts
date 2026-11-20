@@ -20,6 +20,8 @@ describe("@scrivr/html exports", () => {
   it("core and docx export what the importers share", () => {
     expect(typeof core.isHtmlElement).toBe("function");
     expect(core.HTML_BLOCK_TAGS.has("td")).toBe(true);
+    expect(core.HTML_IGNORED_TAGS.has("script")).toBe(true);
+    expect(typeof core.htmlShows).toBe("function");
     expect(typeof core.pickFile).toBe("function");
     expect(docx.applyImportedDocument).toBe(core.applyImportedDocument);
   });

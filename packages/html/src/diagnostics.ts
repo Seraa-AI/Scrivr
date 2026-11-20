@@ -11,7 +11,7 @@
  * reported with no change here.
  */
 
-import { HTML_BLOCK_TAGS, isHtmlElement } from "@scrivr/core";
+import { HTML_IGNORED_TAGS, htmlShows, isHtmlElement } from "@scrivr/core";
 import {
   DOMParser as PMDOMParser,
   type ParseRule,
@@ -19,7 +19,7 @@ import {
   type StyleParseRule,
   type TagParseRule,
 } from "@scrivr/core/pm";
-import type { Carried } from "./cascade";
+import { isBlockElement, type Carried } from "./cascade";
 import { parseDeclarations } from "./stylesheet";
 
 export type HtmlDiagnosticCode =
@@ -51,7 +51,8 @@ export interface HtmlImportDiagnostic {
 /** What the steps before the parse did: what they could not apply, and what they carried where. */
 export interface Preparse {
   unsupportedSelectors: string[];
-  uninheritedProperties: string[];
+  /** The page's properties nothing inherits, with their values. */
+  uninheritedProperties: Map<string, string>;
   carried: Carried;
 }
 
@@ -172,9 +173,6 @@ function bound(target: object, prop: string | symbol): unknown {
 
 const kebabCase = (camel: string) => camel.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
 
-/** Dropped with their content by the parser when no rule takes them. */
-export const IGNORED = new Set(["head", "noscript", "object", "script", "style", "title"]);
-
 /** Containers with no meaning of their own; the parser reads straight through them. */
 const TRANSPARENT = new Set(["div", "span", "tbody", "thead", "tfoot", "colgroup", "col"]);
 
@@ -200,34 +198,31 @@ function collect(body: HTMLElement, preparse: Preparse, seen: Seen, styleRules: 
     else found.set(key, { entry: { level: "warning", code, count: 1, ...subject }, subject: name });
   };
 
-  const took = (el: HTMLElement) => new Set([...(seen.readStyles.get(el) ?? []), ...takenByStyleRules(el, styleRules)]);
-  // A value carried down is lost only where it reached content and nothing
-  // took it; passing through containers whose blocks state their own loses nothing.
+  const takenBy = (el: HTMLElement) => new Set([...(seen.readStyles.get(el) ?? []), ...takenByStyleRules(el, styleRules)]);
+  // A value carried down is lost wherever it reached something shown and no
+  // rule took it there. A container it only passed through loses nothing.
   const reached = new Pairs();
-  const landed = new Pairs();
   const missed = new Pairs();
   for (const [target, origins] of preparse.carried) {
     if (!isHtmlElement(target)) continue;
-    const taken = took(target);
-    const holdsContent = !Array.from(target.children).some((child) => HTML_BLOCK_TAGS.has(child.tagName.toLowerCase()));
+    const taken = takenBy(target);
+    const holdsContent = Array.from(target.childNodes).some((child) => !isBlockElement(child) && htmlShows(child));
     for (const [property, source] of origins) {
       reached.add(source, property);
-      if (covers(taken, property)) landed.add(source, property);
-      else if (holdsContent) missed.add(source, property);
+      if (holdsContent && !covers(taken, property)) missed.add(source, property);
     }
   }
-  const carriedOff = (el: Element, property: string) =>
-    landed.has(el, property) || (reached.has(el, property) && !missed.has(el, property));
+  const carriedOff = (el: Element, property: string) => reached.has(el, property) && !missed.has(el, property);
 
   const visit = (el: Element) => {
     const tag = el.tagName.toLowerCase();
     // A container a rule turned down is still read through; nothing is lost.
     if (!seen.taken.has(el) && !TRANSPARENT.has(tag)) {
-      if (IGNORED.has(tag)) return note("html-element-ignored", { tag });
+      if (HTML_IGNORED_TAGS.has(tag)) return note("html-element-ignored", { tag });
       note(seen.declined.has(el) ? "html-element-rejected" : "html-element-unknown", { tag });
     }
     if (isHtmlElement(el)) {
-      const taken = took(el);
+      const taken = takenBy(el);
       const written = preparse.carried.get(el);
       for (const [property, { value }] of parseDeclarations(el.getAttribute("style") ?? "")) {
         if (written?.has(property) || carriedOff(el, property)) continue;
@@ -239,13 +234,14 @@ function collect(body: HTMLElement, preparse: Preparse, seen: Seen, styleRules: 
     if (!seen.opaque.has(el)) for (const child of Array.from(el.children)) visit(child);
   };
   for (const selector of preparse.unsupportedSelectors) note("html-selector-unsupported", { selector });
-  for (const property of preparse.uninheritedProperties) note("html-style-unsupported", { property });
+  for (const [property, value] of preparse.uninheritedProperties) {
+    if (longhands(body, property, value).length > 0) note("html-style-unsupported", { property });
+  }
   for (const child of Array.from(body.children)) visit(child);
 
   return [...found.values()].map(({ entry, subject }) => ({ ...entry, message: MESSAGES[entry.code](subject, entry.count) }));
 }
 
-/** Element–property pairs. */
 class Pairs {
   private readonly byElement = new Map<Element, Set<string>>();
   add(el: Element, property: string): void {
@@ -273,8 +269,8 @@ function covers(taken: Set<string>, longhand: string): boolean {
   return [...taken].some((name) => name === longhand || longhand.startsWith(`${name}-`));
 }
 
-/** Values that state nothing: a CSS-wide keyword, or the default a shorthand fills in. */
-const STATES_NOTHING = /^\s*(inherit|initial|unset|revert|revert-layer|normal)\s*$/i;
+/** A CSS-wide keyword, or `normal` — the default a shorthand fills in, and what the rules that undo a mark read. */
+const statesNothing = (value: string) => /^\s*(inherit|initial|unset|revert|revert-layer|normal)\s*$/i.test(value);
 
 /**
  * What one declaration sets, longhand by longhand, leaving out what states
@@ -285,6 +281,6 @@ function longhands(el: HTMLElement, property: string, value: string): string[] {
   probe.setAttribute("style", `${property}: ${value}`);
   const names = Array.from({ length: probe.style.length }, (_, i) => probe.style.item(i));
   // A property the DOM does not know expands to nothing; it is still a loss.
-  if (names.length === 0) return STATES_NOTHING.test(value) ? [] : [property];
-  return names.filter((name) => !STATES_NOTHING.test(probe.style.getPropertyValue(name)));
+  if (names.length === 0) return statesNothing(value) ? [] : [property];
+  return names.filter((name) => !statesNothing(probe.style.getPropertyValue(name)));
 }

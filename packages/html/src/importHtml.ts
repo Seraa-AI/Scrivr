@@ -1,18 +1,3 @@
-/**
- * Reads HTML into a document with the editor's schema.
- *
- * The rules are the schema's own `parseDOM`, the ones paste runs, so a tag
- * means the same thing whether it arrives pasted or imported. What differs is
- * intent: pasted HTML is another editor's page and gets cleaned of its
- * artefacts; imported HTML is what the author wrote, and nothing is cleaned.
- *
- * Use `new ServerEditor()` on the server — the editor supplies the schema.
- *
- * Which parser reads the HTML is the package entry's choice: the page's
- * `DOMParser` under the `browser` export condition, happy-dom otherwise. A
- * browser bundle never sees happy-dom.
- */
-
 import type { IBaseEditor } from "@scrivr/core";
 import { assignBlockIds, planDuplicateIdAssignments } from "@scrivr/core";
 import { Mapping, Transform, type Node as PmNode } from "@scrivr/core/pm";
@@ -33,6 +18,12 @@ export interface HtmlImportResult {
 /**
  * Import an HTML document using the editor's schema.
  *
+ * The rules are the schema's own `parseDOM`, the ones paste runs, so a tag
+ * means the same thing pasted or imported. Pasted HTML is another editor's
+ * page and is cleaned of its artefacts; imported HTML is what the author
+ * wrote, and nothing is cleaned. On the server, `new ServerEditor()` supplies
+ * the schema.
+ *
  * Returns the document and `diagnostics`: the styles, elements and selectors
  * the HTML used that the document could not carry. One bad piece never fails
  * the import; it is reported and the rest is read.
@@ -49,15 +40,19 @@ export interface HtmlImportResult {
  */
 export type ImportHtml = (editor: IBaseEditor, html: string) => Promise<HtmlImportResult>;
 
-/** `importHtml`, reading HTML with `withHtmlBody`. */
+/**
+ * `importHtml`, reading HTML with `withHtmlBody` — the page's `DOMParser`
+ * under the `browser` export condition, happy-dom otherwise, so a browser
+ * bundle never sees happy-dom.
+ */
 export function htmlImporter(withHtmlBody: WithHtmlBody): ImportHtml {
   return async (editor, html) => {
     const { parser, report } = watchedParser(editor.schema);
     const parsed = await withHtmlBody(html, (body) => {
       const unsupportedSelectors = applyStylesheets(body);
-      const { carried, uninherited } = cascadeInherited(body);
+      const cascaded = cascadeInherited(body);
       const doc = parser.parse(body);
-      return { doc, diagnostics: report(body, { unsupportedSelectors, uninheritedProperties: uninherited, carried }) };
+      return { doc, diagnostics: report(body, { unsupportedSelectors, ...cascaded }) };
     });
     let doc = rekeyRepeatedIds(parsed.doc);
     if (editor.findExtension("uniqueId")) doc = assignBlockIds(doc);

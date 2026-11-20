@@ -61,6 +61,12 @@ describe("pasted divs", () => {
     expect(blocks(paste(`<p>a</p><div><br></div><p>b</p>`))).toEqual(["paragraph:a", "paragraph:", "paragraph:b"]);
   });
 
+  it("a div holding only empty elements shows nothing and adds no blank line", () => {
+    for (const empty of [`<span></span>`, `<a id="x"></a>`, `<input type="hidden">`]) {
+      expect(blocks(paste(`<p>a</p><div>${empty}</div><p>b</p>`))).toEqual(["paragraph:a", "paragraph:b"]);
+    }
+  });
+
   it("a div holding only an inline atom, such as a field, is a paragraph", () => {
     const doc = paste(`<div style="text-align:center"><span data-field="signature" data-role="a"></span></div>`);
     expect(doc.child(0).type.name).toBe("paragraph");
@@ -110,17 +116,37 @@ describe("pasted formatting", () => {
   });
 
   it("a colour or size set to a CSS-wide keyword is not a value", () => {
-    expect(markAttrs(paste(`<p><span style="color:inherit;font-size:inherit">s</span></p>`), "s", "color")).toBeNull();
+    expect(markAttrs(paste(`<p><span style="color:inherit">s</span></p>`), "s", "color")).toBeNull();
     expect(markAttrs(paste(`<p><span style="font-size:inherit">s</span></p>`), "s", "fontSize")).toBeNull();
     expect(markAttrs(paste(`<p><span style="font-family:inherit">s</span></p>`), "s", "fontFamily")).toBeNull();
   });
 
-  it("`initial` resets the colour and size the text would inherit", () => {
+  it("`initial` resets the colour, size and face the text would inherit", () => {
     const doc = paste(
-      `<p><span style="color:#c00;font-size:20px">a<span style="color:initial;font-size:initial">b</span></span></p>`,
+      `<p><span style="color:#c00;font-size:20px;font-family:Georgia">a` +
+        `<span style="color:initial;font-size:initial;font-family:initial">b</span></span></p>`,
     );
     expect(markAttrs(doc, "a", "color")).toMatchObject({ color: "#c00" });
     expect(markAttrs(doc, "b", "color")).toBeNull();
     expect(markAttrs(doc, "b", "fontSize")).toBeNull();
+    expect(markAttrs(doc, "b", "fontFamily")).toBeNull();
+  });
+
+  it("`revert` on a span keeps what it inherits, as a browser does", () => {
+    const doc = paste(`<p><span style="color:#c00;font-size:20px"><b style="color:revert;font-size:revert">b</b></span></p>`);
+    expect(markAttrs(doc, "b", "color")).toMatchObject({ color: "#c00" });
+    expect(markAttrs(doc, "b", "fontSize")).toMatchObject({ size: 20 });
+  });
+
+  it("normal weight and style undo the bold and italic around them", () => {
+    const doc = paste(
+      `<p><b>a<span style="font-weight:normal">b</span><span style="font-weight:300">c</span></b>` +
+        `<i>d<span style="font-style:normal">e</span></i></p>`,
+    );
+    expect(marksOf(doc, "a")).toEqual(["bold"]);
+    expect(marksOf(doc, "b")).toEqual([]);
+    expect(marksOf(doc, "c")).toEqual([]);
+    expect(marksOf(doc, "d")).toEqual(["italic"]);
+    expect(marksOf(doc, "e")).toEqual([]);
   });
 });
