@@ -8,6 +8,7 @@
  * feature that ships its parse rule stops being reported with no change here.
  */
 
+import type { StylesheetResult } from "./stylesheet";
 import {
   DOMParser as PMDOMParser,
   type ParseRule,
@@ -19,7 +20,8 @@ export type HtmlDiagnosticCode =
   | "html-style-unsupported"
   | "html-element-unknown"
   | "html-element-ignored"
-  | "html-element-rejected";
+  | "html-element-rejected"
+  | "html-selector-unsupported";
 
 export interface HtmlImportDiagnostic {
   level: "warning";
@@ -31,10 +33,15 @@ export interface HtmlImportDiagnostic {
   tag?: string;
   /** The CSS property, for `html-style-unsupported`. */
   property?: string;
+  /** The selector or at-rule, for `html-selector-unsupported`. */
+  selector?: string;
 }
 
 /** A parser for `schema` that records what its rules read while parsing. */
-export function watchedParser(schema: Schema): { parser: PMDOMParser; report: (body: HTMLElement) => HtmlImportDiagnostic[] } {
+export function watchedParser(schema: Schema): {
+  parser: PMDOMParser;
+  report: (body: HTMLElement, stylesheet: StylesheetResult) => HtmlImportDiagnostic[];
+} {
   const seen: Seen = { taken: new Set(), declined: new Set(), opaque: new Set(), readStyles: new Map() };
   const rules = PMDOMParser.fromSchema(schema).rules.map((rule) => (isTagRule(rule) ? watchTag(rule, schema, seen) : rule));
   // A style rule may match one value only (`font-style=italic`); the property is what it reads.
@@ -43,7 +50,7 @@ export function watchedParser(schema: Schema): { parser: PMDOMParser; report: (b
   );
   return {
     parser: new PMDOMParser(schema, rules),
-    report: (body) => collect(body, seen, styleProperties),
+    report: (body, stylesheet) => collect(body, stylesheet, seen, styleProperties),
   };
 }
 
@@ -121,12 +128,24 @@ const MESSAGES: Record<HtmlDiagnosticCode, (subject: string, count: number) => s
   "html-element-ignored": (tag, count) => `<${tag}> and everything in it were dropped (${count}×).`,
   "html-element-rejected": (tag, count) =>
     `<${tag}> was refused by its rule — an unsafe URL, for one; its text was kept (${count}×).`,
+  "html-selector-unsupported": (selector, count) =>
+    `The rule for "${selector}" was not applied; only type, #id and .class selectors are (${count}×).`,
 };
 
-function collect(body: HTMLElement, seen: Seen, styleProperties: Set<string>): HtmlImportDiagnostic[] {
+type Subject = { tag: string } | { property: string } | { selector: string };
+
+const subjectOf = (subject: Subject) =>
+  "tag" in subject ? subject.tag : "property" in subject ? subject.property : subject.selector;
+
+function collect(
+  body: HTMLElement,
+  stylesheet: StylesheetResult,
+  seen: Seen,
+  styleProperties: Set<string>,
+): HtmlImportDiagnostic[] {
   const found = new Map<string, Omit<HtmlImportDiagnostic, "message">>();
-  const note = (code: HtmlDiagnosticCode, subject: { tag: string } | { property: string }) => {
-    const key = `${code}:${"tag" in subject ? subject.tag : subject.property}`;
+  const note = (code: HtmlDiagnosticCode, subject: Subject) => {
+    const key = `${code}:${subjectOf(subject)}`;
     const entry = found.get(key);
     if (entry) entry.count += 1;
     else found.set(key, { level: "warning", code, count: 1, ...subject });
@@ -145,11 +164,13 @@ function collect(body: HTMLElement, seen: Seen, styleProperties: Set<string>): H
     }
     if (!seen.opaque.has(el)) for (const child of Array.from(el.children)) visit(child);
   };
+  for (const selector of stylesheet.unsupportedSelectors) note("html-selector-unsupported", { selector });
+  for (const property of stylesheet.uninheritedProperties) note("html-style-unsupported", { property });
   for (const child of Array.from(body.children)) visit(child);
 
   return [...found.values()].map((entry) => ({
     ...entry,
-    message: MESSAGES[entry.code](entry.tag ?? entry.property ?? "", entry.count),
+    message: MESSAGES[entry.code](entry.tag ?? entry.property ?? entry.selector ?? "", entry.count),
   }));
 }
 

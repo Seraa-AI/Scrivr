@@ -192,7 +192,7 @@ in HTML isn't finished.
 
 ## What shipped
 
-**Phases 1–3** (`feat/html-content`):
+**Phases 1–4** (`feat/html-content`):
 
 - `@scrivr/html` with `importHtml(editor, html)`. It picks the DOM per D2,
   keeps ids per D9 and runs no cleaner. It is tested in node, which is Seraa's
@@ -226,6 +226,17 @@ in HTML isn't finished.
   The paragraph and heading rules now share `blockStyleAttrs` instead of two
   copies of the same code. Block-level text styles and cell fills already
   worked; tests now cover them.
+- **Phase 4, D5 stylesheets.** `<style>` rules, in `<head>` or `<body>`, are
+  applied onto each element's `style` attribute before parsing:
+  - Selectors are checked first (type, `#id`, `.class`, compounds and comma
+    lists), then matched with the DOM's own `querySelectorAll`.
+  - An inline declaration beats every rule, then specificity decides, then
+    source order.
+  - `<body>`/`<html>` can't be read by the parser, so their inherited
+    properties (font, color, alignment, line height, indent) are handed down
+    to every element that doesn't set its own. Their other properties, such
+    as the page `margin`, are reported.
+  - Other selectors and at-rules are reported as `html-selector-unsupported`.
 - **Moved from D7 to D8:** `<ol type>`. Ordered lists have no numbering-kind
   attribute, so supporting it is a schema change. `@scrivr/docx` and `@scrivr/html`
   both re-export it.

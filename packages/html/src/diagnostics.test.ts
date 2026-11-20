@@ -52,10 +52,10 @@ describe("importHtml diagnostics", () => {
   });
 
   it("reports an element whose content is dropped", async () => {
-    const diagnostics = await diagnosticsOf(`<p>a</p><script>alert(1)</script><style>p{}</style>`);
+    const diagnostics = await diagnosticsOf(`<p>a</p><script>alert(1)</script><noscript>b</noscript>`);
     expect(diagnostics).toEqual([
       expect.objectContaining({ code: "html-element-ignored", tag: "script", count: 1 }),
-      expect.objectContaining({ code: "html-element-ignored", tag: "style", count: 1 }),
+      expect.objectContaining({ code: "html-element-ignored", tag: "noscript", count: 1 }),
     ]);
   });
 

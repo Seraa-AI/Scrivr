@@ -16,6 +16,11 @@ anything an extension can paste, it can import. In a browser the page's
 `DOMParser` reads it; on a server, happy-dom does. The package's `browser`
 export condition keeps happy-dom out of browser bundles.
 
+`<style>` rules apply too, for type, `#id` and `.class` selectors (and
+compounds and comma lists of them), with the browser's precedence: inline
+style, then specificity, then source order. What `<body>` sets for text is
+handed down to its blocks.
+
 `importHtml` also returns `diagnostics`: every style and element in the HTML
 that no rule read, counted, so an agent can see what did not land.
 

@@ -19,6 +19,7 @@ import { assignBlockIds, planDuplicateIdAssignments } from "@scrivr/core";
 import { Mapping, Transform, type Node as PmNode } from "@scrivr/core/pm";
 import { watchedParser, type HtmlImportDiagnostic } from "./diagnostics";
 import type { WithHtmlBody } from "./dom";
+import { applyStylesheets } from "./stylesheet";
 
 export type { HtmlImportDiagnostic };
 
@@ -47,7 +48,10 @@ export type ImportHtml = (editor: IBaseEditor, html: string) => Promise<HtmlImpo
 export function htmlImporter(withHtmlBody: WithHtmlBody): ImportHtml {
   return async (editor, html) => {
     const { parser, report } = watchedParser(editor.schema);
-    const parsed = await withHtmlBody(html, (body) => ({ doc: parser.parse(body), diagnostics: report(body) }));
+    const parsed = await withHtmlBody(html, (body) => {
+      const stylesheet = applyStylesheets(body);
+      return { doc: parser.parse(body), diagnostics: report(body, stylesheet) };
+    });
     let doc = reidDuplicates(parsed.doc);
     if (editor.findExtension("uniqueId")) doc = assignBlockIds(doc);
     return { doc, diagnostics: parsed.diagnostics };
