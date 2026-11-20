@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ServerEditor, StarterKit } from "@scrivr/core";
-import { TextSelection } from "@scrivr/core/pm";
+import { Fragment, Slice, TextSelection } from "@scrivr/core/pm";
 import type { Node as PmNode } from "@scrivr/core/pm";
 import { changeActs, findChanges, reviewChanges, TrackChanges, TrackChangesStatus } from "../index";
 
@@ -113,13 +113,37 @@ describe("a word typed over a selection in suggesting mode", () => {
   it("stays one act when the author retypes the whole word", () => {
     const editor = editorWith("The cat sat");
     typeOver(editor, CAT.from, CAT.to, "dog");
-    // "The dog[cat] sat": all of "dog" is taken back, so nothing of it is left to join.
+    // "The dog[cat] sat": "dog" is taken back whole, and the new word continues its replacement.
     typeOver(editor, CAT.from, CAT.to, "cow");
 
     expect(changeActs(pending(editor))).toHaveLength(1);
     rejectInsertion(editor, "cow");
     expect(pending(editor)).toEqual([]);
     expect(texts(editor)).toEqual(["The cat sat"]);
+  });
+
+  it("joins it when the author types just before the replacement's text", () => {
+    const editor = editorWith("The cat sat");
+    typeOver(editor, CAT.from, CAT.to, "dog");
+    // "The dog[cat] sat": typed right before "dog".
+    editor.applyTransaction(editor.getState().tr.insertText("x", CAT.from));
+
+    expect(changeActs(pending(editor))).toHaveLength(1);
+    rejectInsertion(editor, "xdog");
+    expect(texts(editor)).toEqual(["The cat sat"]);
+  });
+
+  it("leaves an insertion made in the same transaction beside it as its own act", () => {
+    const editor = editorWith("The cat sat");
+    const tr = editor.getState().tr;
+    tr.insertText("x", CAT.from);
+    // "The xcat sat": "cat" is now 6–9.
+    tr.insertText("dog", 6, 9);
+    editor.applyTransaction(tr);
+
+    expect(changeActs(pending(editor))).toHaveLength(2);
+    rejectInsertion(editor, "dog");
+    expect(pendingTexts(editor)).toEqual(["x"]);
   });
 
   it("leaves the author's earlier insertion beside it as its own act", () => {
@@ -159,6 +183,20 @@ describe("a word typed over a selection in suggesting mode", () => {
     expect(pendingTexts(editor).some(text => text.includes("cat"))).toBe(false);
     expect(pendingTexts(editor).some(text => text.includes("sat"))).toBe(true);
   });
+
+  it("leaves a later deletion that comes to sit beside it as its own act", () => {
+    const editor = editorWith("The cat sat");
+    typeOver(editor, CAT.from, CAT.to, "dog");
+    // "The dog[cat] sat": strike the "s" (12–13), then the space between (11–12).
+    editor.applyTransaction(editor.getState().tr.delete(12, 13));
+    editor.applyTransaction(editor.getState().tr.delete(11, 12));
+
+    rejectInsertion(editor, "dog");
+    // The deletion of " s" is still pending on its own; "cat" is back.
+    expect(texts(editor)).toEqual(["The cat sat"]);
+    expect(pending(editor).map(c => c.dataTracked.operation)).toEqual(["delete"]);
+    expect(pendingTexts(editor).every(text => text.includes("s") && !text.includes("cat"))).toBe(true);
+  });
 });
 
 describe("edits that are not a replacement stay unpaired", () => {
@@ -193,6 +231,32 @@ describe("edits that are not a replacement stay unpaired", () => {
 
     expect(pending(editor).length).toBeGreaterThan(0);
     expect(groupIds(editor).every(id => id === undefined)).toBe(true);
+  });
+
+  it("pasting paragraphs over a word pairs nothing", () => {
+    const editor = editorWith("The cat sat");
+    const { schema } = editor.getState();
+    const paragraph = schema.nodes.paragraph;
+    if (!paragraph) throw new Error("StarterKit has no paragraph");
+    const paragraphs = Fragment.from([paragraph.create(null, schema.text("x")), paragraph.create(null, schema.text("y"))]);
+    editor.applyTransaction(editor.getState().tr.replace(CAT.from, CAT.to, new Slice(paragraphs, 1, 1)));
+
+    expect(pending(editor).length).toBeGreaterThan(0);
+    expect(groupIds(editor).every(id => id === undefined)).toBe(true);
+  });
+
+  it("moving text beside the author's replacement pairs nothing", () => {
+    const editor = editorWith("The cat sat");
+    typeOver(editor, CAT.from, CAT.to, "dog");
+    // "The dog[cat] sat": move " sat" (11–15) to right after "dog" (8), in one transaction.
+    const { schema } = editor.getState();
+    const tr = editor.getState().tr.delete(11, 15);
+    tr.insert(8, schema.text(" sat"));
+    editor.applyTransaction(tr);
+
+    const moved = pending(editor).filter(c => c.dataTracked.moveId !== undefined);
+    expect(moved.length).toBeGreaterThan(0);
+    expect(moved.every(c => c.dataTracked.groupId === undefined)).toBe(true);
   });
 
   it("typing over a selection that spans two paragraphs pairs nothing", () => {
