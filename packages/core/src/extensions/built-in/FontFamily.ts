@@ -3,6 +3,7 @@ import { Extension } from "../Extension";
 import type { FontModifier, ToolbarItemSpec } from "../types";
 import type { ParsedFont } from "../../layout/StyleResolver";
 import type { DocxMarkHandler, DocxMarkTransform } from "../../exports/docx";
+import { cssPrimaryFamily } from "../../model/cssValues";
 
 interface FontFamilyOptions {
   /** Font family presets shown in the toolbar. */
@@ -48,16 +49,12 @@ export const FontFamily = Extension.create<FontFamilyOptions>({
         parseDOM: [
           {
             style: "font-family",
-            getAttrs: (value) => {
-              // Take only the primary (first) family name — strips the
-              // fallback stack (e.g. "Arial,sans-serif" → "Arial") so the
-              // value matches toolbar presets and blockAttrs comparisons.
-              const primary = (value as string)
-                .replace(/['"]/g, "")
-                .split(",")[0]
-                ?.trim() ?? "";
-              return primary ? { family: primary } : false;
-            },
+            getAttrs: (value) => familyAttrs(value),
+          },
+          {
+            tag: "font[face]",
+            consuming: false,
+            getAttrs: (node) => familyAttrs(node.getAttribute("face") ?? ""),
           },
         ],
         toDOM: (mark) => [
@@ -205,4 +202,13 @@ declare module "@scrivr/core" {
       family: string;
     };
   }
+}
+
+/**
+ * Only the primary (first) family — "Arial,sans-serif" → "Arial" — so the
+ * value matches toolbar presets and blockAttrs comparisons.
+ */
+function familyAttrs(value: string) {
+  const family = cssPrimaryFamily(value);
+  return family ? { family } : false;
 }

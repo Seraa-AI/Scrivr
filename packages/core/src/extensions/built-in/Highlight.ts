@@ -48,8 +48,18 @@ export const Highlight = Extension.create<HighlightOptions>({
             tag: "mark",
             getAttrs: (node) =>
               this.options.multicolor
-                ? { color: (node as HTMLElement).style.backgroundColor || this.options.color }
+                ? { color: node.style.backgroundColor || this.options.color }
                 : {},
+          },
+          {
+            // Only a span: a block's or a cell's background is its own fill.
+            tag: "span",
+            consuming: false,
+            getAttrs: (node) => {
+              const color = node.style.backgroundColor;
+              if (!color || color === "transparent") return false;
+              return this.options.multicolor ? { color } : {};
+            },
           },
         ],
         toDOM: (mark) => {

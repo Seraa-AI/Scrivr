@@ -2,6 +2,7 @@ import { Extension } from "../Extension";
 import type { FontModifier, ToolbarItemSpec } from "../types";
 import type { ParsedFont } from "../../layout/StyleResolver";
 import type { DocxMarkHandler, DocxMarkTransform } from "../../exports/docx";
+import { cssLengthToPx, htmlFontSizeToPx } from "../../model/cssValues";
 
 interface FontSizeOptions {
   /** Font size presets shown as toolbar buttons (px values). */
@@ -33,18 +34,12 @@ export const FontSize = Extension.create<FontSizeOptions>({
         parseDOM: [
           {
             style: "font-size",
-            getAttrs: (value) => {
-              const raw = value as string;
-              let px: number;
-              if (raw.endsWith("pt")) {
-                // 1pt = 96/72 px (≈ 1.333px) at standard 96 DPI
-                px = Math.round(parseFloat(raw) * (96 / 72));
-              } else {
-                // px, or bare number — take as-is
-                px = parseFloat(raw);
-              }
-              return isNaN(px) ? false : { size: px };
-            },
+            getAttrs: (value) => sizeAttrs(cssLengthToPx(value)),
+          },
+          {
+            tag: "font[size]",
+            consuming: false,
+            getAttrs: (node) => sizeAttrs(htmlFontSizeToPx(node.getAttribute("size") ?? "")),
           },
         ],
         toDOM: (mark) => [
@@ -150,4 +145,8 @@ declare module "@scrivr/core" {
       size: number;
     };
   }
+}
+
+function sizeAttrs(px: number | null) {
+  return px === null ? false : { size: Math.round(px) };
 }

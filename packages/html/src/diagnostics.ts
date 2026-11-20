@@ -134,10 +134,10 @@ function collect(body: HTMLElement, seen: Seen, styleProperties: Set<string>): H
 
   const visit = (el: Element) => {
     const tag = el.tagName.toLowerCase();
-    if (!seen.taken.has(el)) {
+    // A container a rule turned down is still read through; nothing is lost.
+    if (!seen.taken.has(el) && !TRANSPARENT.has(tag)) {
       if (IGNORED.has(tag)) return note("html-element-ignored", { tag });
-      if (seen.declined.has(el)) note("html-element-rejected", { tag });
-      else if (!TRANSPARENT.has(tag)) note("html-element-unknown", { tag });
+      note(seen.declined.has(el) ? "html-element-rejected" : "html-element-unknown", { tag });
     }
     const read = seen.readStyles.get(el);
     for (const property of declaredStyles(el)) {

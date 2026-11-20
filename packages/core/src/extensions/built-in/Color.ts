@@ -41,6 +41,11 @@ export const Color = Extension.create<ColorOptions>({
             style: "color",
             getAttrs: (value) => ({ color: value }),
           },
+          {
+            tag: "font[color]",
+            consuming: false,
+            getAttrs: (node) => ({ color: node.getAttribute("color") }),
+          },
         ],
         toDOM: (mark) => [
           "span",

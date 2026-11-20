@@ -128,7 +128,6 @@ schema change, no export work:
 | `<font color face size>` | dropped | `color` / `fontFamily` / `fontSize` |
 | `color` / `font-*` on `<p>`, `<h1>`, `<td>` | depends on rule | applies to the block's text |
 | `<div>` holding text | depends on nesting | a paragraph with the div's alignment |
-| `<ol type>` / `list-style-type` | ignored | ordered-list numbering kind |
 | `<td style="background-color / width">` | to verify | cell fill / column width |
 
 Each row lands with a test that runs `importHtml` on a real `ServerEditor` +
@@ -152,6 +151,7 @@ copy of a block that still exists elsewhere.
 ### D8. What the schema cannot hold stays out of this RFC
 
 `line-height`, space before/after, `<sub>`/`<sup>`, inline `<code>`,
+`<ol type>` / `list-style-type` (ordered lists have no numbering-kind attribute),
 `<blockquote>`, paragraph borders and shading. Each needs a new node, mark or
 attribute **plus** PDF and DOCX export parity, so each is its own change
 (paragraph borders already have `docs/paragraph-borders-rfc.md`). Until then,
@@ -192,7 +192,7 @@ in HTML isn't finished.
 
 ## What shipped
 
-**Phases 1–2** (`feat/html-content`):
+**Phases 1–3** (`feat/html-content`):
 
 - `@scrivr/html` with `importHtml(editor, html)`. It picks the DOM per D2,
   keeps ids per D9 and runs no cleaner. It is tested in node, which is Seraa's
@@ -211,7 +211,23 @@ in HTML isn't finished.
   toolbar item) is in the playground next to `DocxImport`. The file picker
   moved from `DocxImport` into core as `pickFile(accept)`, and both
   extensions use it.
-- `applyImportedDocument` moved to core. `@scrivr/docx` and `@scrivr/html`
+- `applyImportedDocument` moved to core.
+- **Phase 3, D7 coverage.** The rules live in the extensions, so paste reads
+  them too:
+  - CSS lengths in any unit (`px`, `pt`, `in`, `cm`, `mm`, `em`, `rem`) for
+    indents and font size. `font-size:1.5em` was 1.5px before.
+  - Alignment mapped onto the four the editor has. `start` and `end` were
+    stored raw before, which layout doesn't recognise.
+  - A `span` with a background becomes a highlight.
+  - `<font color face size>` applies all three marks. The rules are
+    non-consuming so they don't block each other.
+  - A `div` holding only text becomes a paragraph with its alignment.
+
+  The paragraph and heading rules now share `blockStyleAttrs` instead of two
+  copies of the same code. Block-level text styles and cell fills already
+  worked; tests now cover them.
+- **Moved from D7 to D8:** `<ol type>`. Ordered lists have no numbering-kind
+  attribute, so supporting it is a schema change. `@scrivr/docx` and `@scrivr/html`
   both re-export it.
 - **Found while building, fixed at the seam:** the parse rules for links,
   images, tables, fields, section breaks and sourced blocks checked

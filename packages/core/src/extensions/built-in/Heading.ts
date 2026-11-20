@@ -3,6 +3,7 @@ import type { Node } from "prosemirror-model";
 import type { PdfNodeHandler } from "../../exports/pdf";
 import { textblockTypeInputRule } from "prosemirror-inputrules";
 import { Extension } from "../Extension";
+import { blockStyleAttrs } from "./blockStyleAttrs";
 import type {
   SlashCommandContribution,
   SlashCommandSpec,
@@ -91,24 +92,7 @@ export const Heading = Extension.create<HeadingOptions>({
         outlineLevel: headingOutlineLevel,
         parseDOM: this.options.levels.map((level) => ({
           tag: `h${level}`,
-          getAttrs(dom) {
-            const el = dom as HTMLElement;
-            const rawFamily = el.style.fontFamily;
-            const fontFamily = rawFamily
-              ? (rawFamily.replace(/['"]/g, "").split(",")[0] ?? "").trim() ||
-                null
-              : null;
-            const rawMarginLeft = parseFloat(el.style.marginLeft) || 0;
-            const rawTextIndent = parseFloat(el.style.textIndent) || 0;
-            return {
-              level,
-              align: el.style.textAlign || "left",
-              indent: rawMarginLeft > 0 ? Math.round(rawMarginLeft / 24) : 0,
-              textIndent: rawTextIndent > 0 ? rawTextIndent : 0,
-              fontFamily: fontFamily,
-              nodeId: el.getAttribute("data-node-id") ?? null,
-            };
-          },
+          getAttrs: (el) => ({ level, ...blockStyleAttrs(el) }),
         })),
         toDOM: (node) => {
           const styles: string[] = [];

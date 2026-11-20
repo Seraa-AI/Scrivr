@@ -12,6 +12,7 @@ import { semanticImage, type SemanticNodeHandler } from "../../exports/semantic"
 import type { PdfNodeHandler } from "../../exports/pdf";
 import type { Node as PmNode } from "prosemirror-model";
 import { floats } from "../../layout/AnchoredObjects";
+import { blockStyleAttrs } from "./blockStyleAttrs";
 
 /**
  * The single image a paragraph holds with nothing else but whitespace, or null.
@@ -142,26 +143,10 @@ export const Paragraph = Extension.create({
           dataTracked: { default: [] },
         },
         parseDOM: [
-          {
-            tag: "p",
-            getAttrs(dom) {
-              const el = dom as HTMLElement;
-              const rawFamily = el.style.fontFamily;
-              const fontFamily = rawFamily
-                ? (rawFamily.replace(/['"]/g, "").split(",")[0] ?? "").trim() ||
-                  null
-                : null;
-              const rawMarginLeft = parseFloat(el.style.marginLeft) || 0;
-              const rawTextIndent = parseFloat(el.style.textIndent) || 0;
-              return {
-                align: el.style.textAlign || "left",
-                indent: rawMarginLeft > 0 ? Math.round(rawMarginLeft / 24) : 0,
-                textIndent: rawTextIndent > 0 ? rawTextIndent : 0,
-                fontFamily: fontFamily,
-                nodeId: el.getAttribute("data-node-id") ?? null,
-              };
-            },
-          },
+          { tag: "p", getAttrs: blockStyleAttrs },
+          // A div holding only text is a paragraph as written; one holding
+          // blocks is a container, read through.
+          { tag: "div", priority: 0, getAttrs: (el) => !holdsBlocks(el) && blockStyleAttrs(el) },
         ],
         toDOM: (node) => {
           let style = `text-align:${node.attrs.align as string}`;
@@ -263,4 +248,15 @@ declare module "@scrivr/core" {
       fontFamily?: string | null;
     };
   }
+}
+
+/** Elements that open a block of their own when they appear in HTML. */
+const BLOCK_TAGS = new Set([
+  "address", "article", "aside", "blockquote", "dd", "div", "dl", "dt", "figcaption", "figure",
+  "footer", "form", "h1", "h2", "h3", "h4", "h5", "h6", "header", "hr", "li", "main", "nav",
+  "ol", "p", "pre", "section", "table", "ul",
+]);
+
+function holdsBlocks(el: HTMLElement): boolean {
+  return Array.from(el.children).some((child) => BLOCK_TAGS.has(child.tagName.toLowerCase()));
 }
