@@ -1,17 +1,12 @@
 import { isHtmlElement } from "@scrivr/core";
+import { Window } from "happy-dom";
+import type { WithHtmlBody } from "./dom";
 
 /**
- * Parse HTML into a `<body>` element and hand it to `read` while it is live.
- *
- * In a browser that is the page's own `DOMParser`. On a server there is none,
- * so happy-dom supplies one — imported lazily, so a browser bundle never
- * carries it — in a window that runs no scripts and fetches nothing.
+ * happy-dom's parser, for a server, which has none of its own. The window
+ * runs no scripts and fetches nothing: the HTML is read, never rendered.
  */
-export async function withHtmlBody<T>(html: string, read: (body: HTMLElement) => T): Promise<T> {
-  if (typeof globalThis.DOMParser === "function") {
-    return read(new globalThis.DOMParser().parseFromString(html, "text/html").body);
-  }
-  const { Window } = await import("happy-dom");
+export const withServerBody: WithHtmlBody = async (html, read) => {
   const window = new Window({
     settings: {
       disableJavaScriptEvaluation: true,
@@ -29,4 +24,4 @@ export async function withHtmlBody<T>(html: string, read: (body: HTMLElement) =>
   } finally {
     await window.happyDOM.close();
   }
-}
+};

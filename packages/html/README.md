@@ -13,7 +13,14 @@ applyImportedDocument(editor, doc);
 
 The HTML is read by the schema's own parse rules (the same ones paste uses), so
 anything an extension can paste, it can import. In a browser the page's
-`DOMParser` reads it; on a server, happy-dom does.
+`DOMParser` reads it; on a server, happy-dom does. The package's `browser`
+export condition keeps happy-dom out of browser bundles.
+
+`importHtml` also returns `diagnostics`: every style and element in the HTML
+that no rule read, counted, so an agent can see what did not land.
+
+In the browser, add `HtmlImport` for an `importHtmlFromFile` command and
+toolbar item that loads an `.html` file.
 
 Blocks keep the `data-node-id` the HTML gives them. When two blocks share an id,
 the first keeps it and the others get new ones.

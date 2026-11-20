@@ -65,6 +65,9 @@ importers:
       '@scrivr/export-pdf':
         specifier: workspace:*
         version: link:../../packages/export-pdf
+      '@scrivr/html':
+        specifier: workspace:*
+        version: link:../../packages/html
       '@scrivr/plugins':
         specifier: workspace:*
         version: link:../../packages/plugins

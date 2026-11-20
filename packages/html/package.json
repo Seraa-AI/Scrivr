@@ -25,6 +25,16 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
+      "browser": {
+        "import": {
+          "types": "./dist/index.browser.d.ts",
+          "default": "./dist/index.browser.js"
+        },
+        "require": {
+          "types": "./dist/index.browser.d.cts",
+          "default": "./dist/index.browser.cjs"
+        }
+      },
       "import": {
         "types": "./dist/index.d.ts",
         "default": "./dist/index.js"
@@ -61,5 +71,9 @@
     "tsup": "^8.0.0",
     "typescript": "^5.4.0",
     "vitest": "^2.1.9"
+  },
+  "browser": {
+    "./dist/index.js": "./dist/index.browser.js",
+    "./dist/index.cjs": "./dist/index.browser.cjs"
   }
 }

@@ -6,7 +6,7 @@
 
 import { describe, it, expect } from "vitest";
 import { ServerEditor, StarterKit } from "@scrivr/core";
-import { importHtml, type HtmlImportDiagnostic } from "./importHtml";
+import { importHtml, type HtmlImportDiagnostic } from "./index";
 
 async function diagnosticsOf(html: string): Promise<HtmlImportDiagnostic[]> {
   const editor = new ServerEditor({ extensions: [StarterKit.configure({ table: true })] });

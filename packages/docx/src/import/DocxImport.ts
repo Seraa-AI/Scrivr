@@ -22,8 +22,7 @@
  * should call `importDocx` directly and read `result.diagnostics`.
  */
 
-import { Extension } from "@scrivr/core";
-import { applyImportedDocument } from "@scrivr/core";
+import { Extension, applyImportedDocument, pickFile } from "@scrivr/core";
 import { importDocx as runImportDocx } from "./import";
 import type { DocxImportOptions } from "./import";
 
@@ -45,6 +44,9 @@ interface ImportDocxCallOptions {
   fidelity?: DocxImportOptions["fidelity"];
   media?: DocxImportOptions["media"];
 }
+
+const DOCX_TYPES =
+  ".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 export const DocxImport = Extension.create<DocxImportExtensionOptions>({
   name: "docxImport",
@@ -69,7 +71,7 @@ export const DocxImport = Extension.create<DocxImportExtensionOptions>({
           if (dispatch) {
             const editor = this.editor();
             const opts = resolveOptions(callOptions, this.options);
-            openFilePicker()
+            pickFile(DOCX_TYPES)
               .then(async (file) => {
                 if (!file) return;
                 const bytes = new Uint8Array(await file.arrayBuffer());
@@ -119,53 +121,6 @@ function resolveOptions(
   const media = call?.media ?? ext.media;
   if (media !== undefined) out.media = media;
   return out;
-}
-
-/**
- * Returns the picked file, or `undefined` if the user cancelled. Uses a
- * detached `<input>` so we don't leak DOM, and resolves on `change` (chosen)
- * or `cancel` (modern browsers — Chrome 113+, Firefox 109+, Safari 16.4+).
- *
- * Older browsers don't fire `cancel`, so the promise stays pending until
- * focus returns and we time out the listener (one tick after window focus).
- */
-function openFilePicker(): Promise<File | undefined> {
-  return new Promise((resolve) => {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept =
-      ".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-    input.style.display = "none";
-
-    let settled = false;
-    const settle = (file: File | undefined) => {
-      if (settled) return;
-      settled = true;
-      input.remove();
-      resolve(file);
-    };
-
-    input.addEventListener("change", () => {
-      const file = input.files?.[0];
-      settle(file);
-    });
-    input.addEventListener("cancel", () => settle(undefined));
-
-    // Focus-based fallback for browsers without the `cancel` event.
-    window.addEventListener(
-      "focus",
-      () => {
-        // The change event fires before focus returns when a file is
-        // chosen, so a focus event without a settled promise means the
-        // dialog was dismissed.
-        setTimeout(() => settle(undefined), 300);
-      },
-      { once: true },
-    );
-
-    document.body.appendChild(input);
-    input.click();
-  });
 }
 
 declare module "@scrivr/core" {

@@ -8,13 +8,17 @@
  * artefacts; imported HTML is what the author wrote, and nothing is cleaned.
  *
  * Use `new ServerEditor()` on the server — the editor supplies the schema.
+ *
+ * Which parser reads the HTML is the package entry's choice: the page's
+ * `DOMParser` under the `browser` export condition, happy-dom otherwise. A
+ * browser bundle never sees happy-dom.
  */
 
 import type { IBaseEditor } from "@scrivr/core";
 import { assignBlockIds, planDuplicateIdAssignments } from "@scrivr/core";
 import { Mapping, Transform, type Node as PmNode } from "@scrivr/core/pm";
 import { watchedParser, type HtmlImportDiagnostic } from "./diagnostics";
-import { withHtmlBody } from "./parseHtml";
+import type { WithHtmlBody } from "./dom";
 
 export type { HtmlImportDiagnostic };
 
@@ -37,12 +41,17 @@ export interface HtmlImportResult {
  *   const { doc, diagnostics } = await importHtml(editor, html);
  *   applyImportedDocument(editor, doc);
  */
-export async function importHtml(editor: IBaseEditor, html: string): Promise<HtmlImportResult> {
-  const { parser, report } = watchedParser(editor.schema);
-  const parsed = await withHtmlBody(html, (body) => ({ doc: parser.parse(body), diagnostics: report(body) }));
-  let doc = reidDuplicates(parsed.doc);
-  if (editor.findExtension("uniqueId")) doc = assignBlockIds(doc);
-  return { doc, diagnostics: parsed.diagnostics };
+export type ImportHtml = (editor: IBaseEditor, html: string) => Promise<HtmlImportResult>;
+
+/** `importHtml`, reading HTML with `withHtmlBody`. */
+export function htmlImporter(withHtmlBody: WithHtmlBody): ImportHtml {
+  return async (editor, html) => {
+    const { parser, report } = watchedParser(editor.schema);
+    const parsed = await withHtmlBody(html, (body) => ({ doc: parser.parse(body), diagnostics: report(body) }));
+    let doc = reidDuplicates(parsed.doc);
+    if (editor.findExtension("uniqueId")) doc = assignBlockIds(doc);
+    return { doc, diagnostics: parsed.diagnostics };
+  };
 }
 
 /** Every block after the first that carries an id an earlier one has. */

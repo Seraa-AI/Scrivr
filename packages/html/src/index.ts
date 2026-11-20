@@ -1,5 +1,7 @@
-export { importHtml } from "./importHtml";
-export type { HtmlImportResult, HtmlImportDiagnostic } from "./importHtml";
-export type { HtmlDiagnosticCode } from "./diagnostics";
+import { htmlImporter, type ImportHtml } from "./importHtml";
+import { withServerBody } from "./domServer";
 
-export { applyImportedDocument } from "@scrivr/core";
+/** Import an HTML document using the editor's schema, parsed with happy-dom. */
+export const importHtml: ImportHtml = htmlImporter(withServerBody);
+
+export * from "./shared";

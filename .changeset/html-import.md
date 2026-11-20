@@ -11,3 +11,5 @@ New `@scrivr/html` package: `importHtml(editor, html)` loads a whole document fr
 Parse rules no longer use `instanceof Element` / `HTMLElement`, which threw on a server: links, images, tables, fields, section breaks and sourced blocks now parse from any DOM. The check is exported as `isHtmlElement`.
 
 `importHtml` also returns `diagnostics`: every style property and element the HTML used that the schema's rules did not read, counted, so an agent can see what did not land.
+
+`HtmlImport` adds an `importHtmlFromFile` command and toolbar item for the browser, like `DocxImport`. The file picker both use is now `pickFile(accept)` in `@scrivr/core`. Browser bundlers get an `@scrivr/html` entry without happy-dom (the `browser` export condition); Node gets the happy-dom one.

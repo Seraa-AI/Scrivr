@@ -11,3 +11,4 @@ export {
   serializeSelectionToText,
   SLICE_DATA_ATTR,
 } from "./ClipboardSerializer";
+export { pickFile } from "./pickFile";

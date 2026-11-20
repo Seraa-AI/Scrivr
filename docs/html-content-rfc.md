@@ -192,11 +192,25 @@ in HTML isn't finished.
 
 ## What shipped
 
-**Phase 1, in progress** (`feat/html-content`):
+**Phases 1–2** (`feat/html-content`):
 
 - `@scrivr/html` with `importHtml(editor, html)`. It picks the DOM per D2,
   keeps ids per D9 and runs no cleaner. It is tested in node, which is Seraa's
   path, and under happy-dom as a browser.
+- **D2 changed how the DOM is chosen.** A lazy `import("happy-dom")` still
+  made browser bundlers build happy-dom into a dead chunk and print a warning
+  for each Node built-in it imports. Instead, the package has two entries,
+  routed by the standard `browser` export condition:
+  - browser bundlers get an entry that only knows the page's `DOMParser`;
+  - Node gets the happy-dom entry.
+
+  Seraa still writes `import { importHtml } from "@scrivr/html"` everywhere.
+  A browser app's server-rendering bundle runs in Node, so it gets the
+  happy-dom entry as it should.
+- **Phase 2:** the `HtmlImport` extension (`importHtmlFromFile` plus a
+  toolbar item) is in the playground next to `DocxImport`. The file picker
+  moved from `DocxImport` into core as `pickFile(accept)`, and both
+  extensions use it.
 - `applyImportedDocument` moved to core. `@scrivr/docx` and `@scrivr/html`
   both re-export it.
 - **Found while building, fixed at the seam:** the parse rules for links,

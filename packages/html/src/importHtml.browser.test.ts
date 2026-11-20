@@ -6,7 +6,7 @@
 
 import { describe, it, expect } from "vitest";
 import { ServerEditor, StarterKit } from "@scrivr/core";
-import { importHtml } from "./importHtml";
+import { importHtml } from "./index.browser";
 
 describe("importHtml — in a browser", () => {
   it("reads the HTML with the page's DOMParser", async () => {
