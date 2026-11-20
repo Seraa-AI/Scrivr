@@ -137,6 +137,15 @@ describe.each(lanes.slice(0, 2))("$name, over a break", ({ apply }) => {
     expect(laidOut(editor)).toBe(laid);
   });
 
+  it("replaces words with an image inside as one act, keeping the image", () => {
+    const editor = editorOf([...textOf("a cat"), image, ...textOf("dog sat")]);
+    apply(editor, "a cow sat");
+
+    expect(changeActs(pending(editor))).toHaveLength(1);
+    decideAll(editor, "rejected");
+    expect(laidOut(editor)).toBe("a cat□dog sat");
+  });
+
   it("withdraws only its own record on a break, never another author's", () => {
     const editor = editorOf([...textOf("one"), hardBreak, ...textOf("two")]);
     apply(editor, "one two");

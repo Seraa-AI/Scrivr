@@ -1,5 +1,5 @@
 import type { ReviewDecisions, ReviewOutcome } from "./reviewPlan";
-import { Transaction } from "@scrivr/core/pm";
+import { Transaction, type Step } from "@scrivr/core/pm";
 
 import { ReplacementView, StructureAttrs, TrackChangesStatus, TrackingResult } from "./types";
 
@@ -16,6 +16,8 @@ export enum TrackChangesAction {
   updateMetaNode = "track-changes-update-meta-node",
   structuralChangeAction = "track-changes-structural-change-action",
   indentationAction = "track-changes-indentation-action",
+  /** Steps a writer made for one phrase, recorded as one replacement. */
+  phrases = "track-changes-phrases",
 }
 
 export type TrackChangesActionParams = {
@@ -33,6 +35,7 @@ export type TrackChangesActionParams = {
   [TrackChangesAction.indentationAction]: {
     action: "indent" | "unindent";
   };
+  [TrackChangesAction.phrases]: ReadonlyArray<readonly Step[]>;
 };
 
 /** Returns true if any track-changes action meta is set on the transaction. */

@@ -10,6 +10,7 @@ import {
   Step,
 } from "@scrivr/core/pm";
 
+import { getAction, TrackChangesAction } from "../actions";
 import { ChangeStep, TrTrackingContext } from "../types";
 import { processChangeSteps } from "./processReplaceStep";
 import { advanceBridge } from "./replayBridge";
@@ -87,6 +88,21 @@ function replacementGroup(step: ReplaceStep, doc: PMNode, authorID: string): str
 }
 
 /**
+ * The replacement each step of a named phrase belongs to: the one its first
+ * step starts, so a deletion split around an image it keeps stays one act.
+ */
+function phraseReplacementGroups(tr: Transaction, authorID: string): Map<Step, string> {
+  const groups = new Map<Step, string>();
+  for (const steps of getAction(tr, TrackChangesAction.phrases) ?? []) {
+    const [lead] = steps;
+    const at = lead ? tr.steps.indexOf(lead) : -1;
+    const group = lead instanceof ReplaceStep && at >= 0 ? replacementGroup(lead, tr.docs[at]!, authorID) : undefined;
+    if (group) for (const step of steps) groups.set(step, group);
+  }
+  return groups;
+}
+
+/**
  * The node a single tracked step would write, when it writes one. Used to ask
  * whether that node can carry a change record at all.
  */
@@ -112,13 +128,14 @@ export function trackTransaction(
   }
 
   const baseAttrs = createNewPendingAttrs(tr.time, authorID);
+  const phraseGroups = phraseReplacementGroups(tr, authorID);
 
   for (let i = tr.steps.length - 1; i >= 0; i--) {
     const step = tr.steps[i]!;
     const previousMapping = trContext.replayBridge.slice();
     const replayStart = newTr.mapping.maps.length;
     if (!trContext.composition.folded.has(step)) {
-      trackOneStep(i, step, baseAttrs, tr, oldState, newTr, trContext);
+      trackOneStep(i, step, baseAttrs, tr, oldState, newTr, trContext, phraseGroups);
     }
     trContext.replayBridge = advanceBridge(
       step,
@@ -139,6 +156,7 @@ function trackOneStep(
   oldState: EditorState,
   newTr: Transaction,
   trContext: TrTrackingContext,
+  phraseGroups: ReadonlyMap<Step, string>,
 ) {
   const replayBridge = trContext.replayBridge;
   if (step instanceof ReplaceStep) {
@@ -154,7 +172,7 @@ function trackOneStep(
     const moveId = trContext.textMoves.get(step);
     // A move's two halves already pair through its move id.
     const partOfMove = !!moveNodeId || !!moveId || !!trContext.pastedMove;
-    const groupId = partOfMove ? undefined : replacementGroup(step, tr.docs[i]!, baseAttrs.authorID);
+    const groupId = partOfMove ? undefined : phraseGroups.get(step) ?? replacementGroup(step, tr.docs[i]!, baseAttrs.authorID);
     const stepAttrs = groupId === undefined ? baseAttrs : { ...baseAttrs, groupId };
 
     const [initialTrackedContent, newSelectionPos] = trackReplaceStep(

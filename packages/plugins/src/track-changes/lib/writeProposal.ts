@@ -1,5 +1,7 @@
 import type { Fragment, Transaction } from "@scrivr/core/pm";
 
+import { getAction, setAction, TrackChangesAction } from "../actions";
+
 import { acceptedRangeToDocRange, type PosMapEntry } from "./acceptedTextMap";
 import type { PairedDiffOp } from "./diffText";
 
@@ -13,7 +15,8 @@ import type { PairedDiffOp } from "./diffText";
  *
  * Each phrase (the ops sharing a `groupId`: a deletion, and an insertion in
  * one op or several) starts with one step, the unit the engine pairs as one
- * replacement. A deletion takes only the
+ * replacement; a deletion split around content it leaves in place takes more
+ * steps, which are named on `tr` as one phrase so they stay one replacement. A deletion takes only the
  * characters the map read: an image or another author's struck text between
  * them is left in place, since the proposal never saw it.
  *
@@ -54,9 +57,13 @@ export function writeProposal(
     const content = added > 0 ? contentFor(proposed, proposed + added) : null;
     const [first, ...rest] = runs;
     if (first) {
+      const stepsBefore = tr.steps.length;
       if (content) tr.replaceWith(mapped(first.from, 1), mapped(first.to, -1), content);
       else tr.delete(mapped(first.from, 1), mapped(first.to, -1));
       for (const run of rest) tr.delete(mapped(run.from, 1), mapped(run.to, -1));
+      if (rest.length > 0) {
+        setAction(tr, TrackChangesAction.phrases, [...(getAction(tr, TrackChangesAction.phrases) ?? []), tr.steps.slice(stepsBefore)]);
+      }
       written = true;
     } else if (content && content.size > 0) {
       const at = acceptedRangeToDocRange(map, accepted, accepted)?.from ?? (map.length === 0 ? emptyAt : null);
