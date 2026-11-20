@@ -71,7 +71,7 @@ should get the same behaviour by going through the same path.
 | Pieces of one insertion (marked runs, a break) | one act through a shared `creationId` (`suggestedContent.ts:23-27`) | **One record each** (`trackReplaceStep.ts:101`); Decision 7 |
 | Another author's struck text inside the range | struck again by the lane (`splitRangeForNewMark.ts:66-72`) | Left alone: struck text gets no second record (`deleteTextIfInserted.ts:33`) |
 | A block attr change over another author's pending one | a second record, the lane's | Folded into the pending one, which keeps its author (`processReplaceStep.ts:147-167`) |
-| Text deleted in one place and inserted elsewhere | a deletion and an insertion | **A move** (`groupMoveSteps`), as for a person |
+| Text deleted in one place and inserted elsewhere | a deletion and an insertion | **A move** (`groupMoveSteps`), as for a person, unless the deletion only takes back the author's own pending inline insertion: nothing was there before to move from |
 
 The last three rows are the engine's rules for anyone suggesting, and the lanes
 take them as a person's edits would. Decision 7 answers the first.
@@ -94,6 +94,11 @@ take them as a person's edits would. Decision 7 answers the first.
    - **The AI lane writes its keep-formatting and its text in one
      transaction**, so one apply is one undo step and is applied whole or not
      at all.
+   - A replacement shows its new words before the words it strikes, as the
+     engine places typing over a selection (`selectionContract.test.ts`). The
+     lanes put the struck words first today; the changeset says so.
+   - The plain, rich and AI lanes share one writer, `writeProposal`, which
+     turns a block's phrase ops into these edits.
 
 2. **The engine pairs a replacement.** A step that types over a selection inside
    one block, and records a deletion there, gives the deletion and the insertion
@@ -135,8 +140,9 @@ take them as a person's edits would. Decision 7 answers the first.
      (`isValidTrackableMark`), and deleting the author's own insertion is taken
      back.
    - It also withdraws the author's pending deletion recorded on an inline node
-     (a break or image), which Decision 1 now creates, through `setNodeMarkup`
-     of `dataTracked` alone, which `trackSetNodeMarkupStep` records nothing for.
+     (a break or image), which Decision 1 now creates, through
+     `setNodeAttribute` of `dataTracked`. The engine records nothing for that
+     step: rewriting a review record is bookkeeping, not an edit.
    - As today, the plain and rich lanes withdraw; the AI lane and
      `insertAsSuggestion` do not.
 
@@ -175,6 +181,7 @@ take them as a person's edits would. Decision 7 answers the first.
 | `applyTrackedDelete`, `applyTrackedInsert`, `splitRangeForNewMark` | Kept, unchanged; no lane calls them |
 | `createNewDeleteAttrs`, `createNewInsertAttrs`, `createNewPendingAttrs`, `addTrackIdIfDoesntExist` | Kept; the barrel comment naming `@scrivr/ai` as their consumer is corrected |
 | `suggestionBlocked` | New |
+| `writeProposal` | New: the lanes' shared writer, exported for `@scrivr/ai` |
 
 A host that builds `proposedText` from a view without breaks would now propose
 deleting every break, so the implementation changeset carries a **Breaking**
@@ -208,10 +215,10 @@ patch-level breaks.
   which Decision 6 reports instead of losing.
 - *Undo?* Each lane dispatches one transaction, the AI lane included after
   Decision 1, so each apply is one undo step.
-- *Can tracking refuse a lane's edit?* Only a gesture that overlaps its own
-  insertion is refused, and the lanes write phrases side by side and blocks
-  bottom to top, so none was found that a lane produces. Decision 6 covers it
-  anyway.
+- *Can tracking refuse a lane's edit?* It refuses a step it cannot record.
+  A gesture that overlaps its own insertion is split and recorded, not
+  refused, and the lanes write only replace and mark steps, so none was found
+  that a lane produces. Decision 6 covers it anyway.
 - *Conflicts with another author's pending text?* The engine's rules apply, the
   same as two people typing. Formatting set over another author's pending
   suggestion holds it (`within` on `findChanges().pending`, since #265),
