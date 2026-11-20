@@ -342,9 +342,10 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
 
       /**
        * Insert text as a pending suggestion by `authorID`, whatever the
-       * tracking status, except while snapshots are viewed: then it writes
-       * nothing and returns false. It is a plain edit the engine records, so a
-       * replaced selection and the text typed over it are one replacement.
+       * tracking status. Writes nothing and returns false when the suggestion
+       * would not be recorded (`suggestionBlocked`). It is a plain edit the
+       * engine records, so a replaced selection and the text typed over it are
+       * one replacement.
        *
        * This is the correct way for AI assistants to propose edits — they always
        * show up as suggestions the user can accept or reject, never as direct edits.

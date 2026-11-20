@@ -130,8 +130,8 @@ export function applyAiSuggestion(
     return wrote;
   }
 
-  // An apply that wrote nothing, as one tracking would not record, settles
-  // nothing: the whole proposal stays for the reader.
+  // An apply that wrote nothing (say, one tracking would not record) leaves
+  // the whole proposal pending.
   if (editor.getState().doc === before) return false;
 
   // Everything not accepted stays — the blocks this call did not ask for, and
@@ -271,12 +271,9 @@ function authorOf(suggestion: AiSuggestion): string {
  * apply is one undo step and lands whole or not at all.
  *
  * Formatting on kept runs goes first: a mark step moves nothing, so every range
- * still resolves against the document the suggestion was computed from. Then
- * each phrase is one plain edit, through the same writer as the other lanes.
- * Tracked mode dispatches it with suggestion intent and the engine records it,
- * so a reviewer can reject the formatting as they reject the words; it writes
- * nothing that would not be recorded. Direct mode skips tracking, which is what
- * direct means.
+ * still resolves against the document the suggestion was computed from.
+ * Tracked mode lets the engine record it all, so a reviewer can reject the
+ * formatting as they reject the words, and writes nothing it would not record.
  *
  * A formatting keep carries its own `groupId`, so accepting one group applies
  * exactly that run's formatting — `applyRunMarks` removes what the proposal

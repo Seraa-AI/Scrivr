@@ -53,9 +53,9 @@ export type DiffOp =
   | { type: "insert"; text: string; proposedOffset?: number };
 
 /**
- * A DiffOp extended with an optional groupId.
- * All deletes and inserts that together form one logical replacement share the
- * same groupId so UI and accept/reject can treat them as a single atomic unit.
+ * A DiffOp with the `groupId` of the phrase it belongs to: the deletes and
+ * inserts of one replacement share it, and `writeProposal` writes them as one
+ * step, which the engine records as one replacement under an id of its own.
  */
 export type PairedDiffOp = DiffOp & { groupId?: string };
 

@@ -4,8 +4,9 @@ import { acceptedRangeToDocRange, type PosMapEntry } from "./acceptedTextMap";
 import type { PairedDiffOp } from "./diffText";
 
 /**
- * Writes a block's diff into `tr` as the plain edits a person would make, for
- * the engine to record under `trackAsSuggestion`. `map` is the block's
+ * Writes a block's diff — `ops` from `phraseReplacements` — into `tr` as the
+ * plain edits a person would make, for the engine to record: the caller tags
+ * `tr` with `trackAsSuggestion` and asks `suggestionBlocked` before sending it. `map` is the block's
  * accepted-text map, built on `tr.doc` when `tr` had `mapStep` steps; its
  * positions are mapped through what was written since, as a deletion removes
  * its text.

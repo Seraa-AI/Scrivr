@@ -132,18 +132,14 @@ export function applyRichDiffAsSuggestion(
       onWarn?.(`[applyRichDiffAsSuggestion] nodeId "${edit.nodeId}" is a ${found.node.type.name}, not an editable leaf — skipped`);
       return [];
     }
-    return [{ edit, pos: found.pos }];
+    return [edit];
   });
 
   if (resolved.length === 0) return { applied: false, notFound, rejected };
 
-  // Bottom-to-top, so `rejected` lists blocks in a stable order. Positions do
-  // not depend on it: each block is found again on `tr.doc` as it is written.
-  resolved.sort((a, b) => b.pos - a.pos);
-
   const tr = state.tr;
   let applied = false;
-  for (const { edit } of resolved) {
+  for (const edit of resolved) {
     if (applyRichBlockToTr(state.schema, tr, edit, authorID, onWarn)) applied = true;
     else rejected.push(edit.nodeId);
   }

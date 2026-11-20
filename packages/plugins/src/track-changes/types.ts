@@ -86,7 +86,7 @@ type InsertDeleteAttrs = {
   /**
    * True when another author's mark overlaps this exact segment.
    * Drives amber conflict rendering and the conflict popover.
-   * Set by splitRangeForNewMark, for a host that builds records by hand.
+   * Set by `findChanges` when another author's pending opposing change overlaps this one.
    */
   isConflict?: boolean;
   /**
