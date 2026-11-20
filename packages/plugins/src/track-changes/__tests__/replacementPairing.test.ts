@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ServerEditor, StarterKit } from "@scrivr/core";
 import { Fragment, Slice, TextSelection } from "@scrivr/core/pm";
 import type { Node as PmNode } from "@scrivr/core/pm";
-import { changeActs, findChanges, reviewChanges, TrackChanges, TrackChangesStatus } from "../index";
+import { changeActs, findChanges, reviewChanges, TrackChanges, trackChangesPluginKey, TrackChangesStatus, type ReplacementView } from "../index";
 
 /**
  * A replacement typed in suggesting mode is one act, as Google Docs shows it:
@@ -10,11 +10,12 @@ import { changeActs, findChanges, reviewChanges, TrackChanges, TrackChangesStatu
  * covers both.
  */
 
-const editorWith = (...texts: string[]) =>
+const editorWith = (...texts: string[]) => editorIn("paired", ...texts);
+const editorIn = (replacementView: ReplacementView, ...texts: string[]) =>
   new ServerEditor({
     extensions: [
       StarterKit,
-      TrackChanges.configure({ userID: "alice", initialStatus: TrackChangesStatus.enabled, canAcceptReject: true }),
+      TrackChanges.configure({ userID: "alice", initialStatus: TrackChangesStatus.enabled, canAcceptReject: true, replacementView }),
     ],
     content: {
       type: "doc",
@@ -266,5 +267,43 @@ describe("edits that are not a replacement stay unpaired", () => {
 
     expect(pending(editor).length).toBeGreaterThan(0);
     expect(groupIds(editor).every(id => id === undefined)).toBe(true);
+  });
+});
+
+describe("the replacement view", () => {
+  it("is one card by default", () => {
+    const editor = new ServerEditor({
+      extensions: [StarterKit, TrackChanges.configure({ userID: "alice", initialStatus: TrackChangesStatus.enabled })],
+      content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "The cat sat" }] }] },
+    });
+    typeOver(editor, CAT.from, CAT.to, "dog");
+
+    expect(trackChangesPluginKey.getState(editor.getState())?.replacementView).toBe("paired");
+    expect(changeActs(pending(editor))).toHaveLength(1);
+  });
+
+  it("split, shows the deletion and the insertion as Word does, each decided on its own", () => {
+    const editor = editorIn("split", "The cat sat");
+    typeOver(editor, CAT.from, CAT.to, "dog");
+
+    expect(changeActs(pending(editor), "split")).toHaveLength(2);
+    rejectInsertion(editor, "dog");
+    expect(texts(editor)).toEqual(["The cat sat"]);
+    expect(pendingTexts(editor)).toEqual(["cat"]);
+  });
+
+  it("switches without rewriting the document", () => {
+    const editor = editorWith("The cat sat");
+    typeOver(editor, CAT.from, CAT.to, "dog");
+    const before = editor.getState().doc;
+
+    editor.commands.setReplacementView("split");
+    expect(editor.getState().doc).toBe(before);
+    expect(trackChangesPluginKey.getState(editor.getState())?.replacementView).toBe("split");
+    rejectInsertion(editor, "dog");
+    expect(pendingTexts(editor)).toEqual(["cat"]);
+
+    editor.commands.setReplacementView("paired");
+    expect(changeActs(pending(editor))).toHaveLength(1);
   });
 });

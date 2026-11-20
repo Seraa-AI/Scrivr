@@ -277,6 +277,14 @@ export type RootChange = TrackedChange[];
  */
 export type TrackChangesRenderMode = "all" | "none";
 
+/**
+ * How review shows a replacement — words typed over a selection, or a swap a
+ * suggestion proposes. `"paired"` is one card that decides both halves;
+ * `"split"` is a deletion and an insertion, each decided on its own, as Word
+ * shows them. The pairing is recorded either way, so switching rewrites nothing.
+ */
+export type ReplacementView = "paired" | "split";
+
 export interface TrackChangesOptions {
   debug?: boolean;
   userID: string;
@@ -285,6 +293,8 @@ export interface TrackChangesOptions {
   skipTrsWithMetas?: (PluginKey | string)[];
   initialStatus?: TrackChangesStatus;
   canAcceptReject?: boolean;
+  /** Default `"paired"`. */
+  replacementView?: ReplacementView;
   /**
    * Called with the reason when an edit is stopped because it could not be
    * recorded as a suggestion. The edit is not applied, so tell the person why.

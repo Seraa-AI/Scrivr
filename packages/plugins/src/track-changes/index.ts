@@ -50,6 +50,7 @@ export type { TrackChangesState } from "./engine/trackChangesPlugin";
 export type {
   TrackChangesOptions,
   TrackChangesRenderMode,
+  ReplacementView,
   TrackedAttrs,
   TrackedChange,
   TextChange,
