@@ -1,8 +1,8 @@
 import type { DOMOutputSpec } from "prosemirror-model";
 import type { CellHAlign, CellVAlign, CellVMerge } from "./attrs";
-import { isHAlign, isVAlign, isVMerge, storableFill } from "./attrs";
+import { isVAlign, isVMerge, storableFill } from "./attrs";
 import { isHtmlElement } from "../model/isHtmlElement";
-import { cssLengthToPx } from "../model/cssValues";
+import { cssLengthToPx, parseTextAlign, styleOrAttribute } from "../model/cssValues";
 
 /**
  * The HTML attribute layer for table nodes — one module owning both directions
@@ -68,29 +68,15 @@ export function readRowSpan(el: Element, rowsLeftInGroup: number): number {
   return span === 0 ? rowsLeftInGroup : Math.min(span, rowsLeftInGroup);
 }
 
-/**
- * Reads a value the style sets, falling back to the presentational attribute.
- * CSS wins over the attribute because that is the order a browser paints them.
- */
-function readStyledValue(el: HTMLElement, styleValue: string, attrName: string): string | null {
-  const styled = styleValue.trim();
-  if (styled !== "") return styled;
-  const attr = el.getAttribute(attrName);
-  const trimmed = attr === null ? "" : attr.trim();
-  return trimmed === "" ? null : trimmed;
-}
-
 /** `text-align` / `align` → the cell's `hAlign`, or null to keep the default. */
 export function readCellHAlign(el: HTMLElement): CellHAlign | null {
-  const value = readStyledValue(el, el.style.textAlign, "align");
-  if (value === null) return null;
-  const lower = value.toLowerCase();
-  return isHAlign(lower) ? lower : null;
+  const value = styleOrAttribute(el, el.style.textAlign, "align");
+  return value === null ? null : parseTextAlign(value);
 }
 
 /** `vertical-align` / `valign` → the cell's `vAlign`, or null to keep the default. */
 export function readCellVAlign(el: HTMLElement): CellVAlign | null {
-  const value = readStyledValue(el, el.style.verticalAlign, "valign");
+  const value = styleOrAttribute(el, el.style.verticalAlign, "valign");
   if (value === null) return null;
   const lower = value.toLowerCase();
   // HTML's vertical centre is "middle"; the model calls it "center".
@@ -128,7 +114,7 @@ export function readCellBackground(el: HTMLElement): string | null {
   if (shorthand !== "" && /url\(/i.test(shorthand)) return null;
 
   const styled = el.style.backgroundColor.trim();
-  const candidate = styled !== "" ? styled : readStyledValue(el, shorthand, "bgcolor");
+  const candidate = styled !== "" ? styled : styleOrAttribute(el, shorthand, "bgcolor");
   return candidate === null ? null : storableFill(candidate);
 }
 

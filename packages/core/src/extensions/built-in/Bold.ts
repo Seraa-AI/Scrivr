@@ -9,15 +9,17 @@ interface BoldOptions {
   shortcut: boolean;
 }
 
+/** Under 500: drawn regular. */
+const isRegularWeight = (weight: string) => /^(normal|lighter|[1-9]\d?|[1-4]\d{2})$/i.test(weight);
+/** 500 up: drawn bold. */
+const isBoldWeight = (weight: string) => /^(bold(er)?|[5-9]\d{2}|1000)$/i.test(weight);
+
 /**
  * Bold — the `bold` mark.
  *
  * Font rendering is handled by StyleResolver (font weight → "bold 14px Georgia").
  * No MarkDecorator needed — bold is purely a font metric change, not a visual overlay.
  */
-/** A weight below bold: the editor draws it regular. */
-const isRegularWeight = (weight: string) => /^(normal|lighter|[1-4]\d{2})$/i.test(weight);
-
 export const Bold = Extension.create<BoldOptions>({
   name: "bold",
 
@@ -32,12 +34,15 @@ export const Bold = Extension.create<BoldOptions>({
         parseDOM: [
           { tag: "strong", getAttrs: (node) => !isRegularWeight(node.style.fontWeight) && null },
           { tag: "b", getAttrs: (node) => !isRegularWeight(node.style.fontWeight) && null },
+          // Set to a regular weight, either is a plain wrapper — Google Docs wraps its HTML in one.
+          { tag: "strong", skip: true },
+          { tag: "b", skip: true },
           {
             style: "font-weight",
             getAttrs: (value) => isRegularWeight(value) && null,
             clearMark: (m) => m.type.name === "bold",
           },
-          { style: "font-weight", getAttrs: (value) => /^(bold(er)?|[5-9]\d{2}|1000)$/i.test(value) && null },
+          { style: "font-weight", getAttrs: (value) => isBoldWeight(value) && null },
         ],
         toDOM: () => ["strong", 0],
       },

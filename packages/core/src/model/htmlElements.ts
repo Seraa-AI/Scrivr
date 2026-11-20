@@ -14,7 +14,7 @@ export const HTML_BLOCK_TAGS: ReadonlySet<string> = new Set([
 /** Elements the parse drops with everything in them when no rule takes them. */
 export const HTML_IGNORED_TAGS: ReadonlySet<string> = new Set(["head", "noscript", "object", "script", "style", "title"]);
 
-/** Atoms that show though empty, as an empty span does not. */
+/** Inline atoms that show with nothing inside: a break, an image with a source, a field. */
 const SHOWS_EMPTY = "br, img[src], span[data-field]";
 
 /** Whether `node` is an element that opens a block of its own. */

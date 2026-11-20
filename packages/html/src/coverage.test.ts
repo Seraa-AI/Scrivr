@@ -113,6 +113,32 @@ describe("what an element states beats what it inherits", () => {
     expect([0, 1, 2].map((i) => doc.child(i).attrs["align"])).toEqual(["right", "center", "justify"]);
   });
 
+  it("an align the browser ignores leaves the inherited alignment", async () => {
+    for (const align of [``, `bogus`]) {
+      const doc = await load(`<div style="text-align:center"><p align="${align}">a</p></div>`);
+      expect(doc.child(0).attrs["align"]).toBe("center");
+    }
+  });
+
+  it("text-align: inherit keeps what the block inherits", async () => {
+    for (const keyword of ["inherit", "unset"]) {
+      const doc = await load(`<div style="text-align:center"><p style="text-align:${keyword}">a</p></div>`);
+      expect(doc.child(0).attrs["align"]).toBe("center");
+    }
+  });
+
+  it("align=middle centres a cell, and -webkit-center centres a paragraph", async () => {
+    const doc = await load(
+      `<p style="text-align:-webkit-center">p</p><table><tr><td align="middle">c</td></tr></table>`,
+    );
+    const aligns: unknown[] = [];
+    doc.descendants((node) => {
+      if (node.type.name === "paragraph") aligns.push(node.attrs["align"]);
+      return true;
+    });
+    expect(aligns).toEqual(["center", "center"]);
+  });
+
   it("a heading's align beats its container's", async () => {
     const doc = await load(`<div style="text-align:center"><h1 align="right">H</h1></div>`);
     expect(doc.child(0).attrs["align"]).toBe("right");

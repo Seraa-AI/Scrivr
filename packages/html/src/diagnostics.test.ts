@@ -119,10 +119,25 @@ describe("importHtml diagnostics", () => {
     ).toEqual([]);
   });
 
-  it("an element its rule turned down is not blamed on a URL it does not have", async () => {
-    const [diagnostic] = await diagnosticsOf(`<p><b style="font-weight: normal">x</b></p>`);
-    expect(diagnostic).toMatchObject({ code: "html-element-rejected", tag: "b" });
-    expect(diagnostic?.message).not.toMatch(/URL/);
+  it("a bold or italic tag set to normal is plain text and loses nothing — Google Docs' wrapper", async () => {
+    expect(
+      await diagnosticsOf(
+        `<b style="font-weight:normal" id="docs-internal-guid-1"><p>a</p></b>` +
+          `<p><strong style="font-weight:400">b</strong><em style="font-style:normal">c</em></p>`,
+      ),
+    ).toEqual([]);
+  });
+
+  it("a bold tag set to a light weight reports the weight, as a span does", async () => {
+    expect(await diagnosticsOf(`<p><b style="font-weight:300">x</b></p>`)).toEqual([
+      expect.objectContaining({ code: "html-style-unsupported", property: "font-weight", count: 1 }),
+    ]);
+  });
+
+  it("a regular weight in a heading is reported — the editor draws headings bold", async () => {
+    expect(await diagnosticsOf(`<h1><span style="font-weight:400">t</span></h1>`)).toEqual([
+      expect.objectContaining({ code: "html-style-unsupported", property: "font-weight", count: 1 }),
+    ]);
   });
 
   it("a carried alignment one block cannot hold is reported, though another held it", async () => {

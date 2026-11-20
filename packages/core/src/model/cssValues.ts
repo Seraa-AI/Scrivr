@@ -54,18 +54,42 @@ export function isCssReset(value: string): boolean {
 
 export type TextAlign = "left" | "center" | "right" | "justify";
 
-const TEXT_ALIGN: Record<string, TextAlign> = {
-  left: "left",
-  start: "left",
-  center: "center",
-  right: "right",
-  end: "right",
-  justify: "justify",
-};
+/** `text-align` keywords, the browser-prefixed ones mail clients write, and HTML's `align="middle"`. */
+const TEXT_ALIGN = new Map<string, TextAlign>([
+  ["left", "left"],
+  ["start", "left"],
+  ["-webkit-left", "left"],
+  ["-moz-left", "left"],
+  ["center", "center"],
+  ["middle", "center"],
+  ["-webkit-center", "center"],
+  ["-moz-center", "center"],
+  ["right", "right"],
+  ["end", "right"],
+  ["-webkit-right", "right"],
+  ["-moz-right", "right"],
+  ["justify", "justify"],
+]);
+
+/** `text-align` (or an HTML `align`) as one of the editor's four, or null when it names none. */
+export function parseTextAlign(value: string): TextAlign | null {
+  return TEXT_ALIGN.get(value.trim().toLowerCase()) ?? null;
+}
 
 /** `text-align` as one of the editor's four; anything else is left. */
 export function cssTextAlign(value: string): TextAlign {
-  return TEXT_ALIGN[value.trim().toLowerCase()] ?? "left";
+  return parseTextAlign(value) ?? "left";
+}
+
+/**
+ * The value an element's style sets, else its presentational attribute: CSS
+ * wins because that is the order a browser paints them.
+ */
+export function styleOrAttribute(el: HTMLElement, styleValue: string, attribute: string): string | null {
+  const styled = styleValue.trim();
+  if (styled !== "") return styled;
+  const attr = el.getAttribute(attribute)?.trim() ?? "";
+  return attr === "" ? null : attr;
 }
 
 /** The first family of a `font-family` stack, unquoted — `"Arial", sans-serif` → `Arial`. */

@@ -286,8 +286,13 @@ in HTML isn't finished.
     - What an element states beats what it inherits: its style, its `align`
       (on a paragraph, div, heading, cell, row or row group — a table's
       places the table, which the editor does not model), a `<font>`'s
-      attributes. The cascade writes `align` as `text-align` style, since
-      the parse rules read only style.
+      attributes. The cascade writes `align` as `text-align` style, so
+      diagnostics judge it as a style; only values a browser honours count
+      (`middle` is centre), and an empty or unknown `align` leaves the
+      inherited alignment. `text-align: inherit`/`unset` inherits too.
+    - Paste reads `align` as well: the paragraph rule and the cell rule share
+      core's `styleOrAttribute`, and `text-align` knows the `-webkit-`/`-moz-`
+      keywords mail clients write.
     - A link's own colour applies only to a link the editor keeps: a bare
       `<a name>` or an unsafe href inherits like a span.
   - Diagnostics report what was lost and nothing else:
@@ -301,10 +306,13 @@ in HTML isn't finished.
       `<div>`'s `<pre>`, though a `<p>` beside it was centred. One that only
       passes through containers, reaches a rule line or an empty div, or that
       every block inside overrides, loses nothing.
-    - `normal` (and a weight's `400`), like a CSS-wide keyword, states
-      nothing — on the page too. A rule that only clears a mark takes
-      nothing: a light weight clears bold and is still reported, since it is
-      drawn regular.
+    - A property's default (`normal`, a weight's `400`, a transparent
+      background), like a CSS-wide keyword, states nothing — on the page too
+      — except a regular weight inside a heading, which the editor draws
+      bold. A rule that only clears a mark takes nothing: a light weight
+      clears bold and is still reported, since it is drawn regular.
+    - What a tag rule read before turning its element down is not counted as
+      taken.
     - Reads a rule makes through elements it reaches from its own (a table's
       `<col>`, a Word table's cell widths) are watched, through one stand-in
       per element so a rule comparing elements finds them equal.
@@ -324,7 +332,9 @@ in HTML isn't finished.
     text inherits, as in a browser.
   - `font-weight: normal` (or `lighter`, or below 500) undoes bold and
     `font-style: normal` italic, on the `<b>`/`<strong>`/`<i>`/`<em>` itself
-    or around it; any weight from 500 to 1000 is bold.
+    or around it; any weight from 500 to 1000 is bold. Such a tag is then a
+    plain wrapper, as Google Docs' `<b style="font-weight:normal">` is, and
+    reports nothing.
   - A `div` holding only an inline atom, such as a field, is a paragraph.
   - A selector list with an empty entry (`p, { }`) is invalid whole, as in a
     browser, and reported.

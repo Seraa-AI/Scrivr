@@ -66,6 +66,7 @@ export function watchedParser(schema: Schema): {
     declined: new Set(),
     opaque: new Set(),
     readStyles: new Map(),
+    reading: new Map(),
     watched: new WeakMap(),
   };
   const rules = PMDOMParser.fromSchema(schema).rules.map((rule) => (isTagRule(rule) ? watchTag(rule, schema, seen) : rule));
@@ -83,8 +84,10 @@ interface Seen {
   declined: Set<Element>;
   /** Taken elements whose children the parse never reads — leaves and `ignore` rules. */
   opaque: Set<Element>;
-  /** The `style` properties a rule read off each element. */
+  /** The `style` properties a rule that took its element read off each element. */
   readStyles: Map<Element, Set<string>>;
+  /** What the rule being asked is reading; kept only if it takes its element. */
+  reading: Map<Element, Set<string>>;
   /** One watched stand-in per element, so a rule comparing elements finds them equal. */
   watched: WeakMap<HTMLElement, HTMLElement>;
 }
@@ -97,12 +100,16 @@ function watchTag(rule: TagParseRule, schema: Schema, seen: Seen): TagParseRule 
   return {
     ...rule,
     getAttrs: (dom) => {
+      seen.reading = new Map();
       const result = getAttrs ? getAttrs(watchElement(dom, seen)) : (attrs ?? null);
       if (result === false) {
         seen.declined.add(dom);
-      } else {
-        seen.taken.add(dom);
-        if (opaque) seen.opaque.add(dom);
+        return result;
+      }
+      seen.taken.add(dom);
+      if (opaque) seen.opaque.add(dom);
+      for (const [el, read] of seen.reading) {
+        seen.readStyles.set(el, new Set([...(seen.readStyles.get(el) ?? []), ...read]));
       }
       return result;
     },
@@ -113,17 +120,19 @@ function watchTag(rule: TagParseRule, schema: Schema, seen: Seen): TagParseRule 
 function watchElement(el: HTMLElement, seen: Seen): HTMLElement {
   const known = seen.watched.get(el);
   if (known) return known;
-  const read = seen.readStyles.get(el) ?? new Set<string>();
-  seen.readStyles.set(el, read);
+  const read = (name: string) => {
+    const reading = seen.reading.get(el) ?? new Set<string>();
+    seen.reading.set(el, reading.add(name));
+  };
   const style = new Proxy(el.style, {
     get(target, prop) {
       if (prop === "getPropertyValue") {
         return (name: string) => {
-          read.add(name);
+          read(name);
           return target.getPropertyValue(name);
         };
       }
-      if (typeof prop === "string") read.add(kebabCase(prop));
+      if (typeof prop === "string") read(kebabCase(prop));
       return bound(target, prop);
     },
   });
@@ -199,19 +208,25 @@ function collect(body: HTMLElement, preparse: Preparse, seen: Seen, styleRules: 
   };
 
   const takenBy = (el: HTMLElement) => new Set([...(seen.readStyles.get(el) ?? []), ...takenByStyleRules(el, styleRules)]);
-  // A block property is lost where something shown takes none of it: the
-  // block's own text, or a block it was carried to. One that only passes
-  // through containers, or that every block inside overrides, loses nothing.
   const missed = new Pairs();
   for (const [target, origins] of preparse.carried) {
     if (!isHtmlElement(target) || !holdsContent(target)) continue;
     const taken = takenBy(target);
     for (const [property, source] of origins) if (!covers(taken, property)) missed.add(source, property);
   }
-  const lost = (el: HTMLElement, property: string, value: string, taken: Set<string>) =>
-    BLOCK_PROPERTIES.has(property) && isHtmlBlock(el)
-      ? !statesNothing(property, value) && (missed.has(el, property) || (holdsContent(el) && !covers(taken, property)))
-      : longhands(el, property, value).some((longhand) => !covers(taken, longhand));
+  // A block property is lost where something shown takes none of it: the
+  // block's own text, or a block it was carried to. One that only passes
+  // through containers, or that every block inside overrides, loses nothing.
+  const blockPropertyLost = (el: HTMLElement, property: string, taken: Set<string>) => {
+    if (missed.has(el, property)) return true;
+    return holdsContent(el) && !covers(taken, property);
+  };
+  const lost = (el: HTMLElement, property: string, value: string, taken: Set<string>) => {
+    if (BLOCK_PROPERTIES.has(property) && isHtmlBlock(el)) {
+      return !statesNothing(el, property, value) && blockPropertyLost(el, property, taken);
+    }
+    return longhands(el, property, value).some((longhand) => !covers(taken, longhand));
+  };
 
   const visit = (el: Element) => {
     const tag = el.tagName.toLowerCase();
@@ -272,10 +287,22 @@ function covers(taken: Set<string>, longhand: string): boolean {
   return [...taken].some((name) => name === longhand || longhand.startsWith(`${name}-`));
 }
 
-/** A CSS-wide keyword, or the property's default — `normal`, as a shorthand fills it in, or a weight's `400`. */
-const statesNothing = (property: string, value: string) =>
-  /^\s*(inherit|initial|unset|revert|revert-layer|normal)\s*$/i.test(value) ||
-  (property === "font-weight" && value.trim() === "400");
+/** Each property's default spelled as a value, beside the `normal` a shorthand fills in. */
+const DEFAULT_VALUES = new Map([
+  ["font-weight", ["400"]],
+  ["background-color", ["transparent", "rgba(0, 0, 0, 0)"]],
+]);
+
+/** Blocks the editor draws bold with no mark to clear, so a regular weight inside one is lost. */
+const BOLD_BLOCKS = "h1, h2, h3, h4, h5, h6";
+
+/** A CSS-wide keyword, or the property's default — unless the default is what the editor cannot draw there. */
+function statesNothing(el: Element, property: string, value: string): boolean {
+  const keyword = value.trim().toLowerCase();
+  if (/^(inherit|unset|revert|revert-layer)$/.test(keyword)) return true;
+  if (property === "font-weight" && el.closest(BOLD_BLOCKS)) return false;
+  return keyword === "initial" || keyword === "normal" || (DEFAULT_VALUES.get(property)?.includes(keyword) ?? false);
+}
 
 /**
  * What one declaration sets, longhand by longhand, leaving out what states
@@ -286,6 +313,6 @@ function longhands(el: HTMLElement, property: string, value: string): string[] {
   probe.setAttribute("style", `${property}: ${value}`);
   const names = Array.from({ length: probe.style.length }, (_, i) => probe.style.item(i));
   // A property the DOM does not know expands to nothing; it is still a loss.
-  if (names.length === 0) return statesNothing(property, value) ? [] : [property];
-  return names.filter((name) => !statesNothing(name, probe.style.getPropertyValue(name)));
+  if (names.length === 0) return statesNothing(el, property, value) ? [] : [property];
+  return names.filter((name) => !statesNothing(el, name, probe.style.getPropertyValue(name)));
 }

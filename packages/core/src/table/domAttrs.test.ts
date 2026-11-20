@@ -114,8 +114,16 @@ describe("readCellHAlign", () => {
     expect(readCellHAlign(el(`<td>x</td>`))).toBeNull();
   });
 
-  it.each(["middle", "start", "somewhere"])("rejects the unrepresentable value %o", (value) => {
-    expect(readCellHAlign(el(`<td align="${value}">x</td>`))).toBeNull();
+  it.each([
+    ["middle", "center"],
+    ["start", "left"],
+    ["-webkit-center", "center"],
+  ])("reads %o as the browser does, %o", (value, align) => {
+    expect(readCellHAlign(el(`<td align="${value}">x</td>`))).toBe(align);
+  });
+
+  it("rejects a value that names no alignment", () => {
+    expect(readCellHAlign(el(`<td align="somewhere">x</td>`))).toBeNull();
   });
 });
 

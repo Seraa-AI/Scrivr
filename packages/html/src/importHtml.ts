@@ -40,7 +40,11 @@ export interface HtmlImportResult {
  */
 export type ImportHtml = (editor: IBaseEditor, html: string) => Promise<HtmlImportResult>;
 
-/** `importHtml` over a given parser; each entry picks its own, so a browser bundle never sees happy-dom. */
+/**
+ * `importHtml` reading through `withHtmlBody` — the page's `DOMParser` in the
+ * browser entry, happy-dom in the Node one — so a browser bundle never sees
+ * happy-dom.
+ */
 export function htmlImporter(withHtmlBody: WithHtmlBody): ImportHtml {
   return async (editor, html) => {
     const { parser, report } = watchedParser(editor.schema);

@@ -74,6 +74,16 @@ describe("pasted divs", () => {
     expect(doc.child(0).firstChild?.type.name).toBe("field");
   });
 
+  it("an align attribute aligns a pasted paragraph, heading or div", () => {
+    const doc = paste(`<p align="center">a</p><h2 align="right">b</h2><div align="justify">c</div>`);
+    expect([0, 1, 2].map((i) => doc.child(i).attrs["align"])).toEqual(["center", "right", "justify"]);
+  });
+
+  it("the browser-prefixed and legacy centre keywords centre", () => {
+    const doc = paste(`<p style="text-align:-webkit-center">a</p><div align="middle">b</div>`);
+    expect([0, 1].map((i) => doc.child(i).attrs["align"])).toEqual(["center", "center"]);
+  });
+
   it("a div whose blocks sit inside an inline wrapper is read through", () => {
     expect(blocks(paste(`<div><a href="https://x.y"><h2>T</h2><p>y</p></a></div>`))).toEqual([
       "heading:T",

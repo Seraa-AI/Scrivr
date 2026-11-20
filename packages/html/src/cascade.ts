@@ -15,7 +15,7 @@
 import { HTML_BLOCK_TAGS, HTML_IGNORED_TAGS, htmlShows, isHtmlBlock, isHtmlElement, safeUrl } from "@scrivr/core";
 import { parseDeclarations, serializeDeclarations } from "./stylesheet";
 
-const TEXT = new Set(["color", "font-family", "font-size", "font-style", "font-weight"]);
+const TEXT_PROPERTIES = new Set(["color", "font-family", "font-size", "font-style", "font-weight"]);
 /** Block properties, which the cascade carries since the parse does not. */
 export const BLOCK_PROPERTIES: ReadonlySet<string> = new Set(["text-align", "text-indent"]);
 
@@ -23,25 +23,36 @@ const HEADINGS = ["h1", "h2", "h3", "h4", "h5", "h6"];
 
 /**
  * Text properties an element sets by default, so it takes none from outside.
- * Only a link the editor keeps is one: a bare `<a name>` is a bookmark, and an
- * unsafe link is read as plain text.
+ * A link sets its colour only if the editor keeps it: a bare `<a name>` is a
+ * bookmark, an unsafe href plain text.
  */
-const OWN_DEFAULTS: Array<[(el: Element) => boolean, string[]]> = [
+const OWN_DEFAULTS: Array<[setsOwn: (el: Element) => boolean, properties: string[]]> = [
   [(el) => el.matches("a[href]") && safeUrl(el.getAttribute("href")) !== null, ["color"]],
   [(el) => HEADINGS.includes(el.tagName.toLowerCase()), ["font-size"]],
 ];
 
 /**
- * Attributes that state a block property, and the elements they state it on —
- * a table's `align` places the table. The parse reads only style, so they are
- * written as style.
+ * Attributes that state a block property: the elements they state it on — a
+ * table's `align` places the table — and the values that mean something, as
+ * CSS. A value the browser ignores states nothing. Written as style, so
+ * diagnostics judge them as they judge a style.
  */
-const PRESENTATIONAL: Record<string, { attribute: string; on: ReadonlySet<string> }> = {
+const PRESENTATIONAL: Record<string, { attribute: string; on: ReadonlySet<string>; values: ReadonlyMap<string, string> }> = {
   "text-align": {
     attribute: "align",
     on: new Set(["div", "p", ...HEADINGS, "td", "th", "tr", "thead", "tbody", "tfoot"]),
+    values: new Map([
+      ["left", "left"],
+      ["right", "right"],
+      ["center", "center"],
+      ["middle", "center"],
+      ["justify", "justify"],
+    ]),
   },
 };
+
+/** What a block property set this way inherits instead of stating. */
+const INHERITS = /^\s*(inherit|unset|revert|revert-layer)\s*$/i;
 
 /** Blocks whose loose text needs no paragraph: a text block already is one, and a table's frame holds none. */
 const NO_LOOSE_TEXT = new Set(["p", "pre", ...HEADINGS, "table", "thead", "tbody", "tfoot", "tr"]);
@@ -62,7 +73,7 @@ export function cascadeInherited(body: HTMLElement): {
 } {
   const doc = body.ownerDocument;
   const page = new Map([doc.documentElement, body].flatMap((el) => [...parseDeclarations(el.getAttribute("style") ?? "")]));
-  const inherited = new Map([...page].filter(([property]) => TEXT.has(property) || BLOCK_PROPERTIES.has(property)));
+  const inherited = new Map([...page].filter(([property]) => TEXT_PROPERTIES.has(property) || BLOCK_PROPERTIES.has(property)));
   if (inherited.size > 0) {
     const wrapper = doc.createElement("div");
     wrapper.setAttribute("style", serializeDeclarations(inherited));
@@ -81,14 +92,12 @@ function visit(el: Element, outer: Inherited, carried: Carried): void {
   const tag = el.tagName.toLowerCase();
   if (HTML_IGNORED_TAGS.has(tag)) return;
 
-  const own = parseDeclarations(el.getAttribute("style") ?? "");
-  const presented = Object.entries(PRESENTATIONAL).flatMap(([property, { attribute, on }]) => {
-    const value = on.has(tag) && !own.has(property) ? el.getAttribute(attribute) : null;
-    return value === null ? [] : [{ property, value }];
-  });
-  if (presented.length > 0) {
-    for (const { property, value } of presented) own.set(property, { value, important: false });
-    el.setAttribute("style", serializeDeclarations(own));
+  const style = el.getAttribute("style") ?? "";
+  const own = parseDeclarations(style);
+  for (const property of BLOCK_PROPERTIES) if (INHERITS.test(own.get(property)?.value ?? "")) own.delete(property);
+  for (const [property, { attribute, on, values }] of Object.entries(PRESENTATIONAL)) {
+    const value = on.has(tag) && !own.has(property) ? values.get(el.getAttribute(attribute)?.trim().toLowerCase() ?? "") : undefined;
+    if (value !== undefined) own.set(property, { value, important: false });
   }
   let inner = outer;
 
@@ -105,11 +114,10 @@ function visit(el: Element, outer: Inherited, carried: Carried): void {
   // An ancestor's colour or size reaches this text as a mark; `initial` is
   // what the reset rules read to clear it, as the element's own default would.
   const defaults = OWN_DEFAULTS.flatMap(([setsOwn, properties]) => (setsOwn(el) ? properties : []));
-  const unstated = defaults.filter((property) => !own.has(property));
-  if (unstated.length > 0) {
-    for (const property of unstated) own.set(property, { value: "initial", important: false });
-    el.setAttribute("style", serializeDeclarations(own));
-  }
+  for (const property of defaults) if (!own.has(property)) own.set(property, { value: "initial", important: false });
+
+  const restyled = serializeDeclarations(own);
+  if (restyled !== serializeDeclarations(parseDeclarations(style))) el.setAttribute("style", restyled);
 
   for (const child of Array.from(el.children)) visit(child, inner, carried);
 }
@@ -131,7 +139,9 @@ function paragraphLooseText(el: HTMLElement, values: Inherited, carried: Carried
       const paragraph = el.ownerDocument.createElement("p");
       first.before(paragraph);
       paragraph.append(...run);
-      carryOnto(paragraph, new Map(), [...values], carried);
+      const own = parseDeclarations("");
+      carryOnto(paragraph, own, [...values], carried);
+      paragraph.setAttribute("style", serializeDeclarations(own));
     }
     run = [];
   };
@@ -155,5 +165,4 @@ function carryOnto(
     own.set(property, { value, important: false });
     origins.set(property, source);
   }
-  el.setAttribute("style", serializeDeclarations(own));
 }
