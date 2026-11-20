@@ -2,7 +2,7 @@ import { Node as PMNode } from "@scrivr/core/pm";
 import { EditorState, Transaction } from "@scrivr/core/pm";
 import { AttrStep, type Mapping } from "@scrivr/core/pm";
 
-import { NewEmptyAttrs } from "../helpers";
+import { getBlockInlineTrackedData, isTrackedRecord, NewEmptyAttrs } from "../helpers";
 import { ChangeStep, UpdateNodeAttrsStep } from "../types";
 
 function trackAttrsChangeStep(
@@ -10,13 +10,21 @@ function trackAttrsChangeStep(
   _oldState: EditorState,
   _tr: Transaction,
   newTr: Transaction,
-  _attrs: NewEmptyAttrs,
+  attrs: NewEmptyAttrs,
   currentStepDoc: PMNode,
   replayBridge: Mapping,
 ): ChangeStep[] {
-  // Rewriting a node's review records, by anyone, is review bookkeeping, as
-  // taking off a review mark is: it stands as written, with nothing to record.
-  if (step.attr === "dataTracked") return [];
+  if (step.attr === "dataTracked") {
+    // Taking back one's own records is review bookkeeping, as taking off one's
+    // review mark is: it stands, with nothing to record. Another author's
+    // records are theirs to withdraw, so rewriting them is undone.
+    const node = currentStepDoc.nodeAt(step.pos);
+    if (!node || !withdrawsOwnRecords(node, step.value, attrs.authorID)) {
+      const undo = step.invert(currentStepDoc).map(replayBridge);
+      if (undo) newTr.maybeStep(undo);
+    }
+    return [];
+  }
   const newStep = step.invert(currentStepDoc).map(replayBridge);
   if (!newStep) return [];
   const stepResult = newTr.maybeStep(newStep);
@@ -46,6 +54,17 @@ function trackAttrsChangeStep(
   };
 
   return [changeStep];
+}
+
+/** Whether `records`, written over `node`'s, only drops some of `authorID`'s. */
+function withdrawsOwnRecords(node: PMNode, records: unknown, authorID: string): boolean {
+  const before = getBlockInlineTrackedData(node) ?? [];
+  const after = (Array.isArray(records) ? records : [records]).filter(isTrackedRecord);
+  const kept = new Set(after.map((record) => record.id));
+  return (
+    after.every((record) => before.some((old) => old.id === record.id)) &&
+    before.every((record) => kept.has(record.id) || record.authorID === authorID)
+  );
 }
 
 export default trackAttrsChangeStep;

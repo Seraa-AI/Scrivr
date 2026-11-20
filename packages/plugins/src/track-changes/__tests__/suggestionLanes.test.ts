@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { ServerEditor, StarterKit } from "@scrivr/core";
-import { applyDiffAsSuggestion, applyMultiBlockDiff, applyRichDiffAsSuggestion, changeActs, findChanges, TrackChanges, TrackChangesStatus } from "../index";
+import { applyDiffAsSuggestion, applyMultiBlockDiff, applyRichDiffAsSuggestion, changeActs, findChanges, TrackChanges, TrackChangesStatus, trackAsSuggestion } from "../index";
 
 type Setup = "no plugin" | "viewing snapshots" | "tracking";
 
@@ -135,6 +135,22 @@ describe.each(lanes.slice(0, 2))("$name, over a break", ({ apply }) => {
     decideAll(editor, decision);
 
     expect(laidOut(editor)).toBe(laid);
+  });
+
+  it("withdraws only its own record on a break, never another author's", () => {
+    const editor = editorOf([...textOf("one"), hardBreak, ...textOf("two")]);
+    apply(editor, "one two");
+    let at = -1;
+    editor.getState().doc.descendants((node, pos) => {
+      if (node.type.name === "hardBreak") at = pos;
+    });
+    const erase = trackAsSuggestion(editor.getState().tr.setNodeAttribute(at, "dataTracked", []), "someone else");
+    editor.applyTransaction(erase);
+
+    const records: Array<{ authorID: string }> = editor.getState().doc.nodeAt(at)?.attrs["dataTracked"] ?? [];
+    expect(records.map((record) => record.authorID)).toEqual(["agent"]);
+    apply(editor, "one\ntwo");
+    expect(pending(editor)).toEqual([]);
   });
 
   it("places an edit after another author's deletion where it belongs", () => {
