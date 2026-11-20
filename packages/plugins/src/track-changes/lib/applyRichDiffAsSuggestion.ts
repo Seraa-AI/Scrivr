@@ -39,12 +39,11 @@ import {
 } from "@scrivr/core";
 import { excludes, untracked, type FoundPiece } from "../formatSuggestions";
 import { findLiveNodeById } from "../liveNode";
-import { acceptedRangeToDocRange, bridgeable, collectAccepted, type PosMapEntry } from "./acceptedTextMap";
+import { acceptedRangeToDocRange, bridgeable, buildAcceptedTextMap, collectAccepted, type PosMapEntry } from "./acceptedTextMap";
 import { clearAuthorPendingMarks } from "./applyDiffAsSuggestion";
 import { diffText, phraseReplacements } from "./diffText";
 import { writeProposal } from "./writeProposal";
-import { trackAsSuggestion } from "../actions";
-import { suggestionBlocked } from "../suggestionBlocked";
+import { dispatchSuggestion } from "../suggestionBlocked";
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -151,10 +150,7 @@ export function applyRichDiffAsSuggestion(
 
   if (!applied) return { applied: false, notFound, rejected };
 
-  trackAsSuggestion(tr, authorID);
-  if (suggestionBlocked(state, tr)) return { applied: false, notFound, rejected };
-  dispatch(tr);
-  return { applied: true, notFound, rejected };
+  return { applied: dispatchSuggestion(state, tr, authorID, dispatch), notFound, rejected };
 }
 
 // ── Per-block workhorse ───────────────────────────────────────────────────────
@@ -258,7 +254,8 @@ function applyInlineChange(
   const found = findLiveNodeById(tr.doc, nodeId);
   if (!found) return false;
 
-  const { acceptedText, map, charMarks } = buildAcceptedRichMap(found.node, found.pos, schema);
+  const { acceptedText, map } = buildAcceptedTextMap(found.node, found.pos, schema);
+  const charMarks = collectAccepted(found.node, found.pos, schema).map((cell) => cell.marks);
   const { text: proposedText, charMarks: proposedMarks } = expandSpans(spans);
 
   // Nothing to do when text and every char's mark set already match.
@@ -379,26 +376,6 @@ function markSignature(added: InlineMark[], removed: InlineMark[]): string {
 }
 
 // ── Per-character views ───────────────────────────────────────────────────────
-
-interface AcceptedRichMap {
-  acceptedText: string;
-  map: PosMapEntry[];
-  /** Formatting marks on each accepted character (tracked-change marks excluded). */
-  charMarks: InlineMark[][];
-}
-
-function buildAcceptedRichMap(node: PMNode, nodeStartPos: number, schema: Schema): AcceptedRichMap {
-  const cells = collectAccepted(node, nodeStartPos, schema);
-  const chars: string[] = [];
-  const map: PosMapEntry[] = [];
-  const charMarks: InlineMark[][] = [];
-  for (const cell of cells) {
-    map.push({ acceptedOffset: chars.length, docPos: cell.docPos });
-    chars.push(cell.char);
-    charMarks.push(cell.marks);
-  }
-  return { acceptedText: chars.join(""), map, charMarks };
-}
 
 /** Merge consecutive `keep` ops into one so a retained region isn't split per token. */
 function coalesceKeeps<T extends { type: string; text: string }>(ops: T[]): T[] {

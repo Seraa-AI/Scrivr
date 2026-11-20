@@ -15,7 +15,7 @@ import {
 
 import { isIndentationAction, TrackChangesAction } from "../actions";
 import { genId } from "../helpers";
-import { canCancelInsertion } from "../lib/deletionPolicy";
+import { canCancelInsertion, inlineNodesIn } from "../lib/deletionPolicy";
 import {
   TrackingRefusal,
   TrackingResult,
@@ -198,17 +198,8 @@ const contentStep = (step: Step | undefined): ContentStep | undefined =>
  * insertion. Nothing is left behind, so it is no move's source. A block keeps
  * its identity when moved, so moving one the author created stays a move.
  */
-const withdrawsOwnInsertion = (doc: Node, from: number, to: number, authorID: string): boolean => {
-  const $from = doc.resolve(from);
-  if (!$from.parent.inlineContent || !$from.sameParent(doc.resolve(to))) return false;
-  let withdraws = true;
-  doc.nodesBetween(from, to, node => {
-    if (!node.isInline) return true;
-    if (!canCancelInsertion(node, authorID)) withdraws = false;
-    return false;
-  });
-  return withdraws;
-};
+const withdrawsOwnInsertion = (doc: Node, from: number, to: number, authorID: string): boolean =>
+  inlineNodesIn(doc, from, to)?.every(node => canCancelInsertion(node, authorID)) ?? false;
 
 /** Records which steps belong to one move, by grouping them under one id. */
 export const groupMoveSteps = (

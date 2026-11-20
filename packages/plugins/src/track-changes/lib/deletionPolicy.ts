@@ -40,6 +40,19 @@ function contentInsertions(node: Node): Partial<TrackedAttrs>[] {
     : getBlockInlineTrackedData(node) ?? [];
 }
 
+/** The inline nodes `from`–`to` covers within one textblock, or null when it reaches past one. */
+export function inlineNodesIn(doc: Node, from: number, to: number): Node[] | null {
+  const $from = doc.resolve(from);
+  if (!$from.parent.inlineContent || !$from.sameParent(doc.resolve(to))) return null;
+  const nodes: Node[] = [];
+  doc.nodesBetween(from, to, node => {
+    if (!node.isInline) return true;
+    nodes.push(node);
+    return false;
+  });
+  return nodes;
+}
+
 /** The `groupId` of the replacement `authorID`'s pending insertion on `node` belongs to, if any. */
 export function ownReplacementOf(node: Node | null | undefined, authorID: string): string | undefined {
   if (!node) return undefined;

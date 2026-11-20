@@ -41,8 +41,7 @@ import { CHANGE_OPERATION, CHANGE_STATUS } from "../types";
 import { bridgeable, buildAcceptedTextMap } from "./acceptedTextMap";
 import { computeEditDensity, diffText, phraseReplacements } from "./diffText";
 import { writeProposal } from "./writeProposal";
-import { trackAsSuggestion } from "../actions";
-import { suggestionBlocked } from "../suggestionBlocked";
+import { dispatchSuggestion } from "../suggestionBlocked";
 
 // ── Clear previous suggestions ────────────────────────────────────────────────
 
@@ -216,14 +215,6 @@ function applyBlockToTr(
 
   const wrote = writeProposal(tr, map, tr.steps.length, ops, contentFor, updatedFound.pos + 1);
   return { applied: wrote || withdrew, editDensity, sourceChars: acceptedText.length };
-}
-
-/** Dispatches `tr` as `authorID`'s suggestion, unless it would not be recorded. */
-function dispatchSuggestion(state: EditorState, tr: Transaction, authorID: string, dispatch: (tr: Transaction) => void): boolean {
-  trackAsSuggestion(tr, authorID);
-  if (suggestionBlocked(state, tr)) return false;
-  dispatch(tr);
-  return true;
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────

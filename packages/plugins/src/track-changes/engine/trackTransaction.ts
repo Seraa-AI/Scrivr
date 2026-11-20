@@ -18,7 +18,7 @@ import {
   passThroughMeta,
 } from "./transactionProcessing";
 import { createNewPendingAttrs, genId, NewEmptyAttrs } from "../helpers";
-import { alreadyProposedForDeletion, canCancelInsertion, ownReplacementOf } from "../lib/deletionPolicy";
+import { alreadyProposedForDeletion, canCancelInsertion, inlineNodesIn, ownReplacementOf } from "../lib/deletionPolicy";
 import { diffChangeSteps } from "../lib/structuralChange";
 import { mergeTrackedMarks } from "../lib/mergeTrackedMarks";
 import { isSetNodeMarkupStep } from "../step-trackers/qualifiers";
@@ -56,15 +56,12 @@ function caretBeforeStepEnd(tr: Transaction, i: number, step: ReplaceStep): numb
 }
 
 /**
- * Whether `step` puts inline content into one block. A step across blocks, or
- * one bringing blocks in (an open slice), also joins or splits them, which is
- * not a word swap.
+ * Whether `step` puts inline content in. One bringing blocks in (an open
+ * slice) also joins or splits them, which is not a word swap; nor is one
+ * across blocks, which `inlineNodesIn` turns away.
  */
-function writesInline(step: ReplaceStep, doc: PMNode): boolean {
-  if (step.slice.size === 0) return false;
-  if (step.slice.openStart !== 0 || step.slice.openEnd !== 0) return false;
-  const $from = doc.resolve(step.from);
-  return $from.parent.inlineContent && $from.sameParent(doc.resolve(step.to));
+function writesInline(step: ReplaceStep): boolean {
+  return step.slice.size > 0 && step.slice.openStart === 0 && step.slice.openEnd === 0;
 }
 
 /**
@@ -75,18 +72,17 @@ function writesInline(step: ReplaceStep, doc: PMNode): boolean {
  * so a word typed in several strokes stays one act.
  */
 function replacementGroup(step: ReplaceStep, doc: PMNode, authorID: string): string | undefined {
-  if (!writesInline(step, doc)) return undefined;
+  const covered = writesInline(step) ? inlineNodesIn(doc, step.from, step.to) : null;
+  if (!covered) return undefined;
   const $from = doc.resolve(step.from);
   if (step.from === step.to) return ownReplacementOf($from.nodeBefore, authorID) ?? ownReplacementOf($from.nodeAfter, authorID);
   let recordsDeletion = false;
   let continued: string | undefined;
-  doc.nodesBetween(step.from, step.to, node => {
-    if (!node.isInline) return true;
-    if (alreadyProposedForDeletion(node)) return false;
+  for (const node of covered) {
+    if (alreadyProposedForDeletion(node)) continue;
     if (canCancelInsertion(node, authorID)) continued ??= ownReplacementOf(node, authorID);
     else recordsDeletion = true;
-    return false;
-  });
+  }
   return recordsDeletion ? genId() : continued;
 }
 

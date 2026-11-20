@@ -1,5 +1,6 @@
 import type { EditorState, Transaction } from "@scrivr/core/pm";
 
+import { trackAsSuggestion } from "./actions";
 import { gestureRefusal, untracked } from "./engine/trackChanges";
 import { trackChangesPluginKey } from "./engine/trackChangesPlugin";
 import { TrackChangesStatus, type SuggestionBlock } from "./types";
@@ -16,4 +17,19 @@ export function suggestionBlocked(state: EditorState, tr: Transaction): Suggesti
   if (tracking.status === TrackChangesStatus.viewSnapshots) return { reason: "viewing-snapshots" };
   if (tr.docChanged && untracked(tr, tracking.skipTrsWithMetas)) return { reason: "untracked" };
   return gestureRefusal(tr, state, tracking.skipTrsWithMetas);
+}
+
+/**
+ * Dispatches `tr` as `authorID`'s suggestion, unless it would not be recorded.
+ * Without `dispatch`, only says whether it would be.
+ */
+export function dispatchSuggestion(
+  state: EditorState,
+  tr: Transaction,
+  authorID: string,
+  dispatch?: (tr: Transaction) => void,
+): boolean {
+  if (suggestionBlocked(state, trackAsSuggestion(tr, authorID))) return false;
+  dispatch?.(tr);
+  return true;
 }

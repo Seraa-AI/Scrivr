@@ -19,11 +19,11 @@ import type {
 } from "@scrivr/core";
 import type { EditorState, Node, Transaction } from "@scrivr/core/pm";
 
-import { setAction, trackAsSuggestion, TrackChangesAction } from "./actions";
+import { setAction, TrackChangesAction } from "./actions";
 import { trackChangesPlugin, trackChangesPluginKey } from "./engine/trackChangesPlugin";
 import { lastCutPlugin } from "./lib/cutAndPaste";
 import { proposedForDeletion } from "./helpers";
-import { suggestionBlocked } from "./suggestionBlocked";
+import { dispatchSuggestion } from "./suggestionBlocked";
 import { CHANGE_OPERATION, CHANGE_STATUS, TrackChangesOptions, TrackChangesStatus, type TrackedChange } from "./types";
 import { planReviewIn } from "./reviewChanges";
 import { changeActs } from "./reviewPlan";
@@ -355,10 +355,7 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
         (text: string, from: number, to: number, authorID: string) =>
         (state: EditorState, dispatch: ((tr: Transaction) => void) | undefined) => {
           const content = spansToFragment([{ text, marks: [] }], state.schema, { parentType: state.doc.resolve(from).parent.type });
-          const tr = trackAsSuggestion(state.tr.replaceWith(from, to, content), authorID);
-          if (suggestionBlocked(state, tr)) return false;
-          dispatch?.(tr);
-          return true;
+          return dispatchSuggestion(state, state.tr.replaceWith(from, to, content), authorID, dispatch);
         },
     };
   },
