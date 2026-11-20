@@ -1,19 +1,19 @@
 /**
  * applyDiffAsSuggestion / applyMultiBlockDiff
  *
- * Turn AI-proposed text replacements into tracked insert/delete marks on the
- * live ProseMirror document.
+ * Turn proposed text for a block into a suggestion on the live document.
  *
  * Single-block flow (applyDiffAsSuggestion):
  *   1. Find the block node by its `nodeId` attribute.
- *   2. Build the accepted-text map for that node.
- *   3. Diff acceptedText → proposedText, word by word.
- *   4. Group each run of changes into one phrase replacement — a deletion and
- *      an insertion sharing a groupId — never across a line break, an inline
- *      object or another suggestion.
- *   5. Convert each op's offset to an absolute doc position.
- *   6. Apply inserts/deletes as tracked marks (conflict-aware).
- *   7. Dispatch the transaction.
+ *   2. Withdraw the author's earlier suggestion there (`clearAuthorPendingMarks`).
+ *   3. Build the accepted-text map for that node; a line break reads as "\n".
+ *   4. Diff acceptedText → proposedText, word by word.
+ *   5. Group each run of changes into one phrase replacement — never across a
+ *      line break, an inline object or another suggestion.
+ *   6. Write each phrase as the plain edit a person would make, under
+ *      `trackAsSuggestion`; the engine records it, pairing each replacement.
+ *   7. Dispatch, unless the suggestion would not be recorded
+ *      (`suggestionBlocked`).
  *
  * Multi-block flow (applyMultiBlockDiff):
  *   Same pipeline, but across an array of { nodeId, proposedText } pairs.
@@ -22,7 +22,7 @@
  *   All changes land in a single transaction → one undo step.
  *
  * Returns { applied, editDensity }:
- *   applied     — true if at least one op was dispatched
+ *   applied     — true if the suggestion was dispatched
  *   editDensity — fraction of original chars deleted (0–1), weighted by
  *                 source-character count across all blocks.
  *                 Callers can use this as a quality gate:
@@ -31,33 +31,33 @@
  *                   > 0.7 → full rewrite, offer "Accept rewrite" button
  */
 
+import { spansToFragment } from "@scrivr/core";
 import type { Node as PMNode, Schema } from "@scrivr/core/pm";
 import type { EditorState, Transaction } from "@scrivr/core/pm";
 
 import { findLiveNodeById } from "../liveNode";
-import {
-  addTrackIdIfDoesntExist,
-  createNewDeleteAttrs,
-  createNewInsertAttrs,
-  createNewPendingAttrs,
-} from "../helpers";
+import { getBlockInlineTrackedData } from "../helpers";
 import { CHANGE_OPERATION, CHANGE_STATUS } from "../types";
-import { acceptedRangeToDocRange, bridgeable, buildAcceptedTextMap } from "./acceptedTextMap";
+import { bridgeable, buildAcceptedTextMap } from "./acceptedTextMap";
 import { computeEditDensity, diffText, phraseReplacements } from "./diffText";
-import { applyTrackedDelete } from "./splitRangeForNewMark";
-import { suggestedContent } from "./suggestedContent";
-import { skipTracking, TrackChangesAction, setAction } from "../actions";
+import { writeProposal } from "./writeProposal";
+import { trackAsSuggestion } from "../actions";
+import { suggestionBlocked } from "../suggestionBlocked";
 
 // ── Clear previous suggestions ────────────────────────────────────────────────
 
 /**
- * Removes all pending trackedInsert and trackedDelete marks attributed to
- * `authorID` from the text nodes within `[nodeFrom+1, nodeTo-1]`.
+ * Withdraws `authorID`'s pending suggestion within `[nodeFrom+1, nodeTo-1]`,
+ * so a new proposal replaces it rather than stacking on it.
  *
- * For trackedInsert text (text the author previously inserted), the inserted
- * characters are also deleted so positions snap back before the new diff runs.
- * For trackedDelete marks the mark is simply removed (the text stays, the new
- * diff will re-delete it if still needed).
+ * Text or an inline object the author inserted is deleted, so positions snap
+ * back before the new diff runs. Text the author proposed deleting has its
+ * mark removed, and an inline object (a break, an image) its record, so it is
+ * live again and the new diff re-deletes it only if still needed.
+ *
+ * Inside a transaction tracked as a suggestion none of this is recorded:
+ * deleting one's own insertion takes it back, and rewriting review records is
+ * bookkeeping.
  *
  * Deletions are applied in reverse position order so earlier positions remain
  * stable as we go.
@@ -84,10 +84,15 @@ export function clearAuthorPendingMarks(
 
   // Walk the block content (nodeFrom+1 skips the opening token).
   tr.doc.nodesBetween(nodeFrom + 1, nodeTo - 1, (child, pos) => {
-    // A break or other inline object the author inserted is recorded on the
-    // node, not a mark: it goes with the rest of their suggestion.
+    // A break or other inline object is recorded on the node, not a mark.
     if (child.isInline && !child.isText) {
-      if (ownPendingInsert(child, authorID)) insertRanges.push({ from: pos, to: pos + child.nodeSize });
+      if (ownPending(child, authorID, CHANGE_OPERATION.insert)) {
+        insertRanges.push({ from: pos, to: pos + child.nodeSize });
+      } else if (ownPending(child, authorID, CHANGE_OPERATION.delete)) {
+        const kept = (getBlockInlineTrackedData(child) ?? []).filter((record) => !isOwnPending(record, authorID, CHANGE_OPERATION.delete));
+        // An empty list is the schema default: the node as it was before any record.
+        tr.setNodeAttribute(pos, "dataTracked", kept);
+      }
       return;
     }
     if (!child.isText) return;
@@ -121,15 +126,13 @@ export function clearAuthorPendingMarks(
   }
 }
 
-/** Whether an inline node's own record is `authorID`'s pending insertion. */
-function ownPendingInsert(node: PMNode, authorID: string): boolean {
-  const records: unknown = node.attrs["dataTracked"];
-  return Array.isArray(records) && records.some((record: unknown) =>
-    typeof record === "object" && record !== null &&
-    "authorID" in record && record.authorID === authorID &&
-    "status" in record && record.status === CHANGE_STATUS.pending &&
-    "operation" in record && record.operation === CHANGE_OPERATION.insert);
+/** Whether an inline node carries `authorID`'s pending `operation` as its own record. */
+function ownPending(node: PMNode, authorID: string, operation: CHANGE_OPERATION): boolean {
+  return (getBlockInlineTrackedData(node) ?? []).some((record) => isOwnPending(record, authorID, operation));
 }
+
+const isOwnPending = (record: { authorID?: string; status?: string; operation?: string }, authorID: string, operation: CHANGE_OPERATION) =>
+  record.authorID === authorID && record.status === CHANGE_STATUS.pending && record.operation === operation;
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -153,7 +156,7 @@ export interface MultiBlockDiffOptions {
 }
 
 export interface ApplyDiffResult {
-  /** true if at least one tracked change was applied and dispatched. */
+  /** true if the suggestion was dispatched. */
   applied: boolean;
   /**
    * Fraction of original characters that were deleted (0–1), weighted by
@@ -185,10 +188,8 @@ function applyBlockToTr(
 ): { applied: boolean; editDensity: number; sourceChars: number } {
   const schema = state.schema;
 
-  // Clear any pending marks from the same author on this block before diffing.
-  // Without this, repeated calls stack new marks on top of the old ones,
-  // creating an exponential conflict explosion (each new insert conflicts with
-  // every old delete from a different author, all at the same positions).
+  // Withdraw the author's pending suggestion on this block before diffing, so a
+  // new proposal replaces their last one rather than stacking on it.
   const nodeFrom = found.pos;
   const nodeTo   = found.pos + found.node.nodeSize;
   const stepsBefore = tr.steps.length;
@@ -206,55 +207,23 @@ function applyBlockToTr(
     return { applied: withdrew, editDensity: 0, sourceChars: acceptedText.length };
   }
 
-  const rawOps     = diffText(acceptedText, proposedText);
+  const rawOps      = diffText(acceptedText, proposedText);
   const editDensity = computeEditDensity(rawOps);
-  const ops        = phraseReplacements(rawOps, (from, to) => bridgeable(tr.doc, map, from, to));
+  const ops         = phraseReplacements(rawOps, (from, to) => bridgeable(tr.doc, map, from, to));
+  const parentType  = updatedFound.node.type;
+  const contentFor  = (from: number, to: number) =>
+    spansToFragment([{ text: proposedText.slice(from, to), marks: [] }], schema, { parentType });
 
-  const now = Date.now();
-  let acceptedOffset = 0; // cursor into acceptedText
-  let insertedChars  = 0; // net doc offset from insertions made so far in this block
-  let applied        = false;
+  const wrote = writeProposal(tr, map, tr.steps.length, ops, contentFor, updatedFound.pos + 1);
+  return { applied: wrote || withdrew, editDensity, sourceChars: acceptedText.length };
+}
 
-  for (const op of ops) {
-    const tokenLen = op.text.length;
-
-    if (op.type === "keep") {
-      acceptedOffset += tokenLen;
-      continue;
-    }
-
-    // Each op gets its own unique id so ChangeSet doesn't deduplicate them.
-    const baseAttrs = createNewPendingAttrs(now, authorID);
-
-    if (op.type === "delete") {
-      const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset + tokenLen);
-      if (range) {
-        const dataTracked: Record<string, unknown> = addTrackIdIfDoesntExist(createNewDeleteAttrs(baseAttrs));
-        if (op.groupId) dataTracked["groupId"] = op.groupId;
-        applyTrackedDelete(tr, range.from + insertedChars, range.to + insertedChars, dataTracked, schema);
-        applied = true;
-      }
-      acceptedOffset += tokenLen;
-    } else {
-      // insert — find the doc position corresponding to the current accepted offset
-      const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset);
-      if (range) {
-        const insertMarkType = schema.marks.trackedInsert;
-        if (insertMarkType) {
-          const at = range.from + insertedChars;
-          const insertAttrs = { ...createNewInsertAttrs(baseAttrs), ...(op.groupId ? { groupId: op.groupId } : {}) };
-          // This lane reads a block's text without its breaks (`buildAcceptedTextMap`), so it writes none.
-          const content = suggestedContent([{ text: op.text.replace(/\n/g, " "), marks: [] }], schema, tr.doc.resolve(at).parent.type, insertAttrs);
-          tr.insert(at, content);
-          insertedChars += content.size;
-          applied = content.size > 0 || applied;
-        }
-      }
-      // acceptedOffset does NOT advance for inserts (they add new chars)
-    }
-  }
-
-  return { applied, editDensity, sourceChars: acceptedText.length };
+/** Dispatches `tr` as `authorID`'s suggestion, unless it would not be recorded. */
+function dispatchSuggestion(state: EditorState, tr: Transaction, authorID: string, dispatch: (tr: Transaction) => void): boolean {
+  trackAsSuggestion(tr, authorID);
+  if (suggestionBlocked(state, tr)) return false;
+  dispatch(tr);
+  return true;
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -279,12 +248,7 @@ export function applyDiffAsSuggestion(
   const { applied, editDensity } = applyBlockToTr(state, tr, nodeId, found, proposedText, authorID);
 
   if (!applied) return { applied: false, editDensity };
-
-  skipTracking(tr);
-  setAction(tr, TrackChangesAction.refreshChanges, true);
-  dispatch(tr);
-
-  return { applied: true, editDensity };
+  return { applied: dispatchSuggestion(state, tr, authorID, dispatch), editDensity };
 }
 
 /**
@@ -331,13 +295,9 @@ export function applyMultiBlockDiff(
 
   if (!anyApplied) return { applied: false, editDensity: 0 };
 
-  skipTracking(tr);
-  setAction(tr, TrackChangesAction.refreshChanges, true);
-  dispatch(tr);
-
   const editDensity = density.sourceChars > 0
     ? density.weighted / density.sourceChars
     : 0;
 
-  return { applied: true, editDensity };
+  return { applied: dispatchSuggestion(state, tr, authorID, dispatch), editDensity };
 }

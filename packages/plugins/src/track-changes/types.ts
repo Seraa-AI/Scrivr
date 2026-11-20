@@ -86,14 +86,13 @@ type InsertDeleteAttrs = {
   /**
    * True when another author's mark overlaps this exact segment.
    * Drives amber conflict rendering and the conflict popover.
-   * Set by splitRangeForNewMark when a second author touches the same range.
+   * Set by splitRangeForNewMark, for a host that builds records by hand.
    */
   isConflict?: boolean;
   /**
    * Shared by the deletion and the insertion of one replacement, so deciding
-   * either half decides both. Set by `applyDiffAsSuggestion`,
-   * `applyRichDiffAsSuggestion` and AI suggestion apply, and by the engine when
-   * an edit types over a selection.
+   * either half decides both. Set by the engine when an edit types over a
+   * selection, which is how every suggestion lane writes a replacement.
    */
   groupId?: string;
   /**
@@ -301,6 +300,14 @@ export type TrackingRefusal =
   | { reason: "duplicate-transform-package" }
   /** A later step writes across the edge of an earlier step's insertion where it can't be split. */
   | { reason: "overlapping-steps" };
+
+/** Why a suggestion would not be recorded if dispatched. */
+export type SuggestionBlock =
+  | TrackingRefusal
+  /** No track-changes plugin is installed to record it. */
+  | { reason: "no-tracking" }
+  /** Snapshots are being viewed, which lets no authored edit through. */
+  | { reason: "viewing-snapshots" };
 
 /**
  * What tracking did with a gesture. `refused` is the one outcome a host must act

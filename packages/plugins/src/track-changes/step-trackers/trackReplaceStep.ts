@@ -19,6 +19,7 @@ import { deleteAndMergeSplitNodes } from "../lib/deleteAndMergeSplitNodes";
 import { cutRanges } from "../lib/cutAndPaste";
 import {
   setFragmentAsInserted,
+  setInlineFragmentAsInserted,
   setFragmentAsMoveChange,
   setFragmentAsNodeSplit,
   withoutTakenIds,
@@ -98,7 +99,8 @@ export function trackReplaceStep(
         // the block's first words. Enter at a block's start leaves them to the
         // half written here, and the half already in place is the new one.
         const writtenHalfKeepsIds = !!stepDoc && splits && splitKeepsSecondHalf(step, stepDoc, tr.docs[i + 1] ?? tr.doc);
-        let fragment = setFragmentAsInserted(
+        const inline = newSliceContent.firstChild?.isInline ?? false;
+        let fragment = (inline ? setInlineFragmentAsInserted : setFragmentAsInserted)(
           newSliceContent,
           createNewInsertAttrs(attrs),
           oldState.schema,

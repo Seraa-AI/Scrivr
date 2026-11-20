@@ -15,6 +15,7 @@ import {
 
 import { isIndentationAction, TrackChangesAction } from "../actions";
 import { genId } from "../helpers";
+import { canCancelInsertion } from "../lib/deletionPolicy";
 import {
   TrackingRefusal,
   TrackingResult,
@@ -192,10 +193,28 @@ type ContentStep = ReplaceStep | ReplaceAroundStep;
 const contentStep = (step: Step | undefined): ContentStep | undefined =>
   step instanceof ReplaceStep || step instanceof ReplaceAroundStep ? step : undefined;
 
+/**
+ * Whether deleting `from`–`to` only withdraws the author's own pending inline
+ * insertion. Nothing is left behind, so it is no move's source. A block keeps
+ * its identity when moved, so moving one the author created stays a move.
+ */
+const withdrawsOwnInsertion = (doc: Node, from: number, to: number, authorID: string): boolean => {
+  const $from = doc.resolve(from);
+  if (!$from.parent.inlineContent || !$from.sameParent(doc.resolve(to))) return false;
+  let withdraws = true;
+  doc.nodesBetween(from, to, node => {
+    if (!node.isInline) return true;
+    if (!canCancelInsertion(node, authorID)) withdraws = false;
+    return false;
+  });
+  return withdraws;
+};
+
 /** Records which steps belong to one move, by grouping them under one id. */
 export const groupMoveSteps = (
   tr: Transaction,
   context: TrTrackingContext,
+  authorID: string,
 ): void => {
   const movingAssoc = context.stepsByGroupIDMap;
 
@@ -229,7 +248,8 @@ export const groupMoveSteps = (
     if (!step) {
       continue;
     }
-    const stepDeletesContent = step.from !== step.to && step.slice.size === 0;
+    const stepDeletesContent = step.from !== step.to && step.slice.size === 0 &&
+      !withdrawsOwnInsertion(doc!, step.from, step.to, authorID);
     const stepInsertsContent =
       step.slice.size && step.slice.content.firstChild ? true : false;
 
@@ -245,7 +265,8 @@ export const groupMoveSteps = (
       const peerStepInsertsContent =
         peerStep.slice.size && peerStep.slice.content.firstChild;
       const peerStepDeletesContent =
-        peerStep.from !== peerStep.to && peerStep.slice.size === 0;
+        peerStep.from !== peerStep.to && peerStep.slice.size === 0 &&
+        !withdrawsOwnInsertion(tr.docs[g]!, peerStep.from, peerStep.to, authorID);
 
       if (stepDeletesContent) {
         const deletedContent = doc!.slice(step.from, step.to);

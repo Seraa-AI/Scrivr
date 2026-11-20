@@ -14,8 +14,9 @@ export {
   acceptedTextMapFor,
 } from "./lib/acceptedTextMap";
 export type { PosMapEntry, AcceptedTextMapResult } from "./lib/acceptedTextMap";
+// Record writers and builders, kept for hosts that build records by hand. No
+// lane uses them: every lane writes plain edits and the engine records them.
 export { splitRangeForNewMark, applyTrackedDelete, applyTrackedInsert } from "./lib/splitRangeForNewMark";
-// Tracked-attrs builders — consumed by @scrivr/ai's suggestion apply path.
 export {
   addTrackIdIfDoesntExist,
   createNewDeleteAttrs,
@@ -43,6 +44,7 @@ export {
   TrackChangesAction,
 } from "./actions";
 export type { TrackChangesActionParams } from "./actions";
+export { suggestionBlocked } from "./suggestionBlocked";
 export { TrackChangesStatus, CHANGE_STATUS, CHANGE_OPERATION } from "./types";
 export type { TrackChangesState } from "./engine/trackChangesPlugin";
 export type {
@@ -60,6 +62,7 @@ export type {
   IncompleteChange,
   TrackingResult,
   TrackingRefusal,
+  SuggestionBlock,
   ListLevel,
   ReplacedMark,
 } from "./types";
@@ -69,6 +72,7 @@ export type {
 export { applyRichDiffAsSuggestion, pickAgentAttrs } from "./lib/applyRichDiffAsSuggestion";
 export type { RichBlockEdit, RichDiffOptions, RichDiffResult } from "./lib/applyRichDiffAsSuggestion";
 export { clearAuthorPendingMarks } from "./lib/applyDiffAsSuggestion";
+export { writeProposal } from "./lib/writeProposal";
 
 export { planChangeReview, changeActs } from "./reviewPlan";
 export { planReview, planReviewIn, reviewChanges } from "./reviewChanges";

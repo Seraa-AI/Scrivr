@@ -8,63 +8,43 @@
  * differences as tracked-change suggestions (accept/reject), preserving
  * untouched formatting.
  *
- * Three kinds of change, all hand-built under `skipTracking` (the automatic
- * mark/attr trackers do NOT fire in a skip-tracked transaction):
- *   1. text insert/delete — same tracked marks as the plain path; inserted text
- *      carries the agent's intended formatting marks.
+ * Three kinds of change, each written as the plain edit a person would make,
+ * under `trackAsSuggestion`; the engine records them:
+ *   1. text insert/delete — as the plain path; inserted text carries the
+ *      agent's intended formatting marks.
  *   2. mark add/remove on RETAINED text — the flagship "highlight this clause,
  *      no text change" case. `diffText`'s char-offset KEEP regions are aligned
  *      to the doc's and the agent's per-character mark sets; where they differ,
- *      a tracked mark add (insert op) or remove (delete op) is emitted.
- *   3. block `attrs` (align, indent) — a tracked `set_node_attributes`. `level`
- *      sets a heading's level; 0 makes it a paragraph, 1–6 makes a paragraph a
- *      heading, tracked with the old type so a reject restores it.
+ *      the mark is added or removed.
+ *   3. block `attrs` (align, indent) — `setNodeMarkup`. `level` sets a
+ *      heading's level; 0 makes it a paragraph, 1–6 makes a paragraph a
+ *      heading, which the engine records with the old type so a reject
+ *      restores it.
  *
  * Agent output is untrusted: marks pass through `resolveInlineMark` (unknown
  * type dropped, `link.href` sanitized), so a malformed edit never crashes the
- * merge or poisons the document. Multiple edits apply bottom-to-top so earlier
- * applications never invalidate later positions.
+ * merge or poisons the document.
  */
 
-import type { Mark, NodeType, Node as PMNode, Schema } from "@scrivr/core/pm";
-import { suggestedContent } from "./suggestedContent";
+import type { NodeType, Node as PMNode, Schema } from "@scrivr/core/pm";
 import type { EditorState, Transaction } from "@scrivr/core/pm";
 import {
-  describeInlineMark,
-  isTrackedMark,
+  findNodeById,
   resolveInlineMark,
   sameMark,
+  spansToFragment,
   stableStringify,
   type InlineMark,
   type InlineSpan,
 } from "@scrivr/core";
-import {
-  addTrackIdIfDoesntExist,
-  createNewDeleteAttrs,
-  createNewInsertAttrs,
-  createNewPendingAttrs,
-  createNewUpdateAttrs,
-  getBlockInlineTrackedData,
-  proposedForDeletion,
-  type NewEmptyAttrs,
-} from "../helpers";
-import {
-  excludes,
-  proposeRemoval,
-  restoreRuns,
-  toReplacedMark,
-  untracked,
-  type FoundPiece,
-} from "../formatSuggestions";
-import { isMarkRemoved } from "../semanticChanges";
-import { CHANGE_STATUS } from "../types";
-import { breakOf, findNodeById } from "@scrivr/core";
+import { excludes, untracked, type FoundPiece } from "../formatSuggestions";
 import { findLiveNodeById } from "../liveNode";
-import { acceptedRangeToDocRange, bridgeable, type PosMapEntry } from "./acceptedTextMap";
+import { acceptedRangeToDocRange, bridgeable, collectAccepted, type PosMapEntry } from "./acceptedTextMap";
 import { clearAuthorPendingMarks } from "./applyDiffAsSuggestion";
 import { diffText, phraseReplacements } from "./diffText";
-import { applyTrackedDelete } from "./splitRangeForNewMark";
-import { setAction, skipTracking, TrackChangesAction } from "../actions";
+import { writeProposal } from "./writeProposal";
+import { trackAsSuggestion } from "../actions";
+import { suggestionBlocked } from "../suggestionBlocked";
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -158,8 +138,8 @@ export function applyRichDiffAsSuggestion(
 
   if (resolved.length === 0) return { applied: false, notFound, rejected };
 
-  // Bottom-to-top: process the lowest block first so inserts never shift the
-  // positions of blocks above it that haven't been processed yet.
+  // Bottom-to-top, so `rejected` lists blocks in a stable order. Positions do
+  // not depend on it: each block is found again on `tr.doc` as it is written.
   resolved.sort((a, b) => b.pos - a.pos);
 
   const tr = state.tr;
@@ -171,8 +151,8 @@ export function applyRichDiffAsSuggestion(
 
   if (!applied) return { applied: false, notFound, rejected };
 
-  skipTracking(tr);
-  setAction(tr, TrackChangesAction.refreshChanges, true);
+  trackAsSuggestion(tr, authorID);
+  if (suggestionBlocked(state, tr)) return { applied: false, notFound, rejected };
   dispatch(tr);
   return { applied: true, notFound, rejected };
 }
@@ -202,24 +182,21 @@ function applyRichBlockToTr(
   const updated = findLiveNodeById(tr.doc, edit.nodeId);
   if (!updated) return applied;
 
-  const now = Date.now();
-  const base = (): NewEmptyAttrs => createNewPendingAttrs(now, authorID);
-
   // 1. Block attrs first — setNodeMarkup keeps the node's size, so inline
   //    positions computed below stay valid.
-  if (edit.attrs && applyAttrsChange(tr, updated.pos, updated.node, edit.attrs, base())) {
+  if (edit.attrs && applyAttrsChange(tr, updated.pos, updated.node, edit.attrs)) {
     applied = true;
   }
 
   // 2. Inline content (text + marks).
-  if (edit.spans && applyInlineChange(schema, tr, edit.nodeId, edit.spans, base, onWarn)) {
+  if (edit.spans && applyInlineChange(schema, tr, edit.nodeId, edit.spans, onWarn)) {
     applied = true;
   }
 
   return applied;
 }
 
-// ── Block attrs → tracked set_node_attributes ─────────────────────────────────
+// ── Block attrs ───────────────────────────────────────────────────────────────
 
 /** Every key is one an agent may set, with a value the block can take. */
 function attrsApplicable(tr: Transaction, nodeFrom: number, node: PMNode, editAttrs: Record<string, unknown>): boolean {
@@ -240,7 +217,6 @@ function applyAttrsChange(
   nodeFrom: number,
   node: PMNode,
   editAttrs: Record<string, unknown>,
-  base: NewEmptyAttrs,
 ): boolean {
   const { level } = editAttrs;
   const type = typeAt(tr, nodeFrom, node, level);
@@ -252,12 +228,7 @@ function applyAttrsChange(
     key in picked ? [[key, picked[key]]] : key in node.attrs ? [[key, node.attrs[key]]] : []));
   if (type === node.type && typeAttrs.every((key) => next[key] === node.attrs[key])) return false;
 
-  const update = addTrackIdIfDoesntExist(createNewUpdateAttrs(base, node.attrs));
-  const dataTracked = [
-    ...(getBlockInlineTrackedData(node) ?? []),
-    type === node.type ? update : { ...update, oldNodeTypeName: node.type.name },
-  ];
-  tr.setNodeMarkup(nodeFrom, type, { ...next, dataTracked }, node.marks);
+  tr.setNodeMarkup(nodeFrom, type, next, node.marks);
   return true;
 }
 
@@ -282,7 +253,6 @@ function applyInlineChange(
   tr: Transaction,
   nodeId: string,
   spans: InlineSpan[],
-  base: () => NewEmptyAttrs,
   onWarn?: (message: string) => void,
 ): boolean {
   const found = findLiveNodeById(tr.doc, nodeId);
@@ -294,63 +264,34 @@ function applyInlineChange(
   // Nothing to do when text and every char's mark set already match.
   const rawOps = diffText(acceptedText, proposedText);
   // diffText emits keeps per token (or one whole-text keep when nothing
-  // changed). Merge adjacent keeps so a formatting
-  // change over a retained region is emitted as ONE mark-add (one tracking id)
-  // spanning the whole region — correct even when the region is interleaved
-  // with a pending trackedInsert that stops the text nodes from fusing.
+  // changed). Merge adjacent keeps so a formatting change over a retained
+  // region is ONE mark step spanning the whole region — correct even when the
+  // region is interleaved with a pending insertion that stops text nodes fusing.
   const ops = coalesceKeeps(phraseReplacements(rawOps, (from, to) => bridgeable(tr.doc, map, from, to)));
-  const grouped = (groupId: string | undefined) => (groupId ? { groupId } : {});
 
-  const insertType = schema.marks.trackedInsert;
-  let aOff = 0; // cursor into acceptedText
-  let pOff = 0; // cursor into proposedText
-  let insertedChars = 0; // net doc offset from inserts made so far in this block
+  // Formatting first: a mark step moves nothing, so `map` stays true for the text.
   let applied = false;
-
+  let aOff = 0;
+  let pOff = 0;
   for (const op of ops) {
     const len = op.text.length;
-
-    if (op.type === "keep") {
-      if (emitKeepMarkChanges(tr, schema, map, charMarks, proposedMarks, aOff, pOff, len, insertedChars, base, onWarn)) {
-        applied = true;
-      }
-      aOff += len;
-      pOff += len;
-    } else if (op.type === "delete") {
-      const range = acceptedRangeToDocRange(map, aOff, aOff + len);
-      if (range) {
-        const dataTracked = { ...addTrackIdIfDoesntExist(createNewDeleteAttrs(base())), ...grouped(op.groupId) };
-        applyTrackedDelete(tr, range.from + insertedChars, range.to + insertedChars, dataTracked, schema);
-        applied = true;
-      }
-      aOff += len;
-    } else {
-      // insert — text carrying the agent's intended marks at this proposed slice
-      const range =
-        acceptedRangeToDocRange(map, aOff, aOff) ??
-        (acceptedText.length === 0 && aOff === 0 ? { from: found.pos + 1, to: found.pos + 1 } : null);
-      if (range && insertType) {
-        const subSpans = groupToSpans(proposedText, proposedMarks, pOff, pOff + len);
-        const fragment = suggestedContent(subSpans, schema, found.node.type, { ...createNewInsertAttrs(base()), ...grouped(op.groupId) }, onWarn);
-        if (fragment.size > 0) {
-          tr.insert(range.from + insertedChars, fragment);
-          insertedChars += fragment.size;
-          applied = true;
-        }
-      }
-      pOff += len;
-    }
+    if (op.type === "keep" && changeKeptMarks(tr, schema, map, charMarks, proposedMarks, aOff, pOff, len, onWarn)) applied = true;
+    if (op.type !== "insert") aOff += len;
+    if (op.type !== "delete") pOff += len;
   }
 
+  const contentFor = (from: number, to: number) =>
+    spansToFragment(groupToSpans(proposedText, proposedMarks, from, to), schema, { parentType: found.node.type, ...(onWarn ? { onWarn } : {}) });
+  if (writeProposal(tr, map, tr.steps.length, ops, contentFor, found.pos + 1)) applied = true;
   return applied;
 }
 
 /**
- * On a retained (KEEP) region, emit a tracked mark add/remove wherever the
- * doc's per-char mark set differs from the agent's. Consecutive chars sharing
- * the same add/remove signature are coalesced into one range.
+ * On a retained (KEEP) region, add or remove marks wherever the doc's per-char
+ * mark set differs from the agent's. Consecutive chars sharing the same
+ * add/remove signature are coalesced into one range.
  */
-function emitKeepMarkChanges(
+function changeKeptMarks(
   tr: Transaction,
   schema: Schema,
   map: PosMapEntry[],
@@ -359,8 +300,6 @@ function emitKeepMarkChanges(
   aOff: number,
   pOff: number,
   len: number,
-  insertedChars: number,
-  base: () => NewEmptyAttrs,
   onWarn?: (message: string) => void,
 ): boolean {
   let applied = false;
@@ -384,10 +323,9 @@ function emitKeepMarkChanges(
     if (added.length > 0 || removed.length > 0) {
       const range = acceptedRangeToDocRange(map, aOff + k, aOff + j);
       if (range) {
-        const from = range.from + insertedChars;
-        const to = range.to + insertedChars;
-        // An added mark that takes a removed one off (red over blue) carries what rejecting it
-        // restores; a separate tracked removal would push the addition off in turn.
+        const { from, to } = range;
+        // An added mark that takes a removed one off (red over blue) replaces it in
+        // one step, which the engine records with what rejecting it restores.
         const takenOff = new Set<InlineMark>();
         for (const m of added) {
           const real = resolveInlineMark(m, schema, onWarn);
@@ -396,24 +334,17 @@ function emitKeepMarkChanges(
             const other = resolveInlineMark(r, schema);
             if (other && excludes(real, other)) takenOff.add(r);
           }
-          // Where it changes nothing it is set plain; elsewhere it is proposed, restoring what each stretch had.
-          const runs = restoreRuns(real, inlinePieces(tr.doc, from, to), base().authorID);
-          tr.addMark(from, to, untracked(real));
-          for (const run of runs) {
-            if (run.carried) tr.addMark(run.from, run.to, run.carried);
-            else addTrackedMark(tr, run.from, run.to, real, createNewInsertAttrs(base()), run.restored);
-          }
+          tr.addMark(from, to, real);
           applied = true;
         }
         for (const m of removed) {
           const real = takenOff.has(m) ? null : resolveInlineMark(m, schema, onWarn);
           if (!real) continue;
-          // Taken off as the text carries it, so a suggestion there is withdrawn, not struck;
-          // text that does not carry it (another author's deletion inside the range) is left alone.
+          // Taken off as the text carries it, records and all; text that does not
+          // carry it (another author's deletion inside the range) is left alone.
           for (const piece of inlinePieces(tr.doc, from, to)) {
             const carried = piece.marks.find((mark) => untracked(mark).eq(untracked(real)));
-            if (!carried) continue;
-            for (const step of proposeRemoval(carried, piece.from, piece.to, base())) tr.step(step);
+            if (carried) tr.removeMark(piece.from, piece.to, carried);
           }
           applied = true;
         }
@@ -433,18 +364,6 @@ function inlinePieces(doc: PMNode, from: number, to: number): FoundPiece[] {
   return pieces;
 }
 
-/** Apply `mark` with a tracking record (exclusion replaces the plain mark). */
-function addTrackedMark(
-  tr: Transaction,
-  from: number,
-  to: number,
-  mark: Mark,
-  record: NewEmptyAttrs,
-  restored: readonly Mark[] = [],
-) {
-  const dt = { ...record, ...(restored.length > 0 ? { replaced: restored.map(toReplacedMark) } : {}) };
-  tr.addMark(from, to, mark.type.create({ ...mark.attrs, dataTracked: [addTrackIdIfDoesntExist(dt)] }));
-}
 
 // ── Mark-set helpers ──────────────────────────────────────────────────────────
 
@@ -468,50 +387,6 @@ interface AcceptedRichMap {
   charMarks: InlineMark[][];
 }
 
-/** One accepted-view character: its doc position and the formatting marks on it. */
-interface AcceptedChar {
-  char: string;
-  docPos: number;
-  marks: InlineMark[];
-}
-
-/**
- * Reproduce the accepted-view text of a single LEAF textblock the agent was
- * shown by the semantic emitter, WITH each character's doc position and
- * formatting marks. Must mirror export-semantic's inline extraction exactly, or
- * a verbatim echo diffs as a full rewrite (whole-block churn):
- *  - text node → its chars, minus tracked-change marks (trackedDelete text
- *    excluded entirely, matching the review view);
- *  - formatting → its marks, minus any a pending change proposes removing;
- *  - line break → a newline, unless its deletion is pending;
- *  - other inline leaf (e.g. image) → no intrinsic text.
- * Leaf-only by construction: containers are rejected upstream and their inner
- * leaves are edited by their own nodeId, so this never recurses across blocks.
- */
-function collectAccepted(node: PMNode, nodeStart: number, schema: Schema): AcceptedChar[] {
-  const deleteType = schema.marks.trackedDelete;
-
-  if (node.isText) {
-    if (deleteType && node.marks.some((m) => m.type === deleteType)) return [];
-    const marks = formattingMarksOf(node.marks);
-    const text = node.text ?? "";
-    const out: AcceptedChar[] = [];
-    for (let i = 0; i < text.length; i++) out.push({ char: text[i]!, docPos: nodeStart + i, marks });
-    return out;
-  }
-  if (breakOf(node.type) === "line") return proposedForDeletion(node) ? [] : [{ char: "\n", docPos: nodeStart, marks: [] }];
-  if (node.isLeaf) return []; // other inline leaf (e.g. image) — no intrinsic text
-
-  // A leaf textblock: concatenate its inline runs in document order.
-  const out: AcceptedChar[] = [];
-  let offset = nodeStart + 1; // skip the node's opening token
-  node.forEach((child) => {
-    out.push(...collectAccepted(child, offset, schema));
-    offset += child.nodeSize;
-  });
-  return out;
-}
-
 function buildAcceptedRichMap(node: PMNode, nodeStartPos: number, schema: Schema): AcceptedRichMap {
   const cells = collectAccepted(node, nodeStartPos, schema);
   const chars: string[] = [];
@@ -523,11 +398,6 @@ function buildAcceptedRichMap(node: PMNode, nodeStartPos: number, schema: Schema
     charMarks.push(cell.marks);
   }
   return { acceptedText: chars.join(""), map, charMarks };
-}
-
-/** PM marks → formatting `InlineMark`s: drop tracked-change marks, marks proposed removed, and `dataTracked`/null attrs. */
-function formattingMarksOf(marks: readonly Mark[]): InlineMark[] {
-  return marks.filter((mark) => !isTrackedMark(mark.type.name) && !isMarkRemoved(mark)).map(describeInlineMark);
 }
 
 /** Merge consecutive `keep` ops into one so a retained region isn't split per token. */
@@ -558,7 +428,7 @@ function expandSpans(spans: InlineSpan[]): { text: string; charMarks: InlineMark
 }
 
 /**
- * Group a proposed-text slice back into `InlineSpan`s for `suggestedContent`,
+ * Group a proposed-text slice back into `InlineSpan`s for `spansToFragment`,
  * merging runs of identical marks. A newline stays: inside one block it is a
  * line break, never a block boundary.
  */
