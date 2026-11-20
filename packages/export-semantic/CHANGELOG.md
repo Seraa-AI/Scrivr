@@ -1,5 +1,12 @@
 # @scrivr/export-semantic
 
+## 1.0.26
+
+### Patch Changes
+
+- Updated dependencies [de92dc4]
+  - @scrivr/core@1.0.26
+
 ## 1.0.25
 
 ### Patch Changes

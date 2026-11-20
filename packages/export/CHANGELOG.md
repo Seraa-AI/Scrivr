@@ -1,5 +1,14 @@
 # @scrivr/export
 
+## 1.0.26
+
+### Patch Changes
+
+- Updated dependencies [de92dc4]
+  - @scrivr/core@1.0.26
+  - @scrivr/export-markdown@1.0.26
+  - @scrivr/export-pdf@1.0.26
+
 ## 1.0.25
 
 ### Patch Changes
