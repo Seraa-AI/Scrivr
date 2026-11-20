@@ -17,7 +17,7 @@ Every suggestion lane is now recorded by the track-changes engine. `applyDiffAsS
 
 - A lane can now propose a line break, or its removal, from a `"\n"` in the proposed text.
 - A replacement shows its new words before the words it strikes, as typing over a selection does. The lanes used to show the struck words first.
-- A deletion takes only the text the lane read. An image, or another author's struck text, inside a deleted range is left as it is.
+- A deletion takes only the text the lane read. An image, or another author's struck text, inside a deleted range is left as it is, and the words around it stay one replacement.
 - An insertion is one change, whatever formatting or breaks it holds, so reviewing any part of it decides all of it. This holds for anyone: a formatted paste typed in suggesting mode is one change too.
 - A lane writes nothing that would not be recorded: without the TrackChanges extension, while snapshots are viewed, when tracking refuses the edit, or when the transaction carries a meta tracking skips. It reports `applied: false`, or `false` from `insertAsSuggestion`.
 - `insertAsSuggestion` over a range spanning two blocks proposes joining them, as typing over that selection does; it used to strike and insert.
