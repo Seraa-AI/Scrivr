@@ -10,15 +10,15 @@ import {
   Step,
 } from "@scrivr/core/pm";
 
-import { ChangeStep, CHANGE_OPERATION, CHANGE_STATUS, TrTrackingContext } from "../types";
+import { ChangeStep, TrTrackingContext } from "../types";
 import { processChangeSteps } from "./processReplaceStep";
 import { advanceBridge } from "./replayBridge";
 import {
   excludeFromTracking,
   passThroughMeta,
 } from "./transactionProcessing";
-import { createNewPendingAttrs, genId, getBlockInlineTrackedData, markRecords, NewEmptyAttrs } from "../helpers";
-import { alreadyProposedForDeletion, canCancelInsertion } from "../lib/deletionPolicy";
+import { createNewPendingAttrs, genId, NewEmptyAttrs } from "../helpers";
+import { alreadyProposedForDeletion, canCancelInsertion, ownReplacementOf } from "../lib/deletionPolicy";
 import { diffChangeSteps } from "../lib/structuralChange";
 import { mergeTrackedMarks } from "../lib/mergeTrackedMarks";
 import { isSetNodeMarkupStep } from "../step-trackers/qualifiers";
@@ -56,25 +56,28 @@ function caretBeforeStepEnd(tr: Transaction, i: number, step: ReplaceStep): numb
 }
 
 /**
- * Whether `step` puts inline content in place of something inside one block.
- * A step across blocks, or one bringing blocks in (an open slice), also joins
- * or splits them, which is not a word swap.
+ * Whether `step` puts inline content into one block. A step across blocks, or
+ * one bringing blocks in (an open slice), also joins or splits them, which is
+ * not a word swap.
  */
-function replacesInline(step: ReplaceStep, doc: PMNode): boolean {
-  if (step.from === step.to || step.slice.size === 0) return false;
+function writesInline(step: ReplaceStep, doc: PMNode): boolean {
+  if (step.slice.size === 0) return false;
   if (step.slice.openStart !== 0 || step.slice.openEnd !== 0) return false;
   const $from = doc.resolve(step.from);
   return $from.parent.inlineContent && $from.sameParent(doc.resolve(step.to));
 }
 
 /**
- * The `groupId` that makes what `step` takes out and puts in one act, or none.
- * Only a step that records a deletion starts a replacement: text already struck
- * gets no second record, and the author's own pending insertion is taken back.
- * Retyping inside one's own replacement continues it, so the word stays one act.
+ * The replacement `step` belongs to, as a `groupId`, or none. A step that types
+ * over a selection and records a deletion starts one; text already struck gets
+ * no second record, and the author's own pending insertion is taken back.
+ * Typing right beside, or over, the author's own replacement text continues it,
+ * so a word typed in several strokes stays one act.
  */
 function replacementGroup(step: ReplaceStep, doc: PMNode, authorID: string): string | undefined {
-  if (!replacesInline(step, doc)) return undefined;
+  if (!writesInline(step, doc)) return undefined;
+  const $from = doc.resolve(step.from);
+  if (step.from === step.to) return ownReplacementOf($from.nodeBefore, authorID) ?? ownReplacementOf($from.nodeAfter, authorID);
   let recordsDeletion = false;
   let continued: string | undefined;
   doc.nodesBetween(step.from, step.to, node => {
@@ -85,17 +88,6 @@ function replacementGroup(step: ReplaceStep, doc: PMNode, authorID: string): str
     return false;
   });
   return recordsDeletion ? genId() : continued;
-}
-
-/** The `groupId` of `authorID`'s pending insertion recorded on `node`, if it is part of a replacement. */
-function ownReplacementOf(node: PMNode, authorID: string): string | undefined {
-  const insertions = node.isText
-    ? node.marks.filter(mark => mark.type === node.type.schema.marks.trackedInsert).flatMap(markRecords)
-    : getBlockInlineTrackedData(node) ?? [];
-  return insertions.find(record =>
-    record.authorID === authorID && record.status === CHANGE_STATUS.pending &&
-    record.operation === CHANGE_OPERATION.insert && record.groupId !== undefined,
-  )?.groupId;
 }
 
 /**
