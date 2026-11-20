@@ -13,13 +13,14 @@
  * Does NOT call `ensureLayout()` — DOCX is a semantic export. Reads
  * persistent doc attrs only; never CharacterMap, fragments, or tile state.
  *
- * Returns both `bytes` and `diagnostics` because DOCX export is inherently
- * lossy: unsupported nodes, marks without handlers, and approximations
- * during lossy mappings all surface as `level: "warning"` entries. Fatal
- * failures throw `DocxExportError` with the same diagnostics attached.
+ * Returns `bytes`, `diagnostics` and `report` because DOCX export is
+ * inherently lossy: unsupported nodes, marks without handlers, and
+ * approximations during lossy mappings all surface as `level: "warning"`
+ * entries, and the report counts what was kept and dropped. Fatal failures
+ * throw `DocxExportError` with the same diagnostics attached.
  */
 
-import type { IBaseEditor } from "@scrivr/core";
+import type { DocxReport, IBaseEditor } from "@scrivr/core";
 import { walkDocument, type WalkerHandlers } from "./walker";
 import { createDocxContext } from "./createContext";
 import { buildDocxPackage, buildDocumentRoot } from "./defaults";
@@ -36,6 +37,13 @@ import type {
   DocxFidelity,
   DocxUnsupportedPolicy,
 } from "./context";
+import {
+  assignOwned,
+  ownedBundles,
+  reportRecorderOf,
+  type HandlerOwner,
+  type OwnedHook,
+} from "../report";
 
 export interface DocxExportOptions {
   /** Override or supplement extension-contributed handlers. */
@@ -49,14 +57,17 @@ export interface DocxExportOptions {
 export interface DocxExportResult {
   bytes: Uint8Array;
   diagnostics: DocxDiagnostic[];
+  /** What the export wrote and what it could not — see `DocxReporter`. */
+  report: DocxReport;
 }
 
 /**
  * Export the editor's current document to DOCX format.
  *
- * Returns `{ bytes, diagnostics }` so callers can surface fidelity warnings
- * ("exported with 2 warnings: ..."). Throws `DocxExportError` on fatal
- * failures (e.g. `unsupported: "throw"` policy hits an unknown node).
+ * Returns `{ bytes, diagnostics, report }` so callers can surface fidelity
+ * warnings ("exported with 2 warnings: ...") and say what was carried
+ * across. Throws `DocxExportError` on fatal failures (e.g. the
+ * `unsupported: "throw"` policy hits an unknown node).
  */
 export async function exportDocx(
   editor: IBaseEditor,
@@ -67,6 +78,7 @@ export async function exportDocx(
     nodes: handlers.nodes,
     marks: handlers.marks,
     markWrappers: handlers.markWrappers,
+    owners: handlers.owners,
   };
 
   // Hand the merged handlers to the context so `ctx.walkContent` renders
@@ -83,12 +95,13 @@ export async function exportDocx(
     contextInit.fidelity = options.fidelity;
   }
   const { ctx, state } = createDocxContext(contextInit);
+  const recorder = reportRecorderOf(ctx);
 
   const lifecycleHooks = collectLifecycleHooks(editor, options.overrides);
 
   try {
-    for (const hook of lifecycleHooks.onBeforeExport) {
-      await hook(ctx);
+    for (const { owner, hook } of lifecycleHooks.onBeforeExport) {
+      await recorder.attributeAsync(owner, () => hook(ctx));
     }
 
     const body = walkDocument(editor.getState().doc, ctx, walkerHandlers);
@@ -97,17 +110,19 @@ export async function exportDocx(
     // hooks can read or mutate it (bookmarks, cross-refs, custom packagers).
     ctx.document = buildDocumentRoot(body);
 
-    for (const hook of lifecycleHooks.onBuildTreeComplete) {
-      await hook(ctx);
+    for (const { owner, hook } of lifecycleHooks.onBuildTreeComplete) {
+      await recorder.attributeAsync(owner, () => hook(ctx));
     }
 
-    const pkg = lifecycleHooks.onFinalize
-      ? await lifecycleHooks.onFinalize(ctx)
+    const finalize = lifecycleHooks.onFinalize;
+    const pkg = finalize
+      ? await recorder.attributeAsync(finalize.owner, () => finalize.hook(ctx))
       : buildDocxPackage(ctx.document, state);
 
     return {
       bytes: zipDocxPackage(pkg),
       diagnostics: ctx.diagnostics.list(),
+      report: recorder.snapshot(),
     };
   } catch (err) {
     if (err instanceof DocxExportError) throw err;
@@ -132,13 +147,25 @@ interface ResolvedHandlers {
   nodes: Record<string, DocxNodeHandler>;
   marks: Record<string, DocxMarkHandler>;
   markWrappers: Record<string, DocxRunWrapper>;
+  owners: {
+    nodes: Record<string, HandlerOwner>;
+    marks: Record<string, HandlerOwner>;
+    markWrappers: Record<string, HandlerOwner>;
+  };
 }
 
 interface LifecycleHooks {
-  onBeforeExport: Array<NonNullable<DocxHandlers["onBeforeExport"]>>;
-  onBuildTreeComplete: Array<NonNullable<DocxHandlers["onBuildTreeComplete"]>>;
+  onBeforeExport: Array<OwnedHook<NonNullable<DocxHandlers["onBeforeExport"]>>>;
+  onBuildTreeComplete: Array<OwnedHook<NonNullable<DocxHandlers["onBuildTreeComplete"]>>>;
   /** Last-writer-wins — overrides.onFinalize beats extension contributions. */
-  onFinalize?: NonNullable<DocxHandlers["onFinalize"]>;
+  onFinalize?: OwnedHook<NonNullable<DocxHandlers["onFinalize"]>>;
+}
+
+function docxExportBundles(
+  editor: IBaseEditor,
+  overrides: DocxHandlers | undefined,
+): Array<{ owner: HandlerOwner; bundle: DocxHandlers }> {
+  return ownedBundles(editor.getFormatContributions(), (c) => c.exports.docx, overrides);
 }
 
 function collectHandlers(
@@ -148,25 +175,20 @@ function collectHandlers(
   // Each node + mark contributes its DOCX export via the owning extension's
   // `addExports().docx`. Overrides win per-call. There's no defaults layer
   // in this package — see Bold.ts, Image.ts, Heading.ts, etc.
-  const nodes: Record<string, DocxNodeHandler> = {};
-  const marks: Record<string, DocxMarkHandler> = {};
-  const markWrappers: Record<string, DocxRunWrapper> = {};
+  const resolved: ResolvedHandlers = {
+    nodes: {},
+    marks: {},
+    markWrappers: {},
+    owners: { nodes: {}, marks: {}, markWrappers: {} },
+  };
 
-  for (const contrib of editor.getExportContributions()) {
-    const docx = contrib.docx;
-    if (!docx) continue;
-    if (docx.nodes) Object.assign(nodes, docx.nodes);
-    if (docx.marks) Object.assign(marks, docx.marks);
-    if (docx.markWrappers) Object.assign(markWrappers, docx.markWrappers);
+  for (const { owner, bundle: docx } of docxExportBundles(editor, overrides)) {
+    assignOwned(resolved.nodes, resolved.owners.nodes, docx.nodes, owner);
+    assignOwned(resolved.marks, resolved.owners.marks, docx.marks, owner);
+    assignOwned(resolved.markWrappers, resolved.owners.markWrappers, docx.markWrappers, owner);
   }
 
-  if (overrides) {
-    if (overrides.nodes) Object.assign(nodes, overrides.nodes);
-    if (overrides.marks) Object.assign(marks, overrides.marks);
-    if (overrides.markWrappers) Object.assign(markWrappers, overrides.markWrappers);
-  }
-
-  return { nodes, marks, markWrappers };
+  return resolved;
 }
 
 function collectLifecycleHooks(
@@ -178,20 +200,12 @@ function collectLifecycleHooks(
     onBuildTreeComplete: [],
   };
 
-  for (const contrib of editor.getExportContributions()) {
-    const docx = contrib.docx;
-    if (!docx) continue;
-    if (docx.onBeforeExport) hooks.onBeforeExport.push(docx.onBeforeExport);
-    if (docx.onBuildTreeComplete)
-      hooks.onBuildTreeComplete.push(docx.onBuildTreeComplete);
-    if (docx.onFinalize) hooks.onFinalize = docx.onFinalize;
-  }
-
-  if (overrides) {
-    if (overrides.onBeforeExport) hooks.onBeforeExport.push(overrides.onBeforeExport);
-    if (overrides.onBuildTreeComplete)
-      hooks.onBuildTreeComplete.push(overrides.onBuildTreeComplete);
-    if (overrides.onFinalize) hooks.onFinalize = overrides.onFinalize;
+  for (const { owner, bundle: docx } of docxExportBundles(editor, overrides)) {
+    if (docx.onBeforeExport) hooks.onBeforeExport.push({ owner, hook: docx.onBeforeExport });
+    if (docx.onBuildTreeComplete) {
+      hooks.onBuildTreeComplete.push({ owner, hook: docx.onBuildTreeComplete });
+    }
+    if (docx.onFinalize) hooks.onFinalize = { owner, hook: docx.onFinalize };
   }
 
   return hooks;

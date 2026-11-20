@@ -179,4 +179,5 @@ export type {
   ExportContributionMap,
   FormatImportHandlers,
   ImportContributionMap,
+  FormatContribution,
 } from "./export";

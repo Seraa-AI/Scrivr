@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { buildPdf } from "../index";
-import { normalizeDrawNumber, recordDrawOps, type DrawOp } from "./opLog";
+import { normalizeDrawNumber } from "@scrivr/core";
+import { recordDrawOps, type DrawOp } from "./opLog";
 import { block, exportEditor, onePage, textLine } from "./fixtures";
 
 /**
