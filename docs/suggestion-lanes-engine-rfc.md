@@ -1,115 +1,194 @@
 # Suggestion Lanes RFC — every suggestion is recorded by the engine
 
-Status: Draft (2026-11-16, updated 2026-11-19 for 1.0.25). Answers part 1 of
-#252. Parts 2 (block-level previews) and 3 (structural previews on revision
+Status: Draft (2026-11-16, revised 2026-11-20 against 1.0.25). Answers part 1
+of #252. Parts 2 (block-level previews) and 3 (structural previews on revision
 projection) follow separately.
 
 ## Question
 
-Four lanes propose edits on someone's behalf:
+A *lane* here is an API that writes a suggestion on someone's behalf rather
+than from their keystrokes. There are four:
 
 | Lane | File |
 |---|---|
-| `applyDiffAsSuggestion` / `applyMultiBlockDiff` | `plugins/src/track-changes/lib/applyDiffAsSuggestion.ts` |
-| `applyRichDiffAsSuggestion` | `plugins/src/track-changes/lib/applyRichDiffAsSuggestion.ts` |
-| AI suggestion tracked apply (`_applyTracked`) | `ai/src/ai-suggestion/showHideApply.ts` |
-| `insertAsSuggestion` command | `plugins/src/track-changes/TrackChanges.ts` |
+| `applyDiffAsSuggestion` / `applyMultiBlockDiff` (plain) | `packages/plugins/src/track-changes/lib/applyDiffAsSuggestion.ts` |
+| `applyRichDiffAsSuggestion` (rich) | `packages/plugins/src/track-changes/lib/applyRichDiffAsSuggestion.ts` |
+| AI suggestion tracked apply, `_applyTracked` (AI) | `packages/ai/src/ai-suggestion/showHideApply.ts` |
+| `insertAsSuggestion` command | `packages/plugins/src/track-changes/TrackChanges.ts` |
 
-Each builds `trackedInsert` / `trackedDelete` marks by hand and dispatches under
-`skipTracking`, so the engine never sees the edit. Structural edits and AI
-formatting already go the other way: a plain edit under
+Each builds `trackedInsert` / `trackedDelete` marks and records by hand and
+dispatches under `skipTracking`, so the engine never sees the edit. Structural
+edits (`AiToolkit.ts`, `imageAttrs.ts`) and AI formatting
+(`applyKeepFormatting`) already go the other way: a plain edit under
 `trackAsSuggestion(tr, author)`, recorded by the step trackers.
 
 Can the four lanes make plain edits and let the engine record them, and what
-does the engine need so nothing a reviewer sees today is lost?
+does that need so nothing a reviewer sees today is lost?
 
 ## Why it matters
 
-The hand-written copy of the engine's rules only knows text. The gaps still open:
+The hand-written copy of the engine's rules only knows text:
 
 - **A rich edit cannot propose deleting an existing line break.**
-  `applyTrackedDelete` (`splitRangeForNewMark`) marks text only, so a break
-  inside a deleted range is silently kept. Accepting the suggestion leaves the
-  break in the document.
+  `applyTrackedDelete` (`lib/splitRangeForNewMark.ts:61`, `if (!node.isText)`)
+  marks text only, so a break inside a deleted range is silently kept.
+  Accepting the suggestion leaves the break in the document.
 - **The plain lanes cannot propose a break.** They read a block through
-  `buildAcceptedTextMap`, which has no breaks, so every `"\n"` is written as a
-  space (`applyDiffAsSuggestion.ts:247`, `TrackChanges.ts:363`,
-  `showHideApply.ts` `insertedContent`).
-- **Every new rule lands four extra times.** Images, deletion ownership,
+  `buildAcceptedTextMap`, which skips every non-text inline node, so every
+  `"\n"` is written as a space (`applyDiffAsSuggestion.ts:247`,
+  `TrackChanges.ts:363`, `showHideApply.ts:349`).
+- **Every new rule lands again in the lanes.** Images, deletion ownership,
   conflicts and composition were each added to the engine and then re-derived,
   or missed, in the lanes. Formatting is the latest: #265 (1.0.25) taught the
-  engine to remember a replaced value and to hold another author's suggestion,
-  and `applyRichDiffAsSuggestion` had to call the same rules itself
-  (`restoreRuns`, `proposeRemoval` from `formatSuggestions.ts`, beside
-  `trackAddMarkStep` / `trackRemoveMarkStep`) to keep up.
-- **Typing discipline.** `_applyTracked` needs `as Record<string, unknown>`
-  casts to attach a `groupId` to records it builds itself.
+  engine to remember a replaced value and to *hold* another author's suggestion
+  (keep it, so rejecting the new change brings it back), and
+  `applyRichDiffAsSuggestion` had to call the same rules itself (`restoreRuns`,
+  `proposeRemoval` from `packages/plugins/src/track-changes/formatSuggestions.ts`)
+  to keep up.
+- **Typing.** `_applyTracked` attaches a `groupId` through
+  `as Record<string, unknown>` casts (`showHideApply.ts:439,448`), and the plain
+  lane widens its record to `Record<string, unknown>` for the same reason
+  (`applyDiffAsSuggestion.ts:231`). Both go once the lanes stop building
+  records.
 
-The engine already handles breaks, images and deletions correctly for a person
-typing in suggesting mode. The lanes should get the same behaviour by going
-through the same path.
+The engine already handles breaks, images and deletions for a person typing in
+suggesting mode (`semanticReview.test.ts` covers a deleted break). The lanes
+should get the same behaviour by going through the same path.
 
-## What the engine does today
+## What the lanes do today, and what the engine does
 
-Read from `engine/processReplaceStep.ts`, `lib/deleteTextIfInserted.ts` and
-`step-trackers/`:
+| Today | Lanes | Engine, for the same plain edit |
+|---|---|---|
+| Deleted text gets `trackedDelete` | all four | Same (`deleteTextIfInserted`) |
+| A deleted break or image | kept (rich), never deleted (plain, AI) | Recorded as deleted on the node |
+| Inserted text gets `trackedInsert` | plain, rich via `suggestedContent`; AI and `insertAsSuggestion` by hand | Same (`setFragmentAsInserted`) |
+| The author's own pending insertion, rewritten | taken back by `clearAuthorPendingMarks` (plain, rich); struck (`insertAsSuggestion`) | Taken back (`canCancelInsertion`) |
+| Deletion and insertion share a `groupId` | plain, rich, AI, from `phraseReplacements`; `insertAsSuggestion` pairs nothing | Paired since the engine PR of this work (Decision 2) |
+| The author's own pending deletion, restated | withdrawn by `clearAuthorPendingMarks` (plain, rich) | **Not an edit**: nothing to record |
+| Formatting on kept text | rich, through `restoreRuns` / `proposeRemoval` | Same rules: `tr.addMark` / `tr.removeMark` → `trackAddMarkStep` / `trackRemoveMarkStep` |
+| Block attrs and type | rich, a hand-built `set_node_attributes` record | Same: `tr.setNodeMarkup` → `trackSetNodeMarkupStep` |
+| A `"\n"` in the proposal | written as a space (plain, AI, `insertAsSuggestion`) | A break where the block allows one (`spansToFragment`) |
+| Pieces of one insertion (marked runs, a break) | one act through a shared `creationId` (`suggestedContent.ts:23-27`) | **One record each** (`trackReplaceStep.ts:101`); Decision 7 |
+| Another author's struck text inside the range | struck again by the lane (`splitRangeForNewMark.ts:66-72`) | Left alone: struck text gets no second record (`deleteTextIfInserted.ts:33`) |
+| A block attr change over another author's pending one | a second record, the lane's | Folded into the pending one, which keeps its author (`processReplaceStep.ts:147-167`) |
+| Text deleted in one place and inserted elsewhere | a deletion and an insertion | **A move** (`groupMoveSteps`), as for a person |
 
-| Lane behaviour today | Engine behaviour for the same plain edit |
-|---|---|
-| Deleted text gets `trackedDelete` | Same (`delete-text` → `deleteTextIfInserted`) |
-| Deleted break or image is kept (rich) / never deleted (plain) | Recorded as deleted on the node, like any inline object |
-| Inserted text gets `trackedInsert` (`suggestedContent`) | Same — `suggestedContent` already uses the engine's `setFragmentAsInserted` |
-| Deleting the author's own pending insertion removes it (`clearAuthorPendingMarks`) | Same — `deleteTextIfInserted` takes back the author's own insertion |
-| Deletion and insertion share a `groupId` from `diffText` | **No pairing.** The two halves of a replace step get unrelated ids |
-| Author's earlier pending deletion is withdrawn by removing its mark | **Not an edit.** Nothing to record; the engine has no step for it |
-| Formatting on kept text (rich): hand-applied with `restoreRuns` / `proposeRemoval` | Same rules — `tr.addMark` / `tr.removeMark` recorded by `trackAddMarkStep` / `trackRemoveMarkStep`, which call those helpers (since #265) |
-| Block attrs (rich): a hand-built tracked `set_node_attributes` | Same — `tr.setNodeMarkup` recorded by `trackAttrsChangeStep` / `trackSetNodeMarkupStep` |
-
-Two rows need a decision. Everything else moves to the engine unchanged.
+The last three rows are the engine's rules for anyone suggesting, and the lanes
+take them as a person's edits would. Decision 7 answers the first.
 
 ## Decision
 
 1. **The four lanes make plain edits under `trackAsSuggestion(tr, authorID)`.**
-   Delete with `tr.delete`, insert with `tr.insert` of plain content built by
-   `spansToFragment` (a `"\n"` becomes the block's break). The rich lane sets
-   formatting with `tr.addMark` / `tr.removeMark` and block attrs with
-   `tr.setNodeMarkup`. No lane builds a
-   tracked mark or record. `skipTracking` and the hand-built
-   `refreshChanges` go from these four call sites.
+   - Each phrase is one `tr.replaceWith` (or `tr.delete` / `tr.insert` when it
+     only removes or only adds), with content built by `spansToFragment` for the
+     destination block, so a `"\n"` becomes a break where the block allows one.
+   - The rich lane sets formatting with `tr.addMark` / `tr.removeMark` and block
+     attrs with `tr.setNodeMarkup`.
+   - No lane builds a tracked mark or record. `skipTracking` and the hand-set
+     `refreshChanges` are removed from these four call sites.
+   - **Positions are mapped through `tr.mapping` from the document the diff was
+     made against.** Today the lanes count only inserted characters because a
+     tracked deletion marks text and shifts nothing; a plain deletion removes it
+     inside the lane's transaction, so that counting would place later edits
+     wrongly.
+   - **The AI lane writes its keep-formatting and its text in one
+     transaction**, so one apply is one undo step and is applied whole or not
+     at all.
 
-2. **The engine pairs a replacement.** When one gesture both deletes and
-   inserts at the same place, the engine stamps both records with one
-   `groupId`. The lanes no longer stamp it. Pairing a word swap typed over a
-   selection in suggesting mode comes free: today it is two cards, after this
-   it is one, as in Word.
-   - The lanes keep `phraseReplacements` to decide *where* one replacement
-     ends and the next begins; each phrase is written as one `tr.replaceWith`,
-     so "one replace step" is the unit the engine pairs.
+2. **The engine pairs a replacement.** A step that types over a selection inside
+   one block, and records a deletion there, gives the deletion and the insertion
+   one `groupId`.
+   - Text typed on from the replacement, or retyped inside it, joins it.
+   - An earlier edit beside it stays its own change, and so does another
+     replacement, even side by side.
+   - Typing over text already struck, or over the author's own insertion,
+     starts no replacement: there is no new deletion to pair.
+   - A selection across blocks is not paired: replacing it also joins the
+     blocks. A move is not paired: its halves pair through the move id.
+   - The lanes stop stamping `groupId`. Each phrase they write is one step, so
+     each phrase that deletes agreed text is one replacement. A phrase that only
+     rewrites the author's own earlier lane insertion continues that
+     replacement.
+   - Word writes a typed-over selection as an adjacent `w:del` / `w:ins` pair of
+     one author and date, which Scrivr already imports as one replacement (D11
+     in `docs/tracked-changes-agents-docx-rfc.md`). Google Docs shows it as one
+     suggestion. Today a replacement typed in Scrivr is two cards; after this it
+     is one.
+   - Built and tested on branch `suggestion-lanes-252-engine`
+     (`replacementPairing.test.ts`).
 
-3. **Withdrawing one's own pending deletion stays explicit.** It is review
-   bookkeeping, not an edit, so it cannot go through the engine. It keeps one
-   home: `clearAuthorPendingMarks`, reduced to its deletion half (the insertion
-   half is now the engine's), run before the plain edit in the same
-   transaction.
+3. **Withdrawing one's own pending deletion stays outside the engine.** It is
+   review bookkeeping, not an edit, so the engine has nothing to record; #252
+   asks for withdrawal to "follow the engine", and this is the one place it
+   cannot.
+   - `clearAuthorPendingMarks` keeps its behaviour and its public signature, and
+     runs first, in the lane's own transaction. Inside a tracked transaction its
+     two halves need no change: removing a review mark is never tracked
+     (`isValidTrackableMark`), and deleting the author's own insertion is taken
+     back.
+   - It also withdraws the author's pending deletion recorded on an inline node
+     (a break or image), which Decision 1 now creates, through `setNodeMarkup`
+     of `dataTracked` alone, which `trackSetNodeMarkupStep` records nothing for.
+   - As today, the plain and rich lanes withdraw; the AI lane and
+     `insertAsSuggestion` do not.
 
-4. **The plain lanes read breaks.** `buildAcceptedTextMap` maps a line break to
-   `"\n"`, as the rich map already does, so the plain lanes can propose and
-   remove breaks too.
+4. **One reader of accepted text.** `buildAcceptedTextMap` and the rich lane's
+   `collectAccepted` read a block through one function, which maps a line break
+   to `"\n"` and leaves out a break pending deletion, as `collectAccepted`
+   already does. The plain lanes can then propose and remove breaks.
+
+5. **A lane never deletes an inline object it did not read.** Neither map gives
+   an image a character, so a deleted range that spans one is split around it.
+   The image is proposed for deletion only when the lane's own content leaves
+   it out, as the rich lane's image runs do today.
+
+6. **A lane writes nothing it cannot record.** One check owned by track changes,
+   `suggestionBlocked(state, tr)`, answers whether a suggestion transaction would
+   land: no TrackChanges plugin, the status is `viewSnapshots`, or tracking
+   refuses it (`gestureRefusal`). Every lane asks it before dispatching. When it
+   is blocked the lane dispatches nothing and reports it (`applied: false`, or
+   `false` from the command). Today a "tracked" AI apply without the plugin
+   writes nothing only by accident (`applyTrackedDelete` returns early without
+   the mark type); `applyKeepFormatting` already guards this way.
+
+7. **One step's insertion is one act.** Of the pieces one step inserts (each
+   marked run, each break), the first one's id names the act and the rest carry
+   it as their `creationId`, as `suggestedContent` does for the lanes today. Without it, a rich insertion of
+   "**foo** bar" would become three cards. A paste typed in suggesting mode gets
+   the same.
+
+## Public surface
+
+| Export | After this |
+|---|---|
+| The four lanes' signatures and result types | Unchanged |
+| `clearAuthorPendingMarks` | Unchanged, plus withdrawing a node-level deletion (additive) |
+| `buildAcceptedTextMap`, `acceptedTextMapFor` | **Output changes**: a break reads as `"\n"`, so `acceptedText`, `decoratedText` and the offsets in `map` shift for a block with a break. Callers: `computeAiSuggestion.ts`, `rebase.ts`, `drift.ts`, `AiSuggestion.ts`, `createSuggestionPopover.ts`, `groupRanges.ts`, `showHideApply.ts`, `AiToolkit.ts`, `buildParagraphContexts.ts` |
+| `applyTrackedDelete`, `applyTrackedInsert`, `splitRangeForNewMark` | Kept, unchanged; no lane calls them |
+| `createNewDeleteAttrs`, `createNewInsertAttrs`, `createNewPendingAttrs`, `addTrackIdIfDoesntExist` | Kept; the barrel comment naming `@scrivr/ai` as their consumer is corrected |
+| `suggestionBlocked` | New |
+
+A host that builds `proposedText` from a view without breaks would now propose
+deleting every break, so the implementation changeset carries a **Breaking**
+note for the accepted-text output, as `plugins/CHANGELOG.md` does for earlier
+patch-level breaks.
 
 ## Non-goals
 
 - Block-level previews (#252 part 2) and structural previews (part 3).
 - Changing what `diffText` considers a change.
-- Changing the public signatures of the four lanes. Results (`applied`,
-  `editDensity`, `notFound`, `rejected`) keep their meaning.
+- Removing any export; that is its own decision.
 
 ## Alternatives considered
 
 - **Teach `applyTrackedDelete` about breaks and images.** Closes the first gap
   only, and grows the second copy of the rules this RFC removes.
-- **Keep `groupId` stamping in the lanes, after the engine records.** Requires
-  each lane to find the records the engine just made and rewrite them: a third
+- **Keep `groupId` stamping in the lanes, after the engine records.** Each lane
+  would have to find the records the engine just made and rewrite them: a third
   place that knows the record format.
+- **Give `buildAcceptedTextMap` its own break reading.** A second copy of the
+  rule, which must also skip a break pending deletion and stay in step with
+  export-semantic's extraction.
 - **Leave `insertAsSuggestion` hand-built because it is small.** It has the
   same `"\n"` gap and would be the one lane that disagrees with the engine.
 
@@ -117,42 +196,86 @@ Two rows need a decision. Everything else moves to the engine unchanged.
 
 - *Does the engine track while the host's status is disabled?* Yes:
   `trackChangesPlugin.appendTransaction` tracks any transaction carrying
-  suggestion intent regardless of status.
-- *Undo?* Each lane still dispatches one transaction, so it stays one undo step.
-- *Can tracking refuse a lane's edit?* It can, as for any suggesting edit; the
-  lane then reports `applied: false` instead of writing unrecorded marks.
-- *Conflicts with another author's pending text?* The engine's existing rules
-  apply, the same as two people typing. Formatting set over another author's
-  pending suggestion holds it (`within` on `findChanges().pending`, since
-  #265), whichever lane set it.
+  `suggestionIntent`. While viewing snapshots it lets no authored edit through,
+  which Decision 6 reports instead of losing.
+- *Undo?* Each lane dispatches one transaction, the AI lane included after
+  Decision 1, so each apply is one undo step.
+- *Can tracking refuse a lane's edit?* Only a gesture that overlaps its own
+  insertion is refused, and the lanes write phrases side by side and blocks
+  bottom to top, so none was found that a lane produces. Decision 6 covers it
+  anyway.
+- *Conflicts with another author's pending text?* The engine's rules apply, the
+  same as two people typing. Formatting set over another author's pending
+  suggestion holds it (`within` on `findChanges().pending`, since #265),
+  whichever lane set it.
+- *A lane rewrite that moves a sentence to another block?* It reads as a move,
+  as the same edit by a person does, instead of a deletion and an insertion.
+- *A lane's attr change over another author's pending one?* It folds into that
+  change, as a person's would; the lane no longer adds a second record beside it.
+- *`insertAsSuggestion` across two blocks?* It becomes what typing over that
+  selection is: a proposal to delete the range and join the blocks, unpaired.
+  Today it strikes the range and inserts, leaving the blocks apart.
 
-## Tests (written first, failing before the change)
+## Tests
+
+Written first. Each one fails on `main` unless marked *guard*, which keeps
+today's behaviour through the change.
 
 - A rich edit that drops an existing break proposes deleting it; Accept removes
   it, Reject keeps it.
-- A plain edit with `"\n"` proposes a break, not a space.
-- A word swap from each lane is one act (shared `groupId`), decided whole.
-- A word swap typed over a selection in suggesting mode is one act.
-- Restating the original withdraws the author's earlier suggestion, in both
-  directions (own insertion, own deletion).
-- Each lane produces the same records as the same plain edit typed in
-  suggesting mode.
+- A plain edit, and `insertAsSuggestion`, with `"\n"` propose a break, not a
+  space; in a heading the break becomes a space, in a code block a newline.
+- A deletion spanning an image the lane did not read keeps the image.
+- A deletion spanning another author's pending deletion places the following
+  edits correctly.
+- `insertAsSuggestion` over a selection is one act.
 - A rich recolour of another author's pending colour holds their suggestion;
-  rejecting it brings theirs back (the #265 behaviour, kept through the move).
+  rejecting it brings theirs back. *Guard.*
+- A word swap from the plain, rich and AI lanes is one act. *Guard.*
+- Restating the original withdraws the author's earlier suggestion, own
+  insertion and own text deletion. *Guard.* Restating after a dropped break
+  withdraws the break's deletion.
+- Each lane produces the same records, by operation, text, author and pairing,
+  as the same edit typed in suggesting mode.
+- With no TrackChanges plugin, and while viewing snapshots, every lane writes
+  nothing and reports it.
+- An AI apply with formatting and text is one undo step.
+- `buildAcceptedTextMap` reads a break as `"\n"` and leaves out a break pending
+  deletion.
+- A rich insertion of "**foo** bar", and a paste of it typed in suggesting
+  mode, is one act.
+- A direct AI accept writes a break where its proposal has `"\n"`.
 
 ## Release
 
 This PR is docs only: no changeset, and the PR carries the `no-release` label.
-The implementation PR lists every `@scrivr/*` package as `patch`.
+The implementation PRs list every `@scrivr/*` package as `patch`; the lanes PR's
+changeset carries the **Breaking** note above.
+
+Delivery, each PR stacked on the one before:
+
+1. This RFC.
+2. The engine pairs a replacement (Decision 2), branch
+   `suggestion-lanes-252-engine`.
+3. The lanes (Decisions 1, 3, 4, 5, 6, 7).
 
 ## Files to create / modify
 
-- `plugins/src/track-changes/engine/` — pair the halves of one replace step.
-- `plugins/src/track-changes/lib/applyDiffAsSuggestion.ts`,
-  `lib/applyRichDiffAsSuggestion.ts`, `TrackChanges.ts`
-  (`insertAsSuggestion`), `ai/src/ai-suggestion/showHideApply.ts`
-  (`_applyTracked`) — plain edits under `trackAsSuggestion`.
-- `plugins/src/track-changes/lib/acceptedTextMap.ts` — breaks read as `"\n"`.
-- `lib/splitRangeForNewMark.ts` (`applyTrackedDelete`) — removed if no caller
-  remains. So is `applyRichDiffAsSuggestion`'s own `addTrackedMark` and
-  `inlinePieces`.
+- `packages/plugins/src/track-changes/engine/trackTransaction.ts`,
+  `helpers.ts`, `lib/mergeTrackedMarks.ts`, `lib/deleteTextIfInserted.ts` —
+  pair a replacement (PR 2).
+- `packages/plugins/src/track-changes/lib/applyDiffAsSuggestion.ts`,
+  `lib/applyRichDiffAsSuggestion.ts`, `TrackChanges.ts` (`insertAsSuggestion`),
+  `packages/ai/src/ai-suggestion/showHideApply.ts` (`_applyTracked`,
+  `applyKeepFormatting`, `_applyDirect`'s `"\n"`) — plain edits under
+  `trackAsSuggestion`, positions through `tr.mapping`.
+- `packages/plugins/src/track-changes/lib/acceptedTextMap.ts` and
+  `lib/applyRichDiffAsSuggestion.ts` (`collectAccepted`) — one reader of
+  accepted text, and the map's doc comment.
+- `packages/plugins/src/track-changes/lib/applyDiffAsSuggestion.ts`
+  (`clearAuthorPendingMarks`) — withdraw a node-level deletion.
+- `packages/plugins/src/track-changes/step-trackers/trackReplaceStep.ts` — the
+  pieces of one step's insertion linked by `creationId`.
+- `packages/plugins/src/track-changes/` — `suggestionBlocked`, exported from
+  `packages/plugins/src/track-changes/index.ts`, with the barrel comment on the
+  record builders corrected.
