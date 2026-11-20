@@ -14,6 +14,9 @@ function trackAttrsChangeStep(
   currentStepDoc: PMNode,
   replayBridge: Mapping,
 ): ChangeStep[] {
+  // Rewriting a node's review records, by anyone, is review bookkeeping, as
+  // taking off a review mark is: it stands as written, with nothing to record.
+  if (step.attr === "dataTracked") return [];
   const newStep = step.invert(currentStepDoc).map(replayBridge);
   if (!newStep) return [];
   const stepResult = newTr.maybeStep(newStep);
