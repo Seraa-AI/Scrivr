@@ -6,6 +6,7 @@ import {
   type DocxMarkTransform,
 } from "../../exports/docx";
 import type { PdfMarkHandler } from "../../exports/pdf";
+import { isCssReset, isCssWideKeyword } from "../../model/cssValues";
 
 interface ColorOptions {
   /** Preset color swatches shown in the toolbar (CSS color strings). */
@@ -39,7 +40,12 @@ export const Color = Extension.create<ColorOptions>({
         parseDOM: [
           {
             style: "color",
-            getAttrs: (value) => ({ color: value }),
+            getAttrs: (value) => (isCssWideKeyword(value) ? false : { color: value }),
+          },
+          {
+            style: "color",
+            getAttrs: (value) => isCssReset(value) && null,
+            clearMark: (mark) => mark.type.name === "color",
           },
           {
             tag: "font[color]",

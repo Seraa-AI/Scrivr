@@ -2,25 +2,28 @@
  * What an HTML import could not carry into the document.
  *
  * Nothing here lists what Scrivr supports. The schema's own parse rules are
- * the authority: a style rule names the property it reads, and a tag rule's
- * `getAttrs` is watched for the `style` properties it reads — off the element
- * in front of it, and off any element it reaches from there, such as a
- * table's columns. Whatever the HTML says that no rule read is reported, so a
- * feature that ships its parse rule stops being reported with no change here.
+ * the authority: a style rule takes a property when it accepts the value, and
+ * a tag rule's `getAttrs` is watched for the `style` properties it reads — off
+ * the element in front of it, and off any element it reaches from there, such
+ * as a table's columns. A declaration is judged longhand by longhand, so
+ * `margin: 24px 0` is reported when only its left margin was taken. Whatever
+ * no rule took is reported, so a feature that ships its parse rule stops being
+ * reported with no change here.
  */
 
-import { isHtmlElement } from "@scrivr/core";
+import { HTML_BLOCK_TAGS, isHtmlElement } from "@scrivr/core";
 import {
   DOMParser as PMDOMParser,
   type ParseRule,
   type Schema,
+  type StyleParseRule,
   type TagParseRule,
 } from "@scrivr/core/pm";
-import { INHERITED } from "./cascade";
+import type { Carried } from "./cascade";
 import { parseDeclarations } from "./stylesheet";
 
 export type HtmlDiagnosticCode =
-  /** A CSS property no rule reads; the value was dropped. */
+  /** A CSS property no rule took as written; the value was dropped. */
   | "html-style-unsupported"
   /** An element no rule reads; its text was kept, its meaning dropped. */
   | "html-element-unknown"
@@ -45,24 +48,30 @@ export interface HtmlImportDiagnostic {
   selector?: string;
 }
 
-/** What the steps before the parse could not apply. */
-export interface PreparseLosses {
+/** What the steps before the parse did: what they could not apply, and what they carried where. */
+export interface Preparse {
   unsupportedSelectors: string[];
   uninheritedProperties: string[];
+  carried: Carried;
 }
 
 /** A parser for `schema` that records what its rules read while parsing. */
 export function watchedParser(schema: Schema): {
   parser: PMDOMParser;
-  report: (body: HTMLElement, losses: PreparseLosses) => HtmlImportDiagnostic[];
+  report: (body: HTMLElement, preparse: Preparse) => HtmlImportDiagnostic[];
 } {
-  const seen: Seen = { taken: new Set(), declined: new Set(), opaque: new Set(), readStyles: new Map() };
+  const seen: Seen = {
+    taken: new Set(),
+    declined: new Set(),
+    opaque: new Set(),
+    readStyles: new Map(),
+    watched: new WeakMap(),
+  };
   const rules = PMDOMParser.fromSchema(schema).rules.map((rule) => (isTagRule(rule) ? watchTag(rule, schema, seen) : rule));
-  // A style rule may match one value only (`font-style=italic`); the property is what it reads.
-  const styleProperties = new Set(rules.flatMap((rule) => (isTagRule(rule) ? [] : [rule.style.split("=")[0] ?? ""])));
+  const styleRules = rules.filter((rule): rule is StyleParseRule => !isTagRule(rule));
   return {
     parser: new PMDOMParser(schema, rules),
-    report: (body, losses) => collect(body, losses, seen, styleProperties),
+    report: (body, preparse) => collect(body, preparse, seen, styleRules),
   };
 }
 
@@ -75,6 +84,8 @@ interface Seen {
   opaque: Set<Element>;
   /** The `style` properties a rule read off each element. */
   readStyles: Map<Element, Set<string>>;
+  /** One watched stand-in per element, so a rule comparing elements finds them equal. */
+  watched: WeakMap<HTMLElement, HTMLElement>;
 }
 
 const isTagRule = (rule: ParseRule): rule is TagParseRule => typeof rule.tag === "string";
@@ -99,6 +110,8 @@ function watchTag(rule: TagParseRule, schema: Schema, seen: Seen): TagParseRule 
 
 /** `el`, recording every `style` property read through it or through any element reached from it. */
 function watchElement(el: HTMLElement, seen: Seen): HTMLElement {
+  const known = seen.watched.get(el);
+  if (known) return known;
   const read = seen.readStyles.get(el) ?? new Set<string>();
   seen.readStyles.set(el, read);
   const style = new Proxy(el.style, {
@@ -113,24 +126,26 @@ function watchElement(el: HTMLElement, seen: Seen): HTMLElement {
       return bound(target, prop);
     },
   });
-  return new Proxy(el, {
-    get: (target, prop) => (prop === "style" ? style : watchValue(bound(target, prop), target, seen)),
+  const watched = new Proxy(el, {
+    get: (target, prop) => (prop === "style" ? style : watchValue(bound(target, prop), seen)),
   });
+  seen.watched.set(el, watched);
+  return watched;
 }
 
 /** An element or collection a rule reached, watched in turn; a method's result likewise. */
-function watchValue(value: unknown, owner: object, seen: Seen): unknown {
-  if (typeof value === "function") return (...args: unknown[]) => watchValue(value.apply(owner, args), owner, seen);
+function watchValue(value: unknown, seen: Seen): unknown {
+  if (typeof value === "function") return (...args: unknown[]) => watchValue(value(...args), seen);
   if (isHtmlElement(value)) return watchElement(value, seen);
   if (isElementCollection(value)) {
     return new Proxy(value, {
       get(target, prop) {
         if (prop === Symbol.iterator) {
           return function* () {
-            for (let i = 0; i < target.length; i++) yield watchValue(target.item(i), target, seen);
+            for (let i = 0; i < target.length; i++) yield watchValue(target.item(i), seen);
           };
         }
-        return watchValue(bound(target, prop), target, seen);
+        return watchValue(bound(target, prop), seen);
       },
     });
   }
@@ -158,13 +173,13 @@ function bound(target: object, prop: string | symbol): unknown {
 const kebabCase = (camel: string) => camel.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
 
 /** Dropped with their content by the parser when no rule takes them. */
-const IGNORED = new Set(["head", "noscript", "object", "script", "style", "title"]);
+export const IGNORED = new Set(["head", "noscript", "object", "script", "style", "title"]);
 
 /** Containers with no meaning of their own; the parser reads straight through them. */
 const TRANSPARENT = new Set(["div", "span", "tbody", "thead", "tfoot", "colgroup", "col"]);
 
 const MESSAGES: Record<HtmlDiagnosticCode, (subject: string, count: number) => string> = {
-  "html-style-unsupported": (property, count) => `"${property}" is not supported here and was dropped (${count}×).`,
+  "html-style-unsupported": (property, count) => `"${property}" could not be applied as written and was dropped (${count}×).`,
   "html-element-unknown": (tag, count) => `<${tag}> has no equivalent; its text was kept without it (${count}×).`,
   "html-element-ignored": (tag, count) => `<${tag}> and everything in it were dropped (${count}×).`,
   "html-element-rejected": (tag, count) =>
@@ -175,12 +190,7 @@ const MESSAGES: Record<HtmlDiagnosticCode, (subject: string, count: number) => s
 
 type Subject = { tag: string } | { property: string } | { selector: string };
 
-function collect(
-  body: HTMLElement,
-  losses: PreparseLosses,
-  seen: Seen,
-  styleProperties: Set<string>,
-): HtmlImportDiagnostic[] {
+function collect(body: HTMLElement, preparse: Preparse, seen: Seen, styleRules: StyleParseRule[]): HtmlImportDiagnostic[] {
   const found = new Map<string, { entry: Omit<HtmlImportDiagnostic, "message">; subject: string }>();
   const note = (code: HtmlDiagnosticCode, subject: Subject) => {
     const name = "tag" in subject ? subject.tag : "property" in subject ? subject.property : subject.selector;
@@ -190,10 +200,24 @@ function collect(
     else found.set(key, { entry: { level: "warning", code, count: 1, ...subject }, subject: name });
   };
 
-  // Shorthands expand: `margin` is applied when a rule read `margin-left` from it.
-  const applied = (property: string, read: Set<string> | undefined) =>
-    INHERITED.has(property) ||
-    [...styleProperties, ...(read ?? [])].some((name) => name === property || name.startsWith(`${property}-`));
+  const took = (el: HTMLElement) => new Set([...(seen.readStyles.get(el) ?? []), ...takenByStyleRules(el, styleRules)]);
+  // A value carried down is lost only where it reached content and nothing
+  // took it; passing through containers whose blocks state their own loses nothing.
+  const reached = new Pairs();
+  const landed = new Pairs();
+  const missed = new Pairs();
+  for (const [target, origins] of preparse.carried) {
+    if (!isHtmlElement(target)) continue;
+    const taken = took(target);
+    const holdsContent = !Array.from(target.children).some((child) => HTML_BLOCK_TAGS.has(child.tagName.toLowerCase()));
+    for (const [property, source] of origins) {
+      reached.add(source, property);
+      if (covers(taken, property)) landed.add(source, property);
+      else if (holdsContent) missed.add(source, property);
+    }
+  }
+  const carriedOff = (el: Element, property: string) =>
+    landed.has(el, property) || (reached.has(el, property) && !missed.has(el, property));
 
   const visit = (el: Element) => {
     const tag = el.tagName.toLowerCase();
@@ -202,15 +226,65 @@ function collect(
       if (IGNORED.has(tag)) return note("html-element-ignored", { tag });
       note(seen.declined.has(el) ? "html-element-rejected" : "html-element-unknown", { tag });
     }
-    const read = seen.readStyles.get(el);
-    for (const property of parseDeclarations(el.getAttribute("style") ?? "").keys()) {
-      if (!applied(property, read)) note("html-style-unsupported", { property });
+    if (isHtmlElement(el)) {
+      const taken = took(el);
+      const written = preparse.carried.get(el);
+      for (const [property, { value }] of parseDeclarations(el.getAttribute("style") ?? "")) {
+        if (written?.has(property) || carriedOff(el, property)) continue;
+        if (longhands(el, property, value).some((longhand) => !covers(taken, longhand))) {
+          note("html-style-unsupported", { property });
+        }
+      }
     }
     if (!seen.opaque.has(el)) for (const child of Array.from(el.children)) visit(child);
   };
-  for (const selector of losses.unsupportedSelectors) note("html-selector-unsupported", { selector });
-  for (const property of losses.uninheritedProperties) note("html-style-unsupported", { property });
+  for (const selector of preparse.unsupportedSelectors) note("html-selector-unsupported", { selector });
+  for (const property of preparse.uninheritedProperties) note("html-style-unsupported", { property });
   for (const child of Array.from(body.children)) visit(child);
 
   return [...found.values()].map(({ entry, subject }) => ({ ...entry, message: MESSAGES[entry.code](subject, entry.count) }));
+}
+
+/** Element–property pairs. */
+class Pairs {
+  private readonly byElement = new Map<Element, Set<string>>();
+  add(el: Element, property: string): void {
+    const properties = this.byElement.get(el) ?? new Set<string>();
+    properties.add(property);
+    this.byElement.set(el, properties);
+  }
+  has(el: Element, property: string): boolean {
+    return this.byElement.get(el)?.has(property) ?? false;
+  }
+}
+
+/** The properties of `el`'s style a style rule takes, as the parse matches them. */
+function takenByStyleRules(el: HTMLElement, rules: StyleParseRule[]): string[] {
+  return rules.flatMap((rule) => {
+    const [property = "", only] = rule.style.split("=");
+    const value = el.style.getPropertyValue(property);
+    if (!value || (only !== undefined && only !== value)) return [];
+    return !rule.getAttrs || rule.getAttrs(value) !== false ? [property] : [];
+  });
+}
+
+/** Read as itself, or as part of a shorthand a rule read whole. */
+function covers(taken: Set<string>, longhand: string): boolean {
+  return [...taken].some((name) => name === longhand || longhand.startsWith(`${name}-`));
+}
+
+/** Values that state nothing: a CSS-wide keyword, or the default a shorthand fills in. */
+const STATES_NOTHING = /^\s*(inherit|initial|unset|revert|revert-layer|normal)\s*$/i;
+
+/**
+ * What one declaration sets, longhand by longhand, leaving out what states
+ * nothing: `margin: 24px 0` sets four margins, `background: #ff0` one colour.
+ */
+function longhands(el: HTMLElement, property: string, value: string): string[] {
+  const probe = el.ownerDocument.createElement("span");
+  probe.setAttribute("style", `${property}: ${value}`);
+  const names = Array.from({ length: probe.style.length }, (_, i) => probe.style.item(i));
+  // A property the DOM does not know expands to nothing; it is still a loss.
+  if (names.length === 0) return STATES_NOTHING.test(value) ? [] : [property];
+  return names.filter((name) => !STATES_NOTHING.test(probe.style.getPropertyValue(name)));
 }

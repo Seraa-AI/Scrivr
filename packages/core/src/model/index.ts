@@ -16,6 +16,7 @@ export type { SpansToFragmentOptions } from "./spansToFragment";
 export { sanitizeDocUrls } from "./sanitizeDocUrls";
 export { applyImportedDocument } from "./applyImportedDocument";
 export { isHtmlElement } from "./isHtmlElement";
+export { HTML_BLOCK_TAGS } from "./htmlBlockTags";
 export { dropPendingPlaceholders } from "./dropPendingPlaceholders";
 export { assignBlockIds, blockIdOf, planBlockIdAssignments, planDuplicateIdAssignments, recloneDocumentIds } from "./assignBlockIds";
 export { fnv1aHex, sha256Hex, stableStringify } from "./hash";

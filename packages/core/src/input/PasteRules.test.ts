@@ -7,15 +7,25 @@ import { describe, it, expect } from "vitest";
 import { DOMParser as PMDOMParser, type Node } from "prosemirror-model";
 import { ExtensionManager } from "../extensions/ExtensionManager";
 import { StarterKit } from "../extensions/StarterKit";
+import { Field } from "../extensions/built-in/Field";
 import { cleanPastedHtml } from "./PasteTransformer";
 
-const { schema } = new ExtensionManager([StarterKit]);
+const { schema } = new ExtensionManager([StarterKit, Field]);
 
 function paste(html: string): Node {
   const root = document.createElement("div");
   root.innerHTML = html;
   cleanPastedHtml(root);
   return PMDOMParser.fromSchema(schema).parse(root);
+}
+
+function markAttrs(doc: Node, text: string, mark: string): unknown {
+  let attrs: unknown = null;
+  doc.descendants((node) => {
+    if (node.isText && node.text === text) attrs = node.marks.find((m) => m.type.name === mark)?.attrs ?? null;
+    return true;
+  });
+  return attrs;
 }
 
 const blocks = (doc: Node) => {
@@ -51,6 +61,13 @@ describe("pasted divs", () => {
     expect(blocks(paste(`<p>a</p><div><br></div><p>b</p>`))).toEqual(["paragraph:a", "paragraph:", "paragraph:b"]);
   });
 
+  it("a div holding only an inline atom, such as a field, is a paragraph", () => {
+    const doc = paste(`<div style="text-align:center"><span data-field="signature" data-role="a"></span></div>`);
+    expect(doc.child(0).type.name).toBe("paragraph");
+    expect(doc.child(0).attrs["align"]).toBe("center");
+    expect(doc.child(0).firstChild?.type.name).toBe("field");
+  });
+
   it("a div whose blocks sit inside an inline wrapper is read through", () => {
     expect(blocks(paste(`<div><a href="https://x.y"><h2>T</h2><p>y</p></a></div>`))).toEqual([
       "heading:T",
@@ -84,5 +101,26 @@ describe("pasted formatting", () => {
 
   it("a span's background is the source page's, and is cleaned away", () => {
     expect(marksOf(paste(`<p><span style="background-color:#ff0">h</span></p>`), "h")).toEqual([]);
+  });
+
+  it("a font size of zero or less is no size", () => {
+    for (const size of ["0", "-4px"]) {
+      expect(markAttrs(paste(`<p><span style="font-size:${size}">s</span></p>`), "s", "fontSize")).toBeNull();
+    }
+  });
+
+  it("a colour or size set to a CSS-wide keyword is not a value", () => {
+    expect(markAttrs(paste(`<p><span style="color:inherit;font-size:inherit">s</span></p>`), "s", "color")).toBeNull();
+    expect(markAttrs(paste(`<p><span style="font-size:inherit">s</span></p>`), "s", "fontSize")).toBeNull();
+    expect(markAttrs(paste(`<p><span style="font-family:inherit">s</span></p>`), "s", "fontFamily")).toBeNull();
+  });
+
+  it("`initial` resets the colour and size the text would inherit", () => {
+    const doc = paste(
+      `<p><span style="color:#c00;font-size:20px">a<span style="color:initial;font-size:initial">b</span></span></p>`,
+    );
+    expect(markAttrs(doc, "a", "color")).toMatchObject({ color: "#c00" });
+    expect(markAttrs(doc, "b", "color")).toBeNull();
+    expect(markAttrs(doc, "b", "fontSize")).toBeNull();
   });
 });

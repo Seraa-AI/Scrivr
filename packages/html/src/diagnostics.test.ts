@@ -66,13 +66,48 @@ describe("importHtml diagnostics", () => {
     ]);
   });
 
-  it("a shorthand is judged by the longhands the rules read from it", async () => {
+  it("a shorthand is applied when every longhand it sets was read", async () => {
     expect(
-      await diagnosticsOf(
-        `<p style="margin: 0 0 0 48px">m</p>` +
-          `<p><span style="background: yellow">h</span> <span style="font: bold 20px Georgia">f</span></p>`,
-      ),
+      await diagnosticsOf(`<p><span style="background: yellow">h</span> <span style="font: bold 20px Georgia">f</span></p>`),
     ).toEqual([]);
+  });
+
+  it("a shorthand is reported when any longhand it sets was dropped", async () => {
+    const diagnostics = await diagnosticsOf(
+      `<p style="margin: 24px 0">m</p><p><span style="background: url(a.png) no-repeat">b</span>` +
+        `<span style="font: italic 20px/1.5 Georgia">f</span></p>`,
+    );
+    expect(diagnostics).toEqual([
+      expect.objectContaining({ code: "html-style-unsupported", property: "margin", count: 1 }),
+      expect.objectContaining({ code: "html-style-unsupported", property: "background", count: 1 }),
+      expect.objectContaining({ code: "html-style-unsupported", property: "font", count: 1 }),
+    ]);
+  });
+
+  it("a value no rule takes is reported, though its property is supported", async () => {
+    const diagnostics = await diagnosticsOf(
+      `<p><span style="font-size: large">a</span><span style="font-size: 120%">b</span>` +
+        `<span style="text-decoration: underline dotted">c</span></p>`,
+    );
+    expect(diagnostics).toEqual([
+      expect.objectContaining({ code: "html-style-unsupported", property: "font-size", count: 2 }),
+      expect.objectContaining({ code: "html-style-unsupported", property: "text-decoration", count: 1 }),
+    ]);
+  });
+
+  it("a style is reported when the editor has no extension to hold it", async () => {
+    const editor = new ServerEditor({ extensions: [StarterKit.configure({ color: false })] });
+    const { diagnostics } = await importHtml(editor, `<body style="color:#333"><p style="color:red">r</p></body>`);
+    expect(diagnostics).toEqual([
+      expect.objectContaining({ code: "html-style-unsupported", property: "color", count: 2 }),
+    ]);
+  });
+
+  it("alignment on an inline element is reported — it aligns nothing", async () => {
+    const diagnostics = await diagnosticsOf(`<p><span style="text-align:center">s</span></p>`);
+    expect(diagnostics).toEqual([
+      expect.objectContaining({ code: "html-style-unsupported", property: "text-align", count: 1 }),
+    ]);
   });
 
   it("a style a rule reads off another element than its own counts as read", async () => {

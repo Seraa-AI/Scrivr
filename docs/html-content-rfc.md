@@ -232,12 +232,11 @@ in HTML isn't finished.
   applied onto each element's `style` attribute before parsing:
   - Selectors are checked first (type, `#id`, `.class`, compounds and comma
     lists), then matched with the DOM's own `querySelectorAll`.
-  - An inline declaration beats every rule, then specificity decides, then
-    source order.
+  - `!important` first, then an inline declaration beats any rule, then
+    specificity decides, then source order.
   - `<body>`/`<html>` can't be read by the parser, so their inherited
-    properties (font, color, alignment, line height, indent) are handed down
-    to every element that doesn't set its own. Their other properties, such
-    as the page `margin`, are reported.
+    properties (font, colour, alignment, indent) move onto a wrapper around
+    the page. Their other properties, such as the page `margin`, are reported.
   - Other selectors and at-rules are reported as `html-selector-unsupported`.
 - **Moved from D7 to D8:** `<ol type>`. Ordered lists have no numbering-kind
   attribute, so supporting it is a schema change. `@scrivr/docx` and `@scrivr/html`
@@ -245,9 +244,9 @@ in HTML isn't finished.
 - **Found while building, fixed at the seam:** the parse rules for links,
   images, tables, fields, section breaks and sourced blocks checked
   `instanceof Element` / `HTMLElement`. On a server those globals don't exist,
-  so the import threw. A shape check, `isHtmlElement` (exported from core),
-  replaces them, so the rules read HTML from any DOM. Paste uses the same
-  rules.
+  so the import threw. A tag rule's `getAttrs` is only ever given an element,
+  so most checks went; the table code, which walks to other nodes, uses the
+  shape check `isHtmlElement` (exported from core). Paste uses the same rules.
 - **D3 turned out to need no split.** The import runs no cleaning at all,
   because ProseMirror already skips `<script>`, `<style>` and `<head>`.
   `cleanPastedHtml` is unchanged and still runs only on paste.
@@ -255,10 +254,10 @@ in HTML isn't finished.
   and indent correctly, which the tests confirm. `readStyle` would only matter
   for a DOM that doesn't implement `style`.
 - **D6 diagnostics, with no hand-kept list.** The schema's rules decide what
-  "supported" means. A style rule names the property it reads, and each tag
-  rule's `getAttrs` is watched through a proxy for the `style` properties it
-  reads off the element it was given. Anything the HTML says that no rule read
-  is reported once per kind, with a count:
+  "supported" means. A style rule takes a property when it accepts the value,
+  and each tag rule's `getAttrs` is watched through a proxy for the `style`
+  properties it reads. Anything the HTML says that no rule took is reported
+  once per kind, with a count:
   - `html-style-unsupported`
   - `html-element-unknown`
   - `html-element-ignored`
@@ -273,17 +272,27 @@ in HTML isn't finished.
     sheet applies. Before, it failed the whole import.
   - `!important` is honored, an unclosed final rule still applies, and a `;`
     inside `url(...)` stays part of its value.
-  - Inheritance is no longer copied onto every descendant (`cascade.ts`):
-    - Block properties pass from any container to its blocks.
-    - Page text styles go onto the text runs, and stop at an element's own
-      default (link color, heading size, `<b>` weight).
-    - Before, the result depended on whether `<body>` had any style, and it
-      overrode `<b>`, `<h1>` and `<a>`.
-  - Diagnostics no longer report things that were applied:
-    - A shorthand counts as applied when a rule read one of its longhands.
+  - Inheritance follows CSS (`cascade.ts`):
+    - Text styles are carried by the parse itself, as marks, from any
+      element — the page's from a wrapper around it. A link keeps its colour
+      and a heading its size because the cascade gives them `color: initial`
+      / `font-size: initial`, which the colour and size rules read as a reset.
+    - Block properties pass from a block to the blocks inside it, and text
+      sitting straight in a block (a cell, a list item, the page) gets a
+      paragraph carrying them — the one the parse would have made bare.
+    - What an element states beats what it inherits: its style, its `align`,
+      a `<font>`'s attributes.
+  - Diagnostics report what was lost and nothing else:
+    - A declaration is judged longhand by longhand: `margin: 24px 0` is
+      reported when only the left margin was taken; `background: yellow` is
+      not, since its other longhands state nothing.
+    - A style rule must accept the value, not just name the property:
+      `font-size: large` and `text-decoration: underline dotted` are reported.
+    - A value the cascade carried down is lost only when it reached content
+      and nothing took it; with the colour extension off, colour is reported.
     - Reads a rule makes through elements it reaches from its own (a table's
-      `<col>`) are watched.
-    - Properties the cascade carries count as consumed.
+      `<col>`, a Word table's cell widths) are watched, through one stand-in
+      per element so a rule comparing elements finds them equal.
   - A `div` rule no longer turns an empty spacer div, or a div with blocks
     nested inside an inline wrapper, into a blank paragraph. This applies to
     paste too, with tests in core (`PasteRules.test.ts`).
@@ -291,5 +300,9 @@ in HTML isn't finished.
   - `isHtmlElement` checks for `style`.
   - The table's column-width reader shares `cssLengthToPx`. `em` resolves
     only when the caller knows the font size.
-  - px font sizes keep their fractions.
+  - px font sizes keep their fractions; a size of zero or less is no size.
+  - A CSS-wide keyword (`inherit`, `initial`) is not a colour, size or family.
+  - A `div` holding only an inline atom, such as a field, is a paragraph.
+  - A selector list with an empty entry (`p, { }`) is invalid whole, as in a
+    browser, and reported.
 

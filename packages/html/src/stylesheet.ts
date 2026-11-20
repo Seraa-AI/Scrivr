@@ -33,8 +33,14 @@ export function applyStylesheets(body: HTMLElement): string[] {
         unsupported.push(prelude);
         continue;
       }
+      const selectors = prelude.split(",").map((s) => s.trim());
+      // One empty entry invalidates the whole list, as in a browser.
+      if (selectors.includes("")) {
+        unsupported.push(prelude);
+        continue;
+      }
       const declarations = parseDeclarations(block);
-      for (const selector of prelude.split(",").map((s) => s.trim())) {
+      for (const selector of selectors) {
         const matched = SIMPLE_SELECTOR.test(selector) ? select(doc, selector) : null;
         if (matched === null) {
           unsupported.push(selector);

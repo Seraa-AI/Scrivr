@@ -10,6 +10,7 @@ import {
 } from "../../exports/docx";
 import { semanticImage, type SemanticNodeHandler } from "../../exports/semantic";
 import type { PdfNodeHandler } from "../../exports/pdf";
+import { HTML_BLOCK_TAGS } from "../../model/htmlBlockTags";
 import type { Node as PmNode } from "prosemirror-model";
 import { floats } from "../../layout/AnchoredObjects";
 import { blockStyleAttrs } from "./blockStyleAttrs";
@@ -252,17 +253,13 @@ declare module "@scrivr/core" {
   }
 }
 
-/** Elements that open a block of their own when they appear in HTML. */
-const BLOCK_TAGS = new Set([
-  "address", "article", "aside", "blockquote", "dd", "div", "dl", "dt", "figcaption", "figure",
-  "footer", "form", "h1", "h2", "h3", "h4", "h5", "h6", "header", "hr", "li", "main", "nav",
-  "ol", "p", "pre", "section", "table", "ul",
-]);
+const BLOCK_SELECTOR = [...HTML_BLOCK_TAGS].join(",");
 
-const BLOCK_SELECTOR = [...BLOCK_TAGS].join(",");
-
-/** Inline content with something to show — text, a line break, an image — and no block anywhere inside. */
+/**
+ * Inline content with something to show and no block anywhere inside. An
+ * element with nothing in it — a line break, an image, a field — shows itself.
+ */
 function isParagraphDiv(el: HTMLElement): boolean {
   if (el.querySelector(BLOCK_SELECTOR)) return false;
-  return (el.textContent ?? "").trim() !== "" || el.querySelector("br, img") !== null;
+  return (el.textContent ?? "").trim() !== "" || Array.from(el.querySelectorAll("*")).some((child) => !child.hasChildNodes());
 }

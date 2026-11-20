@@ -3,7 +3,7 @@ import { Extension } from "../Extension";
 import type { FontModifier, ToolbarItemSpec } from "../types";
 import type { ParsedFont } from "../../layout/StyleResolver";
 import type { DocxMarkHandler, DocxMarkTransform } from "../../exports/docx";
-import { cssPrimaryFamily } from "../../model/cssValues";
+import { cssPrimaryFamily, isCssWideKeyword } from "../../model/cssValues";
 
 interface FontFamilyOptions {
   /** Font family presets shown in the toolbar. */
@@ -209,6 +209,6 @@ declare module "@scrivr/core" {
  * value matches toolbar presets and blockAttrs comparisons.
  */
 function familyAttrs(value: string) {
-  const family = cssPrimaryFamily(value);
+  const family = isCssWideKeyword(value) ? null : cssPrimaryFamily(value);
   return family ? { family } : false;
 }

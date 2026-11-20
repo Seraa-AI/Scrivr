@@ -99,4 +99,79 @@ describe("HTML formatting the schema holds", () => {
     });
     expect(background).toEqual(expect.stringMatching(/^#?eeeeee$/i));
   });
+
+  it("Word's cell widths are the table's column widths", async () => {
+    const doc = await load(`<table><tr><td style="width:100pt">a</td><td style="width:200pt">b</td></tr></table>`);
+    const grid: unknown = doc.child(0).attrs["grid"];
+    expect(grid).toEqual([expect.closeTo(133.33, 1), expect.closeTo(266.67, 1)]);
+  });
+});
+
+describe("what an element states beats what it inherits", () => {
+  it("<font> keeps its colour, face and size under a page style", async () => {
+    const doc = await load(
+      `<body style="color:#333333;font-family:Georgia;font-size:10px">` +
+        `<p><font color="#ff0000" face="Arial" size="5">f</font> rest</p></body>`,
+    );
+    expect(marksOf(doc, "f")).toMatchObject({
+      color: { color: "#ff0000" },
+      fontFamily: { family: "Arial" },
+      fontSize: { size: 24 },
+    });
+    expect(marksOf(doc, " rest")).toMatchObject({ color: { color: "#333333" }, fontSize: { size: 10 } });
+  });
+
+  it("a cell's align attribute beats its container's alignment", async () => {
+    const doc = await load(`<div style="text-align:left"><table><tr><td align="center">x</td></tr></table></div>`);
+    let cell: Record<string, unknown> = {};
+    let paragraph: Record<string, unknown> = {};
+    doc.descendants((node) => {
+      if (node.type.name === "tableCell") cell = node.attrs;
+      if (node.type.name === "paragraph") paragraph = node.attrs;
+      return true;
+    });
+    expect(cell["hAlign"]).toBe("center");
+    expect(paragraph["align"]).toBe("center");
+  });
+
+  it("a wrapper's page styles leave a heading its size and a link its colour", async () => {
+    const doc = await load(
+      `<div style="color:#333333;font-size:12px"><h1>T</h1><p><a href="https://seraa.ai">L</a> t</p></div>`,
+    );
+    expect(marksOf(doc, "T")).not.toHaveProperty("fontSize");
+    expect(marksOf(doc, "T")).toHaveProperty("color");
+    expect(marksOf(doc, "L")).not.toHaveProperty("color");
+    expect(marksOf(doc, "L")).toHaveProperty("fontSize");
+    expect(marksOf(doc, " t")).toMatchObject({ color: { color: "#333333" }, fontSize: { size: 12 } });
+  });
+
+  it("the space between two formatted words takes the page's size too", async () => {
+    const doc = await load(`<body style="font-size:24px"><p><b>Hello</b> <i>world</i></p></body>`);
+    expect(marksOf(doc, " ")).toMatchObject({ fontSize: { size: 24 } });
+  });
+});
+
+describe("alignment reaches text that sits straight in its container", () => {
+  it("in the page, a list item, a cell, and beside a block", async () => {
+    const page = await load(`<body style="text-align:center">Hello</body>`);
+    expect(page.child(0).attrs["align"]).toBe("center");
+
+    const item = await load(`<ul><li style="text-align:center">Item</li></ul>`);
+    expect(item.child(0).child(0).child(0).attrs["align"]).toBe("center");
+
+    const mixed = await load(`<div style="text-align:center">loose <b>bold</b><p>wrapped</p></div>`);
+    expect(mixed.childCount).toBe(2);
+    expect(mixed.child(0).textContent).toBe("loose bold");
+    expect([0, 1].map((i) => mixed.child(i).attrs["align"])).toEqual(["center", "center"]);
+  });
+
+  it("a number in a right-aligned cell is right-aligned", async () => {
+    const doc = await load(`<table><tr><td style="text-align:right">42</td></tr></table>`);
+    let align: unknown = null;
+    doc.descendants((node) => {
+      if (node.type.name === "paragraph") align = node.attrs["align"];
+      return true;
+    });
+    expect(align).toBe("right");
+  });
 });

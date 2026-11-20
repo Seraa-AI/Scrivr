@@ -2,7 +2,7 @@ import { Extension } from "../Extension";
 import type { FontModifier, ToolbarItemSpec } from "../types";
 import type { ParsedFont } from "../../layout/StyleResolver";
 import type { DocxMarkHandler, DocxMarkTransform } from "../../exports/docx";
-import { DEFAULT_FONT_PX, cssLengthToPx, htmlFontSizeToPx } from "../../model/cssValues";
+import { DEFAULT_FONT_PX, cssLengthToPx, htmlFontSizeToPx, isCssReset, parseCssLength } from "../../model/cssValues";
 
 interface FontSizeOptions {
   /** Font size presets shown as toolbar buttons (px values). */
@@ -35,6 +35,11 @@ export const FontSize = Extension.create<FontSizeOptions>({
           {
             style: "font-size",
             getAttrs: (value) => sizeAttrs(cssFontSizeToPx(value)),
+          },
+          {
+            style: "font-size",
+            getAttrs: (value) => isCssReset(value) && null,
+            clearMark: (mark) => mark.type.name === "fontSize",
           },
           {
             tag: "font[size]",
@@ -148,7 +153,7 @@ declare module "@scrivr/core" {
 }
 
 function sizeAttrs(px: number | null) {
-  return px === null ? false : { size: px };
+  return px === null || px <= 0 ? false : { size: px };
 }
 
 /**
@@ -159,5 +164,6 @@ function sizeAttrs(px: number | null) {
 function cssFontSizeToPx(value: string): number | null {
   const px = cssLengthToPx(value, DEFAULT_FONT_PX);
   if (px === null) return null;
-  return /^\s*[\d.]+\s*(px)?\s*$/i.test(value) ? px : Math.round(px);
+  const unit = parseCssLength(value)?.unit;
+  return unit === "px" || unit === "" ? px : Math.round(px);
 }

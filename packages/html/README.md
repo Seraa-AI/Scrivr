@@ -18,14 +18,15 @@ export condition keeps happy-dom out of browser bundles.
 
 `<style>` rules apply too, for type, `#id` and `.class` selectors (and
 compounds and comma lists of them), with the browser's precedence:
-`!important`, then inline style, then specificity, then source order. Text
-styles on `<body>` reach the text without overriding an element's own
-default, and a container's alignment reaches its blocks.
+`!important`, then inline style, then specificity, then source order. Styles
+inherit as in CSS: the page's text styles reach the text without overriding
+what an element states or sets by default, and a block's alignment reaches the
+blocks and text inside it.
 
 One bad piece never fails the import: it is reported, and the rest is read.
 
-`importHtml` also returns `diagnostics`: every style and element in the HTML
-that no rule read, counted, so an agent can see what did not land.
+`importHtml` also returns `diagnostics`: the styles, elements and selectors in
+the HTML that no rule took, counted, so an agent can see what did not land.
 
 In the browser, add `HtmlImport` for an `importHtmlFromFile` command and
 toolbar item that loads an `.html` file.

@@ -23,13 +23,30 @@ import { cascadeInherited } from "./cascade";
 
 export type { HtmlImportDiagnostic };
 
+/** What an HTML import produced, and what it could not carry. */
 export interface HtmlImportResult {
   doc: PmNode;
   /** What the HTML said that the document could not carry. */
   diagnostics: HtmlImportDiagnostic[];
 }
 
-/** The signature of `importHtml`. */
+/**
+ * Import an HTML document using the editor's schema.
+ *
+ * Returns the document and `diagnostics`: the styles, elements and selectors
+ * the HTML used that the document could not carry. One bad piece never fails
+ * the import; it is reported and the rest is read.
+ *
+ * Blocks keep the `data-node-id` the HTML gives them, so an agent can refer
+ * back to what it wrote. Where two blocks share one, the first keeps it and
+ * the rest get fresh ids; a block with none gets one when the editor has
+ * `UniqueId`, as a session typing it would.
+ *
+ * @example
+ *   const editor = new ServerEditor();
+ *   const { doc, diagnostics } = await importHtml(editor, html);
+ *   applyImportedDocument(editor, doc);
+ */
 export type ImportHtml = (editor: IBaseEditor, html: string) => Promise<HtmlImportResult>;
 
 /** `importHtml`, reading HTML with `withHtmlBody`. */
@@ -38,8 +55,9 @@ export function htmlImporter(withHtmlBody: WithHtmlBody): ImportHtml {
     const { parser, report } = watchedParser(editor.schema);
     const parsed = await withHtmlBody(html, (body) => {
       const unsupportedSelectors = applyStylesheets(body);
-      const uninheritedProperties = cascadeInherited(body);
-      return { doc: parser.parse(body), diagnostics: report(body, { unsupportedSelectors, uninheritedProperties }) };
+      const { carried, uninherited } = cascadeInherited(body);
+      const doc = parser.parse(body);
+      return { doc, diagnostics: report(body, { unsupportedSelectors, uninheritedProperties: uninherited, carried }) };
     });
     let doc = rekeyRepeatedIds(parsed.doc);
     if (editor.findExtension("uniqueId")) doc = assignBlockIds(doc);

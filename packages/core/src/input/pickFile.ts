@@ -26,7 +26,6 @@ export function pickFile(accept: string): Promise<File | undefined> {
     });
     input.addEventListener("cancel", () => settle(undefined));
 
-    // Focus-based fallback for browsers without the `cancel` event.
     window.addEventListener(
       "focus",
       () => {

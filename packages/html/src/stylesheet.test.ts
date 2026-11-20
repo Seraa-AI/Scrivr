@@ -100,6 +100,14 @@ describe("<style> rules", () => {
     ]);
   });
 
+  it("a selector list with an empty entry is invalid whole, as in a browser", async () => {
+    const { doc, diagnostics } = await load(`<style>p, { color: red }</style><p>a</p>`);
+    expect(colorOf(doc, "a")).toBeUndefined();
+    expect(diagnostics).toEqual([
+      expect.objectContaining({ code: "html-selector-unsupported", selector: "p,", count: 1 }),
+    ]);
+  });
+
   it("reports selectors and at-rules it does not apply", async () => {
     const { doc, diagnostics } = await load(
       `<style>
