@@ -98,10 +98,9 @@ function sameOwnAttrs(a: Mark, b: Mark): boolean {
  * (bold/highlight/color/…): a run of the same mark, same author, operation and
  * status collapses to one tracking id — the same grouping typing already gets,
  * now for formatting. Marks with different OWN attrs (e.g. two colors) never
- * merge. Merging is keyed on userID + operation + status, and fuses only the
- * single records of `authorID`, the author writing: fusing renames records.
- * Two halves of different replacements never fuse; a run that fuses with one
- * stays paired with it.
+ * merge. Whether two records fuse is `shouldMergeTrackedAttributes`'s call,
+ * and only the single records of `authorID`, the author writing, fuse: fusing
+ * renames records.
  */
 export function mergeTrackedMarks(pos: number, doc: PMNode, newTr: Transaction, schema: Schema, authorID: string) {
   const resolved = doc.resolve(pos);
@@ -132,19 +131,13 @@ export function mergeTrackedMarks(pos: number, doc: PMNode, newTr: Transaction, 
     // Already the same change — no need to regenerate the ID (would fragment the group).
     if (leftDataTracked.id && leftDataTracked.id === rightDataTracked.id) continue;
 
-    if (!shouldMergeTrackedAttributes(leftDataTracked, rightDataTracked)) continue;
+    const isLeftOlder = (leftDataTracked.createdAt || 0) < (rightDataTracked.createdAt || 0);
+    const [ancestorAttrs, laterAttrs] = isLeftOlder ? [leftDataTracked, rightDataTracked] : [rightDataTracked, leftDataTracked];
+    if (!shouldMergeTrackedAttributes(ancestorAttrs, laterAttrs)) continue;
     // Fusing gives the run one id, renaming the records it fuses: only the author writing does that to their own.
     if (leftDataTracked.authorID !== authorID) continue;
 
-    const isLeftOlder = (leftDataTracked.createdAt || 0) < (rightDataTracked.createdAt || 0);
-    const ancestorAttrs = isLeftOlder ? leftDataTracked : rightDataTracked;
-    // Whichever half belongs to a replacement keeps the fused run paired with it.
-    const groupId = leftDataTracked.groupId ?? rightDataTracked.groupId;
-    const merged = assignId(
-      { ...ancestorAttrs, ...(groupId !== undefined ? { groupId } : {}), updatedAt: Date.now() },
-      leftDataTracked,
-      rightDataTracked,
-    );
+    const merged = assignId({ ...ancestorAttrs, updatedAt: Date.now() }, leftDataTracked, rightDataTracked);
     // Preserve the original storage shape (array for formatting marks, single
     // object for tracked insert/delete text).
     const dataTracked = Array.isArray(leftMark.attrs.dataTracked) ? [merged] : merged;
