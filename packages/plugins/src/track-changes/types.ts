@@ -91,8 +91,9 @@ type InsertDeleteAttrs = {
   isConflict?: boolean;
   /**
    * Shared by the deletion and the insertion of one replacement, so deciding
-   * either half decides both. Set by the suggestion lanes' diffs and by the
-   * engine when an edit types over a selection.
+   * either half decides both. Set by `applyDiffAsSuggestion`,
+   * `applyRichDiffAsSuggestion` and AI suggestion apply, and by the engine when
+   * an edit types over a selection.
    */
   groupId?: string;
   /**
