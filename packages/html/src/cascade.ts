@@ -12,14 +12,22 @@
  *   `align`, and its defaults — a link keeps its colour, a heading its size.
  */
 
-import { HTML_BLOCK_TAGS, HTML_IGNORED_TAGS, htmlShows, isHtmlBlock, isHtmlElement, safeUrl } from "@scrivr/core";
+import {
+  HTML_BLOCK_TAGS,
+  HTML_IGNORED_TAGS,
+  htmlAlign,
+  htmlShows,
+  isHtmlBlock,
+  isHtmlElement,
+  safeUrl,
+} from "@scrivr/core";
 import { parseDeclarations, serializeDeclarations } from "./stylesheet";
 
 const TEXT_PROPERTIES = new Set(["color", "font-family", "font-size", "font-style", "font-weight"]);
 /** Block properties, which the cascade carries since the parse does not. */
 export const BLOCK_PROPERTIES: ReadonlySet<string> = new Set(["text-align", "text-indent"]);
 
-const HEADINGS = ["h1", "h2", "h3", "h4", "h5", "h6"];
+export const HEADINGS = ["h1", "h2", "h3", "h4", "h5", "h6"];
 
 /**
  * Text properties an element sets by default, so it takes none from outside.
@@ -32,27 +40,24 @@ const OWN_DEFAULTS: Array<[setsOwn: (el: Element) => boolean, properties: string
 ];
 
 /**
- * Attributes that state a block property: the elements they state it on — a
- * table's `align` places the table — and the values that mean something, as
- * CSS. A value the browser ignores states nothing. Written as style, so
- * diagnostics judge them as they judge a style.
+ * Attributes that state a block property, the elements they state it on — a
+ * table's `align` places the table — and how a browser reads their value, as
+ * CSS; one it ignores states nothing. Written as style, so diagnostics judge
+ * them as they judge a style.
  */
-const PRESENTATIONAL: Record<string, { attribute: string; on: ReadonlySet<string>; values: ReadonlyMap<string, string> }> = {
+const PRESENTATIONAL: Record<
+  string,
+  { attribute: string; on: ReadonlySet<string>; read: (value: string) => string | null }
+> = {
   "text-align": {
     attribute: "align",
     on: new Set(["div", "p", ...HEADINGS, "td", "th", "tr", "thead", "tbody", "tfoot"]),
-    values: new Map([
-      ["left", "left"],
-      ["right", "right"],
-      ["center", "center"],
-      ["middle", "center"],
-      ["justify", "justify"],
-    ]),
+    read: htmlAlign,
   },
 };
 
-/** What a block property set this way inherits instead of stating. */
-const INHERITS = /^\s*(inherit|unset|revert|revert-layer)\s*$/i;
+/** Keywords that make a property inherit; `initial` is not one, since it states the default. */
+export const INHERITING_KEYWORD = /^\s*(inherit|unset|revert|revert-layer)\s*$/i;
 
 /** Blocks whose loose text needs no paragraph: a text block already is one, and a table's frame holds none. */
 const NO_LOOSE_TEXT = new Set(["p", "pre", ...HEADINGS, "table", "thead", "tbody", "tfoot", "tr"]);
@@ -92,12 +97,15 @@ function visit(el: Element, outer: Inherited, carried: Carried): void {
   const tag = el.tagName.toLowerCase();
   if (HTML_IGNORED_TAGS.has(tag)) return;
 
-  const style = el.getAttribute("style") ?? "";
-  const own = parseDeclarations(style);
-  for (const property of BLOCK_PROPERTIES) if (INHERITS.test(own.get(property)?.value ?? "")) own.delete(property);
-  for (const [property, { attribute, on, values }] of Object.entries(PRESENTATIONAL)) {
-    const value = on.has(tag) && !own.has(property) ? values.get(el.getAttribute(attribute)?.trim().toLowerCase() ?? "") : undefined;
-    if (value !== undefined) own.set(property, { value, important: false });
+  const original = serializeDeclarations(parseDeclarations(el.getAttribute("style") ?? ""));
+  const own = parseDeclarations(original);
+  // An attribute counts only where the style says nothing — even `inherit` beats it.
+  for (const [property, { attribute, on, read }] of Object.entries(PRESENTATIONAL)) {
+    const presented = on.has(tag) && !own.has(property) ? read(el.getAttribute(attribute) ?? "") : null;
+    if (presented !== null) own.set(property, { value: presented, important: false });
+  }
+  for (const property of BLOCK_PROPERTIES) {
+    if (INHERITING_KEYWORD.test(own.get(property)?.value ?? "")) own.delete(property);
   }
   let inner = outer;
 
@@ -117,7 +125,7 @@ function visit(el: Element, outer: Inherited, carried: Carried): void {
   for (const property of defaults) if (!own.has(property)) own.set(property, { value: "initial", important: false });
 
   const restyled = serializeDeclarations(own);
-  if (restyled !== serializeDeclarations(parseDeclarations(style))) el.setAttribute("style", restyled);
+  if (restyled !== original) el.setAttribute("style", restyled);
 
   for (const child of Array.from(el.children)) visit(child, inner, carried);
 }

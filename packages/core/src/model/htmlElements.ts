@@ -1,3 +1,4 @@
+import { parseTextAlign, type TextAlign } from "./cssValues";
 import { isHtmlElement } from "./isHtmlElement";
 
 /**
@@ -14,7 +15,7 @@ export const HTML_BLOCK_TAGS: ReadonlySet<string> = new Set([
 /** Elements the parse drops with everything in them when no rule takes them. */
 export const HTML_IGNORED_TAGS: ReadonlySet<string> = new Set(["head", "noscript", "object", "script", "style", "title"]);
 
-/** Inline atoms that show with nothing inside: a break, an image with a source, a field. */
+/** Inline atoms that show with nothing inside, as an empty span does not. */
 const SHOWS_EMPTY = "br, img[src], span[data-field]";
 
 /** Whether `node` is an element that opens a block of its own. */
@@ -27,4 +28,24 @@ export function htmlShows(node: Node): boolean {
   if (node.nodeType === 3 /* TEXT_NODE */) return /[^ \t\n\r\f]/.test(node.textContent ?? "");
   if (!isHtmlElement(node) || HTML_IGNORED_TAGS.has(node.tagName.toLowerCase())) return false;
   return node.matches(SHOWS_EMPTY) || Array.from(node.childNodes).some(htmlShows);
+}
+
+/** HTML's `align` values — not CSS's: a browser ignores `align="end"`. */
+const HTML_ALIGN = new Map<string, TextAlign>([
+  ["left", "left"],
+  ["right", "right"],
+  ["center", "center"],
+  ["middle", "center"],
+  ["justify", "justify"],
+]);
+
+/** An HTML `align` attribute as one of the editor's four, or null when a browser would ignore it. */
+export function htmlAlign(value: string): TextAlign | null {
+  return HTML_ALIGN.get(value.trim().toLowerCase()) ?? null;
+}
+
+/** An element's alignment: its `text-align` if it sets one, else its `align`. */
+export function elementTextAlign(el: HTMLElement): TextAlign | null {
+  const styled = el.style.textAlign.trim();
+  return styled !== "" ? parseTextAlign(styled) : htmlAlign(el.getAttribute("align") ?? "");
 }

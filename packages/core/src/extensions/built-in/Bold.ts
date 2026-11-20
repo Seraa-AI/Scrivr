@@ -34,9 +34,6 @@ export const Bold = Extension.create<BoldOptions>({
         parseDOM: [
           { tag: "strong", getAttrs: (node) => !isRegularWeight(node.style.fontWeight) && null },
           { tag: "b", getAttrs: (node) => !isRegularWeight(node.style.fontWeight) && null },
-          // Set to a regular weight, either is a plain wrapper — Google Docs wraps its HTML in one.
-          { tag: "strong", skip: true },
-          { tag: "b", skip: true },
           {
             style: "font-weight",
             getAttrs: (value) => isRegularWeight(value) && null,

@@ -114,16 +114,16 @@ describe("readCellHAlign", () => {
     expect(readCellHAlign(el(`<td>x</td>`))).toBeNull();
   });
 
-  it.each([
-    ["middle", "center"],
-    ["start", "left"],
-    ["-webkit-center", "center"],
-  ])("reads %o as the browser does, %o", (value, align) => {
-    expect(readCellHAlign(el(`<td align="${value}">x</td>`))).toBe(align);
+  it("reads align=\"middle\" as centre, as HTML does", () => {
+    expect(readCellHAlign(el(`<td align="middle">x</td>`))).toBe("center");
   });
 
-  it("rejects a value that names no alignment", () => {
-    expect(readCellHAlign(el(`<td align="somewhere">x</td>`))).toBeNull();
+  it("reads the text-align keywords mail clients write", () => {
+    expect(readCellHAlign(el(`<td style="text-align: -webkit-center">x</td>`))).toBe("center");
+  });
+
+  it.each(["start", "-webkit-center", "somewhere"])("rejects an align attribute HTML ignores, %o", (value) => {
+    expect(readCellHAlign(el(`<td align="${value}">x</td>`))).toBeNull();
   });
 });
 

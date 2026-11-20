@@ -2,7 +2,8 @@ import type { DOMOutputSpec } from "prosemirror-model";
 import type { CellHAlign, CellVAlign, CellVMerge } from "./attrs";
 import { isVAlign, isVMerge, storableFill } from "./attrs";
 import { isHtmlElement } from "../model/isHtmlElement";
-import { cssLengthToPx, parseTextAlign, styleOrAttribute } from "../model/cssValues";
+import { cssLengthToPx, styleOrAttribute } from "../model/cssValues";
+import { elementTextAlign } from "../model/htmlElements";
 
 /**
  * The HTML attribute layer for table nodes — one module owning both directions
@@ -70,8 +71,7 @@ export function readRowSpan(el: Element, rowsLeftInGroup: number): number {
 
 /** `text-align` / `align` → the cell's `hAlign`, or null to keep the default. */
 export function readCellHAlign(el: HTMLElement): CellHAlign | null {
-  const value = styleOrAttribute(el, el.style.textAlign, "align");
-  return value === null ? null : parseTextAlign(value);
+  return elementTextAlign(el);
 }
 
 /** `vertical-align` / `valign` → the cell's `vAlign`, or null to keep the default. */

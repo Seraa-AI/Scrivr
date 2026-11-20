@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { cssLengthToPx, cssPrimaryFamily, cssTextAlign, htmlFontSizeToPx } from "./cssValues";
+import { cssLengthToPx, cssPrimaryFamily, htmlFontSizeToPx, parseTextAlign } from "./cssValues";
 
 describe("cssLengthToPx", () => {
   it("converts absolute and font-relative units at 96dpi and 16px", () => {
@@ -23,15 +23,16 @@ describe("cssLengthToPx", () => {
   });
 });
 
-describe("cssTextAlign", () => {
-  it("maps logical and unknown keywords onto the four", () => {
-    expect(["start", "end", "JUSTIFY", "center", "-webkit-auto", ""].map(cssTextAlign)).toEqual([
+describe("parseTextAlign", () => {
+  it("maps logical and prefixed keywords onto the four, and nothing else", () => {
+    expect(["start", "end", "JUSTIFY", "-webkit-center", "middle", "-webkit-auto", ""].map(parseTextAlign)).toEqual([
       "left",
       "right",
       "justify",
       "center",
-      "left",
-      "left",
+      null,
+      null,
+      null,
     ]);
   });
 });

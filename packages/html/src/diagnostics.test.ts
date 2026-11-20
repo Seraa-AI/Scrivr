@@ -128,6 +128,13 @@ describe("importHtml diagnostics", () => {
     ).toEqual([]);
   });
 
+  it("a bold tag set to normal keeps its colour, and reports nothing", async () => {
+    const editor = new ServerEditor({ extensions: [StarterKit] });
+    const { doc, diagnostics } = await importHtml(editor, `<p><b style="font-weight:normal;color:#ff0000">r</b></p>`);
+    expect(diagnostics).toEqual([]);
+    expect(doc.child(0).firstChild?.marks.map((m) => m.type.name)).toEqual(["color"]);
+  });
+
   it("a bold tag set to a light weight reports the weight, as a span does", async () => {
     expect(await diagnosticsOf(`<p><b style="font-weight:300">x</b></p>`)).toEqual([
       expect.objectContaining({ code: "html-style-unsupported", property: "font-weight", count: 1 }),

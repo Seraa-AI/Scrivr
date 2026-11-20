@@ -120,6 +120,13 @@ describe("what an element states beats what it inherits", () => {
     }
   });
 
+  it("an align attribute HTML ignores aligns nothing, and an inline style beats it", async () => {
+    const ignored = await load(`<p align="end">a</p>`);
+    expect(ignored.child(0).attrs["align"]).toBe("left");
+    const inherited = await load(`<div style="text-align:center"><p style="text-align:inherit" align="right">a</p></div>`);
+    expect(inherited.child(0).attrs["align"]).toBe("center");
+  });
+
   it("text-align: inherit keeps what the block inherits", async () => {
     for (const keyword of ["inherit", "unset"]) {
       const doc = await load(`<div style="text-align:center"><p style="text-align:${keyword}">a</p></div>`);

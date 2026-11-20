@@ -24,9 +24,6 @@ export const Italic = Extension.create<ItalicOptions>({
         parseDOM: [
           { tag: "em", getAttrs: (node) => !isNormalStyle(node.style.fontStyle) && null },
           { tag: "i", getAttrs: (node) => !isNormalStyle(node.style.fontStyle) && null },
-          // Set to a normal style, either is a plain wrapper.
-          { tag: "em", skip: true },
-          { tag: "i", skip: true },
           { style: "font-style=italic" },
           {
             style: "font-style",

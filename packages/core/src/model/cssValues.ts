@@ -54,14 +54,13 @@ export function isCssReset(value: string): boolean {
 
 export type TextAlign = "left" | "center" | "right" | "justify";
 
-/** `text-align` keywords, the browser-prefixed ones mail clients write, and HTML's `align="middle"`. */
+/** `text-align` keywords, and the browser-prefixed ones mail clients write. */
 const TEXT_ALIGN = new Map<string, TextAlign>([
   ["left", "left"],
   ["start", "left"],
   ["-webkit-left", "left"],
   ["-moz-left", "left"],
   ["center", "center"],
-  ["middle", "center"],
   ["-webkit-center", "center"],
   ["-moz-center", "center"],
   ["right", "right"],
@@ -71,20 +70,12 @@ const TEXT_ALIGN = new Map<string, TextAlign>([
   ["justify", "justify"],
 ]);
 
-/** `text-align` (or an HTML `align`) as one of the editor's four, or null when it names none. */
+/** `text-align` as one of the editor's four, or null when it names none. */
 export function parseTextAlign(value: string): TextAlign | null {
   return TEXT_ALIGN.get(value.trim().toLowerCase()) ?? null;
 }
 
-/** `text-align` as one of the editor's four; anything else is left. */
-export function cssTextAlign(value: string): TextAlign {
-  return parseTextAlign(value) ?? "left";
-}
-
-/**
- * The value an element's style sets, else its presentational attribute: CSS
- * wins because that is the order a browser paints them.
- */
+/** The value an element's style sets, else its presentational attribute: any author style beats one. */
 export function styleOrAttribute(el: HTMLElement, styleValue: string, attribute: string): string | null {
   const styled = styleValue.trim();
   if (styled !== "") return styled;

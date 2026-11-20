@@ -84,6 +84,11 @@ describe("pasted divs", () => {
     expect([0, 1].map((i) => doc.child(i).attrs["align"])).toEqual(["center", "center"]);
   });
 
+  it("an align attribute takes only HTML's values, and text-align only CSS's", () => {
+    const doc = paste(`<p align="end">a</p><p align="-webkit-right">b</p><p style="text-align:middle">c</p>`);
+    expect([0, 1, 2].map((i) => doc.child(i).attrs["align"])).toEqual(["left", "left", "left"]);
+  });
+
   it("a div whose blocks sit inside an inline wrapper is read through", () => {
     expect(blocks(paste(`<div><a href="https://x.y"><h2>T</h2><p>y</p></a></div>`))).toEqual([
       "heading:T",
@@ -168,6 +173,16 @@ describe("pasted formatting", () => {
     );
     for (const text of ["a", "b", "c", "d", "f"]) expect(marksOf(doc, text)).toEqual([]);
     expect(marksOf(doc, "e")).toEqual(["bold"]);
+  });
+
+  it("a tag set to normal still undoes the bold or italic around it, and keeps its other styles", () => {
+    const doc = paste(
+      `<p><strong>a<b style="font-weight:normal">b</b></strong><em>c<i style="font-style:normal">d</i></em>` +
+        `<b style="font-weight:normal;color:#ff0000">e</b></p>`,
+    );
+    expect(marksOf(doc, "b")).toEqual([]);
+    expect(marksOf(doc, "d")).toEqual([]);
+    expect(marksOf(doc, "e")).toEqual(["color"]);
   });
 
   it("any weight from 500 up is bold", () => {

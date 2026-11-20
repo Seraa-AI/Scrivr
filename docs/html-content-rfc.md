@@ -287,12 +287,14 @@ in HTML isn't finished.
       (on a paragraph, div, heading, cell, row or row group — a table's
       places the table, which the editor does not model), a `<font>`'s
       attributes. The cascade writes `align` as `text-align` style, so
-      diagnostics judge it as a style; only values a browser honours count
-      (`middle` is centre), and an empty or unknown `align` leaves the
-      inherited alignment. `text-align: inherit`/`unset` inherits too.
-    - Paste reads `align` as well: the paragraph rule and the cell rule share
-      core's `styleOrAttribute`, and `text-align` knows the `-webkit-`/`-moz-`
-      keywords mail clients write.
+      diagnostics judge it as a style. An inline style beats the attribute,
+      even `text-align: inherit`/`unset`, which inherits.
+    - `align` and `text-align` take each one's own values, as a browser does:
+      `align` HTML's (`middle` is centre; `end` is ignored), `text-align`
+      CSS's, with the `-webkit-`/`-moz-` keywords mail clients write. One core
+      reader, `elementTextAlign`, serves the text-block rules and the cell
+      rule, so paste reads `align` too; the cascade reads the attribute with
+      core's `htmlAlign`.
     - A link's own colour applies only to a link the editor keeps: a bare
       `<a name>` or an unsafe href inherits like a span.
   - Diagnostics report what was lost and nothing else:
@@ -332,9 +334,10 @@ in HTML isn't finished.
     text inherits, as in a browser.
   - `font-weight: normal` (or `lighter`, or below 500) undoes bold and
     `font-style: normal` italic, on the `<b>`/`<strong>`/`<i>`/`<em>` itself
-    or around it; any weight from 500 to 1000 is bold. Such a tag is then a
-    plain wrapper, as Google Docs' `<b style="font-weight:normal">` is, and
-    reports nothing.
+    or around it; any weight from 500 to 1000 is bold. Such a tag, turned
+    down for what its own style says — Google Docs' `<b
+    style="font-weight:normal">` — is a plain wrapper: its style still
+    applies, and diagnostics judge the style rather than report the tag.
   - A `div` holding only an inline atom, such as a field, is a paragraph.
   - A selector list with an empty entry (`p, { }`) is invalid whole, as in a
     browser, and reported.

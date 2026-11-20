@@ -19,7 +19,7 @@ import {
   type StyleParseRule,
   type TagParseRule,
 } from "@scrivr/core/pm";
-import { BLOCK_PROPERTIES, type Carried } from "./cascade";
+import { BLOCK_PROPERTIES, HEADINGS, INHERITING_KEYWORD, type Carried } from "./cascade";
 import { parseDeclarations } from "./stylesheet";
 
 export type HtmlDiagnosticCode =
@@ -64,6 +64,7 @@ export function watchedParser(schema: Schema): {
   const seen: Seen = {
     taken: new Set(),
     declined: new Set(),
+    declinedForStyle: new Set(),
     opaque: new Set(),
     readStyles: new Map(),
     reading: new Map(),
@@ -82,6 +83,12 @@ interface Seen {
   taken: Set<Element>;
   /** Elements a tag rule looked at and turned away. */
   declined: Set<Element>;
+  /**
+   * Of those, the ones turned away for what their own style says — a `<b>` set
+   * to normal weight. The style is the meaning, judged as a style; the element
+   * is a plain wrapper, read through.
+   */
+  declinedForStyle: Set<Element>;
   /** Taken elements whose children the parse never reads — leaves and `ignore` rules. */
   opaque: Set<Element>;
   /** The `style` properties a rule that took its element read off each element. */
@@ -104,6 +111,7 @@ function watchTag(rule: TagParseRule, schema: Schema, seen: Seen): TagParseRule 
       const result = getAttrs ? getAttrs(watchElement(dom, seen)) : (attrs ?? null);
       if (result === false) {
         seen.declined.add(dom);
+        if (seen.reading.get(dom)?.size) seen.declinedForStyle.add(dom);
         return result;
       }
       seen.taken.add(dom);
@@ -231,7 +239,7 @@ function collect(body: HTMLElement, preparse: Preparse, seen: Seen, styleRules: 
   const visit = (el: Element) => {
     const tag = el.tagName.toLowerCase();
     // A container a rule turned down is still read through; nothing is lost.
-    if (!seen.taken.has(el) && !TRANSPARENT.has(tag)) {
+    if (!seen.taken.has(el) && !TRANSPARENT.has(tag) && !seen.declinedForStyle.has(el)) {
       if (HTML_IGNORED_TAGS.has(tag)) return note("html-element-ignored", { tag });
       note(seen.declined.has(el) ? "html-element-rejected" : "html-element-unknown", { tag });
     }
@@ -294,12 +302,12 @@ const DEFAULT_VALUES = new Map([
 ]);
 
 /** Blocks the editor draws bold with no mark to clear, so a regular weight inside one is lost. */
-const BOLD_BLOCKS = "h1, h2, h3, h4, h5, h6";
+const BOLD_BLOCKS = HEADINGS.join(", ");
 
-/** A CSS-wide keyword, or the property's default — unless the default is what the editor cannot draw there. */
+/** An inheriting keyword; or `initial` or the default, unless the editor cannot draw the default there. */
 function statesNothing(el: Element, property: string, value: string): boolean {
+  if (INHERITING_KEYWORD.test(value)) return true;
   const keyword = value.trim().toLowerCase();
-  if (/^(inherit|unset|revert|revert-layer)$/.test(keyword)) return true;
   if (property === "font-weight" && el.closest(BOLD_BLOCKS)) return false;
   return keyword === "initial" || keyword === "normal" || (DEFAULT_VALUES.get(property)?.includes(keyword) ?? false);
 }
