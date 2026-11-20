@@ -28,7 +28,7 @@ export function planReviewIn(state: EditorState, decisions: ReviewDecisions): Re
   if (!pluginState?.canAcceptReject) {
     return { status: "blocked", ...decisionsOf(decisions), reason: "not-permitted" };
   }
-  const plan = planChangeReview(pluginState.changeSet, decisions);
+  const plan = planChangeReview(pluginState.changeSet, decisions, pluginState.replacementView);
   if (plan.status !== "ready") return plan;
   const displaced = displacedBy(state, pluginState.changeSet, plan);
   return displaced.length > 0 ? { ...plan, rejected: [...plan.rejected, ...displaced] } : plan;

@@ -314,6 +314,25 @@ describe("one card per act", () => {
     expect(container.querySelector("[data-testid=pieces]")?.textContent).toBe(String(pending(editor).length));
   });
 
+  it("shows a replacement as one card, or as two in the split view", () => {
+    function Kinds({ editor }: { editor: ServerEditor }) {
+      const { items } = useTrackChangesPanel(editor);
+      return <span data-testid="kinds">{items.map((item) => item.kind).join(",")}</span>;
+    }
+    const editor = new ServerEditor({
+      extensions: [StarterKit, TrackChanges.configure({ userID: "alice", initialStatus: TrackChangesStatus.enabled })],
+      content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "The cat sat" }] }] },
+    });
+    editor.applyTransaction(editor.getState().tr.insertText("dog", 5, 8));
+    render(<Kinds editor={editor} />);
+    expect(container.querySelector("[data-testid=kinds]")?.textContent).toBe("replacement");
+
+    act(() => {
+      editor.commands.setReplacementView("split");
+    });
+    expect(container.querySelector("[data-testid=kinds]")?.textContent).toBe("single,single");
+  });
+
   it("removes the whole paragraph from that one card", () => {
     const editor = build();
     render(<TrackChangesPanel editor={editor} />);

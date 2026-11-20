@@ -14,7 +14,7 @@ import { fromCollaborator, gestureRefusal, trackChanges, untracked } from "./tra
 import { fixInconsistentChanges } from "../lib/fixInconsistentChanges";
 import { TrackChangesOptions, TrackChangesStatus } from "../types";
 import { planReviewIn } from "../reviewChanges";
-import type { TrackingResult } from "../types";
+import type { ReplacementView, TrackingResult } from "../types";
 import { reportedTracking, trFromHistory } from "./transactionProcessing";
 import { closeDependentCreations, composeGestureRecords } from "./composition";
 import { fixAndSetSelectionAfterTracking, type ReplayedSelection } from "./fixAndSetSelectionAfterTracking";
@@ -41,6 +41,8 @@ export interface TrackChangesState {
   changeSet: ChangeSet;
   userID: string;
   canAcceptReject: boolean;
+  /** How review shows a replacement: one card, or split as Word shows it. */
+  replacementView: ReplacementView;
 }
 
 type TrackChangesPluginState = TrackChangesState & {
@@ -196,6 +198,7 @@ export const trackChangesPlugin = (options: TrackChangesOptions) => {
           userID,
           changeSet: findChanges(state),
           canAcceptReject,
+          replacementView: options.replacementView ?? "paired",
         };
       },
       apply: (tr, previous, _oldState, newState) => {
@@ -221,6 +224,8 @@ export const trackChangesPlugin = (options: TrackChangesOptions) => {
           ...(review ? { lastReview: review } : {}),
           changeSet: findChanges(newState),
         };
+        const setReplacementView = getAction(tr, TrackChangesAction.setReplacementView);
+        if (setReplacementView) return { ...pluginState, replacementView: setReplacementView };
         const setUserID = getAction(tr, TrackChangesAction.setUserID);
         const setStatus = getAction(tr, TrackChangesAction.setPluginStatus);
         if (setUserID) {
