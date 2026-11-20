@@ -2,6 +2,7 @@ import { Extension } from "../Extension";
 import type { FontModifier, ToolbarItemSpec } from "../types";
 import type { ParsedFont } from "../../layout/StyleResolver";
 import type { DocxMarkHandler, DocxMarkTransform } from "../../exports/docx";
+import { DEFAULT_FONT_PX, cssLengthToPx, htmlFontSizeToPx, isCssReset, parseCssLength } from "../../model/cssValues";
 
 interface FontSizeOptions {
   /** Font size presets shown as toolbar buttons (px values). */
@@ -33,18 +34,18 @@ export const FontSize = Extension.create<FontSizeOptions>({
         parseDOM: [
           {
             style: "font-size",
-            getAttrs: (value) => {
-              const raw = value as string;
-              let px: number;
-              if (raw.endsWith("pt")) {
-                // 1pt = 96/72 px (≈ 1.333px) at standard 96 DPI
-                px = Math.round(parseFloat(raw) * (96 / 72));
-              } else {
-                // px, or bare number — take as-is
-                px = parseFloat(raw);
-              }
-              return isNaN(px) ? false : { size: px };
-            },
+            getAttrs: (value) => sizeAttrs(cssFontSizeToPx(value)),
+          },
+          // A mark is inherited by the text inside it, so `initial` must remove it.
+          {
+            style: "font-size",
+            getAttrs: (value) => isCssReset(value) && null,
+            clearMark: (mark) => mark.type.name === "fontSize",
+          },
+          {
+            tag: "font[size]",
+            consuming: false,
+            getAttrs: (node) => sizeAttrs(htmlFontSizeToPx(node.getAttribute("size") ?? "")),
           },
         ],
         toDOM: (mark) => [
@@ -150,4 +151,20 @@ declare module "@scrivr/core" {
       size: number;
     };
   }
+}
+
+function sizeAttrs(px: number | null) {
+  return px === null || px <= 0 ? false : { size: px };
+}
+
+/**
+ * A size written in px is kept exactly, fractions and all, so the editor's own
+ * copy round-trips. Any other unit is rounded to a whole px — 11pt is 14.67px,
+ * which is noise, not intent.
+ */
+function cssFontSizeToPx(value: string): number | null {
+  const px = cssLengthToPx(value, DEFAULT_FONT_PX);
+  if (px === null) return null;
+  const unit = parseCssLength(value)?.unit;
+  return unit === "px" || unit === "" ? px : Math.round(px);
 }

@@ -26,6 +26,7 @@ import {
   Link2Off,
   RemoveFormatting,
   FileUp,
+  FileCode,
   type LucideIcon,
 } from "lucide-react";
 
@@ -63,6 +64,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   unsetLink: Link2Off,
   clearFormatting: RemoveFormatting,
   importDocxFromFile: FileUp,
+  importHtmlFromFile: FileCode,
 };
 
 /**

@@ -7,13 +7,17 @@
 import { describe, expect, it, vi } from "vitest";
 import { ServerEditor, StarterKit } from "@scrivr/core";
 import type { IBaseEditor } from "@scrivr/core";
+import type * as Core from "@scrivr/core";
 
 const importDocx = vi.hoisted(() =>
   vi.fn(() => Promise.resolve({ doc: null, diagnostics: [] })),
 );
 const applyImportedDocument = vi.hoisted(() => vi.fn());
 vi.mock("./import", () => ({ importDocx }));
-vi.mock("./applyDocument", () => ({ applyImportedDocument }));
+vi.mock("@scrivr/core", async (importOriginal) => ({
+  ...(await importOriginal<typeof Core>()),
+  applyImportedDocument,
+}));
 
 const { DocxImport } = await import("./DocxImport");
 
