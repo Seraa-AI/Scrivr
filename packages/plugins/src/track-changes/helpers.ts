@@ -206,33 +206,31 @@ export function getNodeTrackedData(
   return tracked;
 }
 
-/** Whether the `later` record can join the `earlier` one as one change. */
 export function shouldMergeTrackedAttributes(
-  earlier?: Partial<TrackedAttrs>,
-  later?: Partial<TrackedAttrs>,
+  left?: Partial<TrackedAttrs>,
+  right?: Partial<TrackedAttrs>,
 ) {
-  if (!earlier || !later) {
+  if (!left || !right) {
     console.warn("passed undefined dataTracked attributes to shouldMergeTrackedAttributes", {
-      earlier,
-      later,
+      left,
+      right,
     });
     return false;
   }
   return (
-    earlier.status === later.status &&
-    earlier.operation === later.operation &&
-    earlier.authorID === later.authorID &&
-    earlier.creationId === later.creationId &&
-    earlier.deletionId === later.deletionId &&
-    earlier.continuesId === later.continuesId &&
-    earlier.moveId === later.moveId &&
-    earlier.foldingClosed === later.foldingClosed &&
-    JSON.stringify(earlier.dependsOn ?? []) === JSON.stringify(later.dependsOn ?? []) &&
+    left.status === right.status &&
+    left.operation === right.operation &&
+    left.authorID === right.authorID &&
+    left.creationId === right.creationId &&
+    left.deletionId === right.deletionId &&
+    left.continuesId === right.continuesId &&
+    left.moveId === right.moveId &&
+    left.foldingClosed === right.foldingClosed &&
+    JSON.stringify(left.dependsOn ?? []) === JSON.stringify(right.dependsOn ?? []) &&
     // A record restores what it replaced, so two that replaced different marks stay two.
-    stableStringify(earlier.replaced ?? []) === stableStringify(later.replaced ?? []) &&
-    // Text typed on from a replacement joins it. A replacement never takes in an
-    // earlier, separate edit beside it, nor another replacement.
-    (later.groupId === undefined || later.groupId === earlier.groupId)
+    stableStringify(left.replaced ?? []) === stableStringify(right.replaced ?? []) &&
+    // A replacement is one act: it never takes in a separate edit, nor another replacement.
+    left.groupId === right.groupId
   );
 }
 
@@ -243,8 +241,7 @@ export function getMergeableMarkTrackedAttrs(
 ) {
   const allAttrs = getTextNodeTrackedMarkData(node, schema);
   if (!allAttrs) return null;
-  // When marks are stacked (multi-author), find the one that matches the
-  // delete attrs being applied — same author, operation, and status.
+  // When marks are stacked (multi-author), the record the new deletion could join.
   const matching = allAttrs.find(a => shouldMergeTrackedAttributes(a, attrs));
   return matching || null;
 }
