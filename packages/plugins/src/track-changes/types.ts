@@ -307,7 +307,9 @@ export type SuggestionBlock =
   /** No track-changes plugin is installed to record it. */
   | { reason: "no-tracking" }
   /** Snapshots are being viewed, which lets no authored edit through. */
-  | { reason: "viewing-snapshots" };
+  | { reason: "viewing-snapshots" }
+  /** It carries a meta that tracking skips — `skipTracking`, history, sync, the host's `skipTrsWithMetas` — so it would land as a direct edit. */
+  | { reason: "untracked" };
 
 /**
  * What tracking did with a gesture. `refused` is the one outcome a host must act

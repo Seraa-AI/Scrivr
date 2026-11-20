@@ -41,6 +41,8 @@ export interface TrackChangesState {
   changeSet: ChangeSet;
   userID: string;
   canAcceptReject: boolean;
+  /** The host's metas that mark a transaction tracking skips. */
+  skipTrsWithMetas: (PluginKey | string)[];
 }
 
 type TrackChangesPluginState = TrackChangesState & {
@@ -196,6 +198,7 @@ export const trackChangesPlugin = (options: TrackChangesOptions) => {
           userID,
           changeSet: findChanges(state),
           canAcceptReject,
+          skipTrsWithMetas,
         };
       },
       apply: (tr, previous, _oldState, newState) => {

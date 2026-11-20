@@ -1,6 +1,6 @@
 import type { EditorState, Transaction } from "@scrivr/core/pm";
 
-import { gestureRefusal } from "./engine/trackChanges";
+import { gestureRefusal, untracked } from "./engine/trackChanges";
 import { trackChangesPluginKey } from "./engine/trackChangesPlugin";
 import { TrackChangesStatus, type SuggestionBlock } from "./types";
 
@@ -14,5 +14,6 @@ export function suggestionBlocked(state: EditorState, tr: Transaction): Suggesti
   const tracking = trackChangesPluginKey.getState(state);
   if (!tracking) return { reason: "no-tracking" };
   if (tracking.status === TrackChangesStatus.viewSnapshots) return { reason: "viewing-snapshots" };
-  return gestureRefusal(tr, state, []);
+  if (tr.docChanged && untracked(tr, tracking.skipTrsWithMetas)) return { reason: "untracked" };
+  return gestureRefusal(tr, state, tracking.skipTrsWithMetas);
 }

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { EditorState, Fragment, ReplaceStep, Slice, Step, StepMap, StepResult } from "@scrivr/core/pm";
 import type { Node as PMNode } from "@scrivr/core/pm";
 import { doc, p } from "./helpers";
-import { suggestionBlocked, trackAsSuggestion, TrackChangesStatus } from "../index";
+import { skipTracking, suggestionBlocked, trackAsSuggestion, TrackChangesStatus, type SuggestionBlock } from "../index";
 import { trackChangesPlugin } from "../engine/trackChangesPlugin";
 
 /**
@@ -34,10 +34,10 @@ class UpperStep extends Step {
   }
 }
 
-const stateWith =(status: TrackChangesStatus | null) =>
+const stateWith = (status: TrackChangesStatus | null) =>
   EditorState.create({
     doc: doc(p("start")),
-    plugins: status === null ? [] : [trackChangesPlugin({ userID: "alice", initialStatus: status })],
+    plugins: status === null ? [] : [trackChangesPlugin({ userID: "alice", initialStatus: status, skipTrsWithMetas: ["sync"] })],
   });
 
 const suggestion = (state: EditorState) => trackAsSuggestion(state.tr.insertText("x", 1), "ai");
@@ -67,5 +67,12 @@ describe("suggestionBlocked", () => {
     const state = stateWith(TrackChangesStatus.enabled);
     const tr = trackAsSuggestion(state.tr.step(new UpperStep(1, 6)), "ai");
     expect(suggestionBlocked(state, tr)).toEqual({ reason: "unsupported-step", stepType: "UpperStep" });
+  });
+
+  it("blocks a suggestion tracking would skip, by its own meta or the host's", () => {
+    const state = stateWith(TrackChangesStatus.enabled);
+    const untracked: SuggestionBlock = { reason: "untracked" };
+    expect(suggestionBlocked(state, skipTracking(suggestion(state)))).toEqual(untracked);
+    expect(suggestionBlocked(state, suggestion(state).setMeta("sync", true))).toEqual(untracked);
   });
 });
