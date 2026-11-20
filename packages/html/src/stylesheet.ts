@@ -3,63 +3,53 @@
  * reads them — the parse rules only read an element's `style` attribute.
  *
  * Only the selectors a drafted document uses are applied: a type, `#id`,
- * `.class`, any compound of those, and comma lists of them. A browser's
- * cascade decides between rules: an inline declaration beats every rule, then
- * the more specific rule, then the later one. Anything else — combinators,
- * pseudo-classes, at-rules — is reported, not guessed at.
+ * `.class`, any compound of those, and comma lists of them. Between rules the
+ * browser's cascade decides: importance, then inline over any rule, then the
+ * more specific rule, then the later one. Anything not applied — combinators,
+ * pseudo-classes, at-rules, a selector the DOM refuses — is reported, and the
+ * rest of the sheet still applies.
  */
-
-export interface StylesheetResult {
-  /** Selectors and at-rules not applied, once per occurrence, in source order. */
-  unsupportedSelectors: string[];
-  /** Properties set on `<html>`/`<body>` that no block inherits, such as the page margin. */
-  uninheritedProperties: string[];
-}
-
-/** Properties a block's text takes from `<body>` when it does not set its own. */
-const INHERITED = new Set([
-  "color",
-  "font-family",
-  "font-size",
-  "font-style",
-  "font-weight",
-  "line-height",
-  "text-align",
-  "text-indent",
-]);
 
 const SIMPLE_SELECTOR = /^(?:[a-z][a-z0-9]*)?(?:#[\w-]+)?(?:\.[\w-]+)*$/i;
 
-interface Winner {
+interface Declaration {
   value: string;
+  important: boolean;
+}
+
+interface Winner extends Declaration {
   specificity: number;
 }
 
-export function applyStylesheets(body: HTMLElement): StylesheetResult {
+/** Applies every `<style>` in the document, removes them, and returns the selectors and at-rules not applied. */
+export function applyStylesheets(body: HTMLElement): string[] {
   const doc = body.ownerDocument;
-  const unsupportedSelectors: string[] = [];
+  const unsupported: string[] = [];
   const winners = new Map<Element, Map<string, Winner>>();
 
   for (const sheet of Array.from(doc.querySelectorAll("style"))) {
     for (const { prelude, block } of topLevelRules(stripComments(sheet.textContent ?? ""))) {
       if (prelude.startsWith("@") || block === null) {
-        unsupportedSelectors.push(prelude);
+        unsupported.push(prelude);
         continue;
       }
       const declarations = parseDeclarations(block);
       for (const selector of prelude.split(",").map((s) => s.trim())) {
-        if (!selector || !SIMPLE_SELECTOR.test(selector)) {
-          unsupportedSelectors.push(selector);
+        const matched = SIMPLE_SELECTOR.test(selector) ? select(doc, selector) : null;
+        if (matched === null) {
+          unsupported.push(selector);
           continue;
         }
         const specificity = specificityOf(selector);
-        for (const el of Array.from(doc.querySelectorAll(selector))) {
+        for (const el of matched) {
           const props = winners.get(el) ?? new Map<string, Winner>();
           winners.set(el, props);
-          for (const [property, value] of declarations) {
+          for (const [property, declaration] of declarations) {
             const current = props.get(property);
             // Rules arrive in source order, so on a tie the later one wins.
-            if (!current || specificity >= current.specificity) props.set(property, { value, specificity });
+            if (!current || outranks({ ...declaration, specificity }, current)) {
+              props.set(property, { ...declaration, specificity });
+            }
           }
         }
       }
@@ -69,35 +59,28 @@ export function applyStylesheets(body: HTMLElement): StylesheetResult {
 
   for (const [el, props] of winners) {
     const inline = parseDeclarations(el.getAttribute("style") ?? "");
-    for (const [property, { value }] of props) if (!inline.has(property)) inline.set(property, value);
-    el.setAttribute("style", serialize(inline));
+    for (const [property, winner] of props) {
+      const own = inline.get(property);
+      if (!own || (winner.important && !own.important)) inline.set(property, winner);
+    }
+    el.setAttribute("style", serializeDeclarations(inline));
   }
 
-  return { unsupportedSelectors, uninheritedProperties: inheritFromBody(body) };
+  return unsupported;
 }
 
-/**
- * The parser reads `<body>`'s children, never `<body>` itself, so what it and
- * `<html>` set is handed down to every element that does not set it — an
- * element setting a property passes its own value down instead.
- */
-function inheritFromBody(body: HTMLElement): string[] {
-  const root = body.ownerDocument.documentElement;
-  const page = parseDeclarations(root.getAttribute("style") ?? "");
-  for (const [property, value] of parseDeclarations(body.getAttribute("style") ?? "")) page.set(property, value);
+/** The elements `selector` matches, or null when the DOM cannot read it (`.2col`). */
+function select(doc: Document, selector: string): Element[] | null {
+  try {
+    return Array.from(doc.querySelectorAll(selector));
+  } catch {
+    return null;
+  }
+}
 
-  const inherited = new Map([...page].filter(([property]) => INHERITED.has(property)));
-  const handDown = (el: Element, from: Map<string, string>) => {
-    const own = parseDeclarations(el.getAttribute("style") ?? "");
-    const missing = [...from].filter(([property]) => !own.has(property));
-    if (missing.length > 0) el.setAttribute("style", serialize(new Map([...missing, ...own])));
-    const next = new Map(from);
-    for (const [property, value] of own) if (INHERITED.has(property)) next.set(property, value);
-    for (const child of Array.from(el.children)) handDown(child, next);
-  };
-  if (inherited.size > 0) for (const child of Array.from(body.children)) handDown(child, inherited);
-
-  return [...page.keys()].filter((property) => !INHERITED.has(property));
+function outranks(a: Winner, b: Winner): boolean {
+  if (a.important !== b.important) return a.important;
+  return a.specificity >= b.specificity;
 }
 
 function stripComments(css: string): string {
@@ -107,7 +90,8 @@ function stripComments(css: string): string {
 /**
  * The stylesheet's top-level statements: a rule's prelude with its block, or
  * a block-less at-rule (`@import …;`) with `block: null`. A nested block, as
- * in `@media`, stays inside its at-rule's block.
+ * in `@media`, stays inside its at-rule's block. A block left open at the end
+ * of the sheet is closed there, as a browser closes it.
  */
 function topLevelRules(css: string): Array<{ prelude: string; block: string | null }> {
   const rules: Array<{ prelude: string; block: string | null }> = [];
@@ -134,24 +118,55 @@ function topLevelRules(css: string): Array<{ prelude: string; block: string | nu
       start = i + 1;
     }
   }
+  if (depth > 0) rules.push({ prelude, block: css.slice(start) });
   return rules;
 }
 
-/** `color: red; font-size: 12px !important` → property → value, lowercased property. */
-function parseDeclarations(block: string): Map<string, string> {
-  const out = new Map<string, string>();
-  for (const declaration of block.split(";")) {
+/**
+ * `color: red; font-size: 12px !important` → property → declaration, with the
+ * property lowercased. A `;` inside quotes or parentheses — a data URL — is
+ * part of its value, not the end of it.
+ */
+export function parseDeclarations(block: string): Map<string, Declaration> {
+  const out = new Map<string, Declaration>();
+  for (const declaration of splitDeclarations(block)) {
     const colon = declaration.indexOf(":");
     if (colon < 0) continue;
     const property = declaration.slice(0, colon).trim().toLowerCase();
-    const value = declaration.slice(colon + 1).replace(/!important/i, "").trim();
-    if (property && value) out.set(property, value);
+    const raw = declaration.slice(colon + 1).trim();
+    const important = /!\s*important\s*$/i.test(raw);
+    const value = raw.replace(/!\s*important\s*$/i, "").trim();
+    if (property && value) out.set(property, { value, important });
   }
   return out;
 }
 
-function serialize(declarations: Map<string, string>): string {
-  return [...declarations].map(([property, value]) => `${property}: ${value}`).join("; ");
+function splitDeclarations(block: string): string[] {
+  const parts: string[] = [];
+  let quote: string | null = null;
+  let parens = 0;
+  let start = 0;
+  for (let i = 0; i < block.length; i++) {
+    const ch = block[i];
+    if (quote) {
+      if (ch === quote) quote = null;
+    } else if (ch === '"' || ch === "'") {
+      quote = ch;
+    } else if (ch === "(") {
+      parens += 1;
+    } else if (ch === ")") {
+      parens = Math.max(0, parens - 1);
+    } else if (ch === ";" && parens === 0) {
+      parts.push(block.slice(start, i));
+      start = i + 1;
+    }
+  }
+  parts.push(block.slice(start));
+  return parts;
+}
+
+export function serializeDeclarations(declarations: Map<string, Declaration>): string {
+  return [...declarations].map(([property, { value }]) => `${property}: ${value}`).join("; ");
 }
 
 /** Ids outweigh classes outweigh a type, as in CSS. */

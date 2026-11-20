@@ -17,9 +17,12 @@ anything an extension can paste, it can import. In a browser the page's
 export condition keeps happy-dom out of browser bundles.
 
 `<style>` rules apply too, for type, `#id` and `.class` selectors (and
-compounds and comma lists of them), with the browser's precedence: inline
-style, then specificity, then source order. What `<body>` sets for text is
-handed down to its blocks.
+compounds and comma lists of them), with the browser's precedence:
+`!important`, then inline style, then specificity, then source order. Text
+styles on `<body>` reach the text without overriding an element's own
+default, and a container's alignment reaches its blocks.
+
+One bad piece never fails the import: it is reported, and the rest is read.
 
 `importHtml` also returns `diagnostics`: every style and element in the HTML
 that no rule read, counted, so an agent can see what did not land.

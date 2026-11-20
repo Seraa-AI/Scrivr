@@ -213,7 +213,9 @@ in HTML isn't finished.
   extensions use it.
 - `applyImportedDocument` moved to core.
 - **Phase 3, D7 coverage.** The rules live in the extensions, so paste reads
-  them too:
+  them too, except where paste's cleaner strips the source page's margins and
+  span backgrounds first. That makes indent units and span highlights
+  import-only.
   - CSS lengths in any unit (`px`, `pt`, `in`, `cm`, `mm`, `em`, `rem`) for
     indents and font size. `font-size:1.5em` was 1.5px before.
   - Alignment mapped onto the four the editor has. `start` and `end` were
@@ -265,3 +267,29 @@ in HTML isn't finished.
   A style is judged on the element that carries it, so `margin-left` counts
   as indent on a `<p>` but is reported on a `<span>`. Under D10, a feature that
   ships its parse rule stops being reported automatically.
+- **Pre-ship review fixes.** Following the user's direction, the import is
+  fault tolerant and reports every loss, accurately:
+  - A selector the DOM can't read (`.2col`) is reported, and the rest of the
+    sheet applies. Before, it failed the whole import.
+  - `!important` is honored, an unclosed final rule still applies, and a `;`
+    inside `url(...)` stays part of its value.
+  - Inheritance is no longer copied onto every descendant (`cascade.ts`):
+    - Block properties pass from any container to its blocks.
+    - Page text styles go onto the text runs, and stop at an element's own
+      default (link color, heading size, `<b>` weight).
+    - Before, the result depended on whether `<body>` had any style, and it
+      overrode `<b>`, `<h1>` and `<a>`.
+  - Diagnostics no longer report things that were applied:
+    - A shorthand counts as applied when a rule read one of its longhands.
+    - Reads a rule makes through elements it reaches from its own (a table's
+      `<col>`) are watched.
+    - Properties the cascade carries count as consumed.
+  - A `div` rule no longer turns an empty spacer div, or a div with blocks
+    nested inside an inline wrapper, into a blank paragraph. This applies to
+    paste too, with tests in core (`PasteRules.test.ts`).
+  - The highlight rule turns down invisible backgrounds.
+  - `isHtmlElement` checks for `style`.
+  - The table's column-width reader shares `cssLengthToPx`. `em` resolves
+    only when the caller knows the font size.
+  - px font sizes keep their fractions.
+

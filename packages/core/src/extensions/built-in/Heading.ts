@@ -4,6 +4,7 @@ import type { PdfNodeHandler } from "../../exports/pdf";
 import { textblockTypeInputRule } from "prosemirror-inputrules";
 import { Extension } from "../Extension";
 import { blockStyleAttrs } from "./blockStyleAttrs";
+import { INDENT_STEP } from "./Indent";
 import type {
   SlashCommandContribution,
   SlashCommandSpec,
@@ -99,7 +100,7 @@ export const Heading = Extension.create<HeadingOptions>({
           if (node.attrs.align && node.attrs.align !== "left")
             styles.push(`text-align:${node.attrs.align as string}`);
           if (node.attrs.indent)
-            styles.push(`margin-left:${(node.attrs.indent as number) * 24}px`);
+            styles.push(`margin-left:${(node.attrs.indent as number) * INDENT_STEP}px`);
           if (node.attrs.textIndent)
             styles.push(`text-indent:${node.attrs.textIndent as number}px`);
           if (node.attrs.fontFamily)

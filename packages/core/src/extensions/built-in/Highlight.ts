@@ -1,5 +1,6 @@
 import { toggleMark } from "prosemirror-commands";
 import { Extension } from "../Extension";
+import { parseCssColor } from "../../model/cssColor";
 import type { MarkDecorator, SpanRect } from "../types";
 import {
   cssColorToDocxHex,
@@ -57,7 +58,10 @@ export const Highlight = Extension.create<HighlightOptions>({
             consuming: false,
             getAttrs: (node) => {
               const color = node.style.backgroundColor;
-              if (!color || color === "transparent") return false;
+              // A colour nobody can see is not a highlight: transparent,
+              // zero alpha, or a keyword such as `inherit` that names none.
+              const rgba = parseCssColor(color);
+              if (!rgba || rgba.alpha === 0) return false;
               return this.options.multicolor ? { color } : {};
             },
           },

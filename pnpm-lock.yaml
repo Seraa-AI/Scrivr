@@ -364,6 +364,9 @@ importers:
       '@scrivr/core':
         specifier: workspace:*
         version: link:../core
+      '@scrivr/docx':
+        specifier: workspace:*
+        version: link:../docx
       tsup:
         specifier: ^8.0.0
         version: 8.5.1(jiti@2.6.1)(postcss@8.5.8)(tsx@4.21.0)(typescript@5.9.3)

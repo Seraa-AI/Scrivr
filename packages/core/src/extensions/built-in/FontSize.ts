@@ -2,7 +2,7 @@ import { Extension } from "../Extension";
 import type { FontModifier, ToolbarItemSpec } from "../types";
 import type { ParsedFont } from "../../layout/StyleResolver";
 import type { DocxMarkHandler, DocxMarkTransform } from "../../exports/docx";
-import { cssLengthToPx, htmlFontSizeToPx } from "../../model/cssValues";
+import { DEFAULT_FONT_PX, cssLengthToPx, htmlFontSizeToPx } from "../../model/cssValues";
 
 interface FontSizeOptions {
   /** Font size presets shown as toolbar buttons (px values). */
@@ -34,7 +34,7 @@ export const FontSize = Extension.create<FontSizeOptions>({
         parseDOM: [
           {
             style: "font-size",
-            getAttrs: (value) => sizeAttrs(cssLengthToPx(value)),
+            getAttrs: (value) => sizeAttrs(cssFontSizeToPx(value)),
           },
           {
             tag: "font[size]",
@@ -148,5 +148,16 @@ declare module "@scrivr/core" {
 }
 
 function sizeAttrs(px: number | null) {
-  return px === null ? false : { size: Math.round(px) };
+  return px === null ? false : { size: px };
+}
+
+/**
+ * A size written in px is kept exactly, fractions and all, so the editor's own
+ * copy round-trips. Any other unit is rounded to a whole px — 11pt is 14.67px,
+ * which is noise, not intent.
+ */
+function cssFontSizeToPx(value: string): number | null {
+  const px = cssLengthToPx(value, DEFAULT_FONT_PX);
+  if (px === null) return null;
+  return /^\s*[\d.]+\s*(px)?\s*$/i.test(value) ? px : Math.round(px);
 }

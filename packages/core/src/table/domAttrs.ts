@@ -2,6 +2,7 @@ import type { DOMOutputSpec } from "prosemirror-model";
 import type { CellHAlign, CellVAlign, CellVMerge } from "./attrs";
 import { isHAlign, isVAlign, isVMerge, storableFill } from "./attrs";
 import { isHtmlElement } from "../model/isHtmlElement";
+import { cssLengthToPx } from "../model/cssValues";
 
 /**
  * The HTML attribute layer for table nodes — one module owning both directions
@@ -132,33 +133,16 @@ export function readCellBackground(el: HTMLElement): string | null {
 }
 
 /**
- * CSS absolute units, in px. Word writes column widths in points; a font-
- * relative unit (`em`, `ch`) is left out because resolving it needs the font
- * the cell will be laid out in, which nobody knows at parse time.
+ * Reads one column's width in CSS px, or null when it is missing or relative.
+ * Word writes column widths in points. A font-relative unit (`em`) stays
+ * unresolved: it needs the font the cell will be laid out in, which nobody
+ * knows at parse time.
  */
-const UNIT_PX: Record<string, number> = {
-  "": 1,
-  px: 1,
-  pt: 96 / 72,
-  pc: 16,
-  in: 96,
-  cm: 96 / 2.54,
-  mm: 96 / 25.4,
-};
-
-/** Reads one column's width in CSS px, or null when it is missing or relative. */
 function readColWidth(col: Element): number | null {
   const styled = isHtmlElement(col) ? col.style.width.trim() : "";
   const raw = styled !== "" ? styled : (col.getAttribute("width") ?? "");
-
-  const measure = /^(\d+(?:\.\d+)?)\s*([a-z]*)$/i.exec(raw.trim());
-  if (!measure) return null;
-  const unit = measure[2]!.toLowerCase();
-  const scale = Object.hasOwn(UNIT_PX, unit) ? UNIT_PX[unit] : undefined;
-  if (scale === undefined) return null;
-
-  const width = Number.parseFloat(measure[1]!) * scale;
-  return Number.isFinite(width) && width > 0 ? width : null;
+  const width = cssLengthToPx(raw);
+  return width !== null && Number.isFinite(width) && width > 0 ? width : null;
 }
 
 /**

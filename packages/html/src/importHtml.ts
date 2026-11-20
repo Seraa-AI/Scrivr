@@ -1,6 +1,5 @@
 /**
- * HTML import entry point — parses an HTML document against the editor's
- * schema and returns a ProseMirror `Node`.
+ * Reads HTML into a document with the editor's schema.
  *
  * The rules are the schema's own `parseDOM`, the ones paste runs, so a tag
  * means the same thing whether it arrives pasted or imported. What differs is
@@ -20,6 +19,7 @@ import { Mapping, Transform, type Node as PmNode } from "@scrivr/core/pm";
 import { watchedParser, type HtmlImportDiagnostic } from "./diagnostics";
 import type { WithHtmlBody } from "./dom";
 import { applyStylesheets } from "./stylesheet";
+import { cascadeInherited } from "./cascade";
 
 export type { HtmlImportDiagnostic };
 
@@ -29,19 +29,7 @@ export interface HtmlImportResult {
   diagnostics: HtmlImportDiagnostic[];
 }
 
-/**
- * Import an HTML document using the editor's schema.
- *
- * Blocks keep the `data-node-id` the HTML gives them, so an agent can refer
- * back to what it wrote. Where two blocks share one, the first keeps it; the
- * rest, and blocks with none, get fresh ids — when the editor has `UniqueId`,
- * the same as a session typing them would.
- *
- * @example
- *   const editor = new ServerEditor();
- *   const { doc, diagnostics } = await importHtml(editor, html);
- *   applyImportedDocument(editor, doc);
- */
+/** The signature of `importHtml`. */
 export type ImportHtml = (editor: IBaseEditor, html: string) => Promise<HtmlImportResult>;
 
 /** `importHtml`, reading HTML with `withHtmlBody`. */
@@ -49,17 +37,18 @@ export function htmlImporter(withHtmlBody: WithHtmlBody): ImportHtml {
   return async (editor, html) => {
     const { parser, report } = watchedParser(editor.schema);
     const parsed = await withHtmlBody(html, (body) => {
-      const stylesheet = applyStylesheets(body);
-      return { doc: parser.parse(body), diagnostics: report(body, stylesheet) };
+      const unsupportedSelectors = applyStylesheets(body);
+      const uninheritedProperties = cascadeInherited(body);
+      return { doc: parser.parse(body), diagnostics: report(body, { unsupportedSelectors, uninheritedProperties }) };
     });
-    let doc = reidDuplicates(parsed.doc);
+    let doc = rekeyRepeatedIds(parsed.doc);
     if (editor.findExtension("uniqueId")) doc = assignBlockIds(doc);
     return { doc, diagnostics: parsed.diagnostics };
   };
 }
 
-/** Every block after the first that carries an id an earlier one has. */
-function reidDuplicates(doc: PmNode): PmNode {
+/** `doc`, with each block that repeats an earlier block's id given a fresh one. */
+function rekeyRepeatedIds(doc: PmNode): PmNode {
   // Measured against a document with no blocks, every block is new to it —
   // so of the copies sharing an id, the first written keeps it.
   const nothingBefore = doc.type.create();

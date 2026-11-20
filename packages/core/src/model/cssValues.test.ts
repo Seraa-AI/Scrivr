@@ -6,13 +6,20 @@ describe("cssLengthToPx", () => {
     expect(cssLengthToPx("24px")).toBe(24);
     expect(cssLengthToPx("18pt")).toBe(24);
     expect(cssLengthToPx("0.5in")).toBe(48);
-    expect(cssLengthToPx("1.5em")).toBe(24);
+    expect(cssLengthToPx("1.5em", 16)).toBe(24);
+    expect(cssLengthToPx("2rem", 10)).toBe(20);
     expect(cssLengthToPx("2.54cm")).toBeCloseTo(96);
     expect(cssLengthToPx("12")).toBe(12);
   });
 
   it("is null for what is not a length", () => {
-    for (const value of ["", "50%", "auto", "large", "1vw", "px"]) expect(cssLengthToPx(value)).toBeNull();
+    for (const value of ["", "50%", "auto", "large", "1vw", "px", ".", "1constructor", "1toString"]) {
+      expect(cssLengthToPx(value)).toBeNull();
+    }
+  });
+
+  it("leaves em and rem unresolved when the caller cannot know the font size", () => {
+    expect(cssLengthToPx("2em")).toBeNull();
   });
 });
 

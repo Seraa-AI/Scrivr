@@ -3,24 +3,32 @@
  * one written value means the same thing on every element that carries it.
  */
 
-/** Pixels in one unit, at CSS's 96 dpi. `em`/`rem` take the 16px default. */
+/** Pixels in one absolute unit, at CSS's 96 dpi. A bare number is px. */
 const PX_PER_UNIT: Record<string, number> = {
+  "": 1,
   px: 1,
   pt: 96 / 72,
   pc: 16,
   in: 96,
   cm: 96 / 2.54,
   mm: 96 / 25.4,
-  em: 16,
-  rem: 16,
 };
 
-/** A CSS length in px, or null when it is not one (a `%`, a keyword, empty). A bare number is px. */
-export function cssLengthToPx(value: string): number | null {
-  const match = /^\s*(-?[\d.]+)\s*([a-z]*)\s*$/i.exec(value);
+/** Text sizes are relative to when nothing says otherwise — the browser's default. */
+export const DEFAULT_FONT_PX = 16;
+
+/**
+ * A CSS length in px, or null when it is not one (a `%`, a keyword, empty).
+ * `em`/`rem` resolve only against a font size the caller supplies: a margin
+ * can assume the default text size, a table column cannot know its text's.
+ */
+export function cssLengthToPx(value: string, emPx?: number): number | null {
+  const match = /^\s*(-?(?:\d+\.?\d*|\.\d+))\s*([a-z]*)\s*$/i.exec(value);
   if (!match) return null;
   const amount = parseFloat(match[1] ?? "");
-  const perUnit = PX_PER_UNIT[(match[2] || "px").toLowerCase()];
+  const unit = (match[2] ?? "").toLowerCase();
+  // `hasOwn`: a unit spelled `constructor` must not find Object's.
+  const perUnit = unit === "em" || unit === "rem" ? emPx : Object.hasOwn(PX_PER_UNIT, unit) ? PX_PER_UNIT[unit] : undefined;
   return perUnit === undefined || Number.isNaN(amount) ? null : amount * perUnit;
 }
 
@@ -45,9 +53,9 @@ export function cssPrimaryFamily(value: string): string | null {
   return value.replace(/['"]/g, "").split(",")[0]?.trim() || null;
 }
 
-/** `<font size>` 1–7, or relative `+n`/`-n` from 3, in px. */
 const FONT_SIZE_PX = [10, 13, 16, 18, 24, 32, 48];
 
+/** `<font size>` 1–7, or relative `+n`/`-n` from 3, in px. */
 export function htmlFontSizeToPx(value: string): number | null {
   const raw = value.trim();
   const n = parseInt(raw, 10);

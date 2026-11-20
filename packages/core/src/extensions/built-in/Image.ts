@@ -9,7 +9,6 @@ import type { SelectionBehavior } from "../../selection/types";
 import type { Node as PmNode } from "prosemirror-model";
 import type { ResolvedTheme } from "../../model/theme";
 import { safeImageUrl } from "../../model/safeUrl";
-import { isHtmlElement } from "../../model/isHtmlElement";
 import { getNodeAttrs } from "../../model/getNodeAttrs";
 import {
   xml,
@@ -684,7 +683,6 @@ export const Image = Extension.create({
           {
             tag: "img[src]",
             getAttrs(dom) {
-              if (!isHtmlElement(dom)) return false;
               // Ingestion-time URL validation — see model/safeUrl.ts.
               // Reject the entire image node on unsafe src (returning false
               // from getAttrs drops the matched element) rather than store

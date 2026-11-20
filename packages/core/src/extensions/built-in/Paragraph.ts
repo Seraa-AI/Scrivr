@@ -13,6 +13,7 @@ import type { PdfNodeHandler } from "../../exports/pdf";
 import type { Node as PmNode } from "prosemirror-model";
 import { floats } from "../../layout/AnchoredObjects";
 import { blockStyleAttrs } from "./blockStyleAttrs";
+import { INDENT_STEP } from "./Indent";
 
 /**
  * The single image a paragraph holds with nothing else but whitespace, or null.
@@ -144,14 +145,15 @@ export const Paragraph = Extension.create({
         },
         parseDOM: [
           { tag: "p", getAttrs: blockStyleAttrs },
-          // A div holding only text is a paragraph as written; one holding
-          // blocks is a container, read through.
-          { tag: "div", priority: 0, getAttrs: (el) => !holdsBlocks(el) && blockStyleAttrs(el) },
+          // A div of inline content is a paragraph; a div holding blocks is a
+          // container, and an empty one a spacer — both read through. Lowest
+          // priority, so every more specific `div` rule is tried first.
+          { tag: "div", priority: 0, getAttrs: (el) => isParagraphDiv(el) && blockStyleAttrs(el) },
         ],
         toDOM: (node) => {
           let style = `text-align:${node.attrs.align as string}`;
           if (node.attrs.indent)
-            style += `;margin-left:${(node.attrs.indent as number) * 24}px`;
+            style += `;margin-left:${(node.attrs.indent as number) * INDENT_STEP}px`;
           if (node.attrs.textIndent)
             style += `;text-indent:${node.attrs.textIndent as number}px`;
           if (node.attrs.fontFamily)
@@ -257,6 +259,10 @@ const BLOCK_TAGS = new Set([
   "ol", "p", "pre", "section", "table", "ul",
 ]);
 
-function holdsBlocks(el: HTMLElement): boolean {
-  return Array.from(el.children).some((child) => BLOCK_TAGS.has(child.tagName.toLowerCase()));
+const BLOCK_SELECTOR = [...BLOCK_TAGS].join(",");
+
+/** Inline content with something to show — text, a line break, an image — and no block anywhere inside. */
+function isParagraphDiv(el: HTMLElement): boolean {
+  if (el.querySelector(BLOCK_SELECTOR)) return false;
+  return (el.textContent ?? "").trim() !== "" || el.querySelector("br, img") !== null;
 }

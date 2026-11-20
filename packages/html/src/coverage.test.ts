@@ -34,6 +34,13 @@ describe("HTML formatting the schema holds", () => {
     expect(marksOf(doc, " plain")).not.toHaveProperty("highlight");
   });
 
+  it("a background no one can see is not a highlight", async () => {
+    for (const background of ["rgba(0, 0, 0, 0)", "transparent", "inherit", "initial"]) {
+      const doc = await load(`<p><span style="background-color:${background}">h</span></p>`);
+      expect(marksOf(doc, "h")).not.toHaveProperty("highlight");
+    }
+  });
+
   it("indents in any CSS length unit", async () => {
     const doc = await load(
       `<p style="margin-left:0.5in;text-indent:18pt">a</p>` + `<p style="margin-left:3em">b</p>`,

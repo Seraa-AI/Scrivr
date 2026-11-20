@@ -1,6 +1,5 @@
 import { Extension } from "../Extension";
 import { fnv1aHex, stableStringify } from "../../model/hash";
-import { isHtmlElement } from "../../model/isHtmlElement";
 import { Slice, Fragment, Node } from "prosemirror-model";
 import { insertPoint } from "prosemirror-transform";
 import {
@@ -525,7 +524,6 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 					{
 						tag: "div[data-sourced-block]",
 						getAttrs: dom => {
-							if (!isHtmlElement(dom)) return false;
 							const normalizerAttr = dom.getAttribute(
 								"data-base-normalizer",
 							);

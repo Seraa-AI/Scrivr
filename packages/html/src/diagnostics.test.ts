@@ -65,4 +65,28 @@ describe("importHtml diagnostics", () => {
       expect.objectContaining({ code: "html-element-rejected", tag: "a", count: 1 }),
     ]);
   });
+
+  it("a shorthand is judged by the longhands the rules read from it", async () => {
+    expect(
+      await diagnosticsOf(
+        `<p style="margin: 0 0 0 48px">m</p>` +
+          `<p><span style="background: yellow">h</span> <span style="font: bold 20px Georgia">f</span></p>`,
+      ),
+    ).toEqual([]);
+  });
+
+  it("a style a rule reads off another element than its own counts as read", async () => {
+    expect(
+      await diagnosticsOf(
+        `<table><colgroup><col style="width:240px"><col style="width:80px"></colgroup>` +
+          `<tr><td>a</td><td>b</td></tr></table>`,
+      ),
+    ).toEqual([]);
+  });
+
+  it("an element its rule turned down is not blamed on a URL it does not have", async () => {
+    const [diagnostic] = await diagnosticsOf(`<p><b style="font-weight: normal">x</b></p>`);
+    expect(diagnostic).toMatchObject({ code: "html-element-rejected", tag: "b" });
+    expect(diagnostic?.message).not.toMatch(/URL/);
+  });
 });

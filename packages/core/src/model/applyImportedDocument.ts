@@ -5,12 +5,10 @@ import type { IBaseEditor } from "../extensions/types";
  * Put a document returned by an importer (`importDocx`, `importHtml`) into an
  * editor.
  *
- * Content alone is not the document. An import contribution settles what it
- * reconstructs from outside the body on `doc.attrs`: the header and footer
- * policy comes from the section's references, the final section's settings
- * from its `<w:sectPr>`. A caller who replaces only the content parses all of
- * that and then drops it, so a file's headers survive every step but the last
- * — which is why this is a function rather than a line each consumer writes.
+ * Content alone is not the document. An importer settles what it rebuilds
+ * from outside the body — header and footer policy, the final section's
+ * settings — on `doc.attrs`. Replacing only the content would drop that, so
+ * the attrs are applied here too.
  *
  * The whole document is being replaced, so its attributes win outright,
  * including where the file says a document has no chrome and the editor

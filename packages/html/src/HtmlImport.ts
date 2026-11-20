@@ -8,17 +8,12 @@
  *   new Editor({ extensions: [StarterKit, HtmlImport] });
  *
  * The command asks for an `.html` file, runs `importHtml`, and replaces the
- * editor's document. On the server, call `importHtml(editor, html)` directly.
- *
- * Diagnostics are logged via `console.warn`; an app that shows them should
- * call `importHtml` itself and read `result.diagnostics`.
+ * editor's document, logging what could not be carried via `console.warn`.
+ * On the server, or to show diagnostics, call `importHtml(editor, html)`.
  */
 
 import { Extension, applyImportedDocument, pickFile } from "@scrivr/core";
-import { withPageBody } from "./dom";
-import { htmlImporter } from "./importHtml";
-
-const importHtml = htmlImporter(withPageBody);
+import { importHtml } from "./browserImporter";
 
 const HTML_TYPES = ".html,.htm,text/html";
 
@@ -71,11 +66,7 @@ export const HtmlImport = Extension.create({
 declare module "@scrivr/core" {
   interface Commands<ReturnType> {
     htmlImport: {
-      /**
-       * Open a file picker and import the chosen `.html` file into the editor.
-       * Diagnostics are logged via `console.warn`; call `importHtml(editor, html)`
-       * directly to read them, or on the server.
-       */
+      /** Open a file picker and import the chosen `.html` file into the editor. */
       importHtmlFromFile: () => ReturnType;
     };
   }

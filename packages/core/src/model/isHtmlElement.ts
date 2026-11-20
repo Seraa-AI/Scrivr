@@ -1,5 +1,6 @@
 /**
- * Whether `value` is an HTML element, judged by its shape.
+ * Whether `value` is an HTML element — an element node with attributes and an
+ * inline `style` — judged by its shape.
  *
  * `instanceof HTMLElement` asks whether the element came from this realm's
  * DOM. A server has no global DOM, and a parser such as happy-dom builds its
@@ -13,6 +14,9 @@ export function isHtmlElement(value: unknown): value is HTMLElement {
     "nodeType" in value &&
     value.nodeType === 1 &&
     "getAttribute" in value &&
-    typeof value.getAttribute === "function"
+    typeof value.getAttribute === "function" &&
+    "style" in value &&
+    typeof value.style === "object" &&
+    value.style !== null
   );
 }
