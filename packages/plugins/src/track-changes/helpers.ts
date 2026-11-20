@@ -206,31 +206,33 @@ export function getNodeTrackedData(
   return tracked;
 }
 
+/** Whether the `later` record can join the `earlier` one as one change. */
 export function shouldMergeTrackedAttributes(
-  left?: Partial<TrackedAttrs>,
-  right?: Partial<TrackedAttrs>,
+  earlier?: Partial<TrackedAttrs>,
+  later?: Partial<TrackedAttrs>,
 ) {
-  if (!left || !right) {
+  if (!earlier || !later) {
     console.warn("passed undefined dataTracked attributes to shouldMergeTrackedAttributes", {
-      left,
-      right,
+      earlier,
+      later,
     });
     return false;
   }
   return (
-    left.status === right.status &&
-    left.operation === right.operation &&
-    left.authorID === right.authorID &&
-    left.creationId === right.creationId &&
-    left.deletionId === right.deletionId &&
-    left.continuesId === right.continuesId &&
-    left.moveId === right.moveId &&
-    left.foldingClosed === right.foldingClosed &&
-    JSON.stringify(left.dependsOn ?? []) === JSON.stringify(right.dependsOn ?? []) &&
+    earlier.status === later.status &&
+    earlier.operation === later.operation &&
+    earlier.authorID === later.authorID &&
+    earlier.creationId === later.creationId &&
+    earlier.deletionId === later.deletionId &&
+    earlier.continuesId === later.continuesId &&
+    earlier.moveId === later.moveId &&
+    earlier.foldingClosed === later.foldingClosed &&
+    JSON.stringify(earlier.dependsOn ?? []) === JSON.stringify(later.dependsOn ?? []) &&
     // A record restores what it replaced, so two that replaced different marks stay two.
-    stableStringify(left.replaced ?? []) === stableStringify(right.replaced ?? []) &&
-    // Text typed on from a replacement joins it; two replacements stay two.
-    (left.groupId === undefined || right.groupId === undefined || left.groupId === right.groupId)
+    stableStringify(earlier.replaced ?? []) === stableStringify(later.replaced ?? []) &&
+    // Text typed on from a replacement joins it. A replacement never takes in an
+    // earlier, separate edit beside it, nor another replacement.
+    (later.groupId === undefined || later.groupId === earlier.groupId)
   );
 }
 
