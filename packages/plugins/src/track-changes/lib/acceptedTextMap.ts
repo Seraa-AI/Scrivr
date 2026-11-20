@@ -20,10 +20,18 @@
  *   3. Model returns a proposedText (replacement for acceptedText).
  *   4. Diff acceptedText → proposedText with diffText().
  *   5. Use the map to translate diff offsets to doc positions.
- *   6. Apply the diff as tracked insert/delete marks via splitRangeForNewMark().
+ *   6. Write the diff as plain edits under trackAsSuggestion(); the engine
+ *      records them.
+ *
+ * A line break reads as "\n", so a proposal can add or remove one.
  */
 
-import type { Node as PMNode, Schema } from "@scrivr/core/pm";
+import { breakOf, describeInlineMark, isTrackedMark, type InlineMark } from "@scrivr/core";
+import type { Mark, Node as PMNode, Schema } from "@scrivr/core/pm";
+
+import { getBlockInlineTrackedData, markRecords, proposedForDeletion } from "../helpers";
+import { isMarkRemoved } from "../semanticChanges";
+import { CHANGE_OPERATION, CHANGE_STATUS } from "../types";
 
 export interface PosMapEntry {
   /** 0-based index into acceptedText */
@@ -53,85 +61,92 @@ export function buildAcceptedTextMap(
   nodeStartPos: number,
   schema: Schema,
 ): AcceptedTextMapResult {
-  const acceptedChars: string[] = [];
-  const map: PosMapEntry[] = [];
-  const decoratedParts: string[] = [];
+  const chars = collectAccepted(node, nodeStartPos, schema);
+  return {
+    acceptedText: chars.map((cell) => cell.char).join(""),
+    decoratedText: decorate(node, schema),
+    map: chars.map((cell, acceptedOffset) => ({ acceptedOffset, docPos: cell.docPos })),
+  };
+}
 
-  const insertMarkType = schema.marks.trackedInsert;
-  const deleteMarkType = schema.marks.trackedDelete;
+/** One accepted-view character: its doc position and the formatting marks on it. */
+export interface AcceptedChar {
+  char: string;
+  docPos: number;
+  marks: InlineMark[];
+}
 
-  // nodeStartPos points BEFORE the node token itself.
-  // The first child content starts at nodeStartPos + 1 (skipping the node's
-  // own opening token).
-  let offset = nodeStartPos + 1;
+/**
+ * The accepted-view text of a single textblock, character by character,
+ * with each one's doc position and formatting marks. It is what the semantic
+ * export shows an agent, so it must mirror that extraction exactly, or a
+ * verbatim echo diffs as a full rewrite:
+ *  - text node → its chars, minus tracked-change marks (trackedDelete text
+ *    excluded entirely, matching the review view);
+ *  - formatting → its marks, minus any a pending change proposes removing;
+ *  - line break → a newline, unless its deletion is pending;
+ *  - other inline leaf (e.g. image) → no intrinsic text.
+ */
+export function collectAccepted(node: PMNode, nodeStart: number, schema: Schema): AcceptedChar[] {
+  const deleteType = schema.marks.trackedDelete;
 
+  if (node.isText) {
+    if (deleteType && node.marks.some((m) => m.type === deleteType)) return [];
+    const marks = formattingMarksOf(node.marks);
+    const text = node.text ?? "";
+    const out: AcceptedChar[] = [];
+    for (let i = 0; i < text.length; i++) out.push({ char: text[i]!, docPos: nodeStart + i, marks });
+    return out;
+  }
+  if (breakOf(node.type) === "line") return proposedForDeletion(node) ? [] : [{ char: "\n", docPos: nodeStart, marks: [] }];
+  // A container (a list, a table) has no text of its own: callers read its
+  // textblocks one by one, each under its own id.
+  if (!node.isTextblock) return [];
+
+  // A textblock: its inline runs in document order, past its opening token.
+  const out: AcceptedChar[] = [];
+  let offset = nodeStart + 1;
   node.forEach((child) => {
-    const text = child.text ?? "";
-    const childLen = child.nodeSize;
+    out.push(...collectAccepted(child, offset, schema));
+    offset += child.nodeSize;
+  });
+  return out;
+}
 
-    if (!child.isText) {
-      // Non-text inline (e.g. inline image) — skip in accepted text,
-      // but advance offset.
-      offset += childLen;
+/** PM marks → formatting `InlineMark`s: drop tracked-change marks, marks proposed removed, and `dataTracked`/null attrs. */
+function formattingMarksOf(marks: readonly Mark[]): InlineMark[] {
+  return marks.filter((mark) => !isTrackedMark(mark.type.name) && !isMarkRemoved(mark)).map(describeInlineMark);
+}
+
+/**
+ * The block's text for an agent's context, with suggestions shown:
+ * `<del author="Bob">quick </del><ins author="Bob">agile </ins>`. A line break
+ * reads as a newline; other inline leaves have no text.
+ */
+function decorate(node: PMNode, schema: Schema): string {
+  const insertType = schema.marks.trackedInsert;
+  const deleteType = schema.marks.trackedDelete;
+  const parts: string[] = [];
+  node.forEach((child) => {
+    const isBreak = breakOf(child.type) === "line";
+    if (!child.isText && !isBreak) return;
+    const text = escapeXml(child.isText ? child.text ?? "" : "\n");
+    const records = child.isText
+      ? child.marks.filter((m) => m.type === insertType || m.type === deleteType).flatMap(markRecords)
+      : getBlockInlineTrackedData(child) ?? [];
+    // Struck text reads as deleted even when it was someone's insertion.
+    const pendingAs = (operation: CHANGE_OPERATION) =>
+      records.find((record) => record.status === CHANGE_STATUS.pending && record.operation === operation);
+    const pending = pendingAs(CHANGE_OPERATION.delete) ?? pendingAs(CHANGE_OPERATION.insert);
+    if (!pending) {
+      parts.push(text);
       return;
     }
-
-    const marks = child.marks;
-    const isInsert = insertMarkType
-      ? marks.some((m) => m.type === insertMarkType)
-      : false;
-    const isDelete = deleteMarkType
-      ? marks.some((m) => m.type === deleteMarkType)
-      : false;
-
-    // Determine the authorID for decoration (use first tracked mark found)
-    let authorID: string | undefined;
-    for (const m of marks) {
-      if (
-        m.type === insertMarkType ||
-        m.type === deleteMarkType
-      ) {
-        const dataTracked: { authorID?: string } | null = m.attrs.dataTracked;
-        authorID = dataTracked?.authorID;
-        break;
-      }
-    }
-
-    if (isDelete) {
-      // Deleted text: skip in acceptedText, include in decoratedText only
-      decoratedParts.push(
-        `<del${authorID ? ` author="${escapeAttr(authorID)}"` : ""}>${escapeXml(text)}</del>`,
-      );
-      // Do NOT add to acceptedChars / map — these chars won't exist in
-      // the accepted view.
-    } else {
-      // Plain text OR trackedInsert (insertion is already accepted view)
-      if (isInsert) {
-        decoratedParts.push(
-          `<ins${authorID ? ` author="${escapeAttr(authorID)}"` : ""}>${escapeXml(text)}</ins>`,
-        );
-      } else {
-        decoratedParts.push(escapeXml(text));
-      }
-
-      // Add each character to the accepted text + map
-      for (let ci = 0; ci < text.length; ci++) {
-        map.push({
-          acceptedOffset: acceptedChars.length,
-          docPos: offset + ci,
-        });
-        acceptedChars.push(text[ci]!);
-      }
-    }
-
-    offset += childLen;
+    const tag = pending.operation === CHANGE_OPERATION.delete ? "del" : "ins";
+    const author = pending.authorID ? ` author="${escapeAttr(pending.authorID)}"` : "";
+    parts.push(`<${tag}${author}>${text}</${tag}>`);
   });
-
-  return {
-    acceptedText: acceptedChars.join(""),
-    decoratedText: decoratedParts.join(""),
-    map,
-  };
+  return parts.join("");
 }
 
 /**
@@ -165,7 +180,7 @@ export function bridgeable(doc: PMNode, map: readonly PosMapEntry[], from: numbe
  * Returns `null` if the offset is out of range.
  */
 export function acceptedOffsetToDocPos(
-  map: PosMapEntry[],
+  map: readonly PosMapEntry[],
   acceptedOffset: number,
 ): number | null {
   if (acceptedOffset < 0 || acceptedOffset >= map.length) return null;
@@ -182,7 +197,7 @@ export function acceptedOffsetToDocPos(
  * Returns null if the range is invalid.
  */
 export function acceptedRangeToDocRange(
-  map: PosMapEntry[],
+  map: readonly PosMapEntry[],
   startOffset: number,
   endOffset: number,
 ): { from: number; to: number } | null {
@@ -244,7 +259,7 @@ function escapeAttr(text: string): string {
  * accepted-text range to name.
  */
 export function docRangeToAcceptedRange(
-  map: PosMapEntry[],
+  map: readonly PosMapEntry[],
   from: number,
   to: number,
 ): { from: number; to: number } | null {
