@@ -1,8 +1,9 @@
-import type { IBaseEditor } from "@scrivr/core";
-import type { Node as PmNode } from "@scrivr/core/pm";
+import type { Node as PmNode } from "prosemirror-model";
+import type { IBaseEditor } from "../extensions/types";
 
 /**
- * Put a document returned by `importDocx` into an editor.
+ * Put a document returned by an importer (`importDocx`, `importHtml`) into an
+ * editor.
  *
  * Content alone is not the document. An import contribution settles what it
  * reconstructs from outside the body on `doc.attrs`: the header and footer

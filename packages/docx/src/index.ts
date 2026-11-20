@@ -51,7 +51,8 @@ export { importDocx } from "./import/import";
 export type { DocxImportResult, DocxImportOptions } from "./import/import";
 
 export { DocxImport } from "./import/DocxImport";
-export { applyImportedDocument } from "./import/applyDocument";
+// Moved to core with the HTML importer; re-exported so DOCX callers keep working.
+export { applyImportedDocument } from "@scrivr/core";
 
 export { DocxImportError } from "./import/error";
 

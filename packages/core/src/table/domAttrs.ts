@@ -1,6 +1,7 @@
 import type { DOMOutputSpec } from "prosemirror-model";
 import type { CellHAlign, CellVAlign, CellVMerge } from "./attrs";
 import { isHAlign, isVAlign, isVMerge, storableFill } from "./attrs";
+import { isHtmlElement } from "../model/isHtmlElement";
 
 /**
  * The HTML attribute layer for table nodes — one module owning both directions
@@ -31,7 +32,7 @@ const MAX_COLUMN_SPAN = 64;
 
 /** True for a table cell element — `td` or `th`. */
 export function isCell(el: Element): el is HTMLElement {
-  if (!(el instanceof HTMLElement)) return false;
+  if (!isHtmlElement(el)) return false;
   const tag = el.tagName.toLowerCase();
   return tag === "td" || tag === "th";
 }
@@ -147,7 +148,7 @@ const UNIT_PX: Record<string, number> = {
 
 /** Reads one column's width in CSS px, or null when it is missing or relative. */
 function readColWidth(col: Element): number | null {
-  const styled = col instanceof HTMLElement ? col.style.width.trim() : "";
+  const styled = isHtmlElement(col) ? col.style.width.trim() : "";
   const raw = styled !== "" ? styled : (col.getAttribute("width") ?? "");
 
   const measure = /^(\d+(?:\.\d+)?)\s*([a-z]*)$/i.exec(raw.trim());

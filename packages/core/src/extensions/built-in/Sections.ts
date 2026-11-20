@@ -11,6 +11,7 @@ import {
   type SectionSettings,
   type SectionSettingsPatch,
 } from "../../model/sections";
+import { isHtmlElement } from "../../model/isHtmlElement";
 import type { SemanticNodeHandler } from "../../exports/semantic";
 
 /**
@@ -49,7 +50,7 @@ export const Sections = Extension.create({
           {
             tag: "div.scrivr-section-break",
             getAttrs(dom) {
-              if (!(dom instanceof HTMLElement)) return false;
+              if (!isHtmlElement(dom)) return false;
               const raw = dom.getAttribute("data-section-settings");
               return {
                 nodeId: dom.getAttribute("data-node-id") ?? null,

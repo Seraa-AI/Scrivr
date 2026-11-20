@@ -14,6 +14,8 @@ export type { Rgb, Rgba } from "./cssColor";
 export { spansToFragment, sameMark, resolveInlineMark, resolveInlineMarks, describeInlineMark, isTrackedMark } from "./spansToFragment";
 export type { SpansToFragmentOptions } from "./spansToFragment";
 export { sanitizeDocUrls } from "./sanitizeDocUrls";
+export { applyImportedDocument } from "./applyImportedDocument";
+export { isHtmlElement } from "./isHtmlElement";
 export { dropPendingPlaceholders } from "./dropPendingPlaceholders";
 export { assignBlockIds, blockIdOf, planBlockIdAssignments, planDuplicateIdAssignments, recloneDocumentIds } from "./assignBlockIds";
 export { fnv1aHex, sha256Hex, stableStringify } from "./hash";

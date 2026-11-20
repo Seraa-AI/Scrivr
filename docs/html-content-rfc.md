@@ -192,4 +192,24 @@ in HTML isn't finished.
 
 ## What shipped
 
-Nothing yet.
+**Phase 1, in progress** (`feat/html-content`):
+
+- `@scrivr/html` with `importHtml(editor, html)`. It picks the DOM per D2,
+  keeps ids per D9 and runs no cleaner. It is tested in node, which is Seraa's
+  path, and under happy-dom as a browser.
+- `applyImportedDocument` moved to core. `@scrivr/docx` and `@scrivr/html`
+  both re-export it.
+- **Found while building, fixed at the seam:** the parse rules for links,
+  images, tables, fields, section breaks and sourced blocks checked
+  `instanceof Element` / `HTMLElement`. On a server those globals don't exist,
+  so the import threw. A shape check, `isHtmlElement` (exported from core),
+  replaces them, so the rules read HTML from any DOM. Paste uses the same
+  rules.
+- **D3 turned out to need no split.** The import runs no cleaning at all,
+  because ProseMirror already skips `<script>`, `<style>` and `<head>`.
+  `cleanPastedHtml` is unchanged and still runs only on paste.
+- **D4 isn't needed with happy-dom.** Its `el.style` reads alignment, margin
+  and indent correctly, which the tests confirm. `readStyle` would only matter
+  for a DOM that doesn't implement `style`.
+- **Still open in Phase 1:** D6 diagnostics. `HtmlImportResult` carries only
+  `doc` until those are reported.

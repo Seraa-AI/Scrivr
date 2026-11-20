@@ -23,7 +23,7 @@
  */
 
 import { Extension } from "@scrivr/core";
-import { applyImportedDocument } from "./applyDocument";
+import { applyImportedDocument } from "@scrivr/core";
 import { importDocx as runImportDocx } from "./import";
 import type { DocxImportOptions } from "./import";
 

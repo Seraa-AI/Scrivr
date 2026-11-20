@@ -8,6 +8,7 @@ import {
 } from "../../exports/docx";
 import type { MarkDecorator, SpanRect } from "../types";
 import { safeUrl } from "../../model/safeUrl";
+import { isHtmlElement } from "../../model/isHtmlElement";
 import { getMarkAttrs } from "../../model/getNodeAttrs";
 import type { PdfMarkHandler } from "../../exports/pdf";
 import type { Mark, MarkType, Node } from "prosemirror-model";
@@ -102,9 +103,7 @@ export const Link = Extension.create({
           {
             tag: "a[href]",
             getAttrs: (dom) => {
-              // dom is typed as `Node | string` from ProseMirror; narrow via
-              // `instanceof Element` so we can call getAttribute without a cast.
-              if (!(dom instanceof Element)) return false;
+              if (!isHtmlElement(dom)) return false;
               // Reject the mark entirely when the href fails the ingestion
               // allow-list. Returning false from getAttrs drops only the
               // mark — the link text remains as plain text rather than

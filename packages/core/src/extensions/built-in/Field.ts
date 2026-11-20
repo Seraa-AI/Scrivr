@@ -8,6 +8,7 @@ import { KeymapPriority, type IBaseEditor, type IEditor } from "../types";
 import type { InlineLine, InlineStrategy } from "../../layout/BlockRegistry";
 import type { PdfNodeHandler } from "../../exports/pdf";
 import { compositeColor, parseCssColor, type Rgb } from "../../model/cssColor";
+import { isHtmlElement } from "../../model/isHtmlElement";
 import type { ResolvedTheme } from "../../model/theme";
 import type { HoverResolver } from "../../hover/types";
 import {
@@ -808,7 +809,7 @@ export const Field = Extension.create<FieldOptions>({
           {
             tag: "span[data-field]",
             getAttrs(dom) {
-              if (!(dom instanceof Element)) return false;
+              if (!isHtmlElement(dom)) return false;
               const kind = dom.getAttribute("data-field");
               const spec = kind === null ? undefined : kinds[kind];
               if (!spec) return false;
@@ -860,7 +861,7 @@ export const Field = Extension.create<FieldOptions>({
           {
             tag: "div[data-field-block]",
             getAttrs(dom) {
-              if (!(dom instanceof Element)) return false;
+              if (!isHtmlElement(dom)) return false;
               return {
                 kind: dom.getAttribute("data-field-block") === "date" ? "date" : "text",
                 prompt: dom.getAttribute("data-prompt") ?? "",
@@ -908,7 +909,7 @@ export const Field = Extension.create<FieldOptions>({
           {
             tag: "span[data-field-range]",
             getAttrs(dom) {
-              if (!(dom instanceof Element)) return false;
+              if (!isHtmlElement(dom)) return false;
               const kind = dom.getAttribute("data-field-range") === "date" ? "date" : "text";
               return {
                 kind,
