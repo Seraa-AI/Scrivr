@@ -117,16 +117,15 @@ take them as a person's edits would. Decision 7 answers the first.
      each phrase that deletes agreed text is one replacement. A phrase that only
      rewrites the author's own earlier lane insertion continues that
      replacement.
-   - **Word and Google Docs disagree here, and this follows Google Docs.** Word
-     keeps a typed-over selection as two revisions, an adjacent `w:del` and
-     `w:ins` of one author and date, each accepted or rejected on its own.
-     Google Docs shows it as one suggestion. Scrivr already treats a
-     replacement as one act: the lanes pair their diffs (D8 in
+   - **Word and Google Docs disagree here, and the reader chooses** (Decision 8).
+     Word keeps a typed-over selection as two revisions, an adjacent `w:del`
+     and `w:ins` of one author and date, each accepted or rejected on its own.
+     Google Docs shows it as one suggestion. The engine always records the
+     pairing; how review shows it is a view the reader picks, and the default
+     is one card. The lanes already pair their diffs (D8 in
      `docs/tracked-changes-agents-docx-rfc.md`), and D11 there decides that
-     DOCX import will read Word's adjacent pair as one replacement. D11 is
-     decided but not built. Pairing typed replacements makes a person's swap
-     match an agent's. Today a replacement typed in Scrivr is two cards; after
-     this it is one.
+     DOCX import will read Word's adjacent pair as one replacement, so a
+     person's swap matches an agent's either way.
    - Built and tested on branch `suggestion-lanes-252-engine`
      (`replacementPairing.test.ts`).
 
@@ -171,6 +170,30 @@ take them as a person's edits would. Decision 7 answers the first.
    "**foo** bar" would become three cards. A paste typed in suggesting mode gets
    the same.
 
+8. **Replacements are one card, or split as Word shows them — the reader's
+   choice.** Review reads a replacement's pairing through one setting, the
+   *replacement view*, held in the plugin state:
+   - `"paired"` (the default): a replacement is one card, and accepting or
+     rejecting it decides both halves. Fast to review, as Google Docs does.
+   - `"split"`: the deletion and the insertion are two cards, each decided on
+     its own, as Word shows them.
+   - It is a view, not a recording rule: the engine always records the shared
+     `groupId`, so switching never rewrites the document, and two readers of
+     one document can review it each their own way.
+   - What reads it: the review plan (whether deciding one half decides the
+     other), the change popover (one card or two), and `changeActs`.
+   - Set with `TrackChanges.configure({ replacementView })` for the initial
+     view and the `setReplacementView(view)` command; a host puts the toggle
+     in its review UI.
+   - This is the first setting that lets a reader choose Word's behaviour over
+     the faster default. Reviewing one person's changes at a time, where
+     several have tracked changes, is a later setting of the same kind, in its
+     own PR.
+   - A lane phrase whose deletion is split around content the lane did not
+     read — an image inside the deleted words — is written as several steps.
+     `writeProposal` marks those steps as one phrase, and the engine gives
+     them one replacement, so the default view still shows one card.
+
 ## Public surface
 
 | Export | After this |
@@ -182,6 +205,7 @@ take them as a person's edits would. Decision 7 answers the first.
 | `createNewDeleteAttrs`, `createNewInsertAttrs`, `createNewPendingAttrs`, `addTrackIdIfDoesntExist` | Kept; the barrel comment naming `@scrivr/ai` as their consumer is corrected |
 | `suggestionBlocked` | New |
 | `writeProposal` | New: the lanes' shared writer, exported for `@scrivr/ai` |
+| `replacementView` option, `setReplacementView` command, `ReplacementView` type | New (Decision 8) |
 
 A host that builds `proposedText` from a view without breaks would now propose
 deleting every break, so the implementation changeset carries a **Breaking**
