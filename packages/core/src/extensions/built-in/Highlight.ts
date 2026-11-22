@@ -144,7 +144,8 @@ export const Highlight = Extension.create<HighlightOptions>({
       const value = typeof raw === "string" && raw.length > 0 ? raw : fallback;
       const named = docxHighlightName(value);
       if (named) return { ...props, highlight: named };
-      const hex = writtenDocxColor(value, mark.type.name, "color", ctx.report);
+      // The editor's own colour is drawn onto the white page just as Word blends it.
+      const hex = value === fallback ? cssColorToDocxHex(value) : writtenDocxColor(value, mark.type.name, "color", ctx.report);
       if (hex) return { ...props, shadingFill: hex };
       // Unparseable — fall back to the canonical yellow so something paints.
       ctx.report.changed(mark.type.name, "unreadable color written as yellow");

@@ -295,6 +295,8 @@ export function createReportRecorder(options: ReportRecorderOptions = {}): DocxR
       const item = lost(result);
       if (item && !level.claimedKept.has(item.kind)) {
         for (const [kind, count] of level.kept) {
+          // A kind whose content was all left out already has nothing to move.
+          if (count === 0) continue;
           countOf(kind).kept -= count;
           addEntry("dropped", kind, insideDropped(item.kind), item.owner, count);
         }

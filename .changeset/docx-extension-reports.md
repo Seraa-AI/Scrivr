@@ -11,7 +11,7 @@ The built-in extensions report what their DOCX handlers could not carry across, 
   - Color drops a colour DOCX cannot express (`"not a color DOCX can write"`) and a mark with no colour.
   - FontFamily drops a mark naming no font. FontSize notes a size that Word's half points round, and drops a mark with no size.
   - Highlight notes an unreadable colour written as yellow. Link notes a title it does not write, once per link.
-  - Color, Highlight and Table note a translucent colour blended onto white, since DOCX has no alpha.
+  - Color, Highlight and Table note a translucent colour blended onto white, since DOCX has no alpha — though not the highlight's own colour, which the canvas draws the same way.
   - Table notes a cell background it blends onto white because it is translucent, or does not write because it is not a colour.
   - SourcedBlock notes a source link too long for Word's 255-character tag.
 - **Import.**

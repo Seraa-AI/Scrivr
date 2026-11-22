@@ -900,17 +900,20 @@ describe("exportDocx — what each extension says it could not write", () => {
     expect(report.counts["link"]).toEqual({ kept: 1, dropped: 0, changed: 1 });
   });
 
-  it("names a translucent colour Word is given blended onto white", async () => {
+  it("names no change for a highlight in the editor's own colour", async () => {
+    const report = await exportOf([{ type: "paragraph", content: [{ type: "text", text: "a", marks: [{ type: "highlight" }] }] }]);
+    expect(changesBy(report, "highlight")).toEqual([]);
+  });
+
+  it("names a translucent text colour Word is given blended onto white", async () => {
     const report = await exportOf([{
       type: "paragraph",
       content: [
         { type: "text", text: "a", marks: [{ type: "color", attrs: { color: "rgba(255, 0, 0, 0.5)" } }] },
-        { type: "text", text: "b", marks: [{ type: "highlight", attrs: { color: "rgba(0, 0, 255, 0.5)" } }] },
         { type: "text", text: "c", marks: [{ type: "color", attrs: { color: "#00ff00" } }] },
       ],
     }]);
     expect(changesBy(report, "color")).toEqual(["color: translucent color blended onto white"]);
-    expect(changesBy(report, "highlight")).toEqual(["highlight: translucent color blended onto white"]);
   });
 
   it("says why it wrote nothing for a mark with no value", async () => {
@@ -976,6 +979,12 @@ describe("importDocx — what each extension says it could not keep", () => {
     expect(report.entries).toContainEqual({ outcome: "dropped", kind: "sz", reason: "not a valid size", owner: "fontSize", count: 1 });
     expect(report.entries).toContainEqual({ outcome: "dropped", kind: "rFonts", reason: "theme font not resolved", owner: "fontFamily", count: 1 });
     expect(report.entries).toContainEqual({ outcome: "dropped", kind: "hyperlink", reason: "no usable target", owner: "link", count: 1 });
+  });
+
+  it("keeps the text of a smart tag inside a link", async () => {
+    const body = `<w:p><w:hyperlink w:anchor="top"><w:r><w:t xml:space="preserve">Visit </w:t></w:r><w:smartTag w:uri="urn:x" w:element="place"><w:r><w:t>Nairobi</w:t></w:r></w:smartTag></w:hyperlink></w:p>`;
+    const { doc } = await importDocx(new ServerEditor({ extensions: [StarterKit] }), await docWithBody(body));
+    expect(doc.textContent).toContain("Visit Nairobi");
   });
 
   it("names an underline colour it does not keep", async () => {
@@ -1062,6 +1071,41 @@ describe("importDocx — what each extension says it could not keep", () => {
 
     expect(doc.child(0).type.name).toBe("codeBlock");
     expect(report.entries.filter((entry) => entry.owner === "codeBlock")).toEqual([]);
+  });
+
+  it("counts no loss for the line breaks a code block keeps as newlines", async () => {
+    const editor = new ServerEditor();
+    editor.setContent({ type: "doc", content: [{ type: "codeBlock", content: [{ type: "text", text: "line1\nline2\nline3" }] }] });
+    const { doc, report } = await importDocx(new ServerEditor(), await exportDocxBytes(editor));
+
+    expect(doc.child(0).textContent).toBe("line1\nline2\nline3");
+    expect(dropsOf(report)).toEqual([]);
+  });
+
+  it("names a content control a code block leaves behind by Word's kind", async () => {
+    const editor = new ServerEditor({ extensions: [StarterKit, Field] });
+    editor.setContent({ type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "sign " }, { type: "field", attrs: { nodeId: "who", kind: "name", fill: "signer", role: "client", width: 160, height: 24 } }] }] });
+    const files = unzipSync(await exportDocxBytes(editor));
+    const documentXml = strFromU8(files["word/document.xml"]!).replace("<w:p>", `<w:p><w:pPr><w:pStyle w:val="CodeBlock"/></w:pPr>`);
+    const { report } = await importDocx(new ServerEditor({ extensions: [StarterKit, Field] }), zipSync({ ...files, "word/document.xml": strToU8(documentXml) }));
+
+    expect(report.counts["sdt"]).toMatchObject({ kept: 0, dropped: 1 });
+    expect(report.counts["field"]).toBeUndefined();
+  });
+
+  it("leaves no empty entry when a handler builds nothing from what it was handed", async () => {
+    const Empty = Extension.create({
+      name: "empty",
+      addImports() {
+        return { docx: { blocks: { paragraph: () => [] } } };
+      },
+    });
+    const { report } = await importDocx(
+      new ServerEditor({ extensions: [StarterKit, Empty] }),
+      await docWithBody(`<w:p>${run("<w:b/>")}</w:p>`),
+    );
+    expect(report.entries.filter((entry) => entry.count === 0)).toEqual([]);
+    expect(report.counts["b"]).toMatchObject({ kept: 0, dropped: 1 });
   });
 
   it("counts no loss for formatting a code block leaves behind that carried nothing", async () => {

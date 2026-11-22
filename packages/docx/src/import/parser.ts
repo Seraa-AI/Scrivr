@@ -413,6 +413,10 @@ function parseParagraphInlines(el: OoxmlElement, diag: ParserDiagnostics): DocxI
           for (const item of parseRun(inner, diag)) {
             content.push(addMark(item, linkMark));
           }
+        } else if (inner.name === "w:smartTag") {
+          for (const item of parseParagraphInlines(inner, diag)) {
+            content.push(addMark(item, linkMark));
+          }
         }
       }
     }

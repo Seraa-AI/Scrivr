@@ -69,6 +69,8 @@ export function transformToProseMirror(
   ctx: DocxImportContext,
   handlers: ResolvedImportHandlers,
 ): PmNode {
+  // Links a walk left pending belong to that walk: one that threw leaves none for this one.
+  unlanded.length = 0;
   const blocks = [...ctx.walkBlocks(model.blocks)];
   // Schemas typically require at least one block child in `doc`.
   if (blocks.length === 0) {
@@ -253,7 +255,7 @@ function transformInlines(
       if (item.text.length === 0) continue;
       const { marks, sources } = transformMarks(layer(inherited, item.marks), ctx, handlers, recorder);
       const text = ctx.schema.text(item.text, marks.length > 0 ? marks : undefined);
-      builtInlines.set(text, sources);
+      builtInlines.set(text, { sources });
       out.push(text);
       recorder.carried("text");
     } else if (item.type === "hardBreak") {
@@ -262,7 +264,7 @@ function transformInlines(
         // Marked like its run, so a break inside a field stays inside it.
         const { marks, sources } = transformMarks(layer(inherited, item.marks), ctx, handlers, recorder);
         const hardBreak = hb.create(null, null, marks);
-        builtInlines.set(hardBreak, sources);
+        builtInlines.set(hardBreak, { sources });
         out.push(hardBreak);
         recorder.carried("hardBreak");
       } else {
@@ -296,7 +298,7 @@ function transformControl(
 ): PmNode[] {
   const handler = entryOf(handlers.inlines, "sdt");
   if (handler) {
-    const { marks } = transformMarks(layer(inherited, item.marks), ctx, handlers, recorder);
+    const { marks, sources } = transformMarks(layer(inherited, item.marks), ctx, handlers, recorder);
     // A `null` is "not my tag": the content below still lands.
     const claimed = recorder.handle(
       ownerOf(handlers.owners.inlines, "sdt"),
@@ -305,7 +307,10 @@ function transformControl(
       built,
       NOT_MINE,
     );
-    if (claimed) return [claimed];
+    if (claimed) {
+      builtInlines.set(claimed, { sources, atom: "sdt" });
+      return [claimed];
+    }
   }
 
   // The control's mark is counted once, on the first run under it, so the
@@ -390,7 +395,7 @@ function transformAtom(
     },
     (atom) => (atom ? null : { kind: item.type, owner }),
   );
-  if (node) builtInlines.set(node, sources);
+  if (node) builtInlines.set(node, { sources, atom: item.type });
   for (const mark of wrappers) {
     if (!node) unlanded.push({ mark, atom: item.type });
     else if (!countedWrappers.has(mark)) {
@@ -537,8 +542,12 @@ interface MarkSource {
   docx: DocxMark;
   pm: PmMark;
 }
-/** Each inline node the converter built, and the Word marks behind its formatting. */
-const builtInlines = new WeakMap<PmNode, MarkSource[]>();
+/**
+ * Each inline node the converter built: the Word marks behind its formatting,
+ * and, for an object an extension built (an image, a field, a content
+ * control), the Word kind it was counted as.
+ */
+const builtInlines = new WeakMap<PmNode, { sources: MarkSource[]; atom?: string }>();
 
 /**
  * A paragraph handler hands back a node built from `content`. Formatting and
@@ -555,14 +564,22 @@ function chargeLeftOut(
   owner: HandlerOwner,
   recorder: DocxReportRecorder,
 ): void {
-  if (!result) return;
+  if (!result || !producedNodes(result)) return;
+  // An object is counted by the Word kind it was built from; a line break is
+  // not one, since a handler can keep it as a newline.
+  const atomKinds = new Map<string, string>();
+  for (const node of content) {
+    const atom = builtInlines.get(node)?.atom;
+    if (atom) atomKinds.set(node.type.name, atom);
+  }
   const weight = (node: PmNode) => (node.isText ? (node.text ?? "").length : 1);
   const tally = (nodes: readonly PmNode[]) => {
     const marks = new Map<string, number>();
     const atoms = new Map<string, number>();
     const visit = (node: PmNode) => {
       node.marks.forEach((mark) => marks.set(mark.type.name, (marks.get(mark.type.name) ?? 0) + weight(node)));
-      if (node.isInline && node.isLeaf && !node.isText) atoms.set(node.type.name, (atoms.get(node.type.name) ?? 0) + 1);
+      const atom = atomKinds.get(node.type.name);
+      if (atom) atoms.set(atom, (atoms.get(atom) ?? 0) + 1);
     };
     for (const node of nodes) {
       visit(node);
@@ -577,7 +594,7 @@ function chargeLeftOut(
   for (const [type, amount] of given.marks) {
     let missing = amount - (kept.marks.get(type) ?? 0);
     for (const node of content) {
-      for (const { docx, pm } of builtInlines.get(node) ?? []) {
+      for (const { docx, pm } of builtInlines.get(node)?.sources ?? []) {
         if (missing <= 0 || pm.type.name !== type) continue;
         // The style's own formatting accounts for its share of what is missing, uncharged.
         missing -= weight(node);
