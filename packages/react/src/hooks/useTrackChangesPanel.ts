@@ -84,7 +84,7 @@ const textOf = (changes: TrackedChange[], operation: CHANGE_OPERATION) =>
     .join("");
 
 function buildDisplayItems(changes: TrackedChange[], view: ReplacementView): TrackChangesDisplayItem[] {
-  // Split, a replacement is its deletion and its insertion, each its own card.
+  // In the split view a replacement's deletion and insertion are each a card.
   if (view === "split") return singles(changes, "split");
   const byGroupId = new Map<string, TrackedChange[]>();
   const ungrouped: TrackedChange[] = [];
@@ -126,11 +126,11 @@ function buildDisplayItems(changes: TrackedChange[], view: ReplacementView): Tra
         authorID: del.dataTracked.authorID,
       });
     } else {
-      items.push(...singles(group, view));
+      items.push(...singles(group, "paired"));
     }
   }
 
-  items.push(...singles(ungrouped, view));
+  items.push(...singles(ungrouped, "paired"));
 
   items.sort((a, b) => {
     const af =

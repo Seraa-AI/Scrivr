@@ -353,6 +353,8 @@ const scenarios: Scenario[] = [
   { name: "cut a rule, paste lower", doc: [p("aa"), hr(), p("bb"), p("cc")], gesture: e => { const pos = nodePos(e, "horizontalRule"); const s = cut(e, pos, pos + 1); paste(e, s, at(e, "cc", 2)); } },
   { name: "drag a word along its line", doc: hello, gesture: e => tr(e, (t, s) => { const word = s.doc.slice(1, 7); return t.delete(1, 7).insert(t.mapping.map(12), word.content); }) },
   { name: "drag a word to another paragraph", doc: [p("one two"), p("three")], gesture: e => tr(e, (t, s) => { const word = s.doc.slice(1, 5); return t.delete(1, 5).insert(t.mapping.map(15), word.content); }) },
+  // Nothing of it was there before, so nothing is left behind to move from.
+  { name: "drag words I typed, still pending, along their paragraph", doc: [p("one two")], gesture: e => { tr(e, t => t.insertText("abc ", 1)); tr(e, (t, s) => { const words = s.doc.slice(1, 5); return t.delete(1, 5).insert(t.mapping.map(12), words.content); }); }, check: acts("insert") },
   // Found in review
   { name: "Delete two breaks in a row", doc: [p("aa"), p("bb"), p("cc")], gesture: e => { sel(e, at(e, "aa", 2)); key(e, "Delete"); sel(e, at(e, "bb", 2)); key(e, "Delete"); } },
   { name: "Backspace a selection across two list items", doc: [ul("one", "two")], gesture: e => { sel(e, 4, 11); key(e, "Backspace"); } },

@@ -10,6 +10,7 @@ import {
   Step,
 } from "@scrivr/core/pm";
 
+import { getAction, TrackChangesAction } from "../actions";
 import { ChangeStep, TrTrackingContext } from "../types";
 import { processChangeSteps } from "./processReplaceStep";
 import { advanceBridge } from "./replayBridge";
@@ -18,7 +19,7 @@ import {
   passThroughMeta,
 } from "./transactionProcessing";
 import { createNewPendingAttrs, genId, NewEmptyAttrs } from "../helpers";
-import { alreadyProposedForDeletion, canCancelInsertion, ownReplacementOf } from "../lib/deletionPolicy";
+import { alreadyProposedForDeletion, canCancelInsertion, inlineNodesIn, ownReplacementOf } from "../lib/deletionPolicy";
 import { diffChangeSteps } from "../lib/structuralChange";
 import { mergeTrackedMarks } from "../lib/mergeTrackedMarks";
 import { isSetNodeMarkupStep } from "../step-trackers/qualifiers";
@@ -56,18 +57,6 @@ function caretBeforeStepEnd(tr: Transaction, i: number, step: ReplaceStep): numb
 }
 
 /**
- * Whether `step` puts inline content into one block. A step across blocks, or
- * one bringing blocks in (an open slice), also joins or splits them, which is
- * not a word swap.
- */
-function writesInline(step: ReplaceStep, doc: PMNode): boolean {
-  if (step.slice.size === 0) return false;
-  if (step.slice.openStart !== 0 || step.slice.openEnd !== 0) return false;
-  const $from = doc.resolve(step.from);
-  return $from.parent.inlineContent && $from.sameParent(doc.resolve(step.to));
-}
-
-/**
  * The replacement `step` belongs to, as a `groupId`, or none. A step that types
  * over a selection and records a deletion starts one; text already struck gets
  * no second record, and the author's own pending insertion is taken back.
@@ -75,19 +64,37 @@ function writesInline(step: ReplaceStep, doc: PMNode): boolean {
  * so a word typed in several strokes stays one act.
  */
 function replacementGroup(step: ReplaceStep, doc: PMNode, authorID: string): string | undefined {
-  if (!writesInline(step, doc)) return undefined;
+  // A step bringing blocks in (an open slice), or across blocks (which
+  // `inlineNodesIn` refuses), also joins or splits them, which is not a word swap.
+  const closedInsert = step.slice.size > 0 && step.slice.openStart === 0 && step.slice.openEnd === 0;
+  const covered = closedInsert ? inlineNodesIn(doc, step.from, step.to) : null;
+  if (!covered) return undefined;
   const $from = doc.resolve(step.from);
   if (step.from === step.to) return ownReplacementOf($from.nodeBefore, authorID) ?? ownReplacementOf($from.nodeAfter, authorID);
   let recordsDeletion = false;
   let continued: string | undefined;
-  doc.nodesBetween(step.from, step.to, node => {
-    if (!node.isInline) return true;
-    if (alreadyProposedForDeletion(node)) return false;
+  for (const node of covered) {
+    if (alreadyProposedForDeletion(node)) continue;
     if (canCancelInsertion(node, authorID)) continued ??= ownReplacementOf(node, authorID);
     else recordsDeletion = true;
-    return false;
-  });
+  }
   return recordsDeletion ? genId() : continued;
+}
+
+/**
+ * The group each step of a named phrase belongs to: the replacement its first
+ * step starts, or one of its own when that step starts none, so words deleted
+ * around an image the phrase keeps stay one act.
+ */
+function groupsOfPhrases(tr: Transaction, authorID: string): Map<Step, string> {
+  const groups = new Map<Step, string>();
+  for (const steps of getAction(tr, TrackChangesAction.phrases) ?? []) {
+    const [lead] = steps;
+    const at = lead ? tr.steps.indexOf(lead) : -1;
+    const group = (lead instanceof ReplaceStep && at >= 0 ? replacementGroup(lead, tr.docs[at]!, authorID) : undefined) ?? genId();
+    for (const step of steps) groups.set(step, group);
+  }
+  return groups;
 }
 
 /**
@@ -116,13 +123,14 @@ export function trackTransaction(
   }
 
   const baseAttrs = createNewPendingAttrs(tr.time, authorID);
+  const phraseGroups = groupsOfPhrases(tr, authorID);
 
   for (let i = tr.steps.length - 1; i >= 0; i--) {
     const step = tr.steps[i]!;
     const previousMapping = trContext.replayBridge.slice();
     const replayStart = newTr.mapping.maps.length;
     if (!trContext.composition.folded.has(step)) {
-      trackOneStep(i, step, baseAttrs, tr, oldState, newTr, trContext);
+      trackOneStep(i, step, baseAttrs, tr, oldState, newTr, trContext, phraseGroups);
     }
     trContext.replayBridge = advanceBridge(
       step,
@@ -143,6 +151,7 @@ function trackOneStep(
   oldState: EditorState,
   newTr: Transaction,
   trContext: TrTrackingContext,
+  phraseGroups: ReadonlyMap<Step, string>,
 ) {
   const replayBridge = trContext.replayBridge;
   if (step instanceof ReplaceStep) {
@@ -158,7 +167,7 @@ function trackOneStep(
     const moveId = trContext.textMoves.get(step);
     // A move's two halves already pair through its move id.
     const partOfMove = !!moveNodeId || !!moveId || !!trContext.pastedMove;
-    const groupId = partOfMove ? undefined : replacementGroup(step, tr.docs[i]!, baseAttrs.authorID);
+    const groupId = partOfMove ? undefined : phraseGroups.get(step) ?? replacementGroup(step, tr.docs[i]!, baseAttrs.authorID);
     const stepAttrs = groupId === undefined ? baseAttrs : { ...baseAttrs, groupId };
 
     const [initialTrackedContent, newSelectionPos] = trackReplaceStep(

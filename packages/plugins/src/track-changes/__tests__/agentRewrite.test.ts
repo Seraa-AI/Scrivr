@@ -25,17 +25,22 @@ const laidOut = (editor: ServerEditor) => {
 const acceptAll = (editor: ServerEditor) =>
   editor.commands.setChangeStatuses("accepted", findChanges(editor.getState()).pending.map((change) => change.id));
 
-/** Each pending text change as `-old` or `+new`, in document order. */
+/**
+ * Each pending text change as `-old` or `+new`, in document order. A
+ * replacement's new words come before the words it strikes, as typing over a
+ * selection leaves them.
+ */
 const proposed = (editor: ServerEditor) =>
   findChanges(editor.getState()).pending
     .filter((change) => change.type === "text-change")
     .map((change) => `${change.dataTracked.operation === "delete" ? "-" : "+"}${change.text}`);
 
-const rewrites: Array<{ name: string; lineBreak: string; apply: (editor: ServerEditor, text: string) => void }> = [
+// Both lanes read a line break as "\n", as the semantic export shows it.
+const lineBreak = "\n";
+
+const rewrites: Array<{ name: string; apply: (editor: ServerEditor, text: string) => void }> = [
   {
     name: "a rich rewrite",
-    // The rich lane reads a line break as "\n"; the plain lane has no character for it.
-    lineBreak: "\n",
     apply: (editor, text) =>
       applyRichDiffAsSuggestion(editor.getState(), (tr) => editor.applyTransaction(tr), {
         edits: [{ nodeId: "p", spans: [{ text, marks: [] }] }],
@@ -44,7 +49,6 @@ const rewrites: Array<{ name: string; lineBreak: string; apply: (editor: ServerE
   },
   {
     name: "a plain rewrite",
-    lineBreak: "",
     apply: (editor, text) =>
       applyDiffAsSuggestion(editor.getState(), (tr) => editor.applyTransaction(tr), {
         nodeId: "p", proposedText: text, authorID: "agent",
@@ -52,26 +56,26 @@ const rewrites: Array<{ name: string; lineBreak: string; apply: (editor: ServerE
   },
 ];
 
-describe.each(rewrites)("$name", ({ apply, lineBreak }) => {
+describe.each(rewrites)("$name", ({ apply }) => {
   it("replaces a misspelt word whole, not the letters inside it", () => {
     const editor = editorWith("The policy applys to all staff.");
     apply(editor, "The policy applies to all staff.");
 
-    expect(proposed(editor)).toEqual(["-applys", "+applies"]);
+    expect(proposed(editor)).toEqual(["+applies", "-applys"]);
   });
 
   it("replaces changes close together as one phrase", () => {
     const editor = editorWith("All staff, contractors is covered.");
     apply(editor, "All staff; contractors are covered.");
 
-    expect(proposed(editor)).toEqual(["-, contractors is", "+; contractors are"]);
+    expect(proposed(editor)).toEqual(["+; contractors are", "-, contractors is"]);
   });
 
   it("keeps changes far apart as separate replacements", () => {
     const editor = editorWith("Core hours is ten to three in the employees local timezone.");
     apply(editor, "Core hours are ten to three in the employee's local timezone.");
 
-    expect(proposed(editor)).toEqual(["-is", "+are", "-employees", "+employee's"]);
+    expect(proposed(editor)).toEqual(["+are", "-is", "+employee's", "-employees"]);
   });
 
   it("is reviewed back to the original, or on to the rewrite", () => {
@@ -123,7 +127,7 @@ describe.each(rewrites)("$name", ({ apply, lineBreak }) => {
     const editor = editorOf([{ type: "text", text: "teh " }, { type: "text", text: "big", marks: [{ type: "bold" }] }, { type: "text", text: " smal" }]);
     apply(editor, "the big small");
 
-    expect(proposed(editor)).toEqual(["-teh", "+the", "-smal", "+small"]);
+    expect(proposed(editor)).toEqual(["+the", "-teh", "+small", "-smal"]);
   });
 
   it("leaves another author's pending suggestion as theirs", () => {
@@ -131,7 +135,7 @@ describe.each(rewrites)("$name", ({ apply, lineBreak }) => {
     editor.applyTransaction(editor.getState().tr.insertText("big ", 5));
     apply(editor, "the big cat small");
 
-    expect(proposed(editor)).toEqual(["-teh", "+the", "+big ", "-smal", "+small"]);
+    expect(proposed(editor)).toEqual(["+the", "-teh", "+big ", "+small", "-smal"]);
   });
 
   it("withdraws its own earlier rewrite when it restates the original", () => {
@@ -141,6 +145,16 @@ describe.each(rewrites)("$name", ({ apply, lineBreak }) => {
 
     expect(proposed(editor)).toEqual([]);
     expect(editor.getState().doc.textContent).toBe("teh cat");
+  });
+
+  it("is left as it was when restated, not recorded as a move", () => {
+    const editor = editorWith("the cat sat");
+    apply(editor, `the cat${lineBreak}sat`);
+    const once = laidOut(editor);
+    apply(editor, `the cat${lineBreak}sat`);
+
+    expect(laidOut(editor)).toBe(once);
+    expect(findChanges(editor.getState()).pending.filter((change) => change.dataTracked.moveNodeId || change.dataTracked.moveId)).toEqual([]);
   });
 
   it("adds words without striking the words between them", () => {
@@ -213,7 +227,7 @@ describe("a replacement's two halves", () => {
       blocks: [{ nodeId: "p0", proposedText: "the one" }, { nodeId: "p1", proposedText: "the two" }],
       authorID: "agent",
     });
-    expect(groups(editor)).toEqual([["teh", "the"], ["teh", "the"]]);
+    expect(groups(editor)).toEqual([["the", "teh"], ["the", "teh"]]);
   });
 
   it("share a group of their own, per paragraph, through the rich path", () => {
@@ -222,6 +236,6 @@ describe("a replacement's two halves", () => {
       edits: [{ nodeId: "p0", spans: [{ text: "the one", marks: [] }] }, { nodeId: "p1", spans: [{ text: "the two", marks: [] }] }],
       authorID: "agent",
     });
-    expect(groups(editor)).toEqual([["teh", "the"], ["teh", "the"]]);
+    expect(groups(editor)).toEqual([["the", "teh"], ["the", "teh"]]);
   });
 });

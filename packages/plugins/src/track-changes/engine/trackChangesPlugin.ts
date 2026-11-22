@@ -43,6 +43,8 @@ export interface TrackChangesState {
   canAcceptReject: boolean;
   /** How review shows a replacement: one card, or split as Word shows it. */
   replacementView: ReplacementView;
+  /** The host's metas that mark a transaction tracking skips. */
+  skipTrsWithMetas: (PluginKey | string)[];
 }
 
 type TrackChangesPluginState = TrackChangesState & {
@@ -198,6 +200,7 @@ export const trackChangesPlugin = (options: TrackChangesOptions) => {
           userID,
           changeSet: findChanges(state),
           canAcceptReject,
+          skipTrsWithMetas,
           replacementView: options.replacementView ?? "paired",
         };
       },

@@ -144,6 +144,16 @@ const sameReplacement = (a: TrackedChange, b: TrackedChange) =>
   new Set([a.dataTracked.operation, b.dataTracked.operation]).size === 2 &&
   [a, b].every((c) => c.dataTracked.operation === "insert" || c.dataTracked.operation === "delete");
 
+/**
+ * Pieces of one group with the same operation: one edit in either view — a
+ * word typed over a selection in several strokes, or a phrase written apart
+ * around content it kept.
+ */
+const samePhrase = (a: TrackedChange, b: TrackedChange) =>
+  !!a.dataTracked.groupId && a.dataTracked.groupId === b.dataTracked.groupId &&
+  a.dataTracked.authorID === b.dataTracked.authorID &&
+  a.dataTracked.operation === b.dataTracked.operation;
+
 /** The record pointing back at what a split was split from. */
 const splitReference = (reference: TrackedChange, split: TrackedChange) =>
   reference.dataTracked.operation === "reference" &&
@@ -161,6 +171,7 @@ const sameAct = (a: TrackedChange, b: TrackedChange, view: ReplacementView) =>
   sameMove(a, b) ||
   sameFormattingRun(a, b) ||
   (view === "paired" && sameReplacement(a, b)) ||
+  samePhrase(a, b) ||
   splitReference(a, b) || splitReference(b, a);
 
 /** A record that is secondary within its act: others name the act, this one follows it. */

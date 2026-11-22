@@ -128,6 +128,35 @@ export interface ChangePopoverCallbacks {
 const isHeld = (change: TrackedChange) => change.type === "mark-change" && change.within !== undefined;
 
 /**
+ * The conflict at the caret, if any: every pending change overlapping a change
+ * flagged as a conflict, or, unflagged, opposing changes by different authors
+ * under the caret. `parties` is one per act, as the reader's view groups them:
+ * a whole-paragraph change recorded on the node and on its text is one party,
+ * and a replacement is one party paired or two split.
+ */
+export function conflictAt(
+  pending: readonly TrackedChange[],
+  primary: TrackedChange,
+  head: number,
+  view: ReplacementView = "paired",
+): { group: TrackedChange[]; parties: TrackedChange[] } | null {
+  let group: TrackedChange[];
+  if (primary.dataTracked.isConflict) {
+    // Both parties show even where only one sits at the caret: a deletion and
+    // an insertion at its edge share the conflict range.
+    group = pending.filter((c) => c.from <= primary.to && c.to >= primary.from && !isHeld(c));
+  } else {
+    // Same-author or same-operation overlaps are coexistence, not conflict.
+    group = pending.filter((c) => head >= c.from && head <= c.to && !isHeld(c));
+    const authors = new Set(group.map((c) => c.dataTracked.authorID));
+    const operations = new Set(group.map((c) => c.dataTracked.operation));
+    const opposing = operations.has(CHANGE_OPERATION.insert) && operations.has(CHANGE_OPERATION.delete);
+    if (group.length < 2 || authors.size < 2 || !opposing) return null;
+  }
+  return { group, parties: changeActs(group, view).map((act) => act.primary) };
+}
+
+/**
  * The change a popover offers at the caret: the act that owns the innermost
  * pending record there, shown by that act's primary. Inside a row someone
  * added, that is the row — its words are part of adding it — while an edit
@@ -241,39 +270,7 @@ export function createChangePopover(
       return;
     }
 
-    const primaryIsConflict = !!primary.dataTracked.isConflict;
-
-    // When the primary change is flagged as a conflict, collect ALL pending
-    // changes that overlap its range — not just those at the cursor.
-    // This ensures both parties are always shown (e.g. user's deletion at
-    // [4,11] and AI's insertion at [4,4] share the conflict range).
-    let conflictGroup: typeof pending = [];
-    let isConflict = false;
-
-    if (primaryIsConflict) {
-      conflictGroup = pending.filter(
-        (c) => c.from <= primary.to && c.to >= primary.from && !isHeld(c),
-      );
-      isConflict = conflictGroup.length > 1 || primaryIsConflict;
-    } else {
-      // Check if multiple pending changes overlap the cursor (non-flagged overlap).
-      // Only treat as a conflict when different authors have opposing operations
-      // (insert vs delete). Same-author overlaps or same-operation overlaps are
-      // normal multi-author coexistence, not conflicts.
-      const atCursor = pending.filter((c) => head >= c.from && head <= c.to && !isHeld(c));
-      if (atCursor.length > 1) {
-        const uniqueAuthors = new Set(
-          atCursor.map((c) => c.dataTracked.authorID),
-        );
-        const ops = new Set(atCursor.map((c) => c.dataTracked.operation));
-        const hasOpposingOps =
-          ops.has(CHANGE_OPERATION.insert) && ops.has(CHANGE_OPERATION.delete);
-        if (uniqueAuthors.size > 1 && hasOpposingOps) {
-          conflictGroup = atCursor;
-          isConflict = true;
-        }
-      }
-    }
+    const conflict = conflictAt(pending, primary, head, view);
 
     const readText = (from: number, to: number): string => {
       if (from >= to) return "";
@@ -423,16 +420,13 @@ export function createChangePopover(
     };
 
     const primaryInfo = toInfo(primary);
-    primaryInfo.isConflict = isConflict;
-    // One party per act: a whole-paragraph change is recorded on the node and on
-    // its text, and those are one thing to keep or to discard.
-    const parties = changeActs(conflictGroup).map((act) => act.primary);
-    primaryInfo.conflictChanges = isConflict ? parties.map(toInfo) : [];
+    primaryInfo.isConflict = conflict !== null;
+    primaryInfo.conflictChanges = conflict?.parties.map(toInfo) ?? [];
 
     // Stable key: use groupId when available (so moving across chars within the
     // same replacement group doesn't re-trigger onShow), or sorted ids for conflicts.
-    const key = isConflict
-      ? conflictGroup
+    const key = conflict
+      ? conflict.group
           .map((c) => c.id)
           .sort()
           .join("|")

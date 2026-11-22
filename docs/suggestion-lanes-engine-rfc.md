@@ -1,6 +1,6 @@
 # Suggestion Lanes RFC — every suggestion is recorded by the engine
 
-Status: Draft (2026-11-16, revised 2026-11-20 against 1.0.25). Answers part 1
+Status: Shipped (2026-11-16, revised 2026-11-20 against 1.0.25; see What shipped). Answers part 1
 of #252. Parts 2 (block-level previews) and 3 (structural previews on revision
 projection) follow separately.
 
@@ -96,7 +96,7 @@ take them as a person's edits would. Decision 7 answers the first.
      at all.
    - A replacement shows its new words before the words it strikes, as the
      engine places typing over a selection (`selectionContract.test.ts`). The
-     lanes put the struck words first today; the changeset says so.
+     lanes used to put the struck words first; the changeset says so.
    - The plain, rich and AI lanes share one writer, `writeProposal`, which
      turns a block's phrase ops into these edits.
 
@@ -126,8 +126,7 @@ take them as a person's edits would. Decision 7 answers the first.
      `docs/tracked-changes-agents-docx-rfc.md`), and D11 there decides that
      DOCX import will read Word's adjacent pair as one replacement, so a
      person's swap matches an agent's either way.
-   - Built and tested on branch `suggestion-lanes-252-engine`
-     (`replacementPairing.test.ts`).
+   - Pinned by `replacementPairing.test.ts`.
 
 3. **Withdrawing one's own pending deletion stays outside the engine.** It is
    review bookkeeping, not an edit, so the engine has nothing to record; #252
@@ -140,8 +139,9 @@ take them as a person's edits would. Decision 7 answers the first.
      back.
    - It also withdraws the author's pending deletion recorded on an inline node
      (a break or image), which Decision 1 now creates, through
-     `setNodeAttribute` of `dataTracked`. The engine records nothing for that
-     step: rewriting a review record is bookkeeping, not an edit.
+     `setNodeAttribute` of `dataTracked`. Withdrawing one's own records is
+     bookkeeping, and the engine records nothing for it; rewriting another
+     author's is undone.
    - As today, the plain and rich lanes withdraw; the AI lane and
      `insertAsSuggestion` do not.
 
@@ -165,8 +165,9 @@ take them as a person's edits would. Decision 7 answers the first.
    the mark type); `applyKeepFormatting` already guards this way.
 
 7. **One step's insertion is one act.** Of the pieces one step inserts (each
-   marked run, each break), the first one's id names the act and the rest carry
-   it as their `creationId`, as `suggestedContent` does for the lanes today. Without it, a rich insertion of
+   marked run, each break), every piece carries the first one's id as its
+   `creationId`, the first included (`setInlineFragmentAsInserted`). Without
+   it, a rich insertion of
    "**foo** bar" would become three cards. A paste typed in suggesting mode gets
    the same.
 
@@ -189,10 +190,10 @@ take them as a person's edits would. Decision 7 answers the first.
      the faster default. Reviewing one person's changes at a time, where
      several have tracked changes, is a later setting of the same kind, in its
      own PR.
-   - A lane phrase whose deletion is split around content the lane did not
-     read — an image inside the deleted words — is written as several steps.
-     `writeProposal` marks those steps as one phrase, and the engine gives
-     them one replacement, so the default view still shows one card.
+   - Recording keeps this true for the lanes: a phrase whose deletion is split
+     around content the lane did not read (an image inside the deleted words)
+     is written as several steps, which `writeProposal` names as one phrase;
+     the engine gives them one group, and review reads them as one act.
 
 ## Public surface
 
@@ -287,16 +288,17 @@ today's behaviour through the change.
 
 ## Release
 
-This PR is docs only: no changeset, and the PR carries the `no-release` label.
-The implementation PRs list every `@scrivr/*` package as `patch`; the lanes PR's
-changeset carries the **Breaking** note above.
+The RFC PR carries no changeset. The implementation PRs list every
+`@scrivr/*` package as `patch`; the lanes PR's changeset carries the
+**Breaking** note above.
 
 Delivery, each PR stacked on the one before:
 
 1. This RFC.
-2. The engine pairs a replacement (Decision 2), branch
-   `suggestion-lanes-252-engine`.
-3. The lanes (Decisions 1, 3, 4, 5, 6, 7).
+2. The engine pairs a replacement (Decision 2), and the replacement view
+   (Decision 8).
+3. The lanes (Decisions 1, 3, 4, 5, 6, 7), and a phrase split around an image
+   kept as one replacement (Decision 8).
 
 ## Files to create / modify
 
@@ -318,3 +320,31 @@ Delivery, each PR stacked on the one before:
 - `packages/plugins/src/track-changes/` — `suggestionBlocked`, exported from
   `packages/plugins/src/track-changes/index.ts`, with the barrel comment on the
   record builders corrected.
+
+## What shipped
+
+- **PR 2 (the engine):** a word typed over a selection is one replacement
+  (Decision 2), pinned by `replacementPairing.test.ts`. The reader picks the
+  replacement view (Decision 8): `TrackChanges.configure({ replacementView })`
+  and `setReplacementView`, read by `changeActs`, `planChangeReview`, the change
+  popover and `useTrackChangesPanel` in `@scrivr/react`. The default is
+  `"paired"`.
+- **PR 3 (the lanes):** every lane writes plain edits through `writeProposal`
+  and asks `suggestionBlocked` before sending them: the plugin's lanes through
+  `dispatchSuggestion`, and the AI lane asks it itself, since it also has a
+  direct mode. Where it differs from the decisions above:
+  - Withdrawal (Decision 3) uses `tr.setNodeAttribute` on `dataTracked`, and
+    `trackAttrsChangeStep` lets an author withdraw only their own records;
+    rewriting another author's is undone.
+  - `suggestionBlocked` also reports `untracked`: a transaction carrying a meta
+    tracking skips, including the host's `skipTrsWithMetas`, which the plugin
+    state now carries.
+  - A phrase is every op sharing its `groupId`, so the AI lane's insertion,
+    split into one op per run of formatting, is one replacement.
+  - A phrase whose deletion is split around an image it keeps is written as
+    several steps, named on the transaction (`TrackChangesAction.phrases`), and
+    the engine gives them one group, which review reads as one act.
+  - Dragging one's own pending words along their paragraph is an insertion in
+    the new place, not a move (`withdrawsOwnInsertion`).
+  - `suggestedContent` is gone; `setInlineFragmentAsInserted` holds one
+    step's pieces together.
