@@ -524,7 +524,6 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 					{
 						tag: "div[data-sourced-block]",
 						getAttrs: dom => {
-							if (!(dom instanceof HTMLElement)) return false;
 							const normalizerAttr = dom.getAttribute(
 								"data-base-normalizer",
 							);

@@ -27,6 +27,7 @@
     "@scrivr/ai": "workspace:*",
     "@scrivr/core": "workspace:*",
     "@scrivr/docx": "workspace:*",
+    "@scrivr/html": "workspace:*",
     "@scrivr/export-pdf": "workspace:*",
     "@scrivr/plugins": "workspace:*",
     "@scrivr/react": "workspace:*",
