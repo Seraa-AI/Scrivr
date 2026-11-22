@@ -1,7 +1,13 @@
 # Overlapping Steps RFC — which gestures tracking still stops, and why that can stay
 
-Status: Draft (2026-11-12). Answers part 2 of #232. Nothing here changes how a
-package behaves; it adds tests that keep the answer true.
+Status: decided and shipped (#257). Answers part 2 of #232; parts 1, 3, 4 and 5
+stay open there. See What shipped.
+
+**Answer:** no built-in command or agent edit builds a gesture tracking has to
+stop; #228 already splits the issue's own example. Part 2 closes. Tracking
+keeps stopping the few shapes it cannot cut, which only a host's hand-built
+transaction makes, and tests pin both halves. Nothing here changes how a
+package behaves.
 
 ## Question
 
@@ -31,6 +37,11 @@ answered most of it:
   it. The host hears why through `onRefused`, and `@scrivr/react`'s
   `describeSuggestionRefusal` turns `overlapping-steps` into words: make the
   edit in two steps, or decide your suggestion first.
+- **The agent's suggestions now reach the same check.** Since #278 every
+  suggestion lane writes plain edits through `writeProposal`, under
+  `trackAsSuggestion`, and asks `gestureRefusal` first (`suggestionBlocked`).
+  A lane that built a straddle would now be stopped, not written by hand, so
+  the lanes are part of the question below.
 
 ## What is still refused
 
@@ -49,16 +60,18 @@ answered most of it:
 Nothing in Scrivr does. We checked two ways.
 
 **Measured.** We temporarily logged every straddle `composeGesture` found, and
-every refusal, while the plugins, `ai` and `react` suites ran. The suites
-include `trackedGestures.test.ts`, which runs real key bindings, commands,
-paste, cut and drag with tracking on and off.
+every refusal, while the plugins, `ai` and `react` suites ran, first when this
+was drafted and again after #276–#278 landed. The suites include
+`trackedGestures.test.ts`, which runs real key bindings, commands, paste, cut
+and drag with tracking on and off, and `ai`'s lane tests.
 
-- 152 straddles. 148 came from six existing `trackedGestures` scenarios, and
-  all six build the transaction by hand (`insertText(…).delete(…)`, `insert(…).delete(…)`).
-  The other four came from the same kind of hand-built transaction in
-  `reviewBoundaries.test.ts` and `trackingRefusal.test.ts`.
-- Every one was split and recorded. There were no `overlapping-steps` refusals.
-- No key binding, command, paste, cut, drag or agent edit produced a straddle.
+- Every straddling gesture was a transaction a test builds by hand
+  (`insertText(…).delete(…)`, `insert(…).delete(…)`), in `trackedGestures`,
+  `reviewBoundaries` and `trackingRefusal`. All were split and recorded. The
+  only refusals were the shapes `trackingRefusal` pins on purpose.
+- `ai`: none of its 103 multi-step transactions straddled. `react`: none.
+- No key binding, command, paste, cut, drag, cell gesture or agent edit
+  produced a straddle.
 
 **Read.** Each place that builds a transaction with more than one step:
 
@@ -70,17 +83,20 @@ paste, cut and drag with tracking on and off.
 | `ClearFormatting` | Mark removal, block types, then lists flattened back to front | Each flattened list lands beside the next |
 | Paste placeholders | Attribute changes and deletions | No insertion |
 | `CellSelection.replace` (typing, Delete, cut, paste over cells) | Each cell not already one empty paragraph is emptied to a new one, then the content is written into the first cell | The write lands in the first cell's paragraph: a new one, so it is folded into that insertion, or an empty one left alone, so it is a plain insertion |
-| `applyRichEdit`, `AiSuggestion` direct and tracked apply | Tracked marks built by hand, under `skipTracking` | Never reaches `composeGesture` |
-| `AiSuggestion` keep-formatting apply, tracked | Mark steps only, under `trackAsSuggestion` | Reaches `composeGesture`, but mark steps are not insertions and never straddle |
+| Suggestion lanes through `writeProposal`: `applyDiffAsSuggestion`, `applyMultiBlockDiff`, `applyRichEdit`, `AiSuggestion` tracked apply | Per phrase, a replacement or deletion of its first run, then deletions of the runs after it, under `trackAsSuggestion` | Phrases go left to right, each start mapped past what came before, so each lands beside earlier insertions; a phrase's later deletions sit past its first run |
+| `AiSuggestion` keep-formatting apply, tracked | Mark steps, then `writeProposal` in the same transaction | Mark steps are not insertions; the writes are as above |
+| `insertAsSuggestion` | One replacement | No later step |
+| `AiSuggestion` direct apply | Plain edits under `skipTracking` | Not tracked |
 | `applySemanticEdits` structural batch | One tracked transaction | `overlapsBatch` and `insideMoved` refuse an op on what the batch already added or moved. A block the batch inserts has no id until after dispatch, so no later op can name it |
 | Image layout edits | `setNodeMarkup` | No insertion |
 | Collaborator edits, history, normalization | — | Not tracked |
 
-`CellSelection.replace` is the only built-in gesture that inserts and then writes
-next to that insertion in the same transaction. `trackedGestures` did not
-cover it. We ran typing, Delete, cut and pasting one and two lines over
-selected cells: no straddles, every edit tracked, and Reject all returned
-the original document.
+Two kinds of built-in gesture insert and then keep writing in the same
+transaction: `CellSelection.replace`, whose write lands inside the paragraph it
+emptied, and the suggestion lanes, whose phrases land beside each other.
+`trackedGestures` did not cover cell selections. We ran typing, Delete, cut
+and pasting one and two lines over selected cells: no straddles, every edit
+tracked, and Reject all returned the original document.
 
 ## Decision
 
@@ -95,16 +111,21 @@ the original document.
      content and with the first cell empty), Delete, cut, and pasting one and
      two lines. If a change to `CellSelection.replace` made them straddle where
      no cut is possible, the tracked run would be stopped and these scenarios
-     would fail. Checked: with every multi-step gesture forced to refuse, all
-     six fail.
-   - `trackingRefusal` pins all five refused shapes, one case each: the
-     document is unchanged, `onRefused` reports `overlapping-steps`, and
-     nothing is pending. Checked: with gestures let through, all five fail.
+     would fail; each must also change the document and be recorded, so one
+     that quietly does nothing fails too. Checked: with every multi-step
+     gesture forced to refuse, all six fail.
+   - `suggestionLanes` applies a proposal of several phrases through every
+     lane, tracked: it must be recorded, not stopped, and accept to the
+     proposal.
+   - `trackingRefusal` pins the refused shapes, across the insertion's start
+     and its end: the document is unchanged, `onRefused` reports
+     `overlapping-steps`, and nothing is pending. Checked: with gestures let
+     through, all fail.
 
 ## Non-goals
 
-- #232's other parts: the playground pass (1), moving a struck shadow (3),
-  tests that do not prove their fix (4), and API naming (5).
+- #232's other parts, which stay open there: the playground pass (1), moving a
+  struck shadow (3), tests that do not prove their fix (4), and API naming (5).
 - Changing the refusal's wording, or what `onRefused` carries.
 
 ## Alternatives considered
@@ -124,21 +145,22 @@ the original document.
   stopped in `filterTransaction`, before tracking records anything.
 - **Is "no straddles in the suites" enough?** Not alone. The suites only run
   what they contain, so we also read every multi-step transaction builder (the
-  table above) and added the one built-in gesture `trackedGestures` lacked.
+  table above), added the cell gestures `trackedGestures` lacked, and pinned
+  a multi-phrase suggestion through every lane.
 - **Why not take the cell selection gestures by keyboard?** A cell selection
   comes from the pointer. The tests restore one from its saved JSON
   (`scrivr:cell`), as a reload does.
 
-## Release
+## What shipped
 
-Empty changeset ("No release"). Docs and tests only. No package behaves
-differently.
-
-## Files to create / modify
-
-- `docs/overlapping-steps-rfc.md`: this RFC
-- `.changeset/overlapping-steps-rfc.md`: the empty changeset
-- `packages/plugins/src/track-changes/__tests__/trackedGestures.test.ts`: six
-  gestures over selected cells, and `selectCells`
-- `packages/plugins/src/track-changes/__tests__/trackingRefusal.test.ts`: the
-  five refused shapes
+- **#257.** Docs and tests, with an empty changeset; no package behaves
+  differently.
+- `trackedGestures`: six gestures over selected cells, each required to change
+  the document and be recorded, and `selectCells`, which restores a cell
+  selection from its saved JSON.
+- `trackingRefusal`: eight refused shapes, five across the insertion's end and
+  three across its start.
+- `suggestionLanes`: a multi-phrase proposal, recorded through each lane.
+- Drafted before #276–#278 changed how the agent's suggestions are written;
+  the claims and the measurement were re-checked against them before merge,
+  and the answer held.

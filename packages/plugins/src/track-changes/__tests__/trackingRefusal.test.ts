@@ -56,8 +56,8 @@ const tracking = (editor: TestEditor): TrackingResult | null =>
   trackChangesPluginKey.getState(editor.state)!.lastTracking;
 
 /** A tracked editor state that reports what it stops. */
-const suggesting = (refused: TrackingRefusal[], status = TrackChangesStatus.enabled) => EditorState.create({
-  doc: doc(p("start")),
+const suggesting = (refused: TrackingRefusal[], status = TrackChangesStatus.enabled, startDoc = doc(p("start"))) => EditorState.create({
+  doc: startDoc,
   plugins: [trackChangesPlugin({ userID: "alice", initialStatus: status, onRefused: refusal => refused.push(refusal) })],
 });
 
@@ -72,17 +72,23 @@ describe("an edit tracking cannot record is stopped, and the host is told why", 
     expect(trackChangesPluginKey.getState(next)!.changeSet.pending).toEqual([]);
   });
 
-  // A later step that writes both inside the gesture's own insertion and past it
-  // is cut at the insertion's edge only when it is a replace step that deletes,
-  // or writes inline text within one block, and both cut pieces still fit where
-  // the cut falls in text. Each of these breaks one of those conditions, so the
-  // whole gesture is stopped. No built-in command or agent edit builds them; only
-  // a host's own transaction can. Positions after the first step are noted.
+  // Shapes the cut at an insertion's edge cannot make, so the whole gesture is
+  // stopped; only a host's hand-built transaction makes them. Positions are
+  // after the first step.
   const hello = () => doc(p("hello"), p("world"));
   it.each([
     // new 8–11, world 13–18: the cut at 12 falls between blocks
     ["a deletion from an inserted paragraph into the next one", hello, (s: EditorState) =>
       s.tr.insert(7, p("new")).delete(9, 15)],
+    // hello 1–6, new 8–11: the cut at 7 falls between blocks, at the insertion's start
+    ["a deletion from the paragraph before into an inserted one", hello, (s: EditorState) =>
+      s.tr.insert(7, p("new")).delete(3, 10)],
+    // heabcllo 1–9: the replacement carries paragraphs, across the insertion's start
+    ["a replacement with paragraphs from before the insertion into it", hello, (s: EditorState) =>
+      s.tr.insertText("abc", 3).replace(2, 5, new Slice(Fragment.from([p("X"), p("Y")]), 1, 1))],
+    // hello 1–6, wabcorld 8–16: the replacement spans two blocks into the insertion
+    ["a replacement from the paragraph before into text inserted in the next", hello, (s: EditorState) =>
+      s.tr.insertText("abc", 8).replaceWith(3, 10, s.schema.text("Z"))],
     // heabcllo 1–9: the replacement carries paragraphs
     ["a replacement of text across the insertion's edge with paragraphs", hello, (s: EditorState) =>
       s.tr.insertText("abc", 3).replace(4, 8, new Slice(Fragment.from([p("X"), p("Y")]), 1, 1))],
@@ -102,12 +108,9 @@ describe("an edit tracking cannot record is stopped, and the host is told why", 
     ["a deletion from before a list, through text inserted in it, to after it",
       () => doc(p("hello"), ul(li("mid")), p("world")), (s: EditorState) =>
       s.tr.insertText("abc", 11).delete(3, 23)],
-  ])("stops %s, and says the steps overlap", (_, start, gesture) => {
+  ])("stops %s, and says the steps overlap", (_, startDoc, gesture) => {
     const refused: TrackingRefusal[] = [];
-    const state = EditorState.create({
-      doc: start(),
-      plugins: [trackChangesPlugin({ userID: "alice", onRefused: refusal => refused.push(refusal) })],
-    });
+    const state = suggesting(refused, TrackChangesStatus.enabled, startDoc());
     const next = state.apply(gesture(state));
 
     expect(next.doc.eq(state.doc)).toBe(true);

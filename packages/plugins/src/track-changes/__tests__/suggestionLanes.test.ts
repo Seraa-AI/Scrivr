@@ -67,6 +67,16 @@ describe.each(lanes)("$name", ({ apply, blocked }) => {
 
     expect(laidOut(editor)).toBe("one□two");
   });
+
+  // Several phrases are written in one transaction, each after the last; none
+  // may cross what an earlier one inserted, or tracking would stop the edit.
+  it("records a proposal of several phrases at once", () => {
+    const editor = editorOf(textOf("teh quick brwn fox jumpd"));
+    expect(apply(editor, "the quick brown fox jumped")).toBe(true);
+    expect(pending(editor).length).toBeGreaterThan(0);
+    decideAll(editor, "accepted");
+    expect(laidOut(editor)).toBe("the quick brown fox jumped");
+  });
 });
 
 describe.each(lanes.slice(0, 2))("$name, over what it did not read", ({ apply }) => {
