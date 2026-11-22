@@ -1008,6 +1008,22 @@ describe("importDocx — what each extension says it could not keep", () => {
     expect(doc.child(0).child(0).child(1).type.name).toBe("bulletList");
   });
 
+  it("keeps a page break inside a content control as a line break, and says so", async () => {
+    const control =
+      `<w:sdt><w:sdtPr><w:tag w:val="mystery"/></w:sdtPr><w:sdtContent>` +
+      `<w:r><w:t>before</w:t><w:br w:type="page"/><w:t>after</w:t></w:r></w:sdtContent></w:sdt>`;
+    const { doc, report } = await importDocx(new ServerEditor({ extensions: [StarterKit] }), await docWithBody(`<w:p>${control}</w:p>`));
+    const paragraph = doc.child(1);
+    expect(paragraph.textBetween(0, paragraph.content.size, "", "|")).toBe("before|after");
+    expect(report.entries).toContainEqual({
+      outcome: "dropped",
+      kind: "pageBreak",
+      reason: "inside a content control; a line break stands in",
+      owner: null,
+      count: 1,
+    });
+  });
+
   it("keeps the text of a content control inside a link", async () => {
     const control = `<w:sdt><w:sdtPr><w:tag w:val="mystery"/></w:sdtPr><w:sdtContent><w:r><w:t>INSIDE</w:t></w:r></w:sdtContent></w:sdt>`;
     const body = `<w:p><w:hyperlink w:anchor="top"><w:r><w:t xml:space="preserve">vis </w:t></w:r>${control}</w:hyperlink></w:p>`;

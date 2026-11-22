@@ -521,10 +521,12 @@ or a DOM, as `LayoutCoordinator.layoutForExport` already does.
 
 - The built-in extensions report what their DOCX handlers could not carry:
   Paragraph, Heading, Image, Color, FontFamily, FontSize, Highlight, Link,
-  Underline, SourcedBlock, and Table on export. HardBreak, PageBreak and List
+  Underline, SourcedBlock, List, and Table on export. HardBreak and PageBreak
   report nothing of their own; the converter's counts cover them. A list's
-  numbering format (roman, letters) still collapses to bullet or ordered with
-  no report: a known gap.
+  numbering format is read per level (`w:numFmt`), so a bullet level inside a
+  numbered list stays bullets; List reports a format it draws differently
+  from Word's built-in style for that depth (upper roman, "none"), and
+  nothing for Scrivr's own lists, which use that style.
 - A paragraph handler that leaves out formatting or inline objects it was
   handed — a code block keeping only text — is charged by the converter,
   which knows which Word mark built each piece of formatting: it moves them
@@ -550,5 +552,8 @@ or a DOM, as `LayoutCoordinator.layoutForExport` already does.
   are marked known gaps rather than intended drops. The spike's 92 run-level
   `w:spacing` reads now come out `ignored`, as a known gap.
 - Fixed on the way: a smart tag's text is imported (it was dropped); an
-  underline colour and a hanging indent are reported, not lost silently.
+  underline colour and a hanging indent are reported, not lost silently; a
+  page break inside an inline content control failed the whole import — it
+  is now kept as a line break and reported dropped, and the parser carries
+  page breaks as their own type instead of an `as unknown as` cast.
 

@@ -24,3 +24,5 @@ The built-in extensions report what their DOCX handlers could not carry across, 
   - A paragraph handler that leaves out formatting or inline objects it was handed — a code block keeping only text — has them moved from kept to dropped by the converter, as `LEFT_OUT` (exported). Formatting that carried nothing ("no formatting" values) and the paragraph style's own formatting are not charged.
   - Paragraph and Heading report a negative (hanging) indent they do not write.
 - A smart tag's text is imported; it was dropped.
+- A list's numbering format is read for each level, so a bullet level inside a numbered list stays bullets, and List reports a format it draws differently from Word's built-in style for that depth (`"upperRoman" numbering drawn as decimal`). `DocxBlock`'s list gains `level` and `format`.
+- A page break inside an inline content control no longer fails the import: a line break stands in, and the page break is reported dropped.
