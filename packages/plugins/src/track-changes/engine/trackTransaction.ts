@@ -88,16 +88,17 @@ function replacementGroup(step: ReplaceStep, doc: PMNode, authorID: string): str
 }
 
 /**
- * The replacement each step of a named phrase belongs to: the one its first
- * step starts, so a deletion split around an image it keeps stays one act.
+ * The group each step of a named phrase belongs to: the replacement its first
+ * step starts, or one of its own when that step starts none, so words deleted
+ * around an image the phrase keeps stay one act.
  */
 function phraseReplacementGroups(tr: Transaction, authorID: string): Map<Step, string> {
   const groups = new Map<Step, string>();
   for (const steps of getAction(tr, TrackChangesAction.phrases) ?? []) {
     const [lead] = steps;
     const at = lead ? tr.steps.indexOf(lead) : -1;
-    const group = lead instanceof ReplaceStep && at >= 0 ? replacementGroup(lead, tr.docs[at]!, authorID) : undefined;
-    if (group) for (const step of steps) groups.set(step, group);
+    const group = (lead instanceof ReplaceStep && at >= 0 ? replacementGroup(lead, tr.docs[at]!, authorID) : undefined) ?? genId();
+    for (const step of steps) groups.set(step, group);
   }
   return groups;
 }

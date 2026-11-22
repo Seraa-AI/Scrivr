@@ -162,6 +162,29 @@ describe.each(lanes.slice(0, 2))("$name, over a break", ({ apply }) => {
     expect(pending(editor)).toEqual([]);
   });
 
+  it("never rewrites what another author's record on a break says", () => {
+    const editor = editorOf([...textOf("one"), hardBreak, ...textOf("two")]);
+    apply(editor, "one two");
+    let at = -1;
+    editor.getState().doc.descendants((node, pos) => {
+      if (node.type.name === "hardBreak") at = pos;
+    });
+    const records: Array<Record<string, unknown>> = editor.getState().doc.nodeAt(at)?.attrs["dataTracked"] ?? [];
+    const settled = records.map((record) => ({ ...record, status: "accepted" }));
+    editor.applyTransaction(trackAsSuggestion(editor.getState().tr.setNodeAttribute(at, "dataTracked", settled), "someone else"));
+
+    expect(editor.getState().doc.nodeAt(at)?.attrs["dataTracked"]).toEqual(records);
+  });
+
+  it("deletes words with an image inside as one act, keeping the image", () => {
+    const editor = editorOf([...textOf("a cat"), image, ...textOf("dog sat")]);
+    apply(editor, "a sat");
+
+    expect(changeActs(pending(editor))).toHaveLength(1);
+    decideAll(editor, "rejected");
+    expect(laidOut(editor)).toBe("a cat□dog sat");
+  });
+
   it("places an edit after another author's deletion where it belongs", () => {
     const editor = editorOf(textOf("one cat two three"), "tracking", "person");
     editor.applyTransaction(editor.getState().tr.delete(5, 9));

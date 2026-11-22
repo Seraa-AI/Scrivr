@@ -2,6 +2,8 @@ import { Node as PMNode } from "@scrivr/core/pm";
 import { EditorState, Transaction } from "@scrivr/core/pm";
 import { AttrStep, type Mapping } from "@scrivr/core/pm";
 
+import { stableStringify } from "@scrivr/core";
+
 import { getBlockInlineTrackedData, isTrackedRecord, NewEmptyAttrs } from "../helpers";
 import { ChangeStep, UpdateNodeAttrsStep } from "../types";
 
@@ -56,14 +58,20 @@ function trackAttrsChangeStep(
   return [changeStep];
 }
 
-/** Whether `records`, written over `node`'s, only drops some of `authorID`'s. */
+/**
+ * Whether `records`, written over `node`'s, only drops some of `authorID`'s:
+ * every record left stands exactly as it was.
+ */
 function withdrawsOwnRecords(node: PMNode, records: unknown, authorID: string): boolean {
-  const before = getBlockInlineTrackedData(node) ?? [];
+  const before = new Map((getBlockInlineTrackedData(node) ?? []).map((record) => [record.id, record]));
   const after = (Array.isArray(records) ? records : [records]).filter(isTrackedRecord);
   const kept = new Set(after.map((record) => record.id));
   return (
-    after.every((record) => before.some((old) => old.id === record.id)) &&
-    before.every((record) => kept.has(record.id) || record.authorID === authorID)
+    after.every((record) => {
+      const old = record.id === undefined ? undefined : before.get(record.id);
+      return old !== undefined && stableStringify(old) === stableStringify(record);
+    }) &&
+    [...before.values()].every((record) => kept.has(record.id) || record.authorID === authorID)
   );
 }
 
