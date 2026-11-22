@@ -699,8 +699,12 @@ export function parseRunProperties(rPr: OoxmlElement): DocxMark[] {
       // Once a toggle is on, its val says nothing more — except an underline's,
       // which names its style (double, dotted, wave), and its colour, for the
       // handler to keep or report.
-      const color = attr(child, "w:color");
-      const attrs = kind === "u" && !cancelled ? { ...(val !== undefined ? { val } : {}), ...(color !== undefined ? { color } : {}) } : {};
+      const attrs: Record<string, string> = {};
+      if (kind === "u" && !cancelled) {
+        if (val !== undefined) attrs.val = val;
+        const color = attr(child, "w:color");
+        if (color !== undefined) attrs.color = color;
+      }
       marks.push(cancelled ? { kind, attrs: {}, off: true } : { kind, attrs });
       continue;
     }

@@ -178,7 +178,7 @@ export const Highlight = Extension.create<HighlightOptions>({
     // exact regardless of which form the source used.
     const multicolor = this.options.multicolor;
     // What the editor's one highlight colour is written as, so reading it back is no change.
-    const ownFill = cssColorToDocxHex(this.options.color)?.toUpperCase();
+    const ownFill = cssColorToDocxHex(this.options.color);
     const isSolidPattern = (pattern: unknown) => pattern === undefined || pattern === "clear" || pattern === "nil";
 
     // A highlight of `none`, or shading with no fill and no pattern, is Word

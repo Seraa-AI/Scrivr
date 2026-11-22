@@ -189,8 +189,9 @@ export async function importDocx(
       // not an extension walks it.
       for (const rel of rels.list()) {
         const path = headerFooterPath(rel);
-        const xml = path === null ? undefined : pkg.readText(path);
-        if (path !== null && xml !== undefined) partTree(path, xml);
+        if (path === null) continue;
+        const xml = pkg.readText(path);
+        if (xml !== undefined) partTree(path, xml);
       }
       // Opened only to list what is in them, so one cut short is a warning.
       for (const path of UNOPENED_CONTENT_PARTS) {
@@ -376,7 +377,6 @@ function isUnsupportedCode(code: string): boolean {
   return UNSUPPORTED_CODES.has(code);
 }
 
-/** Word content parts the import does not read, tracked so what they hold is reported. */
 /**
  * Where a header or footer relationship's part is, or null when it names no
  * internal header or footer. The reference lives in document.xml.rels, so the
@@ -387,7 +387,7 @@ function headerFooterPath(rel: { type: string; target: string; targetMode?: stri
   return resolveOpcTarget("word/document.xml", rel.target);
 }
 
-/** `parsePart`, with XML too broken to parse read as no part at all. */
+/** `parsePart`, with a part that fails to parse read as no part at all. */
 function parsePartOrNull(xml: string, path: string, tracker: ReadTracker | undefined): OoxmlElement | null {
   try {
     return parsePart(xml, path, tracker);
@@ -396,6 +396,7 @@ function parsePartOrNull(xml: string, path: string, tracker: ReadTracker | undef
   }
 }
 
+/** Word content parts the import does not read, tracked so what they hold is reported. */
 const UNOPENED_CONTENT_PARTS = ["word/footnotes.xml", "word/endnotes.xml", "word/comments.xml"];
 
 /** `word/header1.xml` → `word/_rels/header1.xml.rels`. */

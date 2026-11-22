@@ -123,8 +123,8 @@ export interface DocxReportRecorder {
   carried(kind: string): void;
   /** The converter's own account: content nothing handled. Its owner is `null`. */
   unhandled(kind: string, reason: string): void;
-  /** One `kind` counted kept that `owner`'s handler then left out: moved to dropped. */
-  leftOut(kind: string, reason: string, owner: HandlerOwner): void;
+  /** One `kind` counted kept that `owner`'s handler then left out: moved to dropped, as `LEFT_OUT`. */
+  leftOut(kind: string, owner: HandlerOwner): void;
   /** How many of `kind` have been counted so far. */
   count(kind: string): DocxReportCount;
   /** The report so far, as plain data the caller owns. */
@@ -315,13 +315,13 @@ export function createReportRecorder(options: ReportRecorderOptions = {}): DocxR
     unhandled(kind, reason) {
       addEntry("dropped", kind, reason, null);
     },
-    leftOut(kind, reason, owner) {
-      const count = countOf(kind);
-      if (count.kept > 0) count.kept -= 1;
+    leftOut(kind, owner) {
+      // Only content counted kept as it was built is ever left out.
+      countOf(kind).kept -= 1;
       const open = subtrees[subtrees.length - 1];
       const inside = open?.kept.get(kind) ?? 0;
       if (open && inside > 0) open.kept.set(kind, inside - 1);
-      addEntry("dropped", kind, reason, owner);
+      addEntry("dropped", kind, LEFT_OUT, owner);
     },
     count(kind) {
       return { ...countOf(kind) };

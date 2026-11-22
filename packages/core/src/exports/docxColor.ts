@@ -1,3 +1,4 @@
+// Kept out of `docx.ts`, which core re-exports whole: this is for core's own handlers.
 import { parseCssColor } from "../model/cssColor";
 import { cssColorToDocxHex, type DocxReporter } from "./docx";
 
