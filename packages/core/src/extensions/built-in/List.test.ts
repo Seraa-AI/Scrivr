@@ -31,3 +31,28 @@ describe("where an ordered list starts, in every format it is written to", () =>
     expect(htmlStart(editor)).toBe("32767");
   });
 });
+
+describe("a heading in a list, as Word makes one", () => {
+  const headingDoc = () => new ServerEditor({
+    extensions: [StarterKit],
+    content: { type: "doc", content: [{ type: "heading", attrs: { level: 2 }, content: [{ type: "text", text: "Scope" }] }] },
+  });
+
+  const toggles: Array<"toggleBulletList" | "toggleOrderedList"> = ["toggleBulletList", "toggleOrderedList"];
+  it.each(toggles)("%s makes a heading a list item and keeps it a heading", (command) => {
+    const editor = headingDoc();
+    expect(editor.runCommand(command)).toBe(true);
+
+    const item = editor.getState().doc.child(0).child(0);
+    expect(item.type.name).toBe("listItem");
+    expect(item.child(0).type.name).toBe("heading");
+    expect(item.child(0).attrs["level"]).toBe(2);
+  });
+
+  it("lifts it back out of the list as a heading", () => {
+    const editor = headingDoc();
+    editor.runCommand("toggleBulletList");
+    editor.runCommand("toggleBulletList");
+    expect(editor.getState().doc.child(0).type.name).toBe("heading");
+  });
+});

@@ -987,6 +987,23 @@ describe("importDocx — what each extension says it could not keep", () => {
     expect(doc.textContent).toContain("Visit Nairobi");
   });
 
+  it("keeps a heading in a list a numbered heading, there and back", async () => {
+    const editor = new ServerEditor();
+    editor.setContent({ type: "doc", content: [{ type: "orderedList", content: [
+      { type: "listItem", content: [{ type: "heading", attrs: { level: 2 }, content: [{ type: "text", text: "Scope" }] }] },
+      { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "Terms" }] }] },
+    ] }] });
+    const bytes = await exportDocxBytes(editor);
+    expect(strFromU8(unzipSync(bytes)["word/document.xml"]!)).toMatch(/<w:pStyle w:val="Heading2"\/>.*<w:numPr>/s);
+
+    const { doc, report } = await importDocx(new ServerEditor(), bytes);
+    const list = doc.child(0);
+    expect(list.type.name).toBe("orderedList");
+    expect(list.child(0).child(0).type.name).toBe("heading");
+    expect(list.child(0).child(0).attrs["level"]).toBe(2);
+    expect(dropsOf(report)).toEqual([]);
+  });
+
   it("names a list numbering format the editor draws differently, and nothing for its own", async () => {
     const editor = new ServerEditor();
     const item = (text: string, nested?: unknown) => ({

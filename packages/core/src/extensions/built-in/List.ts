@@ -339,7 +339,9 @@ export const List = Extension.create({
         layout: { kind: "transparent", wrap: listWrap },
       },
       listItem: {
-        content: "paragraph block*",
+        // Its first block is one a list item can lead with — a paragraph, or a
+        // heading, which Word numbers as readily — and whatever follows.
+        content: "listItemLead block*",
         defining: true,
         attrs: {
           levelOffset: { default: 0 },

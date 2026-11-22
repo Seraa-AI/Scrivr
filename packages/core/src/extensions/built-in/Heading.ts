@@ -78,7 +78,7 @@ export const Heading = Extension.create<HeadingOptions>({
   addNodes() {
     return {
       heading: {
-        group: "block",
+        group: "block listItemLead",
         content: "inline*",
         attrs: {
           level: { default: 1 },

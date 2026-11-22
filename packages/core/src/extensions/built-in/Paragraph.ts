@@ -153,7 +153,7 @@ export const Paragraph = Extension.create({
   addNodes() {
     return {
       paragraph: {
-        group: "block",
+        group: "block listItemLead",
         content: "inline*",
         attrs: {
           align: { default: "left" },
