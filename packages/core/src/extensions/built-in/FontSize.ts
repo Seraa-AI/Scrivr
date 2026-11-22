@@ -2,6 +2,7 @@ import { Extension } from "../Extension";
 import type { FontModifier, ToolbarItemSpec } from "../types";
 import type { ParsedFont } from "../../layout/StyleResolver";
 import type { DocxMarkHandler, DocxMarkTransform } from "../../exports/docx";
+import { DEFAULT_FONT_PX, cssLengthToPx, htmlFontSizeToPx, isCssReset, parseCssLength } from "../../model/cssValues";
 
 interface FontSizeOptions {
   /** Font size presets shown as toolbar buttons (px values). */
@@ -33,18 +34,18 @@ export const FontSize = Extension.create<FontSizeOptions>({
         parseDOM: [
           {
             style: "font-size",
-            getAttrs: (value) => {
-              const raw = value as string;
-              let px: number;
-              if (raw.endsWith("pt")) {
-                // 1pt = 96/72 px (≈ 1.333px) at standard 96 DPI
-                px = Math.round(parseFloat(raw) * (96 / 72));
-              } else {
-                // px, or bare number — take as-is
-                px = parseFloat(raw);
-              }
-              return isNaN(px) ? false : { size: px };
-            },
+            getAttrs: (value) => sizeAttrs(cssFontSizeToPx(value)),
+          },
+          // A mark is inherited by the text inside it, so `initial` must remove it.
+          {
+            style: "font-size",
+            getAttrs: (value) => isCssReset(value) && null,
+            clearMark: (mark) => mark.type.name === "fontSize",
+          },
+          {
+            tag: "font[size]",
+            consuming: false,
+            getAttrs: (node) => sizeAttrs(htmlFontSizeToPx(node.getAttribute("size") ?? "")),
           },
         ],
         toDOM: (mark) => [
@@ -99,9 +100,15 @@ export const FontSize = Extension.create<FontSizeOptions>({
   },
 
   addExports() {
-    const handler: DocxMarkHandler = (props, mark) => {
+    const handler: DocxMarkHandler = (props, mark, ctx) => {
       const v = mark.attrs["size"];
-      return typeof v === "number" ? { ...props, fontSize: v } : props;
+      if (typeof v !== "number") {
+        ctx.report.dropped(mark.type.name, "no size");
+        return props;
+      }
+      // Word sizes text in half points, and 1px is 0.75pt.
+      if (!Number.isInteger(v * 1.5)) ctx.report.changed(mark.type.name, "rounded to a half point");
+      return { ...props, fontSize: v };
     };
     return { docx: { marks: { fontSize: handler } } };
   },
@@ -111,12 +118,16 @@ export const FontSize = Extension.create<FontSizeOptions>({
     // half-points ÷ 1.5 = px (exporter does px × 1.5).
     const handler: DocxMarkTransform = (mark, ctx) => {
       const raw = mark.attrs?.["val"];
-      if (typeof raw !== "string" || raw.length === 0) return null;
-      const halfPoints = Number(raw);
-      if (!Number.isFinite(halfPoints) || halfPoints <= 0) return null;
+      const halfPoints = typeof raw === "string" && raw.length > 0 ? Number(raw) : NaN;
+      if (!Number.isFinite(halfPoints) || halfPoints <= 0) {
+        ctx.report.dropped(mark.kind, "not a valid size");
+        return null;
+      }
       const t = ctx.schema.marks["fontSize"];
       if (!t) return null;
-      return t.create({ size: Math.round(halfPoints / 1.5) });
+      const px = halfPoints / 1.5;
+      if (!Number.isInteger(px)) ctx.report.changed(mark.kind, "rounded to a whole pixel");
+      return t.create({ size: Math.round(px) });
     };
     return { docx: { marks: { sz: handler } } };
   },
@@ -150,4 +161,20 @@ declare module "@scrivr/core" {
       size: number;
     };
   }
+}
+
+function sizeAttrs(px: number | null) {
+  return px === null || px <= 0 ? false : { size: px };
+}
+
+/**
+ * A size written in px is kept exactly, fractions and all, so the editor's own
+ * copy round-trips. Any other unit is rounded to a whole px — 11pt is 14.67px,
+ * which is noise, not intent.
+ */
+function cssFontSizeToPx(value: string): number | null {
+  const px = cssLengthToPx(value, DEFAULT_FONT_PX);
+  if (px === null) return null;
+  const unit = parseCssLength(value)?.unit;
+  return unit === "px" || unit === "" ? px : Math.round(px);
 }

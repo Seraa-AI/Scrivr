@@ -8,6 +8,9 @@
     "viewport",
     "serialization",
     "export",
+    "fields",
+    "sealing",
+    "certificate",
     "plugins",
     "ai-features"
   ]

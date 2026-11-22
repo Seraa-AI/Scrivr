@@ -168,3 +168,31 @@ describe("resolvePagePoint — pageless", () => {
     expect(resolvePagePoint(400, 306, ctx).region).toBe("content");
   });
 });
+
+describe("resolvePagePoint — at a zoom", () => {
+  it("reads a screen point back to the page point drawn there, at every zoom", () => {
+    const layout = pagedLayout(3);
+    const origin = { left: 10, top: 20 };
+    const { slotHeight } = pagedContext(layout);
+    for (const zoom of [0.5, 1, 2.37]) {
+      // Page 2, (100, 200): drawn at the column's origin plus its page-unit place × zoom.
+      const clientX = origin.left + 100 * zoom;
+      const clientY = origin.top + (slotHeight + 200) * zoom;
+      const point = resolvePagePoint(clientX, clientY, { ...pagedContext(layout, origin), zoom });
+
+      expect(point.page).toBe(2);
+      expect(point.x).toBeCloseTo(100, 6);
+      expect(point.y).toBeCloseTo(200, 6);
+      expect(point.region).toBe("content");
+    }
+  });
+
+  it("finds the gap between pages where the zoom draws it", () => {
+    const layout = pagedLayout(2);
+    const zoom = 2;
+    const { tileHeight } = pagedContext(layout);
+    const point = resolvePagePoint(50, (tileHeight + GAP / 2) * zoom, { ...pagedContext(layout), zoom });
+
+    expect(point.region).toBe("gap");
+  });
+});

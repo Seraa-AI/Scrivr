@@ -300,6 +300,7 @@ export class PointerController {
       pageless: this.deps.isPageless(),
       slotHeight: this.deps.slotHeight(),
       tileHeight: this.deps.tileHeight(),
+      zoom: this.deps.editor.zoom,
       layout: this.deps.editor.layout,
     });
   }
@@ -345,7 +346,7 @@ export class PointerController {
         canvasY - r.y,
         r.y + r.height - canvasY,
       );
-      if (distToEdge > EDGE_BAND_PX) return null;
+      if (distToEdge > EDGE_BAND_PX / this.deps.editor.zoom) return null;
     }
 
     // Resize hit-testing uses the canonical 8-point `getHandles(nodeRect)` grid.
@@ -355,7 +356,7 @@ export class PointerController {
     // positions. A behavior that wants bespoke handle geometry can't express it
     // yet (the emitted `handles` primitives carry no id to drive the drag);
     // that lands with the resize → standalone gesture-provider refactor.
-    return hitHandle(canvasX, canvasY, getHandles(r.x, r.y, r.width, r.height));
+    return hitHandle(canvasX, canvasY, getHandles(r.x, r.y, r.width, r.height), this.deps.editor.zoom);
   }
 
   /**
@@ -376,6 +377,8 @@ export class PointerController {
   private hoverCursorFor(hit: PagePoint): string {
     const resizeHit = this.hitHandleAt(hit.x, hit.y, hit.page);
     if (resizeHit) return resizeHit.cursor;
+    const asked = this.deps.editor.pointerCursorAt(hit);
+    if (asked !== null) return asked;
 
     return this.ownerAt(hit.x, hit.y, hit.page).kind === "text" ? "text" : "move";
   }
@@ -478,6 +481,10 @@ export class PointerController {
     this.lastClickTime = now;
     this.lastClickX = e.clientX;
     this.lastClickY = e.clientY;
+
+    // Before any routing, and in read-only too: what is painted over a page
+    // without being a document node — a sealed field — hears presses here.
+    if (e.button === 0) editor.emit("press", { point: hit, clickCount: this.clickCount });
 
     // Chrome bands are separate editing surfaces, so their activation routing
     // precedes body hit testing.
@@ -663,8 +670,9 @@ export class PointerController {
         handle,
         startW,
         startH,
-        e.clientX - startX,
-        e.clientY - startY,
+        // Screen pixels moved, as page units: at 200% a 100px drag grows 50.
+        (e.clientX - startX) / this.deps.editor.zoom,
+        (e.clientY - startY) / this.deps.editor.zoom,
         maxWidth,
       );
       this.resizeDrag.pendingWidth = width;
@@ -923,16 +931,16 @@ export class PointerController {
 
     if (this.commitContainerChange(finalHit)) return;
 
-    const { docPos, startYOffset } = this.anchoredDrag;
-    const sourcePage = this.anchoredDrag.rect.page;
-    const samePage = finalHit.page === sourcePage;
+    const { docPos, startYOffset, rect } = this.anchoredDrag;
+    const samePage = finalHit.page === rect.page;
+    // The drop lands where the ghost was painted.
+    const ghost = this.ghostAt(finalHit, this.anchoredDrag);
 
     // Resolve horizontal target X. For modes whose horizontal placement is
     // user-controlled (square / top-bottom / behind / front) this updates
     // structural attrs so layout reflows around the new rectangle.
-    const newX = this.resolveDragTargetX(dx);
-    const horizontallyStill =
-      newX === null || Math.abs(newX - this.anchoredDrag.startImageX) < 1;
+    const newX = this.resolveDragTargetX(ghost.x);
+    const horizontallyStill = newX === null;
 
     if (samePage) {
       // Same-page drag: yOffset commit, no docPos change. The anchor
@@ -940,8 +948,8 @@ export class PointerController {
       // page (clamped by layout to the anchor's page bounds).
       // Matches the horizontal still threshold so a "pure horizontal" drag
       // with mouse jitter doesn't write a spurious yOffset.
-      const newYOffset = startYOffset + dy;
-      const verticallyStill = Math.abs(dy) < AXIS_STILL_THRESHOLD_PX;
+      const newYOffset = startYOffset + ghost.y - rect.y;
+      const verticallyStill = this.onScreen(ghost.y - rect.y) < AXIS_STILL_THRESHOLD_PX;
 
       if (horizontallyStill && verticallyStill) {
         dragDebugLog(editor, "clampedNoMove", {
@@ -1041,24 +1049,38 @@ export class PointerController {
    * `null` when horizontal movement is too small to constitute a
    * structural change.
    *
-   * The new X is computed as the image's start X plus the cursor's
-   * horizontal delta, then clamped to *page* bounds (Word-aligned: an
-   * image dragged sideways may extend into the left/right margins but
+   * The new X is the ghost's page x, clamped to *page* bounds (Word-aligned:
+   * an image dragged sideways may extend into the left/right margins but
    * cannot escape the page). `xAlign` is set to `"custom"` by the caller
-   * so layout reads `x` directly.
+   * so layout reads `x` directly. Null when the clamped x moved less than
+   * the jitter threshold on screen.
    */
-  private resolveDragTargetX(dx: number): number | null {
+  private resolveDragTargetX(ghostX: number): number | null {
     const { editor } = this.deps;
     if (!this.anchoredDrag) return null;
-    const HORIZONTAL_THRESHOLD = 3;
-    if (Math.abs(dx) < HORIZONTAL_THRESHOLD) return null;
 
     // The painted width snapshotted at pointerdown, as the rest of the drag
     // reads its geometry.
     const { pageWidth } = editor.layout.pageConfig;
-    const proposedX = this.anchoredDrag.startImageX + dx;
-    const clampedX = Math.max(0, Math.min(proposedX, pageWidth - this.anchoredDrag.rect.width));
-    return clampedX;
+    const clampedX = Math.max(0, Math.min(ghostX, pageWidth - this.anchoredDrag.rect.width));
+    return this.onScreen(clampedX - this.anchoredDrag.startImageX) < AXIS_STILL_THRESHOLD_PX ? null : clampedX;
+  }
+
+  /**
+   * The dragged object's top-left for the pointer at `hit`: the page point
+   * less where it was grabbed. What the ghost paints and every drop commits.
+   */
+  private ghostAt(hit: PagePoint, drag: { grabOffsetX: number; grabOffsetY: number }): { x: number; y: number } {
+    return { x: hit.x - drag.grabOffsetX, y: hit.y - drag.grabOffsetY };
+  }
+
+  /**
+   * A page-unit distance in screen pixels. Whether a drag moved is a
+   * question about the hand, so it is asked on screen, of the ghost itself —
+   * a view scrolled under a held pointer moves the drop too.
+   */
+  private onScreen(pageUnits: number): number {
+    return Math.abs(pageUnits) * this.deps.editor.zoom;
   }
 
   /**
@@ -1071,9 +1093,8 @@ export class PointerController {
   private commitContainerChange(hit: PagePoint): boolean {
     if (!this.anchoredDrag) return false;
     const { editor } = this.deps;
-    const { docPos, grabOffsetX, grabOffsetY } = this.anchoredDrag;
-    const ghostX = hit.x - grabOffsetX;
-    const ghostY = hit.y - grabOffsetY;
+    const { docPos } = this.anchoredDrag;
+    const { x: ghostX, y: ghostY } = this.ghostAt(hit, this.anchoredDrag);
     const ownParagraph = editor.getState().doc.resolve(docPos).start();
 
     const target = this.regionAt(hit.page, hit.x, hit.y);
@@ -1167,7 +1188,7 @@ export class PointerController {
     if (!this.anchoredDrag) return null;
     const hit = this.hitTest(e.clientX, e.clientY);
     if (hit.region === "gap") return null;
-    const ghostGlobalY = this.pageLocalYToGlobal(hit.page, hit.y - this.anchoredDrag.grabOffsetY);
+    const ghostGlobalY = this.pageLocalYToGlobal(hit.page, this.ghostAt(hit, this.anchoredDrag).y);
 
     const { doc } = this.deps.editor.getState();
     const $pos = newDocPos <= doc.content.size ? doc.resolve(newDocPos) : null;
@@ -1359,8 +1380,7 @@ export class PointerController {
 
     // Ghost top-left = current cursor minus the grab offset captured at
     // pointerdown. Stays anchored to where the user originally grabbed.
-    const ghostX = hit.x - this.anchoredDrag.grabOffsetX;
-    const ghostY = hit.y - this.anchoredDrag.grabOffsetY;
+    const { x: ghostX, y: ghostY } = this.ghostAt(hit, this.anchoredDrag);
 
     // Inter-page gap: invalid drop target. Keep the ghost rendered (so the
     // user sees what they're dragging) but mark disabled so the renderer

@@ -1,6 +1,6 @@
 {
   "name": "@scrivr/core",
-  "version": "1.0.23",
+  "version": "1.0.25",
   "description": "High-performance canvas-based document editor engine",
   "license": "Apache-2.0",
   "author": "Seraa AI <hello@seraa.ai>",
@@ -71,14 +71,15 @@
   "dependencies": {
     "@floating-ui/dom": "^1.7.6",
     "markdown-it": "^14.1.1",
-    "prosemirror-commands": "^1.7.1",
-    "prosemirror-history": "^1.5.0",
-    "prosemirror-inputrules": "^1.5.1",
+    "prosemirror-commands": "^1.7.2",
+    "prosemirror-history": "^1.5.1",
+    "prosemirror-inputrules": "^1.6.0",
     "prosemirror-keymap": "^1.2.3",
-    "prosemirror-markdown": "^1.13.4",
-    "prosemirror-model": "^1.25.4",
-    "prosemirror-schema-list": "^1.5.1",
+    "prosemirror-markdown": "^1.13.9",
+    "prosemirror-model": "^1.25.13",
+    "prosemirror-schema-list": "^1.6.0",
     "prosemirror-state": "^1.4.4",
-    "prosemirror-transform": "^1.11.0"
+    "prosemirror-transform": "^1.12.6",
+    "zod": "^4.3.6"
   }
 }

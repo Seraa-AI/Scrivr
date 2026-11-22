@@ -1,0 +1,511 @@
+{
+  "import": {
+    "counts": {
+      "b": {
+        "kept": 20,
+        "dropped": 0,
+        "changed": 0
+      },
+      "hardBreak": {
+        "kept": 1,
+        "dropped": 0,
+        "changed": 0
+      },
+      "highlight": {
+        "kept": 8,
+        "dropped": 0,
+        "changed": 8
+      },
+      "lang": {
+        "kept": 0,
+        "dropped": 87,
+        "changed": 0
+      },
+      "paragraph": {
+        "kept": 116,
+        "dropped": 0,
+        "changed": 0
+      },
+      "rFonts": {
+        "kept": 87,
+        "dropped": 0,
+        "changed": 0
+      },
+      "sz": {
+        "kept": 30,
+        "dropped": 0,
+        "changed": 30
+      },
+      "szCs": {
+        "kept": 0,
+        "dropped": 6,
+        "changed": 0
+      },
+      "table": {
+        "kept": 6,
+        "dropped": 0,
+        "changed": 0
+      },
+      "text": {
+        "kept": 86,
+        "dropped": 0,
+        "changed": 0
+      }
+    },
+    "entries": [
+      {
+        "outcome": "dropped",
+        "kind": "lang",
+        "reason": "no handler",
+        "owner": null,
+        "count": 87
+      },
+      {
+        "outcome": "changed",
+        "kind": "sz",
+        "reason": "rounded to a whole pixel",
+        "owner": "fontSize",
+        "count": 30
+      },
+      {
+        "outcome": "changed",
+        "kind": "highlight",
+        "reason": "color not kept: the editor has one highlight color",
+        "owner": "highlight",
+        "count": 8
+      },
+      {
+        "outcome": "dropped",
+        "kind": "szCs",
+        "reason": "no handler",
+        "owner": null,
+        "count": 6
+      }
+    ],
+    "unread": [
+      {
+        "part": "word/document.xml",
+        "path": "w:document/w:body/w:tbl/w:tblPr",
+        "outcome": "unread",
+        "count": 6
+      },
+      {
+        "part": "word/document.xml",
+        "path": "w:document/w:body/w:tbl/w:tr/w:trPr/w:trHeight",
+        "outcome": "unread",
+        "count": 13
+      },
+      {
+        "part": "word/document.xml",
+        "path": "w:document/w:body/w:tbl/w:tr/w:tc/w:tcPr/w:tcW",
+        "outcome": "unread",
+        "count": 55
+      },
+      {
+        "part": "word/document.xml",
+        "path": "w:document/w:body/w:tbl/w:tr/w:tc/w:p/w:pPr/w:rPr",
+        "outcome": "unread",
+        "count": 106
+      },
+      {
+        "part": "word/document.xml",
+        "path": "w:document/w:body/w:p/w:pPr/w:rPr",
+        "outcome": "unread",
+        "count": 9
+      },
+      {
+        "part": "word/document.xml",
+        "path": "w:document/w:body/w:p/w:r/w:rPr/w:noProof",
+        "outcome": "ignored",
+        "count": 8
+      },
+      {
+        "part": "word/document.xml",
+        "path": "w:document/w:body/w:p/w:r/mc:AlternateContent",
+        "outcome": "examined",
+        "count": 8
+      },
+      {
+        "part": "word/document.xml",
+        "path": "w:document/w:body/w:tbl/w:tr/w:tc/w:p/w:pPr/w:ind",
+        "outcome": "unread",
+        "count": 28
+      },
+      {
+        "part": "word/document.xml",
+        "path": "w:document/w:body/w:tbl/w:tr/w:tc/w:tcPr/w:tcBorders",
+        "outcome": "unread",
+        "count": 44
+      },
+      {
+        "part": "word/document.xml",
+        "path": "w:document/w:body/w:tbl/w:tr/w:tc/w:p/w:r/w:rPr/w:szCs",
+        "outcome": "ignored",
+        "count": 6
+      },
+      {
+        "part": "word/document.xml",
+        "path": "w:document/w:body/w:tbl/w:tr/w:tc/w:p/w:r/w:lastRenderedPageBreak",
+        "outcome": "ignored",
+        "count": 1
+      },
+      {
+        "part": "word/document.xml",
+        "path": "w:document/w:body/w:tbl/w:tr/w:tc/w:p/w:bookmarkStart",
+        "outcome": "ignored",
+        "count": 1
+      },
+      {
+        "part": "word/document.xml",
+        "path": "w:document/w:body/w:tbl/w:tr/w:tc/w:p/w:bookmarkEnd",
+        "outcome": "ignored",
+        "count": 1
+      },
+      {
+        "part": "word/document.xml",
+        "path": "w:document/w:body/w:tbl/w:tr/w:tc/w:p/w:proofErr",
+        "outcome": "ignored",
+        "count": 2
+      },
+      {
+        "part": "word/document.xml",
+        "path": "w:document/w:body/w:sectPr/w:pgSz",
+        "outcome": "examined",
+        "count": 1
+      },
+      {
+        "part": "word/document.xml",
+        "path": "w:document/w:body/w:sectPr/w:pgMar",
+        "outcome": "examined",
+        "count": 1
+      },
+      {
+        "part": "word/document.xml",
+        "path": "w:document/w:body/w:sectPr/w:cols",
+        "outcome": "examined",
+        "count": 1
+      },
+      {
+        "part": "word/numbering.xml",
+        "path": "w:numbering/w:abstractNum/w:nsid",
+        "outcome": "unread",
+        "count": 2
+      },
+      {
+        "part": "word/numbering.xml",
+        "path": "w:numbering/w:abstractNum/w:multiLevelType",
+        "outcome": "unread",
+        "count": 2
+      },
+      {
+        "part": "word/numbering.xml",
+        "path": "w:numbering/w:abstractNum/w:tmpl",
+        "outcome": "unread",
+        "count": 2
+      },
+      {
+        "part": "word/numbering.xml",
+        "path": "w:numbering/w:abstractNum/w:lvl/w:lvlText",
+        "outcome": "unread",
+        "count": 18
+      },
+      {
+        "part": "word/numbering.xml",
+        "path": "w:numbering/w:abstractNum/w:lvl/w:lvlJc",
+        "outcome": "unread",
+        "count": 18
+      },
+      {
+        "part": "word/numbering.xml",
+        "path": "w:numbering/w:abstractNum/w:lvl/w:pPr",
+        "outcome": "unread",
+        "count": 18
+      },
+      {
+        "part": "word/numbering.xml",
+        "path": "w:numbering/w:abstractNum/w:lvl/w:rPr",
+        "outcome": "unread",
+        "count": 18
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:docDefaults/w:rPrDefault/w:rPr/w:lang",
+        "outcome": "ignored",
+        "count": 1
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:docDefaults/w:pPrDefault",
+        "outcome": "unread",
+        "count": 1
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:latentStyles",
+        "outcome": "unread",
+        "count": 1
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:name",
+        "outcome": "unread",
+        "count": 10
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:qFormat",
+        "outcome": "unread",
+        "count": 1
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:rsid",
+        "outcome": "ignored",
+        "count": 7
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:rPr",
+        "outcome": "unread",
+        "count": 6
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:uiPriority",
+        "outcome": "unread",
+        "count": 8
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:semiHidden",
+        "outcome": "unread",
+        "count": 9
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:unhideWhenUsed",
+        "outcome": "unread",
+        "count": 6
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:tblPr",
+        "outcome": "unread",
+        "count": 1
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:basedOn",
+        "outcome": "unread",
+        "count": 6
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:link",
+        "outcome": "unread",
+        "count": 4
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:next",
+        "outcome": "unread",
+        "count": 1
+      },
+      {
+        "part": "word/settings.xml",
+        "path": "w:settings/w:zoom",
+        "outcome": "unread",
+        "count": 1
+      },
+      {
+        "part": "word/settings.xml",
+        "path": "w:settings/w:embedSystemFonts",
+        "outcome": "unread",
+        "count": 1
+      },
+      {
+        "part": "word/settings.xml",
+        "path": "w:settings/w:proofState",
+        "outcome": "unread",
+        "count": 1
+      },
+      {
+        "part": "word/settings.xml",
+        "path": "w:settings/w:stylePaneFormatFilter",
+        "outcome": "unread",
+        "count": 1
+      },
+      {
+        "part": "word/settings.xml",
+        "path": "w:settings/w:defaultTabStop",
+        "outcome": "unread",
+        "count": 1
+      },
+      {
+        "part": "word/settings.xml",
+        "path": "w:settings/w:displayHorizontalDrawingGridEvery",
+        "outcome": "unread",
+        "count": 1
+      },
+      {
+        "part": "word/settings.xml",
+        "path": "w:settings/w:displayVerticalDrawingGridEvery",
+        "outcome": "unread",
+        "count": 1
+      },
+      {
+        "part": "word/settings.xml",
+        "path": "w:settings/w:doNotUseMarginsForDrawingGridOrigin",
+        "outcome": "unread",
+        "count": 1
+      },
+      {
+        "part": "word/settings.xml",
+        "path": "w:settings/w:noPunctuationKerning",
+        "outcome": "unread",
+        "count": 1
+      },
+      {
+        "part": "word/settings.xml",
+        "path": "w:settings/w:characterSpacingControl",
+        "outcome": "unread",
+        "count": 1
+      },
+      {
+        "part": "word/settings.xml",
+        "path": "w:settings/w:compat",
+        "outcome": "unread",
+        "count": 1
+      },
+      {
+        "part": "word/settings.xml",
+        "path": "w:settings/w:rsids",
+        "outcome": "ignored",
+        "count": 1
+      },
+      {
+        "part": "word/settings.xml",
+        "path": "w:settings/m:mathPr",
+        "outcome": "unread",
+        "count": 1
+      },
+      {
+        "part": "word/settings.xml",
+        "path": "w:settings/w:themeFontLang",
+        "outcome": "unread",
+        "count": 1
+      },
+      {
+        "part": "word/settings.xml",
+        "path": "w:settings/w:clrSchemeMapping",
+        "outcome": "unread",
+        "count": 1
+      },
+      {
+        "part": "word/settings.xml",
+        "path": "w:settings/w:doNotIncludeSubdocsInStats",
+        "outcome": "unread",
+        "count": 1
+      },
+      {
+        "part": "word/settings.xml",
+        "path": "w:settings/w:shapeDefaults",
+        "outcome": "unread",
+        "count": 1
+      },
+      {
+        "part": "word/settings.xml",
+        "path": "w:settings/w:doNotEmbedSmartTags",
+        "outcome": "unread",
+        "count": 1
+      },
+      {
+        "part": "word/settings.xml",
+        "path": "w:settings/w:decimalSymbol",
+        "outcome": "unread",
+        "count": 1
+      },
+      {
+        "part": "word/settings.xml",
+        "path": "w:settings/w:listSeparator",
+        "outcome": "unread",
+        "count": 1
+      },
+      {
+        "part": "word/settings.xml",
+        "path": "w:settings/w14:docId",
+        "outcome": "unread",
+        "count": 1
+      },
+      {
+        "part": "word/settings.xml",
+        "path": "w:settings/w15:docId",
+        "outcome": "unread",
+        "count": 1
+      }
+    ]
+  },
+  "export": {
+    "counts": {
+      "bold": {
+        "kept": 20,
+        "dropped": 0,
+        "changed": 0
+      },
+      "fontFamily": {
+        "kept": 75,
+        "dropped": 0,
+        "changed": 0
+      },
+      "fontSize": {
+        "kept": 28,
+        "dropped": 0,
+        "changed": 28
+      },
+      "hardBreak": {
+        "kept": 1,
+        "dropped": 0,
+        "changed": 0
+      },
+      "highlight": {
+        "kept": 8,
+        "dropped": 0,
+        "changed": 0
+      },
+      "paragraph": {
+        "kept": 116,
+        "dropped": 0,
+        "changed": 0
+      },
+      "table": {
+        "kept": 6,
+        "dropped": 0,
+        "changed": 0
+      },
+      "tableCell": {
+        "kept": 55,
+        "dropped": 0,
+        "changed": 0
+      },
+      "tableRow": {
+        "kept": 13,
+        "dropped": 0,
+        "changed": 0
+      },
+      "text": {
+        "kept": 75,
+        "dropped": 0,
+        "changed": 0
+      }
+    },
+    "entries": [
+      {
+        "outcome": "changed",
+        "kind": "fontSize",
+        "reason": "rounded to a half point",
+        "owner": "fontSize",
+        "count": 28
+      }
+    ]
+  }
+}

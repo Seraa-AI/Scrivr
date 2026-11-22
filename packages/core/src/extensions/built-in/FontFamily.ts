@@ -3,6 +3,7 @@ import { Extension } from "../Extension";
 import type { FontModifier, ToolbarItemSpec } from "../types";
 import type { ParsedFont } from "../../layout/StyleResolver";
 import type { DocxMarkHandler, DocxMarkTransform } from "../../exports/docx";
+import { cssPrimaryFamily, isCssReset, isCssWideKeyword } from "../../model/cssValues";
 
 interface FontFamilyOptions {
   /** Font family presets shown in the toolbar. */
@@ -48,16 +49,18 @@ export const FontFamily = Extension.create<FontFamilyOptions>({
         parseDOM: [
           {
             style: "font-family",
-            getAttrs: (value) => {
-              // Take only the primary (first) family name — strips the
-              // fallback stack (e.g. "Arial,sans-serif" → "Arial") so the
-              // value matches toolbar presets and blockAttrs comparisons.
-              const primary = (value as string)
-                .replace(/['"]/g, "")
-                .split(",")[0]
-                ?.trim() ?? "";
-              return primary ? { family: primary } : false;
-            },
+            getAttrs: (value) => familyAttrs(value),
+          },
+          // A mark is inherited by the text inside it, so `initial` must remove it.
+          {
+            style: "font-family",
+            getAttrs: (value) => isCssReset(value) && null,
+            clearMark: (mark) => mark.type.name === "fontFamily",
+          },
+          {
+            tag: "font[face]",
+            consuming: false,
+            getAttrs: (node) => familyAttrs(node.getAttribute("face") ?? ""),
           },
         ],
         toDOM: (mark) => [
@@ -141,11 +144,11 @@ export const FontFamily = Extension.create<FontFamilyOptions>({
   },
 
   addExports() {
-    const handler: DocxMarkHandler = (props, mark) => {
+    const handler: DocxMarkHandler = (props, mark, ctx) => {
       const f = mark.attrs["family"];
-      return typeof f === "string" && f.length > 0
-        ? { ...props, fontFamily: f }
-        : props;
+      if (typeof f === "string" && f.length > 0) return { ...props, fontFamily: f };
+      ctx.report.dropped(mark.type.name, "no font named");
+      return props;
     };
     return { docx: { marks: { fontFamily: handler } } };
   },
@@ -159,9 +162,26 @@ export const FontFamily = Extension.create<FontFamilyOptions>({
         readFontFamilyAttr(attrs["ascii"]) ??
         readFontFamilyAttr(attrs["hAnsi"]) ??
         readFontFamilyAttr(attrs["cs"]);
-      if (!family) return null;
+      if (!family) {
+        // `w:hint` alone names no face — it only says which script's font
+        // applies — so there is nothing to carry and nothing lost. A theme
+        // reference (`w:asciiTheme`) does name a face; it is not resolved
+        // yet, so it stays a drop.
+        const named = Object.keys(attrs).filter((name) => name !== "hint");
+        if (named.length === 0) ctx.report.kept(mark.kind);
+        // OOXML spells one of them `cstheme`.
+        else if (named.some((name) => name.toLowerCase().endsWith("theme"))) ctx.report.dropped(mark.kind, "theme font not resolved");
+        else ctx.report.dropped(mark.kind, "no Latin font named");
+        return null;
+      }
       const t = ctx.schema.marks["fontFamily"];
       if (!t) return null;
+      // Word can name a face per range of characters; the editor draws one, so
+      // text Word would set in any other face is drawn in this one.
+      const otherFaces = [attrs["hAnsi"], attrs["eastAsia"], attrs["cs"]]
+        .map(readFontFamilyAttr)
+        .filter((face) => face !== undefined && face !== family);
+      if (otherFaces.length > 0) ctx.report.changed(mark.kind, "one font kept of several named");
       return t.create({ family });
     };
     return { docx: { marks: { rFonts: handler } } };
@@ -205,4 +225,13 @@ declare module "@scrivr/core" {
       family: string;
     };
   }
+}
+
+/**
+ * Only the primary (first) family — "Arial,sans-serif" → "Arial" — so the
+ * value matches toolbar presets and blockAttrs comparisons.
+ */
+function familyAttrs(value: string) {
+  const family = isCssWideKeyword(value) ? null : cssPrimaryFamily(value);
+  return family ? { family } : false;
 }

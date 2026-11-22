@@ -12,7 +12,9 @@ import {
   type DocumentLayout,
   type HoverTarget,
   type IEditor,
+  type ObjectRectEntry,
   type OverlayRenderHandler,
+  type PointerCursorResolver,
   type Selection,
   type ServerEditorOptions,
 } from "@scrivr/core";
@@ -27,6 +29,7 @@ const EMPTY_LAYOUT: DocumentLayout = {
 export class ViewEditorDouble extends ServerEditor implements IEditor {
   readonly surfaces = new SurfaceRegistry();
   readonly cursorManager = new CursorManager(() => {});
+  readonly zoom: number = 1;
   readonly selection: SelectionController;
   /** The overlay painters extensions registered, in order. */
   readonly painters: OverlayRenderHandler[] = [];
@@ -97,6 +100,10 @@ export class ViewEditorDouble extends ServerEditor implements IEditor {
     return [];
   }
 
+  getNodeRects(): ObjectRectEntry[] {
+    return [];
+  }
+
   getRangeViewportRects(): DOMRect[] {
     return [];
   }
@@ -120,6 +127,10 @@ export class ViewEditorDouble extends ServerEditor implements IEditor {
   }
 
   redraw(): void {}
+
+  addPointerCursor(_resolve: PointerCursorResolver): () => void {
+    return () => {};
+  }
 
   invalidateLayout(): void {}
 

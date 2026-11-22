@@ -53,6 +53,8 @@ export interface InputBridgeOptions {
   copyHtmlTransforms: readonly CopyHtmlTransform[];
   /** Viewport rect for a doc-position range — used to position the textarea. */
   getViewportRect: (from: number, to: number) => DOMRect | null;
+  /** The view's zoom: how many screen pixels one page unit spans. */
+  getZoom: () => number;
   /** CharacterMap — used by scrollCursorIntoView for cursor coordinates. */
   getCharMap: () => CharacterMap;
   /**
@@ -137,6 +139,18 @@ export class InputBridge {
     page: number,
   ): { screenLeft: number; screenTop: number } | null {
     return this.pageScreenRectLookup?.(page) ?? null;
+  }
+
+  /**
+   * A page-unit rect on `page`, in screen space at the view's zoom. Every
+   * editor API that turns page units into screen pixels goes through here. Null while
+   * no view is mounted.
+   */
+  pageToScreen(page: number, rect: { x: number; y: number; width: number; height: number }): DOMRect | null {
+    const origin = this.pageScreenRectLookup?.(page);
+    if (!origin) return null;
+    const zoom = this.opts.getZoom();
+    return new DOMRect(origin.screenLeft + rect.x * zoom, origin.screenTop + rect.y * zoom, rect.width * zoom, rect.height * zoom);
   }
 
   /**
@@ -289,12 +303,10 @@ export class InputBridge {
     coords: { page: number; y: number; height: number },
     scrollParent: HTMLElement,
   ): { top: number; bottom: number } | null {
-    const pageScreenRect = this.pageScreenRectLookup?.(coords.page);
-    if (!pageScreenRect) return null;
-    const containerRect = scrollParent.getBoundingClientRect();
-    const pageTop =
-      pageScreenRect.screenTop - containerRect.top + scrollParent.scrollTop;
-    return { top: pageTop + coords.y, bottom: pageTop + coords.y + coords.height };
+    const band = this.pageToScreen(coords.page, { x: 0, y: coords.y, width: 0, height: coords.height });
+    if (!band) return null;
+    const top = band.top - scrollParent.getBoundingClientRect().top + scrollParent.scrollTop;
+    return { top, bottom: top + band.height };
   }
 
   /** Private — textarea creation */

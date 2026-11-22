@@ -1,6 +1,6 @@
 {
   "name": "@scrivr/docx",
-  "version": "1.0.23",
+  "version": "1.0.25",
   "description": "DOCX import + export for Scrivr documents — semantic round-trip to WordprocessingML",
   "license": "Apache-2.0",
   "author": "Seraa AI <hello@seraa.ai>",
@@ -62,6 +62,8 @@
     "@scrivr/core": "workspace:*"
   },
   "devDependencies": {
+    "@expo-google-fonts/inter": "0.4.2",
+    "@napi-rs/canvas": "^1.0.0",
     "@scrivr/core": "workspace:*",
     "tsup": "^8.0.0",
     "typescript": "^5.4.0",

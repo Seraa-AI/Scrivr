@@ -178,6 +178,116 @@ export interface DocxDiagnostic {
   markType?: string;
 }
 
+// ── Report ──────────────────────────────────────────────────────────────────
+
+/**
+ * Where a handler says what became of the content it was handed. Diagnostics
+ * stay the channel for warnings; a drop usually goes in both.
+ *
+ * `kind` uses the vocabulary of the side the content came from. An export
+ * reports Scrivr's node and mark names (`"paragraph"`, `"bold"`). An import
+ * reports Word's, as the parser names them: a `DocxBlock` or `DocxInline`
+ * `type`, a `DocxMark` `kind` such as `"b"`, or, for a top-level element the
+ * parser cannot read, its tag (`"w:customXml"`).
+ *
+ * The converter already records:
+ * - each item it hands a handler (a node, an inline, a mark): kept if the
+ *   handler returned content, dropped if not;
+ * - content with no handler, as dropped with the reason `"no handler"`;
+ * - the content inside a lost item, moved to dropped with it.
+ *
+ * A handler adds what the converter cannot see: a `changed` note, a drop
+ * inside content it did return, and `kept` for something it returns nothing
+ * for but did not lose (a value Word uses to mean "no formatting", or content
+ * it wrote somewhere else). Reporting `kept` or `dropped` for the kind it was
+ * handed replaces the converter's account of that item.
+ */
+export interface DocxReporter {
+  /**
+   * The handler wrote (export) or built (import) `count` of `kind`. `count`
+   * defaults to 1. A count of 0 is no account of the item. A count that is not
+   * a whole number is ignored with a warning.
+   */
+  kept(kind: string, count?: number): void;
+  /**
+   * One `kind` did not make it across, and why. The import names content as
+   * the converter counts it: Word's kinds (`b`, `image`, `field`), not the
+   * editor's. Content a paragraph's handler is handed and leaves out of the
+   * node it returns — a code block keeping only text — the converter finds
+   * and reports itself.
+   */
+  dropped(kind: string, reason: string): void;
+  /**
+   * One `kind` made it across, but not as the source had it ("spacing
+   * ignored"). A note on content that was kept, not a third outcome: it does
+   * not stand in for `kept`, and one item can carry several.
+   */
+  changed(kind: string, reason: string): void;
+}
+
+/** One kind's totals in `DocxReport.counts`. */
+export interface DocxReportCount {
+  kept: number;
+  dropped: number;
+  /** Change notes, not items — one kept paragraph can carry several. */
+  changed: number;
+}
+
+/**
+ * A drop or change, with who recorded it and why. Identical ones — same
+ * outcome, kind, reason and owner — share one entry and add to its `count`.
+ */
+export interface DocxReportEntry {
+  outcome: "dropped" | "changed";
+  kind: string;
+  reason: string;
+  /**
+   * The extension whose handler or hook recorded it, `"overrides"` for a
+   * handler passed in the call's own `overrides`, or `null` when no extension
+   * did — the converter recording content that nothing handled.
+   */
+  owner: string | null;
+  /** How many times this drop or change happened. */
+  count: number;
+}
+
+/** What a DOCX import or export kept, dropped and changed. */
+export interface DocxReport {
+  /** Per kind, with sorted keys so two reports compare line by line. */
+  counts: Record<string, DocxReportCount>;
+  /** Every distinct drop and change, in the order the conversion first met it. */
+  entries: DocxReportEntry[];
+  /**
+   * Import only, with `trackUnread` on: the Word XML the import never read,
+   * across the body, every header and footer the document references,
+   * footnotes, endnotes, comments, styles, numbering and settings. A handler
+   * can only report what it is handed, so this is where a property no code
+   * looks at shows up. It is an inventory of the XML, so it also lists what
+   * `entries` already names as dropped — an element nothing parses, a header
+   * nothing reads — and `ignored` is what the import drops on purpose.
+   */
+  unread?: DocxUnreadElement[];
+}
+
+/**
+ * Word XML an import did not read, by where it sits. Repeats of one path share
+ * an entry and add to its `count`. Only the top of a skipped subtree is listed:
+ * what is inside it was skipped with it.
+ */
+export interface DocxUnreadElement {
+  /** The package part it came from: `"word/document.xml"`, `"word/styles.xml"`. */
+  part: string;
+  /** Element names from the part's root down to it: `"w:document/w:body/w:p/w:pPr/w:ind"`. */
+  path: string;
+  /**
+   * `unread`: never looked at. `examined`: its name was seen, but nothing in
+   * it was read — the import knew it was there and took nothing from it.
+   * `ignored`: dropped on purpose, on the import's reviewed list.
+   */
+  outcome: "unread" | "examined" | "ignored";
+  count: number;
+}
+
 // ── Options ─────────────────────────────────────────────────────────────────
 
 export type DocxUnsupportedPolicy = "drop" | "placeholder" | "throw";
@@ -225,13 +335,15 @@ export interface DocxContext {
      * A numbering for these levels. Without `instance`, equal configs share
      * one. With it, each instance (a list) gets its own `numId`, so separate
      * lists restart in Word, over one shared definition; its count starts at
-     * `start` (default 1), written as level 0's `startOverride`.
+     * `start` (default 1), written as the `startOverride` of `level` (default
+     * 0), the level its items sit at.
      */
     getOrCreate(config: {
       type: "bullet" | "ordered" | "task";
       levels: DocxNumberingLevel[];
       instance?: object;
       start?: number;
+      level?: number;
     }): { numId: number };
   };
 
@@ -250,6 +362,9 @@ export interface DocxContext {
     error(d: Omit<DocxDiagnostic, "level">): void;
     list(): DocxDiagnostic[];
   };
+
+  /** What this export kept, dropped and changed — see `DocxReporter`. */
+  report: DocxReporter;
 
   /** Root document tree — written by the walker before `onBuildTreeComplete`. */
   document: XmlNode;
@@ -313,18 +428,20 @@ export type DocxNodeHandler = (
  * `DocxMarkHandler` contributes run properties — bold, colour, size — which is
  * all most marks need. A hyperlink is not one of them: OOXML expresses it as a
  * `<w:hyperlink>` element around the runs, carrying a relationship id, so no
- * amount of `<w:rPr>` can produce one. A wrapper receives the finished run and
- * returns whatever should stand in its place; returning the run unchanged
- * declines.
+ * amount of `<w:rPr>` can produce one.
  *
- * Wrappers run outermost-last, in the order the marks appear on the text, so
- * two wrapping marks nest predictably rather than by registration accident.
+ * A wrapper receives every consecutive run the mark covers — differently
+ * formatted text is several runs — and returns what stands in their place;
+ * returning `runs` unchanged declines. One element per stretch is what Word
+ * writes, and for a content control it matters: a field split across several
+ * controls comes back as several pieces sharing one id, read as copies. Where
+ * wrapping marks overlap, the one covering the longest stretch is outermost.
  */
 export type DocxRunWrapper = (
-  run: XmlNode,
+  runs: readonly XmlNode[],
   mark: PmMark,
   ctx: DocxContext,
-) => XmlNode;
+) => XmlNode | readonly XmlNode[];
 
 export type DocxMarkHandler = (
   props: DocxRunProps,
@@ -349,6 +466,22 @@ export interface DocxHandlers {
   onBuildTreeComplete?(ctx: DocxContext): void | Promise<void>;
   onFinalize?(ctx: DocxContext): DocxPackage | Promise<DocxPackage>;
 }
+
+// ── Part roots ───────────────────────────────────────────────────────────────
+
+/**
+ * The namespaces every story part's root declares — the body's `<w:document>`,
+ * a `<w:hdr>`, a `<w:ftr>` — so content written into any of them reads the
+ * same. Word 2010's additions (a content-control checkbox) are marked
+ * ignorable, as Word marks them, so an older Word reads past them.
+ */
+export const WORD_PART_NAMESPACES: Readonly<XmlAttrs> = {
+  "xmlns:w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+  "xmlns:r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+  "xmlns:mc": "http://schemas.openxmlformats.org/markup-compatibility/2006",
+  "xmlns:w14": "http://schemas.microsoft.com/office/word/2010/wordml",
+  "mc:Ignorable": "w14",
+};
 
 // ── Unit conversion (px ↔ OOXML units) ──────────────────────────────────────
 
@@ -460,19 +593,52 @@ export interface DocxFieldInline {
   marks: DocxMark[];
 }
 
+/** One `w:listItem`: what is stored (`w:value`) and what is shown (`w:displayText`). */
+export interface DocxSdtListItem {
+  value: string;
+  displayText: string;
+}
+
+/**
+ * An inline content control (`<w:sdt>` inside a paragraph). Several owners
+ * store things in one, each recognising its own by `tag`. An `inlines.sdt`
+ * handler may claim it whole; otherwise its content is imported with an `sdt`
+ * mark (`attrs: { tag, placeholder }`) a `marks.sdt` handler can claim. A
+ * prompt no handler claims is left out — it is Word's text, not the document's.
+ */
+export interface DocxSdtInline {
+  type: "sdt";
+  /** `w:tag/@w:val` — who the control belongs to. */
+  tag: string | null;
+  /** `w:showingPlcHdr` — the content is placeholder text, not a value. */
+  placeholder: boolean;
+  /** A dropdown or combo box's choices, in order. */
+  listItems: DocxSdtListItem[];
+  content: DocxInline[];
+  marks: DocxMark[];
+}
+
 export type DocxInline =
   | { type: "text"; text: string; marks: DocxMark[] }
   | { type: "hardBreak"; marks: DocxMark[] }
   | DocxImageInline
-  | DocxFieldInline;
+  | DocxFieldInline
+  | DocxSdtInline;
+
+/** ECMA-376 caps `w:tag/@w:val` (ST_String) at 255 characters. */
+export const DOCX_TAG_MAX_LENGTH = 255;
 
 export interface DocxParagraphAttrs {
   /** Paragraph style ID (`Heading1`, `Normal`, …) — resolved from `styles.xml`. */
   styleId?: string;
   /** From `<w:pPr><w:jc w:val="…"/>`. */
   align?: "left" | "center" | "right" | "justify";
-  /** From `<w:pPr><w:numPr>` — paragraph belongs to a list. */
-  numbering?: { numId: number; ilvl: number };
+  /**
+   * From `<w:pPr><w:numPr>` — paragraph belongs to a list. Either half may be
+   * absent, as in Word: the paragraph style supplies it. `numId` 0 is Word's
+   * "no numbering": the paragraph turns off what its style would number it as.
+   */
+  numbering?: { numId?: number; ilvl?: number };
   /** Word's `<w:pageBreakBefore/>` hint. */
   pageBreakBefore?: boolean;
 }
@@ -520,6 +686,10 @@ export type DocxBlock =
       items: DocxListItem[];
       /** The number an ordered list starts at, when not 1. */
       start?: number;
+      /** Word's nesting level for the list (`w:ilvl`), 0 at the top. */
+      level?: number;
+      /** Word's numbering format at that level (`w:numFmt`): `decimal`, `upperRoman`, `bullet`, … */
+      format?: string;
     }
   | { type: "table"; grid: number[]; rows: DocxTableRow[] }
   | { type: "sdt"; tag: string | null; content: DocxBlock[] };
@@ -552,6 +722,8 @@ export interface DocxImportContext {
     error(d: Omit<DocxDiagnostic, "level">): void;
     list(): DocxDiagnostic[];
   };
+  /** What this import kept, dropped and changed — see `DocxReporter`. */
+  report: DocxReporter;
   /**
    * Materialize binary parts (images) per `options.media`. Split from
    * `rels` because images run through MIME-sniff + base64 / object-URL

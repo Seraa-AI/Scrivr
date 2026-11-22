@@ -1,6 +1,6 @@
 {
   "name": "@scrivr/export-pdf",
-  "version": "1.0.23",
+  "version": "1.0.25",
   "description": "PDF export for Scrivr documents — same layout pipeline as the canvas renderer",
   "license": "Apache-2.0",
   "author": "Seraa AI <hello@seraa.ai>",
@@ -57,6 +57,7 @@
     "@fontsource/inter": "^5.3.0",
     "@napi-rs/canvas": "^1.0.0",
     "@scrivr/core": "workspace:*",
+    "@scrivr/plugins": "workspace:*",
     "inter-ui": "4.1.1",
     "tsup": "^8.0.0",
     "typescript": "^5.4.0",

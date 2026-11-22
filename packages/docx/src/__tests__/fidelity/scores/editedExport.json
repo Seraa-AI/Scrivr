@@ -1,0 +1,352 @@
+{
+  "01-administrative-f9355274cbfe": {
+    "untouched": [
+      0,
+      39
+    ],
+    "blank": [
+      31,
+      68
+    ],
+    "edits": [
+      2,
+      3
+    ]
+  },
+  "02-correspondence-c1c9a16460c1": {
+    "untouched": [
+      0,
+      61
+    ],
+    "blank": [
+      3,
+      6
+    ],
+    "edits": [
+      2,
+      3
+    ]
+  },
+  "03-creative-6823d70dd497": {
+    "untouched": [
+      0,
+      34
+    ],
+    "blank": [
+      0,
+      0
+    ],
+    "edits": [
+      3,
+      3
+    ]
+  },
+  "04-educational-5ff2cb136228": {
+    "untouched": [
+      44,
+      74
+    ],
+    "blank": [
+      39,
+      50
+    ],
+    "edits": [
+      1,
+      3
+    ]
+  },
+  "05-forms-b63ecf363ed1": {
+    "untouched": [
+      52,
+      66
+    ],
+    "blank": [
+      59,
+      59
+    ],
+    "edits": [
+      1,
+      3
+    ]
+  },
+  "06-legal-6e1e31883ae7": {
+    "untouched": [
+      0,
+      18
+    ],
+    "blank": [
+      19,
+      30
+    ],
+    "edits": [
+      2,
+      3
+    ]
+  },
+  "07-policies-31d60c2ad3a6": {
+    "untouched": [
+      0,
+      103
+    ],
+    "blank": [
+      6,
+      20
+    ],
+    "edits": [
+      3,
+      3
+    ]
+  },
+  "08-reference-35e9f3cf201f": {
+    "untouched": [
+      0,
+      55
+    ],
+    "blank": [
+      0,
+      9
+    ],
+    "edits": [
+      2,
+      3
+    ]
+  },
+  "09-reports-88319cfd12a0": {
+    "untouched": [
+      2,
+      115
+    ],
+    "blank": [
+      16,
+      20
+    ],
+    "edits": [
+      3,
+      3
+    ]
+  },
+  "10-technical-0cd38f008009": {
+    "untouched": [
+      84,
+      159
+    ],
+    "blank": [
+      16,
+      38
+    ],
+    "edits": [
+      3,
+      3
+    ]
+  },
+  "11-administrative-995f335b521f": {
+    "untouched": [
+      19,
+      46
+    ],
+    "blank": [
+      40,
+      61
+    ],
+    "edits": [
+      2,
+      3
+    ]
+  },
+  "12-correspondence-4b5e3f82537d": {
+    "untouched": [
+      0,
+      42
+    ],
+    "blank": [
+      17,
+      33
+    ],
+    "edits": [
+      2,
+      3
+    ]
+  },
+  "13-creative-e32ddad8ec22": {
+    "untouched": [
+      0,
+      19
+    ],
+    "blank": [
+      0,
+      12
+    ],
+    "edits": [
+      2,
+      3
+    ]
+  },
+  "14-educational-3f8be22a9ba5": {
+    "untouched": [
+      9,
+      49
+    ],
+    "blank": [
+      3,
+      13
+    ],
+    "edits": [
+      2,
+      3
+    ]
+  },
+  "15-forms-c5656e233c4f": {
+    "untouched": [
+      0,
+      82
+    ],
+    "blank": [
+      2,
+      12
+    ],
+    "edits": [
+      1,
+      3
+    ]
+  },
+  "16-legal-319db254cfb3": {
+    "untouched": [
+      0,
+      38
+    ],
+    "blank": [
+      8,
+      12
+    ],
+    "edits": [
+      1,
+      3
+    ]
+  },
+  "17-policies-099c9111d52e": {
+    "untouched": [
+      0,
+      18
+    ],
+    "blank": [
+      2,
+      13
+    ],
+    "edits": [
+      2,
+      3
+    ]
+  },
+  "18-reference-47b10797b682": {
+    "untouched": [
+      0,
+      31
+    ],
+    "blank": [
+      0,
+      4
+    ],
+    "edits": [
+      2,
+      3
+    ]
+  },
+  "19-reports-2396c6ea6e69": {
+    "untouched": [
+      0,
+      81
+    ],
+    "blank": [
+      1,
+      7
+    ],
+    "edits": [
+      1,
+      3
+    ]
+  },
+  "20-technical-2f0f92beec3b": {
+    "untouched": [
+      0,
+      81
+    ],
+    "blank": [
+      13,
+      32
+    ],
+    "edits": [
+      2,
+      3
+    ]
+  },
+  "21-administrative-25509fb85533": {
+    "untouched": [
+      0,
+      38
+    ],
+    "blank": [
+      4,
+      10
+    ],
+    "edits": [
+      2,
+      3
+    ]
+  },
+  "22-correspondence-db35f97a98e9": {
+    "untouched": [
+      12,
+      16
+    ],
+    "blank": [
+      19,
+      24
+    ],
+    "edits": [
+      2,
+      3
+    ]
+  },
+  "23-creative-85bcf3eb27e4": {
+    "untouched": [
+      5,
+      5
+    ],
+    "blank": [
+      1,
+      1
+    ],
+    "edits": [
+      3,
+      3
+    ]
+  },
+  "24-educational-c9fcd355819c": {
+    "untouched": [
+      1,
+      82
+    ],
+    "blank": [
+      4,
+      13
+    ],
+    "edits": [
+      2,
+      3
+    ]
+  },
+  "25-forms-f1be83375e8e": {
+    "untouched": [
+      4,
+      18
+    ],
+    "blank": [
+      8,
+      10
+    ],
+    "edits": [
+      3,
+      3
+    ]
+  }
+}

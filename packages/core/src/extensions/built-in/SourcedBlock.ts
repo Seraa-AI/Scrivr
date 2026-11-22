@@ -20,7 +20,7 @@ import type {
 } from "../../selection/types";
 import type { SemanticNodeHandler } from "../../exports/semantic";
 import type { LayoutBlock } from "../../layout/BlockLayout";
-import { xml, type DocxNodeHandler, type DocxBlockTransform } from "../../exports/docx";
+import { DOCX_TAG_MAX_LENGTH, xml, type DocxNodeHandler, type DocxBlockTransform } from "../../exports/docx";
 
 export type SourceCapability =
 	| "update"
@@ -84,9 +84,6 @@ export interface SourceProvider<TMeta = unknown> {
 }
 
 export const NORMALIZER_VERSION = 1;
-
-/** ECMA-376 caps `w:tag/@w:val` (ST_String) at 255 characters. */
-const DOCX_TAG_MAX_LENGTH = 255;
 
 /** The diverged bar sits this far into the left margin, like Word's change bar. */
 const DIVERGED_GUTTER_INSET = 12;
@@ -323,7 +320,6 @@ export interface SourcedBlockOptions {
 	providers?: SourceProvider[];
 }
 
-
 declare module "@scrivr/core" {
 	interface Commands<ReturnType> {
 		sourcedBlock: {
@@ -528,7 +524,6 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 					{
 						tag: "div[data-sourced-block]",
 						getAttrs: dom => {
-							if (!(dom instanceof HTMLElement)) return false;
 							const normalizerAttr = dom.getAttribute(
 								"data-base-normalizer",
 							);
@@ -1126,6 +1121,7 @@ export const SourcedBlockExtension = Extension.create<SourcedBlockOptions>({
 						`${DOCX_TAG_MAX_LENGTH}-character OOXML limit for w:tag. The block was ` +
 						`exported as plain content, without its source link.`,
 				});
+				ctx.report.changed("sourcedBlock", `source link not written: over ${DOCX_TAG_MAX_LENGTH} characters`);
 				return children;
 			}
 			// Use the 'kind' attribute as the label for MS Word, fallback to "Sourced Block"

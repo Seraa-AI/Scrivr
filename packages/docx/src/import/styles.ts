@@ -1,5 +1,5 @@
 import type { DocxMark } from "@scrivr/core";
-import { attr, findChild, findChildren, parseOoxml, type OoxmlElement } from "./xml";
+import { attr, findChild, findChildren, parsePart, type OoxmlElement, type ReadTracker } from "./xml";
 import { parseRunProperties } from "./parser";
 
 /**
@@ -25,16 +25,27 @@ export interface DocxStyleSheet {
    * knowing which rows band — so the extension that owns them reads them here.
    */
   raw(styleId: string): OoxmlElement | undefined;
+  /**
+   * The list numbering a paragraph style puts its paragraphs in — Word's
+   * built-in heading numbering lives here. `numId` and `ilvl` are each the
+   * nearest `basedOn` ancestor's that names one, and absent when none does;
+   * `numId` 0 is the style turning numbering off.
+   */
+  numbering(styleId: string): { numId?: number; ilvl?: number };
+  /** The paragraph style a paragraph naming none has (`w:default="1"`). */
+  defaultParagraphStyle: string | undefined;
 }
 
 const EMPTY: DocxStyleSheet = {
   runMarks: () => [],
   raw: () => undefined,
+  numbering: () => ({}),
+  defaultParagraphStyle: undefined,
 };
 
-export function readStyleSheet(xml: string | undefined): DocxStyleSheet {
+export function readStyleSheet(xml: string | undefined, tracker?: ReadTracker): DocxStyleSheet {
   if (xml === undefined) return EMPTY;
-  const root = parseOoxml(xml);
+  const root = parsePart(xml, "word/styles.xml", tracker);
   if (!root || root.name !== "w:styles") return EMPTY;
 
   const byId = new Map<string, OoxmlElement>();
@@ -74,7 +85,39 @@ export function readStyleSheet(xml: string | undefined): DocxStyleSheet {
     return marks;
   };
 
-  return { runMarks, raw: (styleId) => byId.get(styleId) };
+  const numbering = (styleId: string): { numId?: number; ilvl?: number } => {
+    let numId: number | undefined;
+    let ilvl: number | undefined;
+    const seen = new Set<string>();
+    let id: string | undefined = styleId;
+    while (id !== undefined && !seen.has(id) && (numId === undefined || ilvl === undefined)) {
+      seen.add(id);
+      const style = byId.get(id);
+      if (!style) break;
+      const numPr = findChild(findChild(style, "w:pPr") ?? emptyElement, "w:numPr");
+      numId ??= wholeNumber(numPr && findChild(numPr, "w:numId"));
+      ilvl ??= wholeNumber(numPr && findChild(numPr, "w:ilvl"));
+      id = attr(findChild(style, "w:basedOn") ?? emptyElement, "w:val");
+    }
+    return { ...(numId !== undefined ? { numId } : {}), ...(ilvl !== undefined ? { ilvl } : {}) };
+  };
+
+  const defaultParagraphStyle = findChildren(root, "w:style").find(
+    (style) => attr(style, "w:type") === "paragraph" && attr(style, "w:default") === "1",
+  );
+
+  return {
+    runMarks,
+    raw: (styleId) => byId.get(styleId),
+    numbering,
+    defaultParagraphStyle: defaultParagraphStyle && attr(defaultParagraphStyle, "w:styleId"),
+  };
+}
+
+/** An element's `w:val` as a whole number of 0 or more, or undefined. */
+function wholeNumber(el: OoxmlElement | undefined): number | undefined {
+  const value = el ? Number(attr(el, "w:val")) : NaN;
+  return Number.isInteger(value) && value >= 0 ? value : undefined;
 }
 
 /** `<w:docDefaults><w:rPrDefault><w:rPr>` — what every style starts from. */

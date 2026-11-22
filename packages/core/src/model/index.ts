@@ -8,12 +8,16 @@ export {
 } from "./theme";
 export type { EditorTheme, ResolvedTheme } from "./theme";
 export { resolveTheme, resolveThemeColor, disposeProbe } from "./resolveTheme";
-export { safeUrl, safeImageUrl } from "./safeUrl";
+export { safeUrl, safeImageUrl, safeDrawingUrl, MAX_DRAWING_BYTES } from "./safeUrl";
 export { parseCssColor, compositeColor, toHex6 } from "./cssColor";
 export type { Rgb, Rgba } from "./cssColor";
 export { spansToFragment, sameMark, resolveInlineMark, resolveInlineMarks, describeInlineMark, isTrackedMark } from "./spansToFragment";
 export type { SpansToFragmentOptions } from "./spansToFragment";
 export { sanitizeDocUrls } from "./sanitizeDocUrls";
+export { applyImportedDocument } from "./applyImportedDocument";
+export { isHtmlElement } from "./isHtmlElement";
+export { HTML_BLOCK_TAGS, HTML_IGNORED_TAGS, htmlAlign, htmlShows, isHtmlBlock } from "./htmlElements";
+export { isReadableTextAlign, type TextAlign } from "./cssValues";
 export { dropPendingPlaceholders } from "./dropPendingPlaceholders";
 export { assignBlockIds, blockIdOf, planBlockIdAssignments, planDuplicateIdAssignments, recloneDocumentIds } from "./assignBlockIds";
 export { fnv1aHex, sha256Hex, stableStringify } from "./hash";

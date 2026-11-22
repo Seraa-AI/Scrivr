@@ -1,6 +1,6 @@
 # DOCX Fidelity RFC — a Word file edited in Scrivr comes back as Word had it
 
-Status: Draft (2026-11-04). Nothing here ships until it is agreed.
+Status: Phases 0 (#249), 1 (#261) and 2 (#268) shipped. See What shipped.
 
 ## Goal
 
@@ -44,14 +44,25 @@ ChatGPT), and edited across 11 to about 1,100 Word sessions. They come from the
 public docx-corpus, 2–3 per document type (letters, forms, policies, reports,
 legal, technical and others).
 
-| Check | Result |
-|---|---|
-| Same page count as Word | 10 of 25 |
-| Pages start where Word's do (Word's saved break positions) | 13 of 30 breaks |
-| All text survives import | 21 of 25. One form keeps 2 of 8,464 characters |
-| All imported text reaches a page | 24 of 25. One letter shows 78% |
-| Same text after export → re-import | 25 of 25 |
-| Same document after export → re-import (block ids aside, which import assigns fresh) | 21 of 25. Two gain a list item; in two, a run's marks change |
+| Check | Result | Phase 2 baseline |
+|---|---|---|
+| Same page count as Word | 10 of 25 | 6 of 25 |
+| Pages start where Word's do (Word's saved break positions) | 13 of 30 breaks | 8 of 29 |
+| All text survives import | 21 of 25. One form keeps 2 of 8,464 characters | 21 of 25. The form keeps 0 of 4,232 |
+| All imported text reaches a page | 24 of 25. One letter shows 78% | 25 of 25 |
+| Same text after export → re-import | 25 of 25 | 25 of 25 |
+| Same document after export → re-import (block ids aside, which import assigns fresh) | 21 of 25. Two gain a list item; in two, a run's marks change | 20 of 25 |
+
+The Phase 2 baseline is what the test suite measures and stores, and it differs
+from the first measurement for known reasons. The suite imports with tables on
+(`StarterKit.configure({ table: true })`), which is how an app opening Word
+files would load it. It lays out in one pinned face (Inter) so its scores are
+the same on every machine, on the page size Word set (import does not carry it
+yet), which moves page counts and page starts. It counts a
+text box's text once: Word writes each text box twice, and the first
+measurement read both copies (8,464 = 2 × 4,232). A hard page break that Word
+follows with a rendered break is one page start, not two. And nested-list text
+now reaches the page.
 
 The causes, each traced to a file:
 
@@ -173,19 +184,26 @@ the largest loss. So import gains an option:
 importDocx(editor, bytes, { trackUnread: true });
 ```
 
-With it on, `parseOoxml` returns its element tree wrapped in a `Proxy` that
-records each read. That covers the helpers (`findChild`, `attr`, …) and the 53
-places where the parser walks `.children` directly, without changing any of
-them. The helpers search the unwrapped tree and mark only what they return.
-Otherwise `findChild(pPr, "w:jc")` would count its sibling `w:spacing` as read.
+With it on, each part is parsed through `parsePart`, which wraps the element
+tree in a `Proxy` that records each read. That covers the helpers (`findChild`,
+`attr`, …) and the places where the parser walks `.children` directly. The helpers search the unwrapped tree: the element searched is read, a
+hit is examined, and the siblings passed over stay unread. Otherwise
+`findChild(pPr, "w:jc")` would count its sibling `w:spacing` as read.
+
+A proxy cannot tell a name that was matched and acted on from one compared and
+passed over. So an element whose name or presence is all the import takes from
+it — a run's `w:tab`, a row's `w:tblHeader` — is read only where the parser
+marks it handled (`markRead`, `hasChild`). Counting every bare element read once
+its name was looked at hid real losses: `w:noBreakHyphen` and `w:softHyphen`
+were dropped from the text and reported as read.
 
 Each element ends with one of these outcomes:
 
 | Outcome | Meaning | Example today |
 |---|---|---|
-| `read` | Its attributes or children were read, or a helper returned it. An element with nothing but its name counts as read once its name is matched | `w:jc`, a run's `w:tab` |
-| `examined` | Its name was matched, but nothing in it was read | `w:pgSz`, `w:pgMar` |
-| `ignored` | On a reviewed list of properties dropped on purpose | `w:szCs`, `w:proofErr`, `rsid*` |
+| `read` | Its attributes or children were read, or the parser marked it handled | `w:jc`, a run's `w:tab` |
+| `examined` | Its name was seen, but nothing in it was read | `w:pgSz`, `w:pgMar`, `w:noBreakHyphen` |
+| `ignored` | On a reviewed list of properties dropped on purpose | `w:szCs`, `w:proofErr`, `w:rsids` |
 | `unread` | Never looked at — a silent drop | `w:ind`, `w:keepNext`, `w:tabs`, `w:pPrDefault` |
 
 The option is off by default because a proxy on every element costs time on a
@@ -252,8 +270,9 @@ or drop something different changes the snapshot.
 ```ts
 type LayoutOp =
   | { op: "page"; page: number; width: number; height: number; margins: Margins }
-  | { op: "block"; page: number; type: string; x: number; y: number; width: number;
-      height: number; spaceBefore: number; spaceAfter: number; lines: string[] };
+  | { op: "block"; page: number; depth: number; type: string; x: number; y: number;
+      width: number; height: number; spaceBefore: number; spaceAfter: number; lines: string[] };
+// depth: 0 on the page, 1 in a table cell, and so on — a table's cells follow it
 // lines: the first 16 characters of each line, so a moved line break shows up
 ```
 
@@ -261,8 +280,8 @@ Numbers go through `normalizeDrawNumber` (three decimals, no negative zero).
 The function moves from the PDF log into `@scrivr/core` and is exported there,
 so the PDF log and this log share one rounding rule.
 
-Snapshots are taken with a **fixed-width measurer**: a `TextMeasurer` whose
-context gives every glyph the same advance. Real font metrics differ between
+Snapshots are taken with a **fixed-width measurer**: one that gives every
+glyph half the font size. Real font metrics differ between
 Linux CI and a laptop (CLAUDE.md, Test Setup), so a baseline built on them would
 move for reasons unrelated to the change under test. With fixed widths, the log
 isolates the decisions layout makes: spacing, page geometry and where blocks
@@ -271,19 +290,24 @@ split.
 **Round trip.** Import → export → re-import should give the same document,
 comparing node types, text, marks and attributes and ignoring `nodeId` (import
 assigns fresh ids). Any difference is a bug in one direction or the other.
-Today 4 of the 25 differ. Those 4 are stored as known differences, and a new
-difference fails.
+Today 5 of the 25 differ. Those differences are stored as known, by how often
+each occurs, and a new difference — or one more of a known one — fails.
 
-**The Word comparison.** Real font metrics this time. It compares Scrivr's
-layout with §4 and records, per fixture: page starts matched, page geometry
-matched, and text retained.
+**The Word comparison.** Real font metrics this time, every family measured in
+one pinned face (Inter) so the scores are the same on every machine, on the
+page Word set, so page starts measure where layout breaks pages rather than
+the page size import does not yet carry. It compares Scrivr's layout with §4
+and records, per fixture: page starts matched, and text retained. Page
+geometry becomes a score when import carries the page size; until then it
+could only compare Word's page with Scrivr's default.
 
 **How results are judged.** All the scores above are stored per fixture. A
 known gap does not fail the build. It is logged,
 and when `GITHUB_STEP_SUMMARY` is set the comparison is also written to the
 GitHub CI job summary, so a reviewer reads it on the PR. A score below its
-stored value is a regression and fails. A score that rises passes, and the
-change updates the stored value. The snapshots (report and layout log) fail on
+stored value is a regression and fails. A score that rises fails in CI until
+the change records it (`UPDATE_FIDELITY_SCORES=1`), so a later change cannot
+fall back to the old value unnoticed. The snapshots (report and layout log) fail on
 any difference, as the PDF log's do; updating one is a reviewed diff.
 
 It all runs inside `pnpm test`, which `ci.yml` already runs, so there is no
@@ -332,16 +356,19 @@ could plausibly cause, and the diff must notice every one:
 - **Report:** an extension stops calling `kept` → its count changes. A node
   loses its handler → a `"no handler"` drop appears. A property moves onto
   `ignored` → its outcome changes.
-- **Unread tracking:** one `w:spacing` read is removed → that element becomes
-  `unread`.
+- **Unread tracking:** one more `w:spacing` left unread → its count changes.
 - **Layout:** one block's `spaceAfter` changes by 1px; one line break moves by
-  one character; the page size changes to A4.
+  one character; the page size changes from A4 to US Letter.
 - **Edited document:** one `w:spacing` is removed from one untouched paragraph
-  in the export → the untouched score drops. The typed paragraph exports with
-  Scrivr's default font → the edit score drops.
+  → the untouched score drops; on a real export, kept paragraphs given an
+  alignment Word did not set → it drops below the export's own score. The
+  typed paragraph exports with Scrivr's default font → the edit score drops.
+- **Round trip:** a change inside a list item is reported as that item.
+- **Gates:** a fraction below its stored value, a metric no longer measured,
+  one more of a known difference, and in CI an improvement nobody recorded.
 
-If a field stops being recorded, the matching mutation test passes when it
-should fail, which shows the field has gone missing.
+Each test asserts the stored form differs, so if a field stops being
+recorded, the matching test fails.
 
 ## 8. Behaviour changes we accept
 
@@ -400,7 +427,7 @@ Each is independently reviewable and shippable.
 |---|---|---|
 | **0** | `report` on both contexts and results; dispatcher entries (owner, `"no handler"`); `normalizeDrawNumber` exported from core | Unit tests for the report; PDF baselines unchanged |
 | **1** | Each built-in extension reports its lane: Paragraph, Heading, HardBreak, PageBreak, Image, Table, List, Link, … ; `trackUnread`; the `ignored` list | Every StarterKit extension with a DOCX handler reports; the spike's outcomes reproduce |
-| **2** | The test phase (§5) over the 25 committed fixtures: edited-document check, report snapshots, layout log, round trip, Word comparison, mutation tests (§7) | Mutation-proven; the comparison reproduces "Where we actually are" |
+| **2** | The test phase (§5) over the 25 committed fixtures: edited-document check, report snapshots, layout log, round trip, Word comparison, mutation tests (§7) | Mutation-proven; the comparison reproduces the Phase 2 baseline column |
 | **3+** | The fixes, one change each, in this order: page size and margins; paragraph spacing and indents; theme fonts; nested-list layout; text boxes | The report and logs change only where the fix intends; the untouched-paragraph score rises |
 
 The fix order follows reach. Page size changes every line of the 14 Letter
@@ -414,8 +441,10 @@ Settled on 2026-11-04:
    kept and dropped (§2).
 2. **The 25 documents are committed** as the base fixtures, with provenance
    (§6). Developers add Word-authored fixtures where a pattern is thin.
-3. **Unread tracking records at the boundary.** The proxy wraps the parsed tree;
-   the parser itself is not changed (§3). Confirmed by a spike.
+3. **Unread tracking records at the boundary.** The proxy wraps the parsed tree.
+   The parser changes only to mark elements it acts on by their presence alone
+   (`markRead`, `hasChild`), since a proxy cannot tell those from ones passed
+   over (§3).
 4. **The Word comparison runs in GitHub CI**, inside `pnpm test`, and is written
    to the job summary (§5).
 5. **A known gap does not fail the build.** It is logged. A regression fails: a
@@ -431,8 +460,9 @@ Settled on 2026-11-04:
   `@scrivr/docx` (new result field), as additive API in this repo is.
 - **Phase 1:** `patch` for `@scrivr/core` and `@scrivr/docx`. Extensions start
   reporting, `trackUnread` is added, and the `ignored` list quiets diagnostics.
-- **Phase 2:** empty changeset ("No release. Test-only: …"), as with the PDF
-  op-log baseline.
+- **Phase 2:** no changeset; the PR carries the `no-release` label. It adds
+  tests and dev dependencies and changes no package code, so there is nothing
+  to release, as with this RFC and the fixtures.
 - **Phase 3+:** each fix carries its own changeset.
 
 ## Files to create / modify
@@ -459,15 +489,149 @@ Settled on 2026-11-04:
 - `packages/docx/src/import/ignored.ts` — the reviewed `ignored` list
 
 **Phase 2**
-- `packages/docx/src/__tests__/fidelity/layoutLog.ts`, `wordReference.ts`
-- `packages/docx/src/__tests__/fidelity/editedExport.test.ts` — the scripted
-  edits and the untouched-paragraph check
+- `packages/docx/src/__tests__/fidelity/layoutLog.ts`, `wordReference.ts`,
+  `fixtures.ts`, `align.ts`, `reportLog.ts`, `roundTrip.ts`, `scores.ts`
+- `packages/docx/src/__tests__/fidelity/editedExport.ts` — the scripted edits
+  and the untouched-paragraph check, run by `editedExport.test.ts`
 - `packages/docx/src/__tests__/fidelity/*.baseline.test.ts`,
   `*.mutation.test.ts`, `roundTrip.test.ts`, `wordComparison.test.ts`
-- `packages/docx/src/__tests__/fidelity/scores.json` — stored scores per fixture
+- `packages/docx/src/__tests__/fidelity/scores/` — stored scores per fixture,
+  one file per check, so test files running in parallel never write the same
+  file
 
 ## Dependencies
 
-None. `runPipeline` is exported from `@scrivr/core` (`layout/index.ts`) and
-takes a measurer, so the docx package can lay a document out without an editor
-or a DOM, as `LayoutCoordinator.layoutForExport` already does.
+None at runtime. `runPipeline` is exported from `@scrivr/core`
+(`layout/index.ts`) and takes a measurer, so the docx package can lay a
+document out without an editor or a DOM, as `LayoutCoordinator.layoutForExport`
+already does. The Word comparison adds two dev dependencies to `@scrivr/docx`,
+the versions `@scrivr/export-pdf` already uses: `@napi-rs/canvas` for real
+glyph metrics, and `@expo-google-fonts/inter` for the face it pins.
+
+## What shipped
+
+### Phase 0 — the report (#249)
+
+- `importDocx` and `exportDocx` return a `report` beside `diagnostics`:
+  `counts` per kind (kept, dropped, changed) and `entries` for each distinct
+  drop or change, with its reason, `count` and owner. Identical entries
+  merge into one with a `count`, in the order first met, so a property Word
+  sets on every run is one line — not one entry per drop in document order,
+  as §2 first said.
+- The converter records each item it hands a handler, content with no
+  handler (`"no handler"`), and an element the parser cannot read
+  (`"no parser"`). Content inside a lost item is counted as dropped inside it,
+  on both sides: a Word table imported without the table extension reports
+  its paragraphs and text lost. The content of a block nothing imports is
+  only counted; no handler runs on it, so nothing it would have left behind
+  (a field's answer, a resolved image) outlives it. A handler reporting `kept` or `dropped` for
+  the kind it was handed replaces the converter's account.
+- A link or an inline content control counts once however many runs it
+  spans: kept if any run under it lands, dropped once if none does.
+- A header or footer nothing reads, or whose part cannot be read, is dropped
+  as `w:hdr` / `w:ftr`, one per part, with a warning: `NO_HANDLER` and
+  `header-footer-unread` when nothing reads it, `PART_UNREADABLE` and the
+  warning naming why (`header-footer-part-unreadable` among them) when it
+  cannot be read. Only the final section's references are seen.
+- Import names content in Word's terms (`b`, `w:customXml`); export in
+  Scrivr's.
+- New public API beyond §2: `IBaseEditor.getFormatContributions()` and
+  `FormatContribution`; the vocabulary `NO_HANDLER`, `NO_PARSER`,
+  `HANDLER_RETURNED_NOTHING`, `PART_UNREADABLE`, `WRAPPER_DECLINED`, `OVERRIDES_OWNER`,
+  `insideDropped`, `noSchemaNode`; the `report-unbound` and
+  `report-invalid-count` warnings; `normalizeDrawNumber` in core, shared with
+  the test phase's logs.
+- Fixed on the way: a style id such as `constructor` crashed the import.
+- Not yet: the report when a conversion throws.
+
+### Phase 1 — extensions report, and the import lists what it never read (#261)
+
+- The built-in extensions report what their DOCX handlers could not carry:
+  Paragraph, Heading, Image, Color, FontFamily, FontSize, Highlight, Link,
+  Underline, SourcedBlock, List, and Table on export. HardBreak and PageBreak
+  report nothing of their own; the converter's counts cover them. A list's
+  numbering format is read per level (`w:numFmt`), so a bullet level inside a
+  numbered list stays bullets; List reports a format it draws differently
+  from Word's built-in style for that depth (upper roman, "none"), and
+  nothing for Scrivr's own lists, which use that style.
+- A paragraph handler that leaves out formatting or inline objects it was
+  handed — a code block keeping only text — is charged by the converter,
+  which knows which Word mark built each piece of formatting: it moves them
+  from kept to dropped (`LEFT_OUT`), compared by the text that carries them,
+  so "no formatting" values and joined or copied text nodes are not charged,
+  and neither is the paragraph style's own formatting. `report.dropped`
+  keeps one meaning: record a drop.
+- A wrapper's handler (a link, a content control) runs once per wrapper, so
+  a link it cannot resolve is one loss however many runs it spans.
+- A translucent colour, which DOCX cannot carry, is blended onto white and
+  reported wherever it is written: text colour, highlight, cell shading.
+- `importDocx(editor, bytes, { trackUnread: true })` adds `report.unread`:
+  the XML no code read, by part and path, `unread`, `examined` (only its
+  name seen) or `ignored` (on the reviewed list), the top of a skipped
+  subtree only. It covers the body, every header and footer the document
+  references, footnotes, endnotes, comments, styles, numbering and settings.
+  It is an inventory, so it overlaps what `entries` already drops. A part it
+  opens only to list, cut short, is a warning; the option never changes
+  whether an import succeeds. `examined` means "only its name was seen": a
+  name-only element the parser acts on is marked read.
+- One reviewed list (`ignored.ts`) decides what is dropped on purpose, keyed
+  by element or by parent and element (`w:rPr/w:spacing`); several entries
+  are marked known gaps rather than intended drops. The spike's 92 run-level
+  `w:spacing` reads now come out `ignored`, as a known gap.
+- Fixed on the way: a smart tag's text is imported (it was dropped); an
+  underline colour and a hanging indent are reported, not lost silently; a
+  page break inside an inline content control failed the whole import — it
+  is now kept as a line break and reported dropped, and the parser carries
+  page breaks as their own type instead of an `as unknown as` cast; list
+  import no longer drops the paragraphs after one that starts a list deeper
+  than they sit, and a nested list is placed one level below its list, as
+  the editor draws it, so the numbering it is compared against is the drawn
+  one. Numbering a paragraph's style carries — Word's built-in heading
+  numbering — is applied before lists are rebuilt, `numId` and `ilvl` each
+  resolved on its own (paragraph, then style through `basedOn`, then the
+  level `numbering.xml` links to the style). A list counts on across the
+  paragraphs between its items and restarts a level under each new parent;
+  `numId` 0, an undefined `numId` (reported) and a `none` level are drawn
+  unnumbered, as Word draws them.
+
+### Phase 2 — the test phase (#268)
+
+- Six checks over the 25 committed fixtures, inside `pnpm test`: report and
+  layout snapshots (`__snapshots__/report`, `__snapshots__/layout`), the round
+  trip, the edited export, the Word comparison, and mutation tests that prove
+  each can fail. Scores live in `scores/<check>.json` and are recorded from
+  `packages/docx` with `UPDATE_FIDELITY_SCORES=1 npx vitest run
+  src/__tests__/fidelity` (turbo does not pass the variable through
+  `pnpm test`); the round trip stores its known differences and
+  fails on a new one or one more of a known one.
+- Layout snapshots use fixed-width glyphs; the Word comparison measures in a
+  pinned face (Inter, from a pinned package), so both are the same on Linux CI
+  and a laptop.
+- Formatting is compared on what a reader sees — style, alignment, spacing,
+  indent, borders, shading, tabs, keep-with-next and page-break-before; bold,
+  italic, underline, strike, caps, size, colour, highlight, character spacing,
+  raised or lowered text, the Latin face. A complex-script size, the
+  paragraph mark's own formatting or a proofing language is no loss to a
+  reader, and comparing them held 14 fixtures at zero, where a gate cannot
+  fail. Paragraphs with text and empty ones are scored apart, so a
+  document's blank lines cannot carry the score while its text loses
+  formatting. An inserted paragraph is compared with the paragraph it was
+  split from as Scrivr wrote it, so that paragraph's own loss is not charged
+  twice.
+- Round-trip differences are recorded per text block, with the blocks it sits
+  in, so a loss in one list item or table cell is its own difference; each
+  list and table is also recorded by how many children it holds, so one split
+  in two is a difference.
+- The Word comparison lays each fixture out on the page Word set. Page
+  geometry is not a score until import carries the page size.
+- A score that rises fails in CI until it is recorded.
+- The fixture loader skips Word's `~$` lock files.
+- The baseline: untouched paragraphs with text 232 of 1,370 kept as Word had
+  them, and empty ones 311 of 557; edits 51 of 75; page starts 8 of 29; the same page count 6 of 25; text
+  imported in full 21 of 25 and on a page 25 of 25; 5 fixtures with known
+  round-trip differences, among them headings that come back bold because
+  re-import applies the exported heading style's run formatting as marks.
+  Fifteen fixtures keep no paragraph with text exactly, because export drops
+  paragraph spacing, indents and styles; their text score cannot fall until
+  that is carried, and the report snapshots are what notice a further loss
+  there.

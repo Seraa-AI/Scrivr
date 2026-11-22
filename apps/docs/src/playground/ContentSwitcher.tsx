@@ -3,6 +3,7 @@ import type { DemoKind } from "./demoContent";
 const OPTIONS: { value: DemoKind; label: string }[] = [
   { value: "editing", label: "Editing" },
   { value: "track-changes", label: "Track changes" },
+  { value: "signing", label: "Signing" },
 ];
 
 interface ContentSwitcherProps {
@@ -26,7 +27,7 @@ export function ContentSwitcher({ demo, onChange }: ContentSwitcherProps) {
             key={option.value}
             role="radio"
             aria-checked={selected}
-            className="h-full cursor-pointer rounded px-2.5 text-[12px] font-medium tracking-tight"
+            className="h-full cursor-pointer whitespace-nowrap rounded px-2.5 text-[12px] font-medium tracking-tight"
             style={
               selected
                 ? { background: "var(--app-accent-soft-bg)", color: "var(--app-accent-soft-fg)" }

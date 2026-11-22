@@ -12,7 +12,7 @@ const exportToPdf = vi.hoisted(() =>
   // Never resolves: the assertion is which editor it was handed.
   vi.fn((_editor: unknown, _opts: unknown) => new Promise<never>(() => {})),
 );
-vi.mock("../index", () => ({ exportToPdf }));
+vi.mock("../pdf", () => ({ exportToPdf }));
 
 const { PdfExport } = await import("../PdfExport");
 

@@ -24,10 +24,24 @@ export * from "./renderer";
 export * from "./input";
 export * from "./extensions";
 export type { DeferredEditOptions, DeferredEditAbandonment } from "./BaseEditor";
+export type { MutationDenied, MutationDenialReason, MutationGate, MutationOrigin } from "./mutationGate";
+export { createSnapshot, contentHashOf, verifySnapshot, hashArtifact, snapshotDocument } from "./sealing/snapshot";
+export { documentFromBlocks } from "./model/documentFromBlocks";
+export type { DocumentBlock } from "./model/documentFromBlocks";
+export type {
+  CreateSnapshotOptions,
+  HostSealRefusal,
+  SealCheck,
+  SealCheckSubject,
+  SealRefusal,
+  SealedSnapshot,
+  SnapshotResult,
+} from "./sealing/snapshot";
 export * from "./menus";
 export * from "./surfaces";
 export * from "./exports/docx";
 export * from "./exports/pdf";
+export { normalizeDrawNumber } from "./exports/drawNumber";
 export * from "./fonts/types";
 export { SYNTHETIC_ITALIC_SHEAR, emboldenWidth, fontSizeOf } from "./fonts/synthesis";
 export {

@@ -46,6 +46,7 @@ import {
 import { SYNTHETIC_ITALIC_SHEAR, emboldenWidth, fontSizeOf } from "@scrivr/core";
 import type { PdfNodeHandler } from "./augmentation";
 import { resolvePdfSpanStyle, type ResolvedPdfSpanStyle } from "./spanStyle";
+import { containedSize } from "./contain";
 
 /**
  * Keeps an out-of-range channel or opacity from failing the whole export.
@@ -222,11 +223,14 @@ export function createDrawHelpers(
   function drawImage(op: PdfImageOp): void {
     const image = images.get(op.image.src) ?? null;
     if (!image) return drawImagePlaceholder(op, op.opacity);
+    const { width, height } = op.fit === "contain" ? containedSize(image, op) : op;
+    const x = op.x + (op.width - width) / 2;
+    const y = op.y + (op.height - height) / 2;
     getPage().drawImage(image, {
-      x: op.x * PT_PER_PX,
-      y: flipY(op.y + op.height, pageHeightPt),
-      width: op.width * PT_PER_PX,
-      height: op.height * PT_PER_PX,
+      x: x * PT_PER_PX,
+      y: flipY(y + height, pageHeightPt),
+      width: width * PT_PER_PX,
+      height: height * PT_PER_PX,
       ...alpha(op.opacity),
     });
   }
@@ -475,6 +479,7 @@ export function createDrawHelpers(
               x: spanAbsX,
               y: objY,
               width: span.width,
+              baselineY: lineY + line.ascent,
               ...(span.font !== undefined
                 ? {
                     font: {

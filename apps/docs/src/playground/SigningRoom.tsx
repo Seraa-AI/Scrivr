@@ -1,0 +1,672 @@
+import { useEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode, type RefObject } from "react";
+import { Scrivr, StarterKit, defaultPageConfig, useScrivrEditor } from "@scrivr/react";
+import {
+  DefaultContent,
+  Field,
+  ServerEditor,
+  BUILT_IN_FIELD_KINDS,
+  fieldKindsOf,
+  isDatedWhenSigned,
+  isDrawnKind,
+  isFieldAnswered,
+  isSigningKind,
+  signedAtOf,
+  snapshotDocument,
+  listSignerFields,
+  unansweredBeforeSigning,
+  valuesOnRecord,
+  verifySnapshot,
+  type FieldValue,
+  type SealedSnapshot,
+  type SignerFieldDescriptor,
+} from "@scrivr/core";
+import { FieldCompletion, ReadingProgress, requestField, type ReadingEvent } from "@scrivr/plugins";
+import { exportCompletionCertificate, type CertificateRefusal, type CompletionEvent, type ExecutedPdfRefusal } from "@scrivr/export-pdf";
+import { playgroundFonts } from "./fonts";
+import { PLAYGROUND_THEME } from "./theme";
+import { ROLE_LABEL, SIGNING_ROLES, type SigningRole } from "./signingDemo";
+import { RoleLegend } from "./FieldInsertMenu";
+
+/** A field the signer pressed, waiting for the value they give. */
+interface FieldRequest {
+  field: SignerFieldDescriptor;
+  /** What the field holds now, when the signer is changing it. */
+  current: FieldValue | undefined;
+  resolve: (value: FieldValue | null) => void;
+}
+
+interface Reading {
+  furthest: number;
+  reachedEnd: boolean;
+}
+
+/** How a signature that waits is tagged — on the page and in the room's list alike. */
+const waitingTag = (count: number): string => `After ${count} field${count === 1 ? "" : "s"}`;
+
+const KIND_LABEL: Record<string, string> = {
+  signature: "Signature",
+  initials: "Initials",
+  date: "Date",
+  dateSigned: "Date signed",
+  name: "Name",
+  title: "Title",
+  email: "Email",
+  checkbox: "Agreement",
+  dropdown: "Payment terms",
+};
+
+const shortHash = (hash: string) => `${hash.slice(0, 15)}…${hash.slice(-6)}`;
+
+/**
+ * A sealed revision being signed, as a signing host would run it: each party
+ * opens the same snapshot, completes only their own fields, and every value
+ * stays here — outside the document — until the executed PDF prints them.
+ */
+export function SigningRoom({ snapshot, onBack }: { snapshot: SealedSnapshot; onBack: () => void }) {
+  const [role, setRole] = useState<SigningRole>("client");
+  const [values, setValues] = useState<Record<string, FieldValue>>({});
+  const [reading, setReading] = useState<Record<SigningRole, Reading>>({
+    provider: { furthest: 0, reachedEnd: false },
+    client: { furthest: 0, reachedEnd: false },
+  });
+  const [request, setRequest] = useState<FieldRequest | null>(null);
+  const [verified, setVerified] = useState<boolean | null>(null);
+  // The executed PDF and its certificate, issued together from one printing,
+  // with the answers they were printed from: offered only while those are still the answers.
+  const [issued, setIssued] = useState<{
+    from: Record<string, FieldValue>;
+    executed: { hash: string; url: string };
+    certificate: { hash: string; url: string };
+  } | null>(null);
+  // The room's own record of who was sent and who viewed the document, as a
+  // host keeps one; signings come from the values themselves when it issues.
+  const [events, setEvents] = useState<CompletionEvent[]>(() => {
+    const sent = signersTimestamp(new Date());
+    return SIGNING_ROLES.map((party) => ({ at: sent, kind: "sent", party }));
+  });
+  const [exporting, setExporting] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  // The editor reads these once, when it is created for a role.
+  const valuesRef = useRef(values);
+  valuesRef.current = values;
+
+  // Signing only goes ahead on the bytes that were sealed: their hash must
+  // match, and the fields offered must be the ones those bytes hold.
+  useEffect(() => {
+    let current = true;
+    void verifySnapshot(snapshot.content, snapshot.contentHash).then((intact) => {
+      const held = listSignerFields(new ServerEditor({ extensions: [StarterKit.configure({ table: true }), Field], content: snapshotDocument(snapshot.content) }).getState().doc);
+      if (current) setVerified(intact && JSON.stringify(held) === JSON.stringify(snapshot.fields));
+    });
+    return () => {
+      current = false;
+    };
+  }, [snapshot]);
+
+  const { executed, certificate } = issued?.from === values ? issued : { executed: null, certificate: null };
+  useEffect(() => () => {
+    if (!issued) return;
+    URL.revokeObjectURL(issued.executed.url);
+    URL.revokeObjectURL(issued.certificate.url);
+  }, [issued]);
+
+  // A party has viewed the document once it is opened as them.
+  useEffect(() => {
+    setEvents((all) =>
+      all.some((e) => e.kind === "viewed" && e.party === role) ? all : [...all, { at: signersTimestamp(new Date()), kind: "viewed", party: role }],
+    );
+  }, [role]);
+
+  const content = useMemo(() => snapshotDocument(snapshot.content), [snapshot]);
+  const mine = snapshot.fields.filter((f) => f.role === role);
+
+  const editor = useScrivrEditor(
+    {
+      sealed: true,
+      pageConfig: defaultPageConfig,
+      theme: PLAYGROUND_THEME,
+      fonts: playgroundFonts,
+      themeRoot: typeof document !== "undefined" ? document.documentElement : undefined,
+      extensions: [
+        // Opens with what every party has given so far: the room's record.
+        ...signersSetup(valuesRef.current),
+        DefaultContent.configure({ json: content }),
+        FieldCompletion.configure({
+          fields: snapshot.fields,
+          // Nothing is offered until the snapshot is proven intact.
+          completable: verified ? mine.map((f) => f.id) : [],
+          waitingLabel: waitingTag,
+          onFieldRequest: (field, current) =>
+            new Promise<FieldValue | null>((resolve) => {
+              // A click ticks the box, and a second click clears it.
+              if (field.kind === "checkbox") {
+                return resolve({ kind: "checkbox", checked: !(current?.kind === "checkbox" && current.checked) });
+              }
+              setRequest({ field, current, resolve });
+            }).then((answer) => {
+              setProblem(null);
+              // The room stamps each value it records with when it was given; on a signature, that dates its party.
+              const value = answer && recordedNow(answer);
+              if (value) setValues((all) => ({ ...all, [field.id]: value }));
+              return value;
+            }),
+          onSignatureBlocked: (_signature, missing) =>
+            setProblem(`You sign last. First: ${missing.map((f) => KIND_LABEL[f.kind] ?? f.kind).join(", ")}.`),
+          onFieldRequestError: (field, error) =>
+            setProblem(`${KIND_LABEL[field.kind] ?? field.kind} could not be completed: ${error instanceof Error ? error.message : String(error)}. Try again.`),
+        }),
+        ReadingProgress.configure({
+          onReading: (event: ReadingEvent) => {
+            if (event.type !== "furthestPage" && event.type !== "reachedEnd") return;
+            setReading((all) => ({
+              ...all,
+              [role]:
+                event.type === "furthestPage"
+                  ? { ...all[role], furthest: Math.max(all[role].furthest, event.page) }
+                  : { ...all[role], reachedEnd: true },
+            }));
+          },
+        }),
+      ],
+    },
+    [role, verified],
+  );
+
+  const pageCount = editor?.layout.pages.length ?? 0;
+  // The kinds this room's Field knows, read as the signing view reads them.
+  const kinds = editor ? fieldKindsOf(editor) : BUILT_IN_FIELD_KINDS;
+  // The room's values as the record shows them — each date signed derived from its party's signature.
+  const shown = valuesOnRecord(snapshot.fields, values, kinds, signedDateInWords);
+  const missing = snapshot.fields.filter((f) => f.required && !isFieldAnswered(f, shown[f.id], kinds));
+  // What a signer owes before signing comes first, as the signing view asks for it.
+  const nextOpen =
+    unansweredBeforeSigning(mine, shown, role, kinds)[0] ??
+    mine.find((f) => !isDatedWhenSigned(kinds, f.kind) && !isFieldAnswered(f, shown[f.id], kinds));
+
+  // An unanswered field's status: a signature says how many fields come first, in its tag's words on the page.
+  const statusOf = (field: SignerFieldDescriptor): string => {
+    const owed = isSigningKind(kinds, field.kind) ? unansweredBeforeSigning(mine, shown, role, kinds).length : 0;
+    return owed > 0 ? waitingTag(owed) : "Open";
+  };
+
+  const answer = (value: FieldValue | null) => {
+    request?.resolve(value);
+    setRequest(null);
+    // Back to the page, so Tab carries on from this field.
+    editor?.focus();
+  };
+  const open = (id: string) => {
+    if (editor) requestField(editor, id);
+  };
+
+  // A signing on record: each signature with its own moment, from the room's values — one source with what prints.
+  const signingsOf = (all: Record<string, FieldValue>): CompletionEvent[] =>
+    snapshot.fields.flatMap((field) => {
+      const signedAt = isSigningKind(kinds, field.kind) ? signedAtOf(all[field.id]) : null;
+      return signedAt === null ? [] : [{ at: signedAt, kind: "signed", party: field.role }];
+    });
+
+  const exportExecuted = async () => {
+    if (!verified) return;
+    setExporting(true);
+    setProblem(null);
+    // The executed document — the sealed snapshot with every party's values
+    // printed in their fields — and its certificate of completion, issued
+    // together from one printing, laid out with the setup the signers used.
+    try {
+      const result = await exportCompletionCertificate(snapshot, values, {
+        editorOptions: { pageConfig: defaultPageConfig, fonts: playgroundFonts, extensions: signersSetup() },
+        record: {
+          issuer: "the Scrivr playground",
+          title: "Services Agreement",
+          parties: SIGNING_ROLES.map((party) => ({ role: party, name: ROLE_LABEL[party] })),
+          // Each signing from the value that carries it, then completed as it is executed.
+          events: [...events, ...signingsOf(values), { at: signersTimestamp(new Date()), kind: "completed" }],
+        },
+        // The room's own words after the record, as a signing service adds its disclosure.
+        content: () => ({
+          after: [
+            { title: "Electronic record and signature disclosure", level: 3 },
+            { paragraph: "Each party agreed to sign this agreement electronically in the Scrivr playground. This demo records no identity." },
+          ],
+        }),
+      });
+      // Answered again while it printed: these documents are of answers no longer given.
+      if (valuesRef.current !== values) {
+        setProblem("An answer changed while the documents were printing. Download them again.");
+        return;
+      }
+      if (!result.ok) {
+        const { refusal } = result;
+        setIssued(null);
+        setProblem(
+          refusal.reason === "unanswered-fields"
+            ? `Still unanswered: ${refusal.missing.map((f) => KIND_LABEL[f.kind] ?? f.kind).join(", ")}.`
+            : `No executed document: ${REFUSAL_WORDS[refusal.reason]}`,
+        );
+        return;
+      }
+      setIssued({
+        from: values,
+        executed: { hash: result.executed.artifactHash, url: download(result.executed.pdf, "services-agreement-executed.pdf") },
+        certificate: { hash: result.certificate.certificateHash, url: pdfUrl(result.certificate.pdf) },
+      });
+    } catch (error) {
+      setProblem(`The executed PDF and its certificate could not be made: ${error instanceof Error ? error.message : String(error)}. Try again.`);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  return (
+    <div className="relative flex flex-1 overflow-hidden">
+      {/* Keyed by role: each party opens the document at its start, as they would. */}
+      <main key={role} className="min-w-0 flex-1 overflow-auto p-2 md:p-4">
+        {verified === false && (
+          <div role="alert" className="mx-auto mb-3 max-w-[794px] rounded-md border px-3 py-2 text-[13px]" style={{ borderColor: "#dc2626", color: "#dc2626" }}>
+            This copy is not what was sealed — its hash or its fields differ. Signing and the executed PDF are off.
+          </div>
+        )}
+        {/* Pinned to the window, so it is seen wherever the signer has scrolled to. */}
+        {problem && (
+          <div
+            role="alert"
+            className="fixed bottom-6 left-1/2 z-40 flex max-w-[560px] -translate-x-1/2 items-start gap-3 rounded-lg border px-4 py-3 text-[13px] shadow-lg"
+            style={{ borderColor: "var(--app-border)", background: "var(--app-surface)", color: "var(--app-text)" }}
+          >
+            <span>{problem}</span>
+            <button type="button" aria-label="Dismiss" onClick={() => setProblem(null)} style={{ color: "var(--app-text-muted)" }}>
+              ×
+            </button>
+          </div>
+        )}
+        <div className="flex min-w-max justify-center">
+          <div className="relative shrink-0" style={{ width: defaultPageConfig.pageWidth }}>
+            <Scrivr
+              editor={editor}
+              style={{ width: defaultPageConfig.pageWidth }}
+              pageStyle={{
+                border: "1px solid var(--scrivr-page-border)",
+                background: "var(--scrivr-page-bg)",
+                boxShadow: "none",
+              }}
+            />
+          </div>
+        </div>
+      </main>
+
+      <aside
+        className="hidden shrink-0 flex-col gap-4 overflow-y-auto border-l p-4 text-[12px] md:flex"
+        style={{ width: 340, borderColor: "var(--app-border)", background: "var(--app-surface)" }}
+      >
+        <RoleLegend />
+        <Section title="Signing as">
+          <div className="grid grid-cols-2 gap-1 rounded-lg border p-1" style={{ borderColor: "var(--app-border)" }}>
+            {SIGNING_ROLES.map((r) => (
+              <button
+                key={r}
+                type="button"
+                onClick={() => setRole(r)}
+                className="h-8 rounded-md text-[12px] font-semibold"
+                style={
+                  r === role
+                    ? { background: "var(--app-accent-soft-bg)", color: "var(--app-accent-soft-fg)" }
+                    : { color: "var(--app-text-muted)" }
+                }
+              >
+                {ROLE_LABEL[r]}
+              </button>
+            ))}
+          </div>
+          <p className="mt-2 leading-snug" style={{ color: "var(--app-text-muted)" }}>
+            Fields drawn solid in your colour are yours. Click one to complete it, or press Tab to move between them and
+            Enter to open one. Click a completed field to change it.
+          </p>
+          <button
+            type="button"
+            disabled={!nextOpen}
+            onClick={() => nextOpen && open(nextOpen.id)}
+            className="mt-2 h-8 w-full rounded-md border text-[12px] font-semibold disabled:opacity-50"
+            style={{ background: "var(--app-accent)", borderColor: "var(--app-accent)", color: "var(--app-accent-fg)" }}
+          >
+            {nextOpen ? `Next field: ${KIND_LABEL[nextOpen.kind] ?? nextOpen.kind}` : "All your fields are complete"}
+          </button>
+        </Section>
+
+        <Section title={`${ROLE_LABEL[role]}'s fields`}>
+          <ul className="flex flex-col gap-1">
+            {mine.map((f) => {
+              const value = shown[f.id];
+              const answered = isFieldAnswered(f, value, kinds);
+              return (
+                <li key={f.id}>
+                  <button
+                    type="button"
+                    onClick={() => open(f.id)}
+                    className="flex w-full items-center justify-between gap-2 rounded px-1 py-0.5 text-left hover:bg-[var(--app-accent-soft-bg)]"
+                  >
+                    <span>
+                      {KIND_LABEL[f.kind] ?? f.kind}
+                      {!f.required && <span style={{ color: "var(--app-text-muted)" }}> (optional)</span>}
+                    </span>
+                    <span style={{ color: answered ? "var(--app-accent)" : "var(--app-text-muted)" }}>
+                      {answered && value ? describe(value, f) : isDatedWhenSigned(kinds, f.kind) ? "When you sign" : statusOf(f)}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </Section>
+
+        <Section title="Reading">
+          <Row label="Furthest page">
+            {reading[role].furthest} of {pageCount}
+          </Row>
+          <Row label="Reached the end">{reading[role].reachedEnd ? "Yes" : "Not yet"}</Row>
+        </Section>
+
+        <Section title="Sealed revision">
+          <Row label="Content hash">
+            <code title={snapshot.contentHash}>{shortHash(snapshot.contentHash)}</code>
+          </Row>
+          <Row label="Snapshot intact">{verified === null ? "Checking…" : verified ? "Yes" : "No — it changed"}</Row>
+          <Row label="Required fields left">{missing.length}</Row>
+        </Section>
+
+        <Section title="Executed document">
+          <button
+            type="button"
+            disabled={!verified || missing.length > 0 || exporting}
+            onClick={() => void exportExecuted()}
+            className="h-8 w-full rounded-md border text-[12px] font-semibold disabled:opacity-50"
+            style={{ background: "var(--app-accent)", borderColor: "var(--app-accent)", color: "var(--app-accent-fg)" }}
+          >
+            {exporting ? "Rendering…" : "Download executed PDF"}
+          </button>
+          {missing.length > 0 && (
+            <p className="mt-2" style={{ color: "var(--app-text-muted)" }}>
+              Available once every party has completed their required fields.
+            </p>
+          )}
+          {executed && (
+            <Row label="PDF hash">
+              <a href={executed.url} target="_blank" rel="noreferrer">
+                <code title={executed.hash}>{shortHash(executed.hash)}</code>
+              </a>
+            </Row>
+          )}
+          {certificate && (
+            <button
+              type="button"
+              onClick={() => saveAs(certificate.url, "services-agreement-certificate.pdf")}
+              className="mt-2 h-8 w-full rounded-md border text-[12px] font-semibold"
+              style={{ borderColor: "var(--app-border)", color: "var(--app-text)" }}
+            >
+              Download certificate of completion
+            </button>
+          )}
+          {certificate && (
+            <Row label="Certificate hash">
+              <a href={certificate.url} target="_blank" rel="noreferrer">
+                <code title={certificate.hash}>{shortHash(certificate.hash)}</code>
+              </a>
+            </Row>
+          )}
+        </Section>
+
+        <button
+          type="button"
+          onClick={onBack}
+          className="h-8 rounded-md border text-[12px] font-medium"
+          style={{ borderColor: "var(--app-border)", color: "var(--app-text)" }}
+        >
+          Back to editing
+        </button>
+      </aside>
+
+      {request && <ValueDialog field={request.field} drawn={isDrawnKind(kinds, request.field.kind)} current={request.current} onAnswer={answer} />}
+    </div>
+  );
+}
+
+/**
+ * The setup the signers see and the executed PDF is printed with — one list,
+ * so the two agree; the certificate takes its fonts and page. The signing
+ * view also opens with the room's values; the export hands its own.
+ */
+function signersSetup(values: Record<string, FieldValue> = {}) {
+  return [StarterKit.configure({ table: true }), Field.configure({ values, formatSignedDate: signedDateInWords })];
+}
+
+/** Why the room could not issue the executed PDF and its certificate, in words. */
+const REFUSAL_WORDS: Record<Exclude<ExecutedPdfRefusal["reason"] | CertificateRefusal["reason"], "unanswered-fields">, string> = {
+  "snapshot-altered": "the sealed snapshot no longer matches its hash.",
+  "unknown-field-kind": "a field is of a kind this room does not know.",
+  "unverified-signature-print": "a signature was not printed by the standard field renderer.",
+  "unnamed-issuer": "the record names no issuer.",
+  "duplicate-party": "two parties are recorded for one role.",
+  "unknown-event": "the record holds an event no certificate can name.",
+  "unknown-party": "the record names a party the room does not know.",
+  "missing-party": "a party who signed is missing from the record.",
+  "unzoned-time": "a time in the record names no zone.",
+  "undated-signature": "a signature carries no time.",
+  "signed-after-completed": "a signature is dated after completion.",
+  "events-out-of-order": "the record's events are out of order.",
+};
+
+const pdfUrl = (bytes: Uint8Array): string => URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: "application/pdf" }));
+
+/** Hands the browser `url` to save as `name`. */
+function saveAs(url: string, name: string): void {
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = name;
+  link.click();
+}
+
+/** A PDF's bytes as a link the browser saves at once; the link, to show again. */
+function download(bytes: Uint8Array, name: string): string {
+  const url = pdfUrl(bytes);
+  saveAs(url, name);
+  return url;
+}
+
+/**
+ * The day a signature names, in the room's own words — "November 14, 2026". Read from the
+ * date `signedAt` writes, never from this machine's zone or language, so every viewer and
+ * the executed PDF print the same day.
+ */
+function signedDateInWords(signedAt: string): string {
+  return new Date(`${signedAt.slice(0, 10)}T00:00:00Z`).toLocaleDateString("en-US", { dateStyle: "long", timeZone: "UTC" });
+}
+
+/** A value as the room records it: words and drawings stamped with the moment they were given, in the signer's own offset. */
+function recordedNow(value: FieldValue): FieldValue {
+  return value.kind === "text" || value.kind === "image" ? { ...value, signedAt: signersTimestamp(new Date()) } : value;
+}
+
+/** `at` as the signer's clock reads it, with their offset — "2026-11-14T23:30:00-05:00" — as Adobe Sign stamps a signature. */
+function signersTimestamp(at: Date): string {
+  const minutesEast = -at.getTimezoneOffset();
+  const pad = (n: number) => String(Math.abs(n)).padStart(2, "0");
+  const local = new Date(at.getTime() + minutesEast * 60_000).toISOString().slice(0, 19);
+  return `${local}${minutesEast < 0 ? "-" : "+"}${pad(Math.trunc(minutesEast / 60))}:${pad(minutesEast % 60)}`;
+}
+
+function describe(value: FieldValue, field: SignerFieldDescriptor): string {
+  if (value.kind === "text") return value.text;
+  if (value.kind === "choice") return field.options.find((choice) => choice.id === value.id)?.label ?? "";
+  if (value.kind === "image") return "Drawn";
+  return value.checked ? "Ticked" : "Unticked";
+}
+
+function Section({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section>
+      <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--app-text-muted)" }}>
+        {title}
+      </h3>
+      {children}
+    </section>
+  );
+}
+
+function Row({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-2 py-0.5">
+      <span style={{ color: "var(--app-text-muted)" }}>{label}</span>
+      <span>{children}</span>
+    </div>
+  );
+}
+
+/** What a host shows when a signer presses a field: capture the value, or cancel. */
+function ValueDialog({
+  field,
+  drawn,
+  current,
+  onAnswer,
+}: {
+  field: SignerFieldDescriptor;
+  /** The field is completed by drawing: offer a pad. */
+  drawn: boolean;
+  current: FieldValue | undefined;
+  onAnswer: (value: FieldValue | null) => void;
+}) {
+  const [typed, setTyped] = useState(() => {
+    if (current?.kind === "text") return current.text;
+    if (current?.kind === "choice") return current.id;
+    if (field.kind === "date") return new Date().toISOString().slice(0, 10);
+    return field.kind === "dropdown" ? (field.options[0]?.id ?? "") : "";
+  });
+  const pad = useRef<HTMLCanvasElement>(null);
+  const [inked, setInked] = useState(false);
+
+  const submit = () => {
+    if (drawn && inked && pad.current) return onAnswer({ kind: "image", src: pad.current.toDataURL("image/png") });
+    if (field.kind === "dropdown") onAnswer({ kind: "choice", id: typed });
+    else if (typed.trim()) onAnswer({ kind: "text", text: typed.trim() });
+  };
+
+  // Esc cancels and Enter applies, wherever focus is in the dialog.
+  const keys = useRef({ submit, onAnswer });
+  keys.current = { submit, onAnswer };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") keys.current.onAnswer(null);
+      else if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        keys.current.submit();
+      } else return;
+      e.stopPropagation();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.35)" }}>
+      <div
+        role="dialog"
+        aria-label={KIND_LABEL[field.kind] ?? field.kind}
+        className="w-[400px] rounded-lg border p-4 text-[13px] shadow-xl"
+        style={{ background: "var(--app-surface)", borderColor: "var(--app-border)", color: "var(--app-text)" }}
+      >
+        <div className="mb-3 font-semibold">
+          {KIND_LABEL[field.kind] ?? field.kind} — {ROLE_LABEL[field.role] ?? field.role}
+        </div>
+
+        {drawn && current?.kind === "image" && !inked && (
+          <p className="mb-2" style={{ color: "var(--app-text-muted)" }}>
+            Signed already — draw again to replace it.
+          </p>
+        )}
+        {drawn && <SignaturePad canvas={pad} onInk={() => setInked(true)} />}
+
+        {field.kind === "dropdown" ? (
+          <select
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+            className="h-9 w-full rounded-md border px-2"
+            style={{ background: "var(--app-surface)", borderColor: "var(--app-border)" }}
+          >
+            {field.options.map((choice) => (
+              <option key={choice.id} value={choice.id}>
+                {choice.label}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input
+            autoFocus={!drawn}
+            type={field.kind === "date" ? "date" : field.kind === "email" ? "email" : "text"}
+            placeholder={drawn ? "…or type it" : KIND_LABEL[field.kind] ?? field.kind}
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+            className="mt-2 h-9 w-full rounded-md border px-2"
+            style={{ background: "var(--app-surface)", borderColor: "var(--app-border)" }}
+          />
+        )}
+
+        <div className="mt-4 flex justify-end gap-2">
+          <button type="button" onClick={() => onAnswer(null)} className="h-8 rounded-md border px-3" style={{ borderColor: "var(--app-border)" }}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={!(drawn && inked) && !typed.trim()}
+            className="h-8 rounded-md border px-3 font-semibold disabled:opacity-50"
+            style={{ background: "var(--app-accent)", borderColor: "var(--app-accent)", color: "var(--app-accent-fg)" }}
+          >
+            Apply
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SignaturePad({ canvas, onInk }: { canvas: RefObject<HTMLCanvasElement | null>; onInk: () => void }) {
+  const drawing = useRef(false);
+
+  const point = (e: PointerEvent<HTMLCanvasElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  };
+
+  return (
+    <canvas
+      ref={canvas}
+      width={366}
+      height={120}
+      className="block w-full cursor-crosshair touch-none rounded-md border"
+      style={{ borderColor: "var(--app-border)", background: "#fff" }}
+      onPointerDown={(e) => {
+        const ctx = e.currentTarget.getContext("2d");
+        if (!ctx) return;
+        e.currentTarget.setPointerCapture(e.pointerId);
+        drawing.current = true;
+        const { x, y } = point(e);
+        ctx.lineWidth = 2;
+        ctx.lineCap = "round";
+        ctx.strokeStyle = "#111827";
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+      }}
+      onPointerMove={(e) => {
+        if (!drawing.current) return;
+        const ctx = e.currentTarget.getContext("2d");
+        const { x, y } = point(e);
+        ctx?.lineTo(x, y);
+        ctx?.stroke();
+        onInk();
+      }}
+      onPointerUp={() => {
+        drawing.current = false;
+      }}
+    />
+  );
+}

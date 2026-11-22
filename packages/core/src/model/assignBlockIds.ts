@@ -73,12 +73,14 @@ function walk(node: Node, generate: () => string): Node {
   return node.type.create(attrs, content, node.marks);
 }
 
-/** A block whose schema declares an id, without one `blockIdOf` would read. */
+/** A node whose schema declares an id, without one `blockIdOf` would read. */
 function needsBlockId(node: Node): boolean {
   return declaresBlockId(node) && blockIdOf(node) === null;
 }
 
-const declaresBlockId = (node: Node) => node.isBlock && "nodeId" in (node.type.spec.attrs ?? {});
+// Inline atoms too: a field or an image is addressed by id like a block, and a
+// pasted copy must not answer to its original's.
+const declaresBlockId = (node: Node) => (node.isBlock || node.isAtom) && "nodeId" in (node.type.spec.attrs ?? {});
 
 /**
  * A single block waiting for an ID, returned by `planBlockIdAssignments`.

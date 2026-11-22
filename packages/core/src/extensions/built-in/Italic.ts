@@ -8,6 +8,8 @@ interface ItalicOptions {
   shortcut: boolean;
 }
 
+const isNormalStyle = (style: string) => /^normal$/i.test(style);
+
 export const Italic = Extension.create<ItalicOptions>({
   name: "italic",
 
@@ -20,9 +22,16 @@ export const Italic = Extension.create<ItalicOptions>({
       italic: {
         attrs: { dataTracked: { default: [] } },
         parseDOM: [
-          { tag: "em" },
-          { tag: "i", getAttrs: (node) => (node as HTMLElement).style.fontStyle !== "normal" && null },
+          // A tag set to normal style is declined, not a `skip: true` rule: a skipped
+          // element's own style is never read, so it would lose its colour too.
+          { tag: "em", getAttrs: (node) => !isNormalStyle(node.style.fontStyle) && null },
+          { tag: "i", getAttrs: (node) => !isNormalStyle(node.style.fontStyle) && null },
           { style: "font-style=italic" },
+          {
+            style: "font-style",
+            getAttrs: (value) => isNormalStyle(value) && null,
+            clearMark: (m) => m.type.name === "italic",
+          },
         ],
         toDOM: () => ["em", 0],
       },

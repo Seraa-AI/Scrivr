@@ -4,6 +4,7 @@ import type {
   LineEntry,
 } from "../layout/CharacterMap";
 import { HANDLE_SIZE } from "./ResizeController";
+import { screenPixels, setPaintZoom } from "./zoom";
 import type { SelectionPrimitive, SelectionRole } from "../selection/types";
 import type { ResolvedTheme } from "../model/theme";
 
@@ -52,44 +53,57 @@ export function renderAiCaret(
   coords: CoordsResult,
   options?: { color?: string; label?: string; visible?: boolean },
 ): void {
-  const color = options?.color ?? "#a5b4fc"; // indigo-300
-  const label = options?.label ?? "AI";
-  const visible = options?.visible ?? true;
+  renderLabelledCaret(ctx, coords, {
+    color: options?.color ?? "#a5b4fc", // indigo-300
+    label: options?.label ?? "AI",
+    labelColor: "#1e1b4b", // indigo-950 for contrast
+    visible: options?.visible ?? true,
+  });
+}
 
-  const x = Math.round(coords.x) + 0.5;
+/**
+ * Another hand's caret — a collaborator's, the AI's — with its name in a
+ * bubble above it. Pointer furniture: the same size on screen at every zoom.
+ * `visible: false` hides the line for a blink; the name stays.
+ */
+export function renderLabelledCaret(
+  ctx: CanvasRenderingContext2D,
+  coords: Pick<CoordsResult, "x" | "y" | "height">,
+  options: { color: string; label: string; labelColor?: string; visible?: boolean },
+): void {
+  const { color, label, labelColor = "#ffffff", visible = true } = options;
+  const x = onPixelCentre(coords.x);
 
   ctx.save();
 
   if (visible) {
-    // Caret line (slightly thicker than user cursor to distinguish)
+    // Slightly thicker than the user's own caret, to tell them apart.
     ctx.strokeStyle = color;
-    ctx.lineWidth = 2;
+    ctx.lineWidth = screenPixels(2);
     ctx.lineCap = "round";
     ctx.beginPath();
-    ctx.moveTo(x, coords.y + 1);
-    ctx.lineTo(x, coords.y + coords.height - 1);
+    ctx.moveTo(x, coords.y + screenPixels(1));
+    ctx.lineTo(x, coords.y + coords.height - screenPixels(1));
     ctx.stroke();
   }
 
-  // Label bubble (always visible while AI caret is active)
-  ctx.font = "bold 10px system-ui, -apple-system, sans-serif";
-  const textW = ctx.measureText(label).width;
-  const pad = 4;
-  const labelW = textW + pad * 2;
-  const labelH = 15;
+  ctx.font = `bold ${screenPixels(11)}px system-ui, -apple-system, sans-serif`;
+  const pad = screenPixels(4);
+  const labelW = ctx.measureText(label).width + pad * 2;
+  const labelH = screenPixels(16);
   const labelX = coords.x;
-  const labelY = Math.max(0, coords.y - labelH - 2);
+  const labelY = Math.max(0, coords.y - labelH - screenPixels(2));
 
   ctx.fillStyle = color;
   ctx.beginPath();
   if (ctx.roundRect) {
-    ctx.roundRect(labelX, labelY, labelW, labelH, 3);
+    ctx.roundRect(labelX, labelY, labelW, labelH, screenPixels(3));
   } else {
     ctx.rect(labelX, labelY, labelW, labelH);
   }
   ctx.fill();
 
-  ctx.fillStyle = "#1e1b4b"; // indigo-950 for contrast
+  ctx.fillStyle = labelColor;
   ctx.textBaseline = "middle";
   ctx.fillText(label, labelX + pad, labelY + labelH / 2);
 
@@ -390,15 +404,9 @@ export function renderAnchoredDragSource(
   snappedFillRect(ctx, x, y, width, height);
 
   ctx.strokeStyle = "rgba(100, 116, 139, 0.55)"; // slate-500
-  ctx.lineWidth = 1;
-  ctx.setLineDash([4, 3]);
-  ctx.strokeRect(
-    Math.round(x) + 0.5,
-    Math.round(y) + 0.5,
-    Math.round(width) - 1,
-    Math.round(height) - 1,
-  );
-  ctx.setLineDash([]);
+  ctx.lineWidth = screenPixels(1);
+  ctx.setLineDash([screenPixels(4), screenPixels(3)]);
+  strokeInside(ctx, x, y, width, height);
   ctx.restore();
 }
 
@@ -433,15 +441,9 @@ export function renderAnchoredDragGhost(
   snappedFillRect(ctx, x, y, width, height);
 
   ctx.strokeStyle = stroke;
-  ctx.lineWidth = 1.5;
-  if (disabled) ctx.setLineDash([4, 3]);
-  ctx.strokeRect(
-    Math.round(x) + 0.5,
-    Math.round(y) + 0.5,
-    Math.round(width) - 1,
-    Math.round(height) - 1,
-  );
-  if (disabled) ctx.setLineDash([]);
+  ctx.lineWidth = screenPixels(1.5);
+  if (disabled) ctx.setLineDash([screenPixels(4), screenPixels(3)]);
+  strokeInside(ctx, x, y, width, height);
   ctx.restore();
 }
 
@@ -453,15 +455,16 @@ export function renderAnchoredDragCaret(
   ctx: CanvasRenderingContext2D,
   coords: { x: number; y: number; height: number },
 ): void {
-  const x = Math.round(coords.x) + 0.5;
+  const x = onPixelCentre(coords.x);
+  const inset = screenPixels(1);
 
   ctx.save();
   ctx.strokeStyle = "rgba(37, 99, 235, 0.9)"; // blue-600
-  ctx.lineWidth = 2;
+  ctx.lineWidth = screenPixels(2);
   ctx.lineCap = "round";
   ctx.beginPath();
-  ctx.moveTo(x, coords.y + 1);
-  ctx.lineTo(x, coords.y + coords.height - 1);
+  ctx.moveTo(x, coords.y + inset);
+  ctx.lineTo(x, coords.y + coords.height - inset);
   ctx.stroke();
   ctx.restore();
 }
@@ -469,11 +472,15 @@ export function renderAnchoredDragCaret(
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
 /**
- * Current device pixel ratio used for pixel-grid snapping.
- * Updated by clearOverlay (called every frame) so all draw calls in the same
- * paint cycle use the correct value without threading dpr through every API.
+ * Device pixels per page unit in the overlay paint under way, as
+ * `setupCanvas` returned it — used for pixel-grid snapping. Set by clearOverlay at
+ * the start of each paint so every draw in it snaps alike without threading
+ * the value through every API.
  */
 let activeDpr = 1;
+
+/** Moves a page-unit x to the centre of its device pixel, so a stroke one device pixel wide lands on one pixel. */
+const onPixelCentre = (x: number): number => (Math.round(x * activeDpr) + 0.5) / activeDpr;
 
 /** @internal Set the active DPR for testing snapRect without calling clearOverlay. */
 export function setActiveDpr(dpr: number): void {
@@ -499,7 +506,6 @@ export function snapRect(
   return { x: sx, y: sy, w: sw, h: sh };
 }
 
-/** fillRect snapped to the device pixel grid. */
 /**
  * Marks each line that holds no text with a line-high square at its start, so
  * an empty paragraph still shows its change. The caret's zero-width glyph on
@@ -512,6 +518,7 @@ function fillEmptyLines(ctx: CanvasRenderingContext2D, glyphs: GlyphEntry[], lin
   }
 }
 
+/** fillRect snapped to the device pixel grid. */
 function snappedFillRect(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -521,6 +528,14 @@ function snappedFillRect(
 ): void {
   const r = snapRect(x, y, w, h);
   ctx.fillRect(r.x, r.y, r.w, r.h);
+}
+
+/** strokeRect for a line one device pixel inside the rect's edges, on pixel centres. */
+function strokeInside(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number): void {
+  const left = onPixelCentre(x);
+  const top = onPixelCentre(y);
+  const pixel = 1 / activeDpr;
+  ctx.strokeRect(left, top, onPixelCentre(x + w) - left - pixel, onPixelCentre(y + h) - top - pixel);
 }
 
 function hexToRgba(hex: string, alpha: number): string {
@@ -538,27 +553,26 @@ function hexToRgba(hex: string, alpha: number): string {
  * overlay stays transparent between the content canvas and the user's eyes.
  *
  * Mirrors the resetTransform + re-scale pattern from clearCanvas so callers
- * can treat content and overlay canvases the same way.
+ * can treat content and overlay canvases the same way. `dpr` is device pixels
+ * per page unit, as `setupCanvas` returns it; `zoom` the view's.
+ *
+ * Starts a paint: records `dpr` for pixel snapping and `zoom` for
+ * `screenPixels`, which every draw until the next clear reads.
  */
 export function clearOverlay(
   ctx: CanvasRenderingContext2D,
   width: number,
   height: number,
   dpr: number,
+  zoom = 1,
 ): void {
   activeDpr = dpr;
+  setPaintZoom(zoom);
   ctx.resetTransform();
   ctx.clearRect(0, 0, width * dpr, height * dpr);
   ctx.scale(dpr, dpr);
 }
 
-/**
- * Draws a cursor line at the given character coordinates.
- *
- * Caller controls blink state — only call this when the cursor should be
- * visible. If the cursor is in the "off" phase, simply don't call it
- * (clearOverlay is sufficient to hide it).
- */
 /** Map a primitive's semantic role to its theme color. */
 function roleColor(role: SelectionRole, theme: ResolvedTheme): string {
   switch (role) {
@@ -593,50 +607,49 @@ export function paintSelectionPrimitives(
         break;
       case "outline":
         ctx.strokeStyle = roleColor(p.role ?? "affordance", theme);
-        ctx.lineWidth = p.width;
+        ctx.lineWidth = screenPixels(p.width);
         ctx.strokeRect(p.rect.x, p.rect.y, p.rect.width, p.rect.height);
         break;
-      case "handles":
+      case "handles": {
         ctx.fillStyle = roleColor(p.role ?? "affordance", theme);
+        const size = screenPixels(HANDLE_SIZE);
         for (const h of p.handles) {
-          ctx.fillRect(h.x - HANDLE_SIZE / 2, h.y - HANDLE_SIZE / 2, HANDLE_SIZE, HANDLE_SIZE);
+          ctx.fillRect(h.x - size / 2, h.y - size / 2, size, size);
         }
         break;
-      case "caret": {
-        if (p.height <= 0) break;
-        // +0.5 so the 1px stroke lands on a physical pixel boundary.
-        const x = Math.round(p.x) + 0.5;
-        ctx.strokeStyle = theme.cursor;
-        ctx.lineWidth = 1.5;
-        ctx.lineCap = "round";
-        ctx.beginPath();
-        ctx.moveTo(x, p.y + 1);
-        ctx.lineTo(x, p.y + p.height - 1);
-        ctx.stroke();
-        break;
       }
+      case "caret":
+        renderCursor(ctx, p, theme.cursor);
+        break;
     }
     ctx.restore();
   }
 }
 
+/**
+ * Draws a cursor line at the given character coordinates.
+ *
+ * Caller controls blink state — only call this when the cursor should be
+ * visible. If the cursor is in the "off" phase, simply don't call it
+ * (clearOverlay is sufficient to hide it).
+ */
 export function renderCursor(
   ctx: CanvasRenderingContext2D,
-  coords: CoordsResult,
+  coords: Pick<CoordsResult, "x" | "y" | "height">,
   cursorColor: string,
 ): void {
   if (coords.height <= 0) return;
 
-  // +0.5 sub-pixel offset → 1px stroke lands on a physical pixel boundary
-  const x = Math.round(coords.x) + 0.5;
+  const x = onPixelCentre(coords.x);
+  const inset = screenPixels(1);
 
   ctx.save();
   ctx.strokeStyle = cursorColor;
-  ctx.lineWidth = 1.5;
+  ctx.lineWidth = screenPixels(1.5);
   ctx.lineCap = "round";
   ctx.beginPath();
-  ctx.moveTo(x, coords.y + 1);
-  ctx.lineTo(x, coords.y + coords.height - 1);
+  ctx.moveTo(x, coords.y + inset);
+  ctx.lineTo(x, coords.y + coords.height - inset);
   ctx.stroke();
   ctx.restore();
 }

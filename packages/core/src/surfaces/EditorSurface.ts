@@ -19,6 +19,7 @@
 import { Node, type Schema } from "prosemirror-model";
 import { EditorState, type Transaction, type Plugin } from "prosemirror-state";
 import { CharacterMap } from "../layout/CharacterMap";
+import { applyUngated, type MutationGate } from "../mutationGate";
 import type { SurfaceId, Unsubscribe } from "./types";
 
 export interface EditorSurfaceInit {
@@ -61,6 +62,14 @@ export class EditorSurface {
    * throws — turns silent commit recursion into a loud error.
    */
   committing = false;
+
+  /**
+   * @internal
+   * Set by SurfaceRegistry on `register()`: the owning editor's gate, so a
+   * read-only or sealed editor refuses header/footer edits as it does body ones.
+   * An unregistered surface admits everything.
+   */
+  gate: MutationGate = applyUngated;
 
   constructor(init: EditorSurfaceInit) {
     this.id = init.id;
@@ -106,7 +115,7 @@ export class EditorSurface {
    *     would re-dirty it and spin the commit loop. This is guarded by
    *     `committing` and throws a clear error.
    */
-  dispatch(tr: Transaction): void {
+  dispatch(tr: Transaction): boolean {
     if (this.committing) {
       throw new Error(
         `[EditorSurface] dispatch() called on "${this.id}" during its own ` +
@@ -114,7 +123,9 @@ export class EditorSurface {
         `the surface they are committing.`,
       );
     }
-    this.editorState = this.editorState.apply(tr);
+    const state = this.gate(this.editorState, tr);
+    if (!state) return false;
+    this.editorState = state;
     const docChanged = tr.docChanged;
     if (docChanged) {
       this.dirty = true;
@@ -122,6 +133,7 @@ export class EditorSurface {
     }
     const update: SurfaceUpdate = { state: this.editorState, tr, docChanged };
     this.listeners.forEach((h) => h(update));
+    return true;
   }
 
   /** Clear the dirty flag. Owners call this after a successful commit. */

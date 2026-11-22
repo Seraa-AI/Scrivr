@@ -693,7 +693,7 @@ function buildWordList(items: WordListItem[], doc: Document): HTMLElement {
 
     if (item.level > top.level) {
       // A deeper item belongs inside the item above it, which is where HTML
-      // (and our listItem's `paragraph block*` content) puts a sublist.
+      // (and our listItem's leading block, then any blocks) puts a sublist.
       const nested = doc.createElement(item.ordered ? "ol" : "ul");
       (top.list.lastElementChild ?? top.list).appendChild(nested);
       top = { level: item.level, list: nested };
@@ -779,9 +779,8 @@ export function cleanPastedHtml(root: HTMLElement): void {
     if (s.verticalAlign === "baseline") s.removeProperty("vertical-align");
     if (s.color === "rgb(0, 0, 0)" || s.color === "#000000")
       s.removeProperty("color");
-    // margin/padding/line-height have no schema equivalent
-    // TODO: add these to the schema
     s.removeProperty("line-height");
+    // A pasted page's margins are its layout, not the author's indent.
     s.removeProperty("margin-top");
     s.removeProperty("margin-bottom");
     s.removeProperty("margin-left");

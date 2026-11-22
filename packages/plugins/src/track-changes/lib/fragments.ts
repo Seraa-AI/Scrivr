@@ -25,6 +25,25 @@ export function setFragmentAsInserted(inserted: Fragment, insertAttrs: NewInsert
   return updatedInserted.length === 0 ? Fragment.empty : Fragment.fromArray(updatedInserted);
 }
 
+/**
+ * Inline content one edit inserts, recorded as one act however many pieces it
+ * takes (differently formatted runs, a line break). The first piece's id names
+ * the act and every piece carries it as `creationId`, as an inserted block
+ * does: deciding any piece decides all of it, and no piece fuses with a
+ * separate change beside it, which would rename the act out from under the
+ * rest. A single piece is recorded as typing is, so typing on still joins it.
+ */
+export function setInlineFragmentAsInserted(inserted: Fragment, insertAttrs: NewInsertAttrs, schema: Schema) {
+  if (inserted.childCount < 2) return setFragmentAsInserted(inserted, insertAttrs, schema);
+  const act = genId();
+  const pieces: PMNode[] = [];
+  inserted.forEach((piece, _offset, index) => {
+    const attrs: NewInsertAttrs & { id?: string } = { ...insertAttrs, creationId: act, ...(index === 0 ? { id: act } : {}) };
+    setFragmentAsInserted(Fragment.from(piece), attrs, schema).forEach(recorded => pieces.push(recorded));
+  });
+  return Fragment.fromArray(pieces);
+}
+
 export function setFragmentAsWrapChange(inserted: Fragment, attrs: NewEmptyAttrs, schema: Schema) {
   const content: PMNode[] = [];
   inserted.forEach(node => {

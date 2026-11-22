@@ -1,5 +1,59 @@
 # @scrivr/export-docx
 
+## 1.0.25
+
+### Patch Changes
+
+- Updated dependencies [29af9a4]
+- Updated dependencies [29af9a4]
+- Updated dependencies [a6b92e1]
+  - @scrivr/core@1.0.25
+
+## 1.0.24
+
+### Patch Changes
+
+- fd2b37d: DOCX export now writes one wrapper element around consecutive runs that share a wrapping mark, as Word does. For example, a link over bold and plain text is now one `<w:hyperlink>`, not two. `DocxRunWrapper` receives all the runs (`runs: readonly XmlNode[]`) and may return several nodes. DOCX import now lets several extensions claim the same element: a later `blocks`, `inlines` or `marks` handler that returns `null` falls through to an earlier one instead of hiding it. A mark with a wrapper and no run-properties handler exports without an `unsupported-mark` warning. A line break inside a wrapping mark joins its stretch, so a link or field across a break is one element.
+- fd2b37d: A dropdown's choices are `{ id, label }` (`FieldChoice`, validated by `FieldChoiceSchema`): the id is what Word stores as `w:value`, the label what it shows as `w:displayText`, and both survive a round trip. `insertField` refuses choices that share an id. `SignerFieldDescriptor` carries a dropdown's `options`, so a signing host can ask for one. `DocxSdtInline.listItems` is `DocxSdtListItem[]`, keeping both halves of a `w:listItem`. `@scrivr/core` now depends on `zod`.
+- fd2b37d: Fields now go through DOCX, Markdown and semantic export:
+
+  - **DOCX:** each field is a Word content control whose tag carries its id, kind, who fills it, and its role, so it comes back as the same field. A signature is Word's own signature line, which Word can sign. A checkbox is Word's checkbox, and text, initials and date fields are Word text and date controls.
+  - **Import:** inline content controls are now parsed rather than silently dropped. Their text is kept even when no extension claims them; Word's prompt in an unfilled one is not, since it is not the document's text. A line break keeps the marks of its run, so a break inside a field or a link stays inside it.
+  - **Markdown:** a field is written as its caption, where before `getMarkdown()` threw on a document containing fields.
+  - **Semantic export:** a block field is its own `fieldBlock` unit.
+
+  Every field control is named on its Word tab — a checkbox as "Checkbox · client". Every story part's root — the body, each header and footer — declares the same namespaces (`WORD_PART_NAMESPACES`) and marks Word 2010's checkbox as ignorable, as Word does, so an older Word can read past it.
+
+- fd2b37d: Fields come in more kinds, and hosts can add their own. Name, email, title, company, number and dropdown join signature, initials, date, text and checkbox. A dropdown carries its choices and exports to Word as a dropdown list. `Field.configure({ kinds })` registers a kind with a label, a box size and a `control` (signature line, checkbox, date, dropdown or text), which decides how it draws, toggles, prints and exports. A new guide, "Fields", explains how fields work and how to add a kind.
+- fd2b37d: - `createSnapshot` checks every part of the document, not only its body. A prompt still showing or a suggestion still pending in a header or footer refuses the seal, and a signer field there refuses it with `fields-outside-body`, since the signing view completes fields in the body only.
+  - `createSnapshot` rejects, rather than refuses, when a host check throws or a header or footer holds content the editor's schema cannot read.
+  - `importDocx` returns `fieldValues`: what signers entered into fields' controls in Word, by field id, kept out of the document. A value takes the type its field's kind declares, and only a ticked box counts as an answer. A drawing in a signature control raises `field-drawing-not-imported` instead of vanishing.
+  - `FieldCompletion` takes `onFieldRequestError`, called when the host's request fails. Tab and Shift+Tab no longer cycle forever: past either end, focus goes on to the page's next control, and pressing elsewhere on the page lets focus go.
+- fd2b37d: `createSnapshot` refuses with `unfilled-fields` while text the author fills still shows its prompt — a signer would agree to a blank — and with `unidentified-fields` for a signer field with no id or role, or another field's id, which nobody could complete. Typing at the edge of a prompt, or deleting part of it, replaces the whole prompt as in Word, so a prompt is never counted as filled; a line break inside a text field keeps it one field, in the editor and through DOCX. A field is now set in the face of the text around it, keeping its authored size, so an executed PDF prints its value in that face; values were dropped from PDFs exported with a font provider.
+- Updated dependencies [3da6dba]
+- Updated dependencies [3da6dba]
+- Updated dependencies [0b97d54]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+  - @scrivr/core@1.0.24
+
 ## 1.0.23
 
 ### Patch Changes

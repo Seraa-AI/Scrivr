@@ -1,0 +1,28 @@
+{
+  "02-correspondence-c1c9a16460c1": [
+    "changed: bulletList > listItem > heading \"New How and where to refer patie\"",
+    "changed: bulletList > listItem > bulletList > listItem > heading \"Making a Strong Recommendation f\"",
+    "changed: bulletList > listItem > bulletList > listItem > heading \"Trust the Facts, Get the Vax cam\"",
+    "changed: bulletList > listItem > bulletList > listItem > heading \"COVID-19 Vaccination Locations t\"",
+    "changed: bulletList > listItem > heading \"USP COVID-19 Vaccine Handling To\"",
+    "changed: bulletList > listItem > heading \"Maximizing Doses of Pfizer-BioNT\""
+  ],
+  "04-educational-5ff2cb136228": [
+    "changed: paragraph \"\""
+  ],
+  "11-administrative-995f335b521f": [
+    "changed: heading \"Finance, Policies and Staff Comm\""
+  ],
+  "15-forms-c5656e233c4f": [
+    "changed: paragraph \"\""
+  ],
+  "25-forms-f1be83375e8e": [
+    "changed: heading \"[ENGLISH]\"",
+    "changed: bulletList > listItem > paragraph \"Whether the teacher has met Stat\"",
+    "changed: bulletList > listItem > paragraph \"Whether the teacher is teaching \"",
+    "changed: bulletList > listItem > paragraph \"The baccalaureate degree major o\"",
+    "changed: bulletList > listItem > paragraph \"If the teacher is teaching in th\"",
+    "changed: table > tableRow > tableCell > heading \"Name of teacher or teachers for \"",
+    "changed: table > tableRow > tableCell > heading \"Your Name:\""
+  ]
+}

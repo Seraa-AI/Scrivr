@@ -36,6 +36,15 @@ export const cloneTrackedChanges: CloneHandler = ({ doc, idMap, newId, recordId 
       next ??= { ...entry };
       next[field] = ids.map(id => typeof id === "string" ? remap(id) : id);
     }
+    // A suggestion this record holds keeps its records, so they are re-keyed with it.
+    const replaced = entry["replaced"];
+    if (Array.isArray(replaced)) {
+      next ??= { ...entry };
+      next["replaced"] = replaced.map(held => {
+        if (!isRecord(held) || !isRecord(held["attrs"]) || !("dataTracked" in held["attrs"])) return held;
+        return { ...held, attrs: { ...held["attrs"], dataTracked: cloneDataTracked(held["attrs"]["dataTracked"]) } };
+      });
+    }
     // A block id, re-keyed by core with the block it names.
     const originalNodeId = entry["originalNodeId"];
     const clonedNodeId = typeof originalNodeId === "string" ? idMap.get(originalNodeId) : undefined;

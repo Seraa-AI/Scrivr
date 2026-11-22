@@ -76,6 +76,7 @@ export type {
   CompositeLayout,
   CompositeUnit,
   InlineStrategy,
+  InlineLine,
   RegionInset,
   RegionPlacement,
   NodeLayout,
