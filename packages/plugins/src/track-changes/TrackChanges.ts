@@ -23,7 +23,7 @@ import { trackChangesPlugin, trackChangesPluginKey } from "./engine/trackChanges
 import { lastCutPlugin } from "./lib/cutAndPaste";
 import { suggestedContent } from "./lib/suggestedContent";
 import { addTrackIdIfDoesntExist, createNewDeleteAttrs, createNewInsertAttrs, createNewPendingAttrs, proposedForDeletion } from "./helpers";
-import { CHANGE_OPERATION, CHANGE_STATUS, TrackChangesOptions, TrackChangesStatus, type TrackedChange } from "./types";
+import { CHANGE_OPERATION, CHANGE_STATUS, TrackChangesOptions, TrackChangesStatus, type ReplacementView, type TrackedChange } from "./types";
 import { planReviewIn } from "./reviewChanges";
 import { changeActs } from "./reviewPlan";
 import type { ChangeSet } from "./ChangeSet";
@@ -47,6 +47,8 @@ declare module "@scrivr/core" {
       setChangeStatuses: (status: "accepted" | "rejected", ids: string[]) => ReturnType;
       /** Update the userID attributed to future tracked changes. */
       setTrackChangesUserID: (userID: string) => ReturnType;
+      /** Show replacements as one card (`"paired"`) or split as Word shows them (`"split"`). */
+      setReplacementView: (view: ReplacementView) => ReturnType;
       /** Force a refresh of the tracked-changes decoration state. */
       refreshChanges: () => ReturnType;
       /**
@@ -201,6 +203,7 @@ function deleteColor(authorID: string): string {
  *   setTrackingStatus(status?)  — toggle or set tracking status
  *   setChangeStatuses(status, ids) — accept or reject changes; false when the plan is blocked
  *   setTrackChangesUserID(userID) — update the current user ID
+ *   setReplacementView(view)     — one card per replacement, or split as Word shows it
  *   refreshChanges()             — force-rebuild the ChangeSet
  */
 export const TrackChanges = Extension.create<TrackChangesOptions>({
@@ -277,6 +280,7 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
     if (this.options.canAcceptReject !== undefined) opts.canAcceptReject = this.options.canAcceptReject;
     if (this.options.skipTrsWithMetas !== undefined) opts.skipTrsWithMetas = this.options.skipTrsWithMetas;
     if (this.options.onRefused !== undefined) opts.onRefused = this.options.onRefused;
+    if (this.options.replacementView !== undefined) opts.replacementView = this.options.replacementView;
     return [
       trackChangesPlugin(opts),
       lastCutPlugin(),
@@ -326,6 +330,13 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
         (userID: string) =>
         (state: EditorState, dispatch: ((tr: Transaction) => void) | undefined) => {
           dispatch?.(setAction(state.tr, TrackChangesAction.setUserID, userID));
+          return true;
+        },
+
+      setReplacementView:
+        (view: ReplacementView) =>
+        (state: EditorState, dispatch: ((tr: Transaction) => void) | undefined) => {
+          dispatch?.(setAction(state.tr, TrackChangesAction.setReplacementView, view));
           return true;
         },
 
