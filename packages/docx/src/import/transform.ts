@@ -371,10 +371,11 @@ function transformAtom(
       const pmMarks = transformMarks(marks, ctx, handlers, recorder);
       return recorder.handle(owner, item.type, () => handler(item, pmMarks, ctx), built);
     },
-    (built) => (built ? null : { kind: item.type, owner }),
+    (atom) => (atom ? null : { kind: item.type, owner }),
   );
-  // A link counts once where it lands: an atom that was lost recorded it as
-  // dropped with itself, and leaves it to count again on the runs that land.
+  // A link counts kept once where it lands. An atom that was lost took its
+  // piece of the link with it, as dropped, and leaves the kept count to the
+  // runs that land.
   if (!node) uncountedWrappers.forEach((mark) => countedWrappers.delete(mark));
   return node;
 }
@@ -505,32 +506,48 @@ function fallbackBlock(
     code: "unsupported-block",
     message: `No import handler (and no fallback) for block kind "${block.type}"`,
   });
-  countLost(innerBlocks(block), insideDropped(block.type), recorder);
+  countLost(innerBlocks(block), insideDropped(block.type), ctx, recorder);
   return null;
 }
 
 /**
  * What a lost block held, counted as dropped with it. Only counted: a handler
  * run on content that is then thrown away could still leave something behind
- * — a field's answer, a warning — for content that is not in the document.
+ * — a field's answer, a resolved image — for content that is not in the
+ * document. It counts what the walk would have: a paragraph's runs under its
+ * style's formatting, no empty text, no content control's prompt.
  */
-function countLost(blocks: readonly DocxBlock[], reason: string, recorder: DocxReportRecorder): void {
-  const countInline = (inline: DocxInline): void => {
-    recorder.unhandled(inline.type, reason);
-    for (const mark of inline.marks) {
-      if (mark.off || (WRAPPER_KINDS.has(mark.kind) && countedWrappers.has(mark))) continue;
+function countLost(
+  blocks: readonly DocxBlock[],
+  reason: string,
+  ctx: DocxImportContext,
+  recorder: DocxReportRecorder,
+): void {
+  const countMarks = (marks: readonly DocxMark[]) => {
+    for (const mark of marks) {
+      if (mark.off || countedWrappers.has(mark)) continue;
       if (WRAPPER_KINDS.has(mark.kind)) countedWrappers.add(mark);
       recorder.unhandled(mark.kind, reason);
     }
-    if (inline.type === "sdt") inline.content.forEach(countInline);
+  };
+  const countInlines = (inlines: readonly DocxInline[], inherited: readonly DocxMark[]): void => {
+    for (const inline of inlines) {
+      if (inline.type === "text" && inline.text.length === 0) continue;
+      recorder.unhandled(inline.type, reason);
+      if (inline.type === "sdt") {
+        if (!inline.placeholder) countInlines(inline.content, layer(inherited, inline.marks));
+        continue;
+      }
+      countMarks(layer(inherited, inline.marks));
+    }
   };
   for (const block of blocks) {
     if (block.type === "paragraph") {
       recorder.unhandled("paragraph", reason);
-      block.content.forEach(countInline);
+      countInlines(block.content, ctx.styles.runMarks(block.attrs.styleId));
     } else {
       recorder.unhandled(block.type, reason);
-      countLost(innerBlocks(block), reason, recorder);
+      countLost(innerBlocks(block), reason, ctx, recorder);
     }
   }
 }

@@ -593,8 +593,8 @@ describe("importDocx — report", () => {
     for (const extensions of [[StarterKit], [StarterKit.configure({ image: false })]]) {
       const { report } = await importDocx(new ServerEditor({ extensions }), bytes);
 
-      expect(report.counts["hyperlink"]?.kept).toBe(1);
-      expect(report.counts["hyperlink"]?.dropped ?? 0).toBeLessThanOrEqual(1);
+      // The link is kept on the text; the piece of it on the lost image went with the image.
+      expect(report.counts["hyperlink"]).toMatchObject({ kept: 1, dropped: 1 });
     }
   });
 
@@ -606,6 +606,36 @@ describe("importDocx — report", () => {
 
       expect(dropsOf(report).filter((entry) => entry.kind === "sdt").map((entry) => entry.count)).toEqual([1]);
     }
+  });
+
+  it("counts a lost table's content as the same table kept would count it", async () => {
+    const runs =
+      '<w:r><w:t></w:t></w:r><w:r><w:rPr><w:b/></w:rPr><w:t>bold</w:t></w:r>' +
+      '<w:hyperlink w:anchor="top"><w:r><w:t>one</w:t></w:r><w:r><w:t>two</w:t></w:r></w:hyperlink>';
+    const cell = `<w:tc><w:p><w:pPr><w:pStyle w:val="Loud"/></w:pPr>${runs}</w:p></w:tc>`;
+    const table = `<w:tbl><w:tblGrid><w:gridCol w:w="2000"/></w:tblGrid><w:tr>${cell}</w:tr></w:tbl>`;
+    // A paragraph style that sets formatting its runs inherit.
+    const entries = unzipSync(await docWithBody(table));
+    const styles = strFromU8(entries["word/styles.xml"]!);
+    entries["word/styles.xml"] = strToU8(
+      styles.replace("</w:styles>", '<w:style w:type="paragraph" w:styleId="Loud"><w:rPr><w:i/></w:rPr></w:style></w:styles>'),
+    );
+    const bytes = zipSync(entries);
+    const kept = (await importDocx(new ServerEditor({ extensions: [StarterKit.configure({ table: true })] }), bytes)).report;
+    const lost = (await importDocx(new ServerEditor({ extensions: [StarterKit] }), bytes)).report;
+
+    const content = (kind: string) => !["table", "tableRow", "tableCell", "tableHeader", "paragraph"].includes(kind);
+    // What the table held: kept with it, less what the document outside it keeps either way.
+    const keptContent = Object.fromEntries(
+      Object.entries(kept.counts)
+        .filter(([kind]) => content(kind))
+        .map(([kind, count]) => [kind, count.kept - (lost.counts[kind]?.kept ?? 0)]),
+    );
+    const lostContent = Object.fromEntries(
+      dropsOf(lost).filter((entry) => entry.reason === insideDropped("table") && content(entry.kind)).map((entry) => [entry.kind, entry.count]),
+    );
+    expect(lostContent).toEqual(keptContent);
+    expect(Object.keys(keptContent).sort()).toEqual(["b", "hyperlink", "i", "text"]);
   });
 
   it("records a header nothing reads as dropped, with a warning", async () => {

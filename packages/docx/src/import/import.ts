@@ -174,9 +174,12 @@ export async function importDocx(
     ctx.walkBlocks = createBlockWalker(ctx, handlers);
     // A header or footer is Word's `w:hdr` or `w:ftr` part. One a walk cannot
     // read is the walking extension's loss; one nothing walks is nobody's.
-    const partKind = (relId: string) => {
-      const type = rels.get(relId)?.type ?? (sectionRefs.footers.some((ref) => ref.relId === relId) ? "footer" : "header");
-      return type === "footer" ? "w:ftr" : "w:hdr";
+    const partKind = (relId: string): "w:hdr" | "w:ftr" => {
+      const type = rels.get(relId)?.type;
+      if (type === "header") return "w:hdr";
+      if (type === "footer") return "w:ftr";
+      // No header or footer relationship: the slot that referenced it says which.
+      return sectionRefs.footers.some((ref) => ref.relId === relId) ? "w:ftr" : "w:hdr";
     };
     const walked = new Set<string>();
     const skipPart = (relId: string, code: string, message: string): null => {

@@ -51,6 +51,7 @@ export const NO_PARSER = "no parser";
 
 /** The reason recorded when a handler took content and gave nothing back. */
 export const HANDLER_RETURNED_NOTHING = "handler returned nothing";
+
 /** The reason for a header or footer part the import could not read; the warning says why. */
 export const PART_UNREADABLE = "part could not be read";
 
