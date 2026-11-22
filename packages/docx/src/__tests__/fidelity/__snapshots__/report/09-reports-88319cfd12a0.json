@@ -304,7 +304,7 @@
         "part": "word/styles.xml",
         "path": "w:styles/w:style/w:pPr",
         "outcome": "unread",
-        "count": 18
+        "count": 17
       },
       {
         "part": "word/styles.xml",
@@ -329,6 +329,24 @@
         "path": "w:styles/w:style/w:tblPr",
         "outcome": "unread",
         "count": 2
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:pPr/w:pBdr",
+        "outcome": "unread",
+        "count": 1
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:pPr/w:spacing",
+        "outcome": "unread",
+        "count": 1
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:pPr/w:jc",
+        "outcome": "unread",
+        "count": 1
       },
       {
         "part": "word/styles.xml",

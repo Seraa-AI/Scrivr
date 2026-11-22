@@ -70,6 +70,16 @@
         "kept": 10,
         "dropped": 0,
         "changed": 0
+      },
+      "w:ftr": {
+        "kept": 0,
+        "dropped": 1,
+        "changed": 0
+      },
+      "w:hdr": {
+        "kept": 0,
+        "dropped": 1,
+        "changed": 0
       }
     },
     "entries": [
@@ -135,6 +145,20 @@
         "reason": "no handler",
         "owner": null,
         "count": 2
+      },
+      {
+        "outcome": "dropped",
+        "kind": "w:hdr",
+        "reason": "no handler",
+        "owner": null,
+        "count": 1
+      },
+      {
+        "outcome": "dropped",
+        "kind": "w:ftr",
+        "reason": "no handler",
+        "owner": null,
+        "count": 1
       }
     ],
     "unread": [
@@ -356,12 +380,6 @@
       },
       {
         "part": "word/numbering.xml",
-        "path": "w:numbering/w:abstractNum/w:lvl/w:numFmt",
-        "outcome": "unread",
-        "count": 296
-      },
-      {
-        "part": "word/numbering.xml",
         "path": "w:numbering/w:numIdMacAtCleanup",
         "outcome": "unread",
         "count": 1
@@ -422,9 +440,21 @@
       },
       {
         "part": "word/styles.xml",
-        "path": "w:styles/w:style/w:pPr",
+        "path": "w:styles/w:style/w:pPr/w:widowControl",
         "outcome": "unread",
-        "count": 17
+        "count": 2
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:pPr/w:ind",
+        "outcome": "unread",
+        "count": 1
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:pPr/w:outlineLvl",
+        "outcome": "unread",
+        "count": 1
       },
       {
         "part": "word/styles.xml",
@@ -458,9 +488,33 @@
       },
       {
         "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:pPr/w:jc",
+        "outcome": "unread",
+        "count": 1
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:pPr/w:tabs",
+        "outcome": "unread",
+        "count": 1
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:pPr/w:suppressAutoHyphens",
+        "outcome": "unread",
+        "count": 1
+      },
+      {
+        "part": "word/styles.xml",
         "path": "w:styles/w:style/w:rPr/w:snapToGrid",
         "outcome": "ignored",
         "count": 1
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:pPr",
+        "outcome": "unread",
+        "count": 13
       },
       {
         "part": "word/styles.xml",
@@ -473,6 +527,12 @@
         "path": "w:styles/w:style/w:aliases",
         "outcome": "unread",
         "count": 3
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:pPr/w:spacing",
+        "outcome": "unread",
+        "count": 1
       },
       {
         "part": "word/settings.xml",

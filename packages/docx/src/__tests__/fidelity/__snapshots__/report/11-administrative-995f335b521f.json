@@ -65,6 +65,16 @@
         "kept": 0,
         "dropped": 3,
         "changed": 0
+      },
+      "w:ftr": {
+        "kept": 0,
+        "dropped": 3,
+        "changed": 0
+      },
+      "w:hdr": {
+        "kept": 0,
+        "dropped": 3,
+        "changed": 0
       }
     },
     "entries": [
@@ -106,6 +116,20 @@
       {
         "outcome": "dropped",
         "kind": "vertAlign",
+        "reason": "no handler",
+        "owner": null,
+        "count": 3
+      },
+      {
+        "outcome": "dropped",
+        "kind": "w:hdr",
+        "reason": "no handler",
+        "owner": null,
+        "count": 3
+      },
+      {
+        "outcome": "dropped",
+        "kind": "w:ftr",
         "reason": "no handler",
         "owner": null,
         "count": 3
@@ -323,12 +347,6 @@
         "count": 43
       },
       {
-        "part": "word/numbering.xml",
-        "path": "w:numbering/w:abstractNum/w:lvl/w:numFmt",
-        "outcome": "unread",
-        "count": 96
-      },
-      {
         "part": "word/styles.xml",
         "path": "w:styles/w:docDefaults/w:rPrDefault/w:rPr/w:lang",
         "outcome": "ignored",
@@ -392,13 +410,31 @@
         "part": "word/styles.xml",
         "path": "w:styles/w:style/w:pPr",
         "outcome": "unread",
-        "count": 7
+        "count": 6
       },
       {
         "part": "word/styles.xml",
         "path": "w:styles/w:style/w:rPr",
         "outcome": "unread",
         "count": 7
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:pPr/w:keepNext",
+        "outcome": "unread",
+        "count": 1
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:pPr/w:jc",
+        "outcome": "unread",
+        "count": 1
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:pPr/w:outlineLvl",
+        "outcome": "unread",
+        "count": 1
       },
       {
         "part": "word/styles.xml",

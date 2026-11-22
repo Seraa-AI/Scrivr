@@ -213,9 +213,9 @@
       },
       {
         "part": "word/styles.xml",
-        "path": "w:styles/w:style/w:pPr",
+        "path": "w:styles/w:style/w:pPr/w:spacing",
         "outcome": "unread",
-        "count": 5
+        "count": 4
       },
       {
         "part": "word/styles.xml",
@@ -240,6 +240,24 @@
         "path": "w:styles/w:style/w:link",
         "outcome": "unread",
         "count": 14
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:pPr/w:keepNext",
+        "outcome": "unread",
+        "count": 1
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:pPr/w:keepLines",
+        "outcome": "unread",
+        "count": 1
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:pPr/w:outlineLvl",
+        "outcome": "unread",
+        "count": 1
       },
       {
         "part": "word/styles.xml",
@@ -276,6 +294,24 @@
         "path": "w:styles/w:style/w:rPr",
         "outcome": "unread",
         "count": 11
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:pPr/w:tabs",
+        "outcome": "unread",
+        "count": 1
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:pPr/w:suppressAutoHyphens",
+        "outcome": "unread",
+        "count": 1
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:pPr/w:ind",
+        "outcome": "unread",
+        "count": 1
       },
       {
         "part": "word/settings.xml",

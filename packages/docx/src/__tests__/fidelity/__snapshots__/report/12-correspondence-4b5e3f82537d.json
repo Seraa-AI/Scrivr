@@ -330,12 +330,6 @@
       },
       {
         "part": "word/numbering.xml",
-        "path": "w:numbering/w:abstractNum/w:lvl/w:numFmt",
-        "outcome": "unread",
-        "count": 16
-      },
-      {
-        "part": "word/numbering.xml",
         "path": "w:numbering/w:abstractNum/w:lvl/w:rPr",
         "outcome": "unread",
         "count": 9
@@ -378,9 +372,9 @@
       },
       {
         "part": "word/styles.xml",
-        "path": "w:styles/w:style/w:pPr",
+        "path": "w:styles/w:style/w:pPr/w:spacing",
         "outcome": "unread",
-        "count": 5
+        "count": 2
       },
       {
         "part": "word/styles.xml",
@@ -420,6 +414,12 @@
       },
       {
         "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:pPr",
+        "outcome": "unread",
+        "count": 3
+      },
+      {
+        "part": "word/styles.xml",
         "path": "w:styles/w:style/w:basedOn",
         "outcome": "unread",
         "count": 5
@@ -429,6 +429,12 @@
         "path": "w:styles/w:style/w:rsid",
         "outcome": "ignored",
         "count": 3
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:pPr/w:pBdr",
+        "outcome": "unread",
+        "count": 1
       },
       {
         "part": "word/styles.xml",

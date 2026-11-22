@@ -281,12 +281,6 @@
         "count": 25
       },
       {
-        "part": "word/numbering.xml",
-        "path": "w:numbering/w:abstractNum/w:lvl/w:numFmt",
-        "outcome": "unread",
-        "count": 104
-      },
-      {
         "part": "word/styles.xml",
         "path": "w:styles/w:docDefaults/w:rPrDefault/w:rPr/w:lang",
         "outcome": "ignored",
@@ -330,9 +324,15 @@
       },
       {
         "part": "word/styles.xml",
-        "path": "w:styles/w:style/w:pPr",
+        "path": "w:styles/w:style/w:pPr/w:keepNext",
         "outcome": "unread",
-        "count": 3
+        "count": 1
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:pPr/w:outlineLvl",
+        "outcome": "unread",
+        "count": 1
       },
       {
         "part": "word/styles.xml",
@@ -363,6 +363,12 @@
         "path": "w:styles/w:style/w:basedOn",
         "outcome": "unread",
         "count": 7
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:pPr",
+        "outcome": "unread",
+        "count": 2
       },
       {
         "part": "word/styles.xml",

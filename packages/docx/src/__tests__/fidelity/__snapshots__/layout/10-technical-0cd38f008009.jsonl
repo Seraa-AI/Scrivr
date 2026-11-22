@@ -62,30 +62,30 @@
 {"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":385.6,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
 {"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":412.4,"width":650,"height":31.2,"spaceBefore":0,"spaceAfter":10,"lines":["There are two pr","Cumulative Annua"]}
 {"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":453.6,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
-{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":480.4,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["Transmission (Fo"]}
-{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":506,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
-{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":532.8,"width":650,"height":46.8,"spaceBefore":0,"spaceAfter":10,"lines":["Both the MDR CHC","respective funct","functional speci"]}
-{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":589.6,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["\t"]}
-{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":615.2,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["Organization and"]}
-{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":640.8,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
-{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":667.6,"width":650,"height":31.2,"spaceBefore":0,"spaceAfter":10,"lines":["Output Products:","enrollment MEPRS"]}
-{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":708.8,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
-{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":735.6,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["Table 1: Enrollm"]}
-{"op":"block","page":2,"depth":0,"type":"tableRow","x":72,"y":761.2,"width":650,"height":33.6,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":2,"depth":0,"type":"paragraph","x":120,"y":480.4,"width":602,"height":15.6,"spaceBefore":0,"spaceAfter":4,"lines":["Transmission (Fo"]}
+{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":500,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":526.8,"width":650,"height":46.8,"spaceBefore":0,"spaceAfter":10,"lines":["Both the MDR CHC","respective funct","functional speci"]}
+{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":583.6,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["\t"]}
+{"op":"block","page":2,"depth":0,"type":"paragraph","x":120,"y":609.2,"width":602,"height":15.6,"spaceBefore":0,"spaceAfter":4,"lines":["Organization and"]}
+{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":628.8,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":655.6,"width":650,"height":31.2,"spaceBefore":0,"spaceAfter":10,"lines":["Output Products:","enrollment MEPRS"]}
+{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":696.8,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":723.6,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["Table 1: Enrollm"]}
+{"op":"block","page":2,"depth":0,"type":"tableRow","x":72,"y":749.2,"width":650,"height":33.6,"spaceBefore":0,"spaceAfter":0,"lines":[]}
 {"op":"block","page":2,"depth":1,"type":"paragraph","x":78,"y":4,"width":276.039,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["Enrollment MEPRS"]}
 {"op":"block","page":2,"depth":1,"type":"paragraph","x":366.039,"y":4,"width":197.02,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["File Naming Conv"]}
 {"op":"block","page":2,"depth":1,"type":"paragraph","x":575.059,"y":4,"width":140.941,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["Member Name"]}
-{"op":"block","page":2,"depth":0,"type":"tableRow","x":72,"y":794.8,"width":650,"height":33.6,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":2,"depth":0,"type":"tableRow","x":72,"y":782.8,"width":650,"height":33.6,"spaceBefore":0,"spaceAfter":0,"lines":[]}
 {"op":"block","page":2,"depth":1,"type":"paragraph","x":78,"y":4,"width":276.039,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["Enrollment MEPRS"]}
 {"op":"block","page":2,"depth":1,"type":"paragraph","x":366.039,"y":4,"width":197.02,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["/mdr/pub/pcmh/fy"]}
 {"op":"block","page":2,"depth":1,"type":"paragraph","x":575.059,"y":4,"width":140.941,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["enr_meprs.fmt"]}
-{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":828.4,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
-{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":855.2,"width":650,"height":31.2,"spaceBefore":0,"spaceAfter":10,"lines":["Archival of file","etc) are also lo"]}
-{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":896.4,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
-{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":923.2,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["Receiving Filter"]}
-{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":948.8,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
-{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":975.6,"width":650,"height":31.2,"spaceBefore":0,"spaceAfter":10,"lines":["Include records ","corresponding to"]}
-{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":1016.8,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":816.4,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":843.2,"width":650,"height":31.2,"spaceBefore":0,"spaceAfter":10,"lines":["Archival of file","etc) are also lo"]}
+{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":884.4,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":2,"depth":0,"type":"paragraph","x":120,"y":911.2,"width":602,"height":15.6,"spaceBefore":0,"spaceAfter":4,"lines":["Receiving Filter"]}
+{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":930.8,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":957.6,"width":650,"height":31.2,"spaceBefore":0,"spaceAfter":10,"lines":["Include records ","corresponding to"]}
+{"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":998.8,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
 {"op":"page","page":3,"width":794,"height":1123,"margins":{"top":72,"right":72,"bottom":72,"left":72}}
 {"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":72,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["Table 2: Receivi"]}
 {"op":"block","page":3,"depth":0,"type":"tableRow","x":72,"y":97.6,"width":650,"height":33.6,"spaceBefore":0,"spaceAfter":0,"lines":[]}
@@ -113,21 +113,21 @@
 {"op":"block","page":3,"depth":1,"type":"paragraph","x":302.029,"y":29.6,"width":413.971,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["LENRMTF, LBGNDT,"]}
 {"op":"block","page":3,"depth":1,"type":"paragraph","x":302.029,"y":55.2,"width":413.971,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["LPCMID (from seg"]}
 {"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":517.6,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
-{"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":544.4,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["Update Process"]}
-{"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":570,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
-{"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":596.8,"width":650,"height":46.8,"spaceBefore":0,"spaceAfter":10,"lines":["Obtain the most ","Merge them based","DEERS LVM file),"]}
-{"op":"block","page":3,"depth":0,"type":"paragraph","x":120,"y":653.6,"width":602,"height":15.6,"spaceBefore":0,"spaceAfter":4,"lines":["LVM LENRMTF=CHCS"]}
-{"op":"block","page":3,"depth":0,"type":"paragraph","x":120,"y":673.2,"width":602,"height":15.6,"spaceBefore":0,"spaceAfter":4,"lines":["LVM LBGNDT= CHCS"]}
-{"op":"block","page":3,"depth":0,"type":"paragraph","x":120,"y":692.8,"width":602,"height":15.6,"spaceBefore":0,"spaceAfter":4,"lines":["LVM LPCMID=PCM_E"]}
-{"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":712.4,"width":650,"height":46.8,"spaceBefore":0,"spaceAfter":10,"lines":["Retain each CHCS","above, adding th","records that do "]}
-{"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":769.2,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["Field Transforma"]}
-{"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":794.8,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
-{"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":821.6,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["None."]}
-{"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":847.2,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
-{"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":874,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["Record Layout an"]}
-{"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":899.6,"width":650,"height":109.2,"spaceBefore":0,"spaceAfter":10,"lines":["The MDR Enrollme","VI above, made l","for each FY is e","the fiscal year ","be at person-lev","information abou","given year. "]}
-{"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":1018.8,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
-{"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":1035.6,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":0,"lines":["The first line i"]}
+{"op":"block","page":3,"depth":0,"type":"paragraph","x":120,"y":544.4,"width":602,"height":15.6,"spaceBefore":0,"spaceAfter":4,"lines":["Update Process"]}
+{"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":564,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":590.8,"width":650,"height":46.8,"spaceBefore":0,"spaceAfter":10,"lines":["Obtain the most ","Merge them based","DEERS LVM file),"]}
+{"op":"block","page":3,"depth":0,"type":"paragraph","x":120,"y":647.6,"width":602,"height":15.6,"spaceBefore":0,"spaceAfter":4,"lines":["LVM LENRMTF=CHCS"]}
+{"op":"block","page":3,"depth":0,"type":"paragraph","x":120,"y":667.2,"width":602,"height":15.6,"spaceBefore":0,"spaceAfter":4,"lines":["LVM LBGNDT= CHCS"]}
+{"op":"block","page":3,"depth":0,"type":"paragraph","x":120,"y":686.8,"width":602,"height":15.6,"spaceBefore":0,"spaceAfter":4,"lines":["LVM LPCMID=PCM_E"]}
+{"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":706.4,"width":650,"height":46.8,"spaceBefore":0,"spaceAfter":10,"lines":["Retain each CHCS","above, adding th","records that do "]}
+{"op":"block","page":3,"depth":0,"type":"paragraph","x":120,"y":763.2,"width":602,"height":15.6,"spaceBefore":0,"spaceAfter":4,"lines":["Field Transforma"]}
+{"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":782.8,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":809.6,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["None."]}
+{"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":835.2,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":3,"depth":0,"type":"paragraph","x":120,"y":862,"width":602,"height":15.6,"spaceBefore":0,"spaceAfter":4,"lines":["Record Layout an"]}
+{"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":881.6,"width":650,"height":109.2,"spaceBefore":0,"spaceAfter":10,"lines":["The MDR Enrollme","VI above, made l","for each FY is e","the fiscal year ","be at person-lev","information abou","given year. "]}
+{"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":1000.8,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":1027.6,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":0,"lines":["The first line i"]}
 {"op":"page","page":4,"width":794,"height":1123,"margins":{"top":72,"right":72,"bottom":72,"left":72}}
 {"op":"block","page":4,"depth":0,"type":"paragraph","x":72,"y":72,"width":650,"height":31.2,"spaceBefore":0,"spaceAfter":10,"lines":["where YY represe","concatenated str"]}
 {"op":"block","page":4,"depth":0,"type":"paragraph","x":72,"y":113.2,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["Table 5: Values "]}
@@ -200,11 +200,11 @@
 {"op":"block","page":4,"depth":0,"type":"paragraph","x":72,"y":823.6,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["\tother = ‘   ‘;"]}
 {"op":"block","page":4,"depth":0,"type":"paragraph","x":72,"y":849.2,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["run;"]}
 {"op":"block","page":4,"depth":0,"type":"paragraph","x":72,"y":874.8,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
-{"op":"block","page":4,"depth":0,"type":"paragraph","x":72,"y":901.6,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["Refresh Frequenc"]}
-{"op":"block","page":4,"depth":0,"type":"paragraph","x":72,"y":927.2,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
-{"op":"block","page":4,"depth":0,"type":"paragraph","x":120,"y":954,"width":602,"height":31.2,"spaceBefore":0,"spaceAfter":4,"lines":["The MDR Enrollme","the previous fis"]}
-{"op":"block","page":4,"depth":0,"type":"paragraph","x":72,"y":989.2,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
-{"op":"block","page":4,"depth":0,"type":"paragraph","x":120,"y":1016,"width":602,"height":31.2,"spaceBefore":0,"spaceAfter":0,"lines":["The MDR Enrollme","semi-annually, i"]}
+{"op":"block","page":4,"depth":0,"type":"paragraph","x":120,"y":901.6,"width":602,"height":15.6,"spaceBefore":0,"spaceAfter":4,"lines":["Refresh Frequenc"]}
+{"op":"block","page":4,"depth":0,"type":"paragraph","x":72,"y":921.2,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":4,"depth":0,"type":"paragraph","x":120,"y":948,"width":602,"height":31.2,"spaceBefore":0,"spaceAfter":4,"lines":["The MDR Enrollme","the previous fis"]}
+{"op":"block","page":4,"depth":0,"type":"paragraph","x":72,"y":983.2,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":4,"depth":0,"type":"paragraph","x":120,"y":1010,"width":602,"height":31.2,"spaceBefore":0,"spaceAfter":0,"lines":["The MDR Enrollme","semi-annually, i"]}
 {"op":"page","page":5,"width":794,"height":1123,"margins":{"top":72,"right":72,"bottom":72,"left":72}}
 {"op":"block","page":5,"depth":0,"type":"paragraph","x":120,"y":72,"width":602,"height":15.6,"spaceBefore":0,"spaceAfter":4,"lines":["from that period"]}
 {"op":"block","page":5,"depth":0,"type":"paragraph","x":72,"y":91.6,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
@@ -218,13 +218,13 @@
 {"op":"block","page":5,"depth":0,"type":"paragraph","x":120,"y":338.4,"width":602,"height":31.2,"spaceBefore":0,"spaceAfter":4,"lines":["Frequency tabula","being processed)"]}
 {"op":"block","page":5,"depth":0,"type":"paragraph","x":120,"y":373.6,"width":602,"height":31.2,"spaceBefore":0,"spaceAfter":4,"lines":["Routine feed and","Code processor."]}
 {"op":"block","page":5,"depth":0,"type":"paragraph","x":72,"y":408.8,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
-{"op":"block","page":5,"depth":0,"type":"paragraph","x":72,"y":435.6,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["Data Marts"]}
-{"op":"block","page":5,"depth":0,"type":"paragraph","x":72,"y":461.2,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
-{"op":"block","page":5,"depth":0,"type":"paragraph","x":72,"y":488,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
-{"op":"block","page":5,"depth":0,"type":"paragraph","x":72,"y":514.8,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["Special Outputs"]}
-{"op":"block","page":5,"depth":0,"type":"paragraph","x":72,"y":540.4,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
-{"op":"block","page":5,"depth":0,"type":"paragraph","x":72,"y":567.2,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["N/A"]}
-{"op":"block","page":5,"depth":0,"type":"paragraph","x":72,"y":592.8,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":5,"depth":0,"type":"paragraph","x":120,"y":435.6,"width":602,"height":15.6,"spaceBefore":0,"spaceAfter":4,"lines":["Data Marts"]}
+{"op":"block","page":5,"depth":0,"type":"paragraph","x":72,"y":455.2,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":5,"depth":0,"type":"paragraph","x":72,"y":482,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":5,"depth":0,"type":"paragraph","x":120,"y":508.8,"width":602,"height":15.6,"spaceBefore":0,"spaceAfter":4,"lines":["Special Outputs"]}
+{"op":"block","page":5,"depth":0,"type":"paragraph","x":72,"y":528.4,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":5,"depth":0,"type":"paragraph","x":72,"y":555.2,"width":650,"height":15.6,"spaceBefore":0,"spaceAfter":10,"lines":["N/A"]}
+{"op":"block","page":5,"depth":0,"type":"paragraph","x":72,"y":580.8,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
 {"op":"page","page":6,"width":794,"height":1123,"margins":{"top":72,"right":72,"bottom":72,"left":72}}
 {"op":"block","page":6,"depth":0,"type":"paragraph","x":72,"y":72,"width":650,"height":18,"spaceBefore":0,"spaceAfter":10,"lines":["Appendix A: How "]}
 {"op":"block","page":6,"depth":0,"type":"paragraph","x":72,"y":100,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}

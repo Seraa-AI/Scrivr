@@ -12,7 +12,7 @@
         "changed": 0
       },
       "hyperlink": {
-        "kept": 57,
+        "kept": 50,
         "dropped": 0,
         "changed": 0
       },
@@ -65,6 +65,16 @@
         "kept": 150,
         "dropped": 0,
         "changed": 0
+      },
+      "w:ftr": {
+        "kept": 0,
+        "dropped": 1,
+        "changed": 0
+      },
+      "w:hdr": {
+        "kept": 0,
+        "dropped": 1,
+        "changed": 0
       }
     },
     "entries": [
@@ -106,6 +116,20 @@
       {
         "outcome": "dropped",
         "kind": "noProof",
+        "reason": "no handler",
+        "owner": null,
+        "count": 1
+      },
+      {
+        "outcome": "dropped",
+        "kind": "w:hdr",
+        "reason": "no handler",
+        "owner": null,
+        "count": 1
+      },
+      {
+        "outcome": "dropped",
+        "kind": "w:ftr",
         "reason": "no handler",
         "owner": null,
         "count": 1
@@ -299,12 +323,6 @@
         "count": 117
       },
       {
-        "part": "word/numbering.xml",
-        "path": "w:numbering/w:abstractNum/w:lvl/w:numFmt",
-        "outcome": "unread",
-        "count": 104
-      },
-      {
         "part": "word/styles.xml",
         "path": "w:styles/w:docDefaults/w:rPrDefault/w:rPr/w:szCs",
         "outcome": "ignored",
@@ -368,7 +386,7 @@
         "part": "word/styles.xml",
         "path": "w:styles/w:style/w:pPr",
         "outcome": "unread",
-        "count": 12
+        "count": 10
       },
       {
         "part": "word/styles.xml",
@@ -399,6 +417,24 @@
         "path": "w:styles/w:style/w:tblPr",
         "outcome": "unread",
         "count": 2
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:pPr/w:ind",
+        "outcome": "unread",
+        "count": 1
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:pPr/w:contextualSpacing",
+        "outcome": "unread",
+        "count": 1
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:pPr/w:spacing",
+        "outcome": "unread",
+        "count": 1
       },
       {
         "part": "word/styles.xml",

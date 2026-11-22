@@ -45,18 +45,18 @@
 {"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":280.8,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
 {"op":"block","page":2,"depth":0,"type":"paragraph","x":72,"y":307.6,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
 {"op":"page","page":3,"width":794,"height":1123,"margins":{"top":72,"right":72,"bottom":72,"left":72}}
-{"op":"block","page":3,"depth":0,"type":"heading","x":72,"y":72,"width":650,"height":28.8,"spaceBefore":24,"spaceAfter":12,"lines":["Background"]}
+{"op":"block","page":3,"depth":0,"type":"heading","x":120,"y":72,"width":602,"height":28.8,"spaceBefore":24,"spaceAfter":12,"lines":["Background"]}
 {"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":112.8,"width":650,"height":90,"spaceBefore":0,"spaceAfter":10,"lines":["We tested access","Accessibility Ev","Toolbar, which i","to WCAG 2.0 guid","that are general"]}
 {"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":212.8,"width":650,"height":108,"spaceBefore":0,"spaceAfter":10,"lines":["The WAVE tool gr","HTML5/ARIA eleme","Most of the erro","web pages. Becau","be identified as","process the HTML"]}
 {"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":330.8,"width":650,"height":18,"spaceBefore":0,"spaceAfter":10,"lines":["Browser tested: "]}
-{"op":"block","page":3,"depth":0,"type":"heading","x":72,"y":372.8,"width":650,"height":28.8,"spaceBefore":24,"spaceAfter":12,"lines":["User login."]}
+{"op":"block","page":3,"depth":0,"type":"heading","x":120,"y":372.8,"width":602,"height":28.8,"spaceBefore":24,"spaceAfter":12,"lines":["User login."]}
 {"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":413.6,"width":650,"height":40.8,"spaceBefore":0,"spaceAfter":10,"lines":[" The separate lo","and adjusted for"]}
 {"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":464.4,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
-{"op":"block","page":3,"depth":0,"type":"heading","x":72,"y":505.2,"width":650,"height":28.8,"spaceBefore":24,"spaceAfter":12,"lines":["Login page. "]}
+{"op":"block","page":3,"depth":0,"type":"heading","x":120,"y":505.2,"width":602,"height":28.8,"spaceBefore":24,"spaceAfter":12,"lines":["Login page. "]}
 {"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":546,"width":650,"height":18,"spaceBefore":0,"spaceAfter":10,"lines":["Errors:"]}
 {"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":574,"width":650,"height":18,"spaceBefore":0,"spaceAfter":10,"lines":["No errors anymor"]}
 {"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":602,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
-{"op":"block","page":3,"depth":0,"type":"heading","x":72,"y":642.8,"width":650,"height":28.8,"spaceBefore":24,"spaceAfter":12,"lines":["Home page after "]}
+{"op":"block","page":3,"depth":0,"type":"heading","x":120,"y":642.8,"width":602,"height":28.8,"spaceBefore":24,"spaceAfter":12,"lines":["Home page after "]}
 {"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":683.6,"width":650,"height":36,"spaceBefore":0,"spaceAfter":10,"lines":["After successful","page. In additio"]}
 {"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":729.6,"width":650,"height":18,"spaceBefore":0,"spaceAfter":10,"lines":["Errors: "]}
 {"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":757.6,"width":650,"height":18,"spaceBefore":0,"spaceAfter":10,"lines":["4 errors are rep"]}
@@ -65,12 +65,12 @@
 {"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":841.6,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
 {"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":868.4,"width":650,"height":54,"spaceBefore":0,"spaceAfter":10,"lines":["All errors are h","delivery. Depend","solved through J"]}
 {"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":932.4,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
-{"op":"block","page":3,"depth":0,"type":"heading","x":72,"y":973.2,"width":650,"height":28.8,"spaceBefore":24,"spaceAfter":12,"lines":["PLAN page"]}
+{"op":"block","page":3,"depth":0,"type":"heading","x":120,"y":973.2,"width":602,"height":28.8,"spaceBefore":24,"spaceAfter":12,"lines":["PLAN page"]}
 {"op":"block","page":3,"depth":0,"type":"paragraph","x":72,"y":1014,"width":650,"height":36,"spaceBefore":0,"spaceAfter":0,"lines":["Six menu options","“Overview” is ch"]}
 {"op":"page","page":4,"width":794,"height":1123,"margins":{"top":72,"right":72,"bottom":72,"left":72}}
 {"op":"block","page":4,"depth":0,"type":"paragraph","x":72,"y":72,"width":650,"height":18,"spaceBefore":0,"spaceAfter":10,"lines":["“Information” an"]}
 {"op":"page","page":5,"width":794,"height":1123,"margins":{"top":72,"right":72,"bottom":72,"left":72}}
-{"op":"block","page":5,"depth":0,"type":"heading","x":72,"y":72,"width":650,"height":28.8,"spaceBefore":24,"spaceAfter":12,"lines":["Menu option “Ove"]}
+{"op":"block","page":5,"depth":0,"type":"heading","x":120,"y":72,"width":602,"height":28.8,"spaceBefore":24,"spaceAfter":12,"lines":["Menu option “Ove"]}
 {"op":"block","page":5,"depth":0,"type":"paragraph","x":72,"y":112.8,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
 {"op":"block","page":5,"depth":0,"type":"paragraph","x":72,"y":139.6,"width":650,"height":18,"spaceBefore":0,"spaceAfter":10,"lines":["“Plan” tab (defa"]}
 {"op":"block","page":5,"depth":0,"type":"paragraph","x":72,"y":167.6,"width":650,"height":18,"spaceBefore":0,"spaceAfter":10,"lines":["Errors:"]}
@@ -90,37 +90,37 @@
 {"op":"block","page":5,"depth":0,"type":"paragraph","x":72,"y":556,"width":650,"height":18,"spaceBefore":0,"spaceAfter":10,"lines":["1 error reported"]}
 {"op":"block","page":5,"depth":0,"type":"paragraph","x":72,"y":584,"width":650,"height":18,"spaceBefore":0,"spaceAfter":10,"lines":["1 x “Empty table"]}
 {"op":"block","page":5,"depth":0,"type":"paragraph","x":72,"y":612,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
-{"op":"block","page":5,"depth":0,"type":"heading","x":72,"y":652.8,"width":650,"height":28.8,"spaceBefore":24,"spaceAfter":12,"lines":["Menu option “Mon"]}
+{"op":"block","page":5,"depth":0,"type":"heading","x":120,"y":652.8,"width":602,"height":28.8,"spaceBefore":24,"spaceAfter":12,"lines":["Menu option “Mon"]}
 {"op":"block","page":5,"depth":0,"type":"paragraph","x":72,"y":693.6,"width":650,"height":18,"spaceBefore":0,"spaceAfter":10,"lines":["Errors:"]}
 {"op":"block","page":5,"depth":0,"type":"paragraph","x":72,"y":721.6,"width":650,"height":18,"spaceBefore":0,"spaceAfter":10,"lines":["0 error reported"]}
 {"op":"block","page":5,"depth":0,"type":"paragraph","x":72,"y":749.6,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
-{"op":"block","page":5,"depth":0,"type":"heading","x":72,"y":790.4,"width":650,"height":28.8,"spaceBefore":24,"spaceAfter":12,"lines":["Menu option “Med"]}
+{"op":"block","page":5,"depth":0,"type":"heading","x":120,"y":790.4,"width":602,"height":28.8,"spaceBefore":24,"spaceAfter":12,"lines":["Menu option “Med"]}
 {"op":"block","page":5,"depth":0,"type":"paragraph","x":72,"y":831.2,"width":650,"height":36,"spaceBefore":0,"spaceAfter":10,"lines":["Four navigation ","“Info”"]}
 {"op":"block","page":5,"depth":0,"type":"paragraph","x":72,"y":877.2,"width":650,"height":18,"spaceBefore":0,"spaceAfter":10,"lines":["“My medication” "]}
 {"op":"block","page":5,"depth":0,"type":"paragraph","x":72,"y":905.2,"width":650,"height":18,"spaceBefore":0,"spaceAfter":10,"lines":["Errors:"]}
 {"op":"block","page":5,"depth":0,"type":"paragraph","x":72,"y":933.2,"width":650,"height":18,"spaceBefore":0,"spaceAfter":10,"lines":["2 errors reporte"]}
 {"op":"block","page":5,"depth":0,"type":"paragraph","x":72,"y":961.2,"width":650,"height":18,"spaceBefore":0,"spaceAfter":10,"lines":["2 x Empty table "]}
 {"op":"block","page":5,"depth":0,"type":"paragraph","x":72,"y":989.2,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
-{"op":"block","page":5,"depth":0,"type":"heading","x":72,"y":1006,"width":650,"height":28.8,"spaceBefore":24,"spaceAfter":12,"lines":["Menu option “Nut"]}
 {"op":"page","page":6,"width":794,"height":1123,"margins":{"top":72,"right":72,"bottom":72,"left":72}}
-{"op":"block","page":6,"depth":0,"type":"paragraph","x":72,"y":72,"width":650,"height":18,"spaceBefore":0,"spaceAfter":10,"lines":["Errors:"]}
-{"op":"block","page":6,"depth":0,"type":"paragraph","x":72,"y":100,"width":650,"height":18,"spaceBefore":0,"spaceAfter":10,"lines":["0 error reported"]}
-{"op":"block","page":6,"depth":0,"type":"paragraph","x":72,"y":128,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
-{"op":"block","page":6,"depth":0,"type":"heading","x":72,"y":168.8,"width":650,"height":28.8,"spaceBefore":24,"spaceAfter":12,"lines":["Menu option “Act"]}
-{"op":"block","page":6,"depth":0,"type":"paragraph","x":72,"y":209.6,"width":650,"height":18,"spaceBefore":0,"spaceAfter":10,"lines":["Errors:"]}
-{"op":"block","page":6,"depth":0,"type":"paragraph","x":72,"y":237.6,"width":650,"height":18,"spaceBefore":0,"spaceAfter":10,"lines":["0 error reported"]}
-{"op":"block","page":6,"depth":0,"type":"heading","x":72,"y":279.6,"width":650,"height":28.8,"spaceBefore":24,"spaceAfter":12,"lines":["Menu option “Hea"]}
-{"op":"block","page":6,"depth":0,"type":"paragraph","x":72,"y":320.4,"width":650,"height":18,"spaceBefore":0,"spaceAfter":10,"lines":["Errors:"]}
-{"op":"block","page":6,"depth":0,"type":"paragraph","x":72,"y":348.4,"width":650,"height":18,"spaceBefore":0,"spaceAfter":10,"lines":["2 errors reporte"]}
-{"op":"block","page":6,"depth":0,"type":"paragraph","x":72,"y":376.4,"width":650,"height":18,"spaceBefore":0,"spaceAfter":10,"lines":["2 x Missing alte"]}
-{"op":"block","page":6,"depth":0,"type":"heading","x":72,"y":418.4,"width":650,"height":28.8,"spaceBefore":24,"spaceAfter":12,"lines":["Other pages"]}
-{"op":"block","page":6,"depth":0,"type":"paragraph","x":72,"y":459.2,"width":650,"height":54,"spaceBefore":0,"spaceAfter":10,"lines":["The other main p","Knowledge, Profi","ones listed earl"]}
-{"op":"block","page":6,"depth":0,"type":"paragraph","x":120,"y":523.2,"width":602,"height":19.2,"spaceBefore":0,"spaceAfter":4,"lines":["Empty link"]}
-{"op":"block","page":6,"depth":0,"type":"paragraph","x":120,"y":546.4,"width":602,"height":19.2,"spaceBefore":0,"spaceAfter":4,"lines":["Missing form lab"]}
-{"op":"block","page":6,"depth":0,"type":"paragraph","x":120,"y":569.6,"width":602,"height":19.2,"spaceBefore":0,"spaceAfter":4,"lines":["Empty table head"]}
-{"op":"block","page":6,"depth":0,"type":"paragraph","x":72,"y":592.8,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
-{"op":"block","page":6,"depth":0,"type":"paragraph","x":72,"y":619.6,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
-{"op":"block","page":6,"depth":0,"type":"paragraph","x":72,"y":646.4,"width":650,"height":22.8,"spaceBefore":0,"spaceAfter":10,"lines":["Outline"]}
-{"op":"block","page":6,"depth":0,"type":"paragraph","x":72,"y":679.2,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
-{"op":"block","page":6,"depth":0,"type":"paragraph","x":72,"y":706,"width":650,"height":72,"spaceBefore":0,"spaceAfter":10,"lines":["Many errors show","tool works. The ","identified which","to be accessible"]}
-{"op":"block","page":6,"depth":0,"type":"paragraph","x":72,"y":788,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":6,"depth":0,"type":"heading","x":120,"y":72,"width":602,"height":28.8,"spaceBefore":24,"spaceAfter":12,"lines":["Menu option “Nut"]}
+{"op":"block","page":6,"depth":0,"type":"paragraph","x":72,"y":112.8,"width":650,"height":18,"spaceBefore":0,"spaceAfter":10,"lines":["Errors:"]}
+{"op":"block","page":6,"depth":0,"type":"paragraph","x":72,"y":140.8,"width":650,"height":18,"spaceBefore":0,"spaceAfter":10,"lines":["0 error reported"]}
+{"op":"block","page":6,"depth":0,"type":"paragraph","x":72,"y":168.8,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":6,"depth":0,"type":"heading","x":120,"y":209.6,"width":602,"height":28.8,"spaceBefore":24,"spaceAfter":12,"lines":["Menu option “Act"]}
+{"op":"block","page":6,"depth":0,"type":"paragraph","x":72,"y":250.4,"width":650,"height":18,"spaceBefore":0,"spaceAfter":10,"lines":["Errors:"]}
+{"op":"block","page":6,"depth":0,"type":"paragraph","x":72,"y":278.4,"width":650,"height":18,"spaceBefore":0,"spaceAfter":10,"lines":["0 error reported"]}
+{"op":"block","page":6,"depth":0,"type":"heading","x":120,"y":320.4,"width":602,"height":28.8,"spaceBefore":24,"spaceAfter":12,"lines":["Menu option “Hea"]}
+{"op":"block","page":6,"depth":0,"type":"paragraph","x":72,"y":361.2,"width":650,"height":18,"spaceBefore":0,"spaceAfter":10,"lines":["Errors:"]}
+{"op":"block","page":6,"depth":0,"type":"paragraph","x":72,"y":389.2,"width":650,"height":18,"spaceBefore":0,"spaceAfter":10,"lines":["2 errors reporte"]}
+{"op":"block","page":6,"depth":0,"type":"paragraph","x":72,"y":417.2,"width":650,"height":18,"spaceBefore":0,"spaceAfter":10,"lines":["2 x Missing alte"]}
+{"op":"block","page":6,"depth":0,"type":"heading","x":120,"y":459.2,"width":602,"height":28.8,"spaceBefore":24,"spaceAfter":12,"lines":["Other pages"]}
+{"op":"block","page":6,"depth":0,"type":"paragraph","x":72,"y":500,"width":650,"height":54,"spaceBefore":0,"spaceAfter":10,"lines":["The other main p","Knowledge, Profi","ones listed earl"]}
+{"op":"block","page":6,"depth":0,"type":"paragraph","x":120,"y":564,"width":602,"height":19.2,"spaceBefore":0,"spaceAfter":4,"lines":["Empty link"]}
+{"op":"block","page":6,"depth":0,"type":"paragraph","x":120,"y":587.2,"width":602,"height":19.2,"spaceBefore":0,"spaceAfter":4,"lines":["Missing form lab"]}
+{"op":"block","page":6,"depth":0,"type":"paragraph","x":120,"y":610.4,"width":602,"height":19.2,"spaceBefore":0,"spaceAfter":4,"lines":["Empty table head"]}
+{"op":"block","page":6,"depth":0,"type":"paragraph","x":72,"y":633.6,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":6,"depth":0,"type":"paragraph","x":72,"y":660.4,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":6,"depth":0,"type":"paragraph","x":72,"y":687.2,"width":650,"height":22.8,"spaceBefore":0,"spaceAfter":10,"lines":["Outline"]}
+{"op":"block","page":6,"depth":0,"type":"paragraph","x":72,"y":720,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":6,"depth":0,"type":"paragraph","x":72,"y":746.8,"width":650,"height":72,"spaceBefore":0,"spaceAfter":10,"lines":["Many errors show","tool works. The ","identified which","to be accessible"]}
+{"op":"block","page":6,"depth":0,"type":"paragraph","x":72,"y":828.8,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}

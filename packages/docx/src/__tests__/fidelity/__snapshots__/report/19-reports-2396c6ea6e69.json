@@ -210,7 +210,7 @@
       },
       {
         "part": "word/styles.xml",
-        "path": "w:styles/w:style/w:pPr",
+        "path": "w:styles/w:style/w:pPr/w:spacing",
         "outcome": "unread",
         "count": 1
       },

@@ -70,6 +70,16 @@
         "kept": 136,
         "dropped": 0,
         "changed": 0
+      },
+      "w:ftr": {
+        "kept": 0,
+        "dropped": 3,
+        "changed": 0
+      },
+      "w:hdr": {
+        "kept": 0,
+        "dropped": 3,
+        "changed": 0
       }
     },
     "entries": [
@@ -121,6 +131,20 @@
         "reason": "no handler",
         "owner": null,
         "count": 7
+      },
+      {
+        "outcome": "dropped",
+        "kind": "w:hdr",
+        "reason": "no handler",
+        "owner": null,
+        "count": 3
+      },
+      {
+        "outcome": "dropped",
+        "kind": "w:ftr",
+        "reason": "no handler",
+        "owner": null,
+        "count": 3
       }
     ],
     "unread": [
@@ -396,21 +420,9 @@
       },
       {
         "part": "word/numbering.xml",
-        "path": "w:numbering/w:abstractNum/w:lvl/w:numFmt",
-        "outcome": "unread",
-        "count": 64
-      },
-      {
-        "part": "word/numbering.xml",
         "path": "w:numbering/w:abstractNum/w:styleLink",
         "outcome": "unread",
         "count": 3
-      },
-      {
-        "part": "word/numbering.xml",
-        "path": "w:numbering/w:abstractNum/w:lvl/w:pStyle",
-        "outcome": "unread",
-        "count": 10
       },
       {
         "part": "word/numbering.xml",
@@ -450,9 +462,9 @@
       },
       {
         "part": "word/styles.xml",
-        "path": "w:styles/w:style/w:pPr",
+        "path": "w:styles/w:style/w:pPr/w:spacing",
         "outcome": "unread",
-        "count": 183
+        "count": 17
       },
       {
         "part": "word/styles.xml",
@@ -483,6 +495,12 @@
         "path": "w:styles/w:style/w:qFormat",
         "outcome": "unread",
         "count": 56
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:pPr",
+        "outcome": "unread",
+        "count": 166
       },
       {
         "part": "word/styles.xml",
@@ -522,9 +540,51 @@
       },
       {
         "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:pPr/w:keepNext",
+        "outcome": "unread",
+        "count": 6
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:pPr/w:keepLines",
+        "outcome": "unread",
+        "count": 9
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:pPr/w:ind",
+        "outcome": "unread",
+        "count": 12
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:pPr/w:outlineLvl",
+        "outcome": "unread",
+        "count": 3
+      },
+      {
+        "part": "word/styles.xml",
         "path": "w:styles/w:style/w:rPr/w:kern",
         "outcome": "ignored",
         "count": 7
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:pPr/w:tabs",
+        "outcome": "unread",
+        "count": 6
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:pPr/w:pBdr",
+        "outcome": "unread",
+        "count": 2
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:pPr/w:jc",
+        "outcome": "unread",
+        "count": 1
       },
       {
         "part": "word/styles.xml",

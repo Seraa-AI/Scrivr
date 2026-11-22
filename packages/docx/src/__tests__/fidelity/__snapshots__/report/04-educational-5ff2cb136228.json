@@ -228,12 +228,6 @@
         "count": 18
       },
       {
-        "part": "word/numbering.xml",
-        "path": "w:numbering/w:abstractNum/w:lvl/w:numFmt",
-        "outcome": "unread",
-        "count": 16
-      },
-      {
         "part": "word/styles.xml",
         "path": "w:styles/w:docDefaults/w:rPrDefault/w:rPr/w:lang",
         "outcome": "ignored",

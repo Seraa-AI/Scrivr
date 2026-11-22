@@ -50,6 +50,16 @@
         "kept": 1,
         "dropped": 0,
         "changed": 0
+      },
+      "w:ftr": {
+        "kept": 0,
+        "dropped": 1,
+        "changed": 0
+      },
+      "w:hdr": {
+        "kept": 0,
+        "dropped": 1,
+        "changed": 0
       }
     },
     "entries": [
@@ -87,6 +97,20 @@
         "reason": "no handler",
         "owner": null,
         "count": 90
+      },
+      {
+        "outcome": "dropped",
+        "kind": "w:hdr",
+        "reason": "no handler",
+        "owner": null,
+        "count": 1
+      },
+      {
+        "outcome": "dropped",
+        "kind": "w:ftr",
+        "reason": "no handler",
+        "owner": null,
+        "count": 1
       }
     ],
     "unread": [
@@ -265,12 +289,6 @@
         "count": 28
       },
       {
-        "part": "word/numbering.xml",
-        "path": "w:numbering/w:abstractNum/w:lvl/w:numFmt",
-        "outcome": "unread",
-        "count": 208
-      },
-      {
         "part": "word/styles.xml",
         "path": "w:styles/w:docDefaults/w:rPrDefault/w:rPr/w:szCs",
         "outcome": "ignored",
@@ -352,13 +370,25 @@
         "part": "word/styles.xml",
         "path": "w:styles/w:style/w:pPr",
         "outcome": "unread",
-        "count": 4
+        "count": 3
       },
       {
         "part": "word/styles.xml",
         "path": "w:styles/w:style/w:rPr",
         "outcome": "unread",
         "count": 2
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:pPr/w:ind",
+        "outcome": "unread",
+        "count": 1
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:pPr/w:contextualSpacing",
+        "outcome": "unread",
+        "count": 1
       },
       {
         "part": "word/settings.xml",

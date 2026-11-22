@@ -17,7 +17,7 @@
         "changed": 0
       },
       "hyperlink": {
-        "kept": 26,
+        "kept": 12,
         "dropped": 0,
         "changed": 0
       },
@@ -32,7 +32,7 @@
         "changed": 0
       },
       "list": {
-        "kept": 2,
+        "kept": 13,
         "dropped": 0,
         "changed": 0
       },
@@ -84,6 +84,16 @@
       "u": {
         "kept": 3,
         "dropped": 0,
+        "changed": 0
+      },
+      "w:ftr": {
+        "kept": 0,
+        "dropped": 2,
+        "changed": 0
+      },
+      "w:hdr": {
+        "kept": 0,
+        "dropped": 3,
         "changed": 0
       },
       "webHidden": {
@@ -155,6 +165,20 @@
         "reason": "no handler",
         "owner": null,
         "count": 14
+      },
+      {
+        "outcome": "dropped",
+        "kind": "w:hdr",
+        "reason": "no handler",
+        "owner": null,
+        "count": 3
+      },
+      {
+        "outcome": "dropped",
+        "kind": "w:ftr",
+        "reason": "no handler",
+        "owner": null,
+        "count": 2
       }
     ],
     "unread": [
@@ -406,18 +430,6 @@
       },
       {
         "part": "word/numbering.xml",
-        "path": "w:numbering/w:abstractNum/w:lvl/w:numFmt",
-        "outcome": "unread",
-        "count": 104
-      },
-      {
-        "part": "word/numbering.xml",
-        "path": "w:numbering/w:abstractNum/w:lvl/w:pStyle",
-        "outcome": "unread",
-        "count": 8
-      },
-      {
-        "part": "word/numbering.xml",
         "path": "w:numbering/w:abstractNum/w:lvl/w:lvlPicBulletId",
         "outcome": "unread",
         "count": 6
@@ -460,9 +472,9 @@
       },
       {
         "part": "word/styles.xml",
-        "path": "w:styles/w:style/w:pPr",
+        "path": "w:styles/w:style/w:pPr/w:spacing",
         "outcome": "unread",
-        "count": 30
+        "count": 6
       },
       {
         "part": "word/styles.xml",
@@ -502,9 +514,21 @@
       },
       {
         "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:pPr/w:outlineLvl",
+        "outcome": "unread",
+        "count": 2
+      },
+      {
+        "part": "word/styles.xml",
         "path": "w:styles/w:style/w:basedOn",
         "outcome": "unread",
         "count": 26
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:pPr",
+        "outcome": "unread",
+        "count": 22
       },
       {
         "part": "word/styles.xml",
@@ -553,6 +577,30 @@
         "path": "w:styles/w:style/w:tblStylePr",
         "outcome": "unread",
         "count": 3
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:pPr/w:keepNext",
+        "outcome": "unread",
+        "count": 2
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:pPr/w:keepLines",
+        "outcome": "unread",
+        "count": 2
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:pPr/w:jc",
+        "outcome": "unread",
+        "count": 1
+      },
+      {
+        "part": "word/styles.xml",
+        "path": "w:styles/w:style/w:pPr/w:ind",
+        "outcome": "unread",
+        "count": 1
       },
       {
         "part": "word/settings.xml",
@@ -726,7 +774,7 @@
         "changed": 0
       },
       "bulletList": {
-        "kept": 2,
+        "kept": 13,
         "dropped": 0,
         "changed": 0
       },
@@ -761,7 +809,7 @@
         "changed": 0
       },
       "listItem": {
-        "kept": 5,
+        "kept": 49,
         "dropped": 0,
         "changed": 0
       },
