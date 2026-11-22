@@ -45,16 +45,16 @@ export function alignToJc(align: unknown): string | null {
 }
 
 /**
- * Report the textblock attrs the Paragraph and Heading export handlers do not
- * write yet, so a file that loses them says so. Shared because both nodes
- * carry the same attrs and neither handler writes these.
+ * The textblock attrs neither the Paragraph nor the Heading export writes yet,
+ * reported so a file that loses them says so.
  */
 export function reportUnwrittenTextblockAttrs(node: PmNode, ctx: DocxContext): void {
   const kind = node.type.name;
-  if (typeof node.attrs["indent"] === "number" && node.attrs["indent"] > 0) {
+  if (typeof node.attrs["indent"] === "number" && node.attrs["indent"] !== 0) {
     ctx.report.changed(kind, "indent not written");
   }
-  if (typeof node.attrs["textIndent"] === "number" && node.attrs["textIndent"] > 0) {
+  // A negative first-line indent is a hanging one, just as unwritten.
+  if (typeof node.attrs["textIndent"] === "number" && node.attrs["textIndent"] !== 0) {
     ctx.report.changed(kind, "first-line indent not written");
   }
   if (typeof node.attrs["fontFamily"] === "string" && node.attrs["fontFamily"].length > 0) {

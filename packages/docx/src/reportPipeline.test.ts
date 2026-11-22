@@ -837,6 +837,11 @@ describe("exportDocx — what each extension says it could not write", () => {
     expect(changesBy(report, "heading")).toEqual(unwritten.map((reason) => `heading: ${reason}`));
   });
 
+  it("names a hanging first-line indent Word is not given", async () => {
+    const report = await exportOf([{ type: "paragraph", attrs: { textIndent: -24 }, content: [{ type: "text", text: "p" }] }]);
+    expect(changesBy(report, "paragraph")).toEqual(["paragraph: first-line indent not written"]);
+  });
+
   it("says nothing about a paragraph whose attributes are all written", async () => {
     const report = await exportOf([{ type: "paragraph", attrs: { align: "center" }, content: [{ type: "text", text: "p" }] }]);
     expect(changesBy(report, "paragraph")).toEqual([]);
@@ -946,6 +951,11 @@ describe("importDocx — what each extension says it could not keep", () => {
     expect(report.entries).toContainEqual({ outcome: "dropped", kind: "sz", reason: "not a valid size", owner: "fontSize", count: 1 });
     expect(report.entries).toContainEqual({ outcome: "dropped", kind: "rFonts", reason: "theme font not resolved", owner: "fontFamily", count: 1 });
     expect(report.entries).toContainEqual({ outcome: "dropped", kind: "hyperlink", reason: "no usable target", owner: "link", count: 1 });
+  });
+
+  it("names an underline colour it does not keep", async () => {
+    const report = await importOf(`<w:p>${run(`<w:u w:val="single" w:color="FF0000"/>`)}${run(`<w:u w:val="single" w:color="auto"/>`)}</w:p>`);
+    expect(changesBy(report, "underline")).toEqual(["u: underline color not kept"]);
   });
 
   it("keeps the text inside a smart tag", async () => {

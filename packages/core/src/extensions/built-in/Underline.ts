@@ -83,6 +83,9 @@ export const Underline = Extension.create({
       if (typeof style === "string" && style !== "single") {
         ctx.report.changed(mark.kind, `"${style}" underline imported as single`);
       }
+      const color = mark.attrs?.["color"];
+      // The underline is drawn in the text's colour; `auto` asks for exactly that.
+      if (typeof color === "string" && color !== "auto") ctx.report.changed(mark.kind, "underline color not kept");
       return t.create();
     };
     return { docx: { marks: { u: handler } } };
