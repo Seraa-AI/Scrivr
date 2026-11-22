@@ -1,0 +1,112 @@
+{"op":"page","page":1,"width":794,"height":1123,"margins":{"top":72,"right":72,"bottom":72,"left":72}}
+{"op":"block","page":1,"depth":0,"type":"tableRow","x":72,"y":72,"width":650,"height":46.8,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":78,"y":4,"width":638,"height":28.8,"spaceBefore":0,"spaceAfter":10,"lines":["Suppl. Table 1. ","fibrillation"]}
+{"op":"block","page":1,"depth":0,"type":"tableRow","x":72,"y":118.8,"width":650,"height":32.4,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":78,"y":4,"width":287.458,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["Endpoint"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":377.458,"y":4,"width":88.407,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["HR"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":477.864,"y":4,"width":150.06,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["95% CI"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":639.924,"y":4,"width":76.076,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["p value"]}
+{"op":"block","page":1,"depth":0,"type":"tableRow","x":72,"y":151.2,"width":650,"height":34.8,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":78,"y":4,"width":287.458,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["All-cause mortal"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":377.458,"y":4,"width":88.407,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":477.864,"y":4,"width":150.06,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":639.924,"y":4,"width":76.076,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":1,"depth":0,"type":"tableRow","x":72,"y":186,"width":650,"height":32.4,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":78,"y":4,"width":287.458,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["Male gender"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":377.458,"y":4,"width":88.407,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["1.189"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":477.864,"y":4,"width":150.06,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["0.923-1.532"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":639.924,"y":4,"width":76.076,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["0.181"]}
+{"op":"block","page":1,"depth":0,"type":"tableRow","x":72,"y":218.4,"width":650,"height":32.4,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":78,"y":4,"width":287.458,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["Diabetes"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":377.458,"y":4,"width":88.407,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["1.011"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":477.864,"y":4,"width":150.06,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["0.747-1.241"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":639.924,"y":4,"width":76.076,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["0.77"]}
+{"op":"block","page":1,"depth":0,"type":"tableRow","x":72,"y":250.8,"width":650,"height":32.4,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":78,"y":4,"width":287.458,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["Chronic Kidney d"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":377.458,"y":4,"width":88.407,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["2.253"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":477.864,"y":4,"width":150.06,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["1.902-3.347"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":639.924,"y":4,"width":76.076,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["0.001"]}
+{"op":"block","page":1,"depth":0,"type":"tableRow","x":72,"y":283.2,"width":650,"height":32.4,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":78,"y":4,"width":287.458,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["CPR"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":377.458,"y":4,"width":88.407,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["1.272"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":477.864,"y":4,"width":150.06,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["1.048-1.544"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":639.924,"y":4,"width":76.076,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["0.015"]}
+{"op":"block","page":1,"depth":0,"type":"tableRow","x":72,"y":315.6,"width":650,"height":32.4,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":78,"y":4,"width":287.458,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["CAD"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":377.458,"y":4,"width":88.407,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["0.827"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":477.864,"y":4,"width":150.06,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["0.623-1.096"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":639.924,"y":4,"width":76.076,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["0.186"]}
+{"op":"block","page":1,"depth":0,"type":"tableRow","x":72,"y":348,"width":650,"height":32.4,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":78,"y":4,"width":287.458,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["AMI"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":377.458,"y":4,"width":88.407,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["0.592"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":477.864,"y":4,"width":150.06,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["0.452-0.776"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":639.924,"y":4,"width":76.076,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["0.001"]}
+{"op":"block","page":1,"depth":0,"type":"tableRow","x":72,"y":380.4,"width":650,"height":32.4,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":78,"y":4,"width":287.458,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["ICD"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":377.458,"y":4,"width":88.407,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["0.166"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":477.864,"y":4,"width":150.06,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["0.166-0-237"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":639.924,"y":4,"width":76.076,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["0.001"]}
+{"op":"block","page":1,"depth":0,"type":"tableRow","x":72,"y":412.8,"width":650,"height":32.4,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":78,"y":4,"width":287.458,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["LVEF < 35%"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":377.458,"y":4,"width":88.407,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["1.914"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":477.864,"y":4,"width":150.06,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["1.505-2.435"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":639.924,"y":4,"width":76.076,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["0.001"]}
+{"op":"block","page":1,"depth":0,"type":"tableRow","x":72,"y":445.2,"width":650,"height":32.4,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":78,"y":4,"width":287.458,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["Age "]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":377.458,"y":4,"width":88.407,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["1.028"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":477.864,"y":4,"width":150.06,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["1.019-1.038"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":639.924,"y":4,"width":76.076,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["0.001"]}
+{"op":"block","page":1,"depth":0,"type":"tableRow","x":72,"y":477.6,"width":650,"height":34.8,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":78,"y":4,"width":287.458,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["Composite endpoi"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":377.458,"y":4,"width":88.407,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":477.864,"y":4,"width":150.06,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":639.924,"y":4,"width":76.076,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
+{"op":"block","page":1,"depth":0,"type":"tableRow","x":72,"y":512.4,"width":650,"height":32.4,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":78,"y":4,"width":287.458,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["Male gender"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":377.458,"y":4,"width":88.407,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["0.967"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":477.864,"y":4,"width":150.06,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["0.701-1.336"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":639.924,"y":4,"width":76.076,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["0.84"]}
+{"op":"block","page":1,"depth":0,"type":"tableRow","x":72,"y":544.8,"width":650,"height":32.4,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":78,"y":4,"width":287.458,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["Diabetes"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":377.458,"y":4,"width":88.407,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["1.096"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":477.864,"y":4,"width":150.06,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["0.789-1.523"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":639.924,"y":4,"width":76.076,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["0.585"]}
+{"op":"block","page":1,"depth":0,"type":"tableRow","x":72,"y":577.2,"width":650,"height":32.4,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":78,"y":4,"width":287.458,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["Chronic Kidney d"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":377.458,"y":4,"width":88.407,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["1.542"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":477.864,"y":4,"width":150.06,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["1.103-2.157"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":639.924,"y":4,"width":76.076,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["0.011"]}
+{"op":"block","page":1,"depth":0,"type":"tableRow","x":72,"y":609.6,"width":650,"height":32.4,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":78,"y":4,"width":287.458,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["CPR"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":377.458,"y":4,"width":88.407,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["1.129"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":477.864,"y":4,"width":150.06,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["0.893-1.429"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":639.924,"y":4,"width":76.076,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["0.31"]}
+{"op":"block","page":1,"depth":0,"type":"tableRow","x":72,"y":642,"width":650,"height":32.4,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":78,"y":4,"width":287.458,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["CAD"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":377.458,"y":4,"width":88.407,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["0.643"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":477.864,"y":4,"width":150.06,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["0.453-0.911"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":639.924,"y":4,"width":76.076,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["0.013"]}
+{"op":"block","page":1,"depth":0,"type":"tableRow","x":72,"y":674.4,"width":650,"height":32.4,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":78,"y":4,"width":287.458,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["AMI"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":377.458,"y":4,"width":88.407,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["0.728"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":477.864,"y":4,"width":150.06,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["0.505-1.050"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":639.924,"y":4,"width":76.076,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["0.089"]}
+{"op":"block","page":1,"depth":0,"type":"tableRow","x":72,"y":706.8,"width":650,"height":32.4,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":78,"y":4,"width":287.458,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["ICD"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":377.458,"y":4,"width":88.407,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["1.133"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":477.864,"y":4,"width":150.06,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["0.809-1.586"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":639.924,"y":4,"width":76.076,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["0.468"]}
+{"op":"block","page":1,"depth":0,"type":"tableRow","x":72,"y":739.2,"width":650,"height":32.4,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":78,"y":4,"width":287.458,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["LVEF < 35%"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":377.458,"y":4,"width":88.407,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["1.238"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":477.864,"y":4,"width":150.06,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["0.903-1.696"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":639.924,"y":4,"width":76.076,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["0.185"]}
+{"op":"block","page":1,"depth":0,"type":"tableRow","x":72,"y":771.6,"width":650,"height":32.4,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":78,"y":4,"width":287.458,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["Age "]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":377.458,"y":4,"width":88.407,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["1.024"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":477.864,"y":4,"width":150.06,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["1.012-1.037"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":639.924,"y":4,"width":76.076,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["0.001"]}
+{"op":"block","page":1,"depth":0,"type":"tableRow","x":72,"y":804,"width":650,"height":85.6,"spaceBefore":0,"spaceAfter":0,"lines":[]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":78,"y":4,"width":638,"height":43.2,"spaceBefore":0,"spaceAfter":10,"lines":["AMI, acute myoca","CPR, cardiopulmo","ejection fractio"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":78,"y":57.2,"width":638,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["Bold type indica"]}
+{"op":"block","page":1,"depth":0,"type":"paragraph","x":72,"y":889.6,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
