@@ -1,7 +1,7 @@
 /**
- * What an import never read. The parser is not changed to report it: the tree
- * it walks records each read, so a property nobody looks at shows up without
- * anyone having to remember to say so.
+ * What an import never read. The tree the parser walks records each read, so
+ * a property nobody looks at shows up without anyone having to remember to say
+ * so; the parser marks only the elements it acts on by their presence alone.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -186,5 +186,18 @@ describe("importDocx — the ignored list", () => {
     expect(diagnostics.some((d) => d.markType === "szCs")).toBe(false);
     // Still counted: the report is the inventory.
     expect(report.counts["szCs"]?.dropped ?? 0).toBeGreaterThan(0);
+  });
+});
+
+describe("an import that tracks what it never read", () => {
+  it("succeeds where one that does not would, though a part it opens to look is cut short", async () => {
+    const files = unzipSync(await exportDocxBytes(new ServerEditor({ content: "body" })));
+    files["word/footnotes.xml"] = strToU8("<w:footnotes><w:footnote><!-- cut");
+    const bytes = zipSync(files);
+
+    const plain = await importDocx(new ServerEditor(), bytes);
+    const tracking = await importDocx(new ServerEditor(), bytes, { trackUnread: true });
+    expect(tracking.doc.textContent).toBe(plain.doc.textContent);
+    expect(tracking.diagnostics.map((d) => d.code)).toContain("docx-part-unreadable");
   });
 });
