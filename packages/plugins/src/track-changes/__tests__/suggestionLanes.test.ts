@@ -69,6 +69,20 @@ describe.each(lanes)("$name", ({ apply, blocked }) => {
   });
 });
 
+// A lane writes each phrase in one transaction, after the last; none may cross
+// what an earlier one inserted, or the proposal is recorded wrong. The first
+// phrase changes length, so the second lands right only if its start is mapped,
+// and the unchanged words between them are too many to bridge into one phrase.
+describe.each(lanes.slice(0, 2))("$name, several phrases at once", ({ apply }) => {
+  it("records each phrase, beside the one before", () => {
+    const editor = editorOf(textOf("tehh a b c d e f g brwn"));
+    expect(apply(editor, "the a b c d e f g brown")).toBe(true);
+    expect(changeActs(pending(editor))).toHaveLength(2);
+    decideAll(editor, "accepted");
+    expect(laidOut(editor)).toBe("the a b c d e f g brown");
+  });
+});
+
 describe.each(lanes.slice(0, 2))("$name, over what it did not read", ({ apply }) => {
   it("keeps an image a deleted range spans", () => {
     const editor = editorOf([...textOf("one "), image, ...textOf(" two")]);

@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { EditorState, Plugin, DocAttrStep, Fragment, ReplaceStep, Slice, Step, StepMap, StepResult } from "@scrivr/core/pm";
+import { EditorState, Plugin, DocAttrStep, findWrapping, Fragment, ReplaceStep, Slice, Step, StepMap, StepResult } from "@scrivr/core/pm";
 import type { Node as PMNode } from "@scrivr/core/pm";
 import { COLLAB_SYNC_META } from "@scrivr/core";
-import { doc, p, TestEditor } from "./helpers";
+import { doc, li, p, TestEditor, ul } from "./helpers";
 import { TrackChangesStatus, trackChangesPluginKey } from "../index";
 import { trackChangesPlugin } from "../engine/trackChangesPlugin";
 import { reportedTracking } from "../engine/transactionProcessing";
@@ -15,9 +15,10 @@ import type { TrackingRefusal, TrackingResult } from "../index";
  * that carries content — never how many there are, and never a step that is not
  * content at all.
  *
- * The question is answered on step kinds, before anything runs. Whether every
- * gesture built from supported kinds is then recorded completely is a separate
- * matter, and not one this file speaks for.
+ * The question is answered before anything runs: on step kinds, and on whether
+ * a later step that writes across the gesture's own insertion can be cut at its
+ * edge. Whether every gesture tracking lets through is then recorded completely
+ * is a separate matter, and not one this file speaks for.
  */
 
 /** A step kind the engine has no tracker for. */
@@ -55,8 +56,8 @@ const tracking = (editor: TestEditor): TrackingResult | null =>
   trackChangesPluginKey.getState(editor.state)!.lastTracking;
 
 /** A tracked editor state that reports what it stops. */
-const suggesting = (refused: TrackingRefusal[], status = TrackChangesStatus.enabled) => EditorState.create({
-  doc: doc(p("start")),
+const suggesting = (refused: TrackingRefusal[], status = TrackChangesStatus.enabled, startDoc = doc(p("start"))) => EditorState.create({
+  doc: startDoc,
   plugins: [trackChangesPlugin({ userID: "alice", initialStatus: status, onRefused: refusal => refused.push(refusal) })],
 });
 
@@ -68,6 +69,52 @@ describe("an edit tracking cannot record is stopped, and the host is told why", 
 
     expect(next.doc.textContent).toBe("start");
     expect(refused).toEqual([{ reason: "unsupported-step", stepType: "ShoutStep" }]);
+    expect(trackChangesPluginKey.getState(next)!.changeSet.pending).toEqual([]);
+  });
+
+  // Each crosses an insertion's edge where it cannot be cut, so the whole
+  // gesture is stopped; only a hand-built transaction builds them. Positions
+  // are after the first step.
+  const hello = () => doc(p("hello"), p("world"));
+  it.each([
+    // new 8–11, world 13–18: the cut at 12 falls between blocks
+    ["a deletion from an inserted paragraph into the next one", hello, (s: EditorState) =>
+      s.tr.insert(7, p("new")).delete(9, 15)],
+    // hello 1–6, new 8–11: the cut at 7 falls between blocks, at the insertion's start
+    ["a deletion from the paragraph before into an inserted one", hello, (s: EditorState) =>
+      s.tr.insert(7, p("new")).delete(3, 10)],
+    // heabcllo 1–9: the replacement carries paragraphs, across the insertion's start
+    ["a replacement with paragraphs from before the insertion into it", hello, (s: EditorState) =>
+      s.tr.insertText("abc", 3).replace(2, 5, new Slice(Fragment.from([p("X"), p("Y")]), 1, 1))],
+    // hello 1–6, abcworld 8–16: the replacement spans two blocks into the insertion
+    ["a replacement from the paragraph before into text inserted in the next", hello, (s: EditorState) =>
+      s.tr.insertText("abc", 8).replaceWith(3, 10, s.schema.text("Z"))],
+    // heabcllo 1–9: the replacement carries paragraphs
+    ["a replacement of text across the insertion's edge with paragraphs", hello, (s: EditorState) =>
+      s.tr.insertText("abc", 3).replace(4, 8, new Slice(Fragment.from([p("X"), p("Y")]), 1, 1))],
+    // helloabc 1–9, world 11–16: the replacement spans two blocks
+    ["a replacement of text across the insertion's edge and into the next paragraph", hello, (s: EditorState) =>
+      s.tr.insertText("abc", 6).replaceWith(7, 12, s.schema.text("Z"))],
+    // A 8–9, B 11–12, world 14–19: a wrap is not a step that can be cut
+    ["a wrap of an inserted paragraph and the next one into a list", hello, (s: EditorState) => {
+      const tr = s.tr.insert(7, Fragment.from([p("A"), p("B")]));
+      const range = tr.doc.resolve(11).blockRange(tr.doc.resolve(15));
+      const wrapping = range && findWrapping(range, s.schema.nodes.bullet_list!);
+      if (!range || !wrapping) throw new Error("cannot wrap B and world in a list");
+      return tr.wrap(range, wrapping);
+    }],
+    // hello 1–6, mabcid in the list item 10–16, world 20–25: the deletion's ends
+    // sit at a different depth from the insertion's edges, so the pieces don't fit
+    ["a deletion from before a list, through text inserted in it, to after it",
+      () => doc(p("hello"), ul(li("mid")), p("world")), (s: EditorState) =>
+      s.tr.insertText("abc", 11).delete(3, 23)],
+  ])("stops %s, and says the steps overlap", (_, startDoc, gesture) => {
+    const refused: TrackingRefusal[] = [];
+    const state = suggesting(refused, TrackChangesStatus.enabled, startDoc());
+    const next = state.apply(gesture(state));
+
+    expect(next.doc.eq(state.doc)).toBe(true);
+    expect(refused).toEqual([{ reason: "overlapping-steps" }]);
     expect(trackChangesPluginKey.getState(next)!.changeSet.pending).toEqual([]);
   });
 

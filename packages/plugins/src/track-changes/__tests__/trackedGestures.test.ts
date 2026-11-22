@@ -3,6 +3,7 @@ import { ServerEditor, StarterKit, Table } from "@scrivr/core";
 import {
   Fragment,
   NodeSelection,
+  Selection,
   Slice,
   TextSelection,
   type EditorState,
@@ -58,6 +59,8 @@ type Scenario = {
   doc: DocNode[];
   gesture: (e: Editor, as: (user: string) => Editor) => Editor | void;
   check?: (e: Editor) => string | null;
+  /** The gesture must change the document and be recorded; one that quietly does nothing fails. */
+  mustChange?: boolean;
 };
 
 const p = (text: string): DocNode => text ? { type: "paragraph", content: [{ type: "text", text }] } : { type: "paragraph" };
@@ -95,6 +98,16 @@ const make = (content: DocNode[], userID: string, tracked: boolean) => new Edito
 const sel = (e: Editor, from: number, to = from): void => {
   e.applyTransaction(e.getState().tr.setSelection(TextSelection.create(e.getState().doc, from, to)));
 };
+/**
+ * Cells are selected by pointer, and `CellSelection` is not public, so the
+ * selection is read back from its saved JSON, as a reload does.
+ */
+function selectCells(e: Editor, anchorCell: number, headCell: number) {
+  const json = { type: "scrivr:cell", anchor: nodePos(e, "tableCell", anchorCell), head: nodePos(e, "tableCell", headCell) };
+  const selection = Selection.fromJSON(e.getState().doc, json);
+  if (selection.toJSON().type !== json.type) throw new Error(`no cell selection from ${JSON.stringify(json)}`);
+  e.applyTransaction(e.getState().tr.setSelection(selection));
+}
 const key = (e: Editor, name: string) => e.press(name);
 const tr = (e: Editor, f: (t: Transaction, s: EditorState) => Transaction): void => {
   e.applyTransaction(f(e.getState().tr, e.getState()));
@@ -399,6 +412,14 @@ const scenarios: Scenario[] = [
   { name: "three lines mid-line", doc: hello, gesture: e => { sel(e, 3); pasteOpen(e, ["FOO", "MID", "BAR"]); } },
   { name: "two lines over a selection", doc: hello, gesture: e => { sel(e, 3, 8); pasteOpen(e, ["FOO", "BAR"]); } },
   { name: "one line mid-line", doc: hello, gesture: e => { sel(e, 3); pasteOpen(e, ["FOO"]); } },
+  // Selected cells are emptied and the first one written in one transaction,
+  // so a change to CellSelection.replace could make the write straddle what it inserted
+  { name: "type over selected cells", doc: [table("aa", "bb")], mustChange: true, gesture: e => { selectCells(e, 0, 1); tr(e, t => t.insertText("Q")); } },
+  { name: "type over selected cells, the first empty", doc: [table("", "bb")], mustChange: true, gesture: e => { selectCells(e, 0, 1); tr(e, t => t.insertText("Q")); } },
+  { name: "Delete selected cells", doc: [table("aa", "bb")], mustChange: true, gesture: e => { selectCells(e, 0, 1); key(e, "Delete"); } },
+  { name: "cut selected cells", doc: [table("aa", "bb")], mustChange: true, gesture: e => { selectCells(e, 0, 1); tr(e, t => t.deleteSelection().setMeta("uiEvent", "cut")); } },
+  { name: "paste a line over selected cells", doc: [table("aa", "bb")], mustChange: true, gesture: e => { selectCells(e, 0, 1); pasteOpen(e, ["FOO"]); } },
+  { name: "paste two lines over selected cells", doc: [table("aa", "bb")], mustChange: true, gesture: e => { selectCells(e, 0, 1); pasteOpen(e, ["FOO", "BAR"]); } },
 ];
 
 const isTracking = (name: string) => name.startsWith("tracked");
@@ -534,6 +555,8 @@ function judge(s: Scenario): string[] {
     failures.push(`selection is a ${selectionKind(tracked)}, not a ${selectionKind(untrackedRun)}`);
   }
   if (contentOf(tracked) !== wanted && !pendingOf(tracked).length) failures.push("changed the document with no record");
+  if (s.mustChange && wanted === original) failures.push("the gesture changed nothing");
+  if (s.mustChange && !pendingOf(tracked).length) failures.push("the tracked gesture recorded nothing");
 
   const bulk: Array<[keyof ReviewDecisions, string]> = [["accepted", wanted], ["rejected", original]];
   for (const [decision, result] of bulk) {
