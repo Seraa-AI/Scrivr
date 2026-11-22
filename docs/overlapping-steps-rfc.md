@@ -1,6 +1,6 @@
 # Overlapping Steps RFC — which gestures tracking still stops, and why that can stay
 
-Status: decided and shipped (#257). Answers part 2 of #232; parts 1, 3, 4 and 5
+Status: decided; ships with #257. Answers part 2 of #232; parts 1, 3, 4 and 5
 stay open there. See What shipped.
 
 **Answer:** no built-in command or agent edit builds a gesture tracking has to
@@ -83,7 +83,7 @@ and drag with tracking on and off, and `ai`'s lane tests.
 | `ClearFormatting` | Mark removal, block types, then lists flattened back to front | Each flattened list lands beside the next |
 | Paste placeholders | Attribute changes and deletions | No insertion |
 | `CellSelection.replace` (typing, Delete, cut, paste over cells) | Each cell not already one empty paragraph is emptied to a new one, then the content is written into the first cell | The write lands in the first cell's paragraph: a new one, so it is folded into that insertion, or an empty one left alone, so it is a plain insertion |
-| Suggestion lanes through `writeProposal`: `applyDiffAsSuggestion`, `applyMultiBlockDiff`, `applyRichEdit`, `AiSuggestion` tracked apply | Per phrase, a replacement or deletion of its first run, then deletions of the runs after it, under `trackAsSuggestion` | Phrases go left to right, each start mapped past what came before, so each lands beside earlier insertions; a phrase's later deletions sit past its first run |
+| Suggestion lanes through `writeProposal`: `applyDiffAsSuggestion`, `applyMultiBlockDiff`, `applyRichEdit`, `AiSuggestion` tracked apply | The author's earlier suggestion withdrawn first; then per phrase, an insertion, or a replacement or deletion of its first run followed by deletions of the runs after it, under `trackAsSuggestion` | The withdrawal touches only what was there before. Within a block, phrases go left to right, each start mapped past what came before, so each lands beside earlier insertions; a phrase's later deletions sit past its first run. `applyMultiBlockDiff` writes blocks back to front, each beside the last |
 | `AiSuggestion` keep-formatting apply, tracked | Mark steps, then `writeProposal` in the same transaction | Mark steps are not insertions; the writes are as above |
 | `insertAsSuggestion` | One replacement | No later step |
 | `AiSuggestion` direct apply | Plain edits under `skipTracking` | Not tracked |
@@ -114,9 +114,9 @@ tracked, and Reject all returned the original document.
      would fail; each must also change the document and be recorded, so one
      that quietly does nothing fails too. Checked: with every multi-step
      gesture forced to refuse, all six fail.
-   - `suggestionLanes` applies a proposal of several phrases through every
-     lane, tracked: it must be recorded, not stopped, and accept to the
-     proposal.
+   - `suggestionLanes` applies a proposal of two phrases through the plain and
+     rich lanes, tracked: both must be recorded as two changes, not stopped,
+     and accept to the proposal.
    - `trackingRefusal` pins the refused shapes, across the insertion's start
      and its end: the document is unchanged, `onRefused` reports
      `overlapping-steps`, and nothing is pending. Checked: with gestures let
@@ -146,7 +146,7 @@ tracked, and Reject all returned the original document.
 - **Is "no straddles in the suites" enough?** Not alone. The suites only run
   what they contain, so we also read every multi-step transaction builder (the
   table above), added the cell gestures `trackedGestures` lacked, and pinned
-  a multi-phrase suggestion through every lane.
+  a two-phrase suggestion through the plain and rich lanes.
 - **Why not take the cell selection gestures by keyboard?** A cell selection
   comes from the pointer. The tests restore one from its saved JSON
   (`scrivr:cell`), as a reload does.
@@ -160,7 +160,8 @@ tracked, and Reject all returned the original document.
   selection from its saved JSON.
 - `trackingRefusal`: eight refused shapes, five across the insertion's end and
   three across its start.
-- `suggestionLanes`: a multi-phrase proposal, recorded through each lane.
+- `suggestionLanes`: a two-phrase proposal, recorded as two changes through
+  the plain and rich lanes.
 - Drafted before #276–#278 changed how the agent's suggestions are written;
   the claims and the measurement were re-checked against them before merge,
   and the answer held.

@@ -72,9 +72,9 @@ describe("an edit tracking cannot record is stopped, and the host is told why", 
     expect(trackChangesPluginKey.getState(next)!.changeSet.pending).toEqual([]);
   });
 
-  // Shapes the cut at an insertion's edge cannot make, so the whole gesture is
-  // stopped; only a host's hand-built transaction makes them. Positions are
-  // after the first step.
+  // Each crosses an insertion's edge where it cannot be cut, so the whole
+  // gesture is stopped; only a hand-built transaction builds them. Positions
+  // are after the first step.
   const hello = () => doc(p("hello"), p("world"));
   it.each([
     // new 8–11, world 13–18: the cut at 12 falls between blocks
@@ -86,7 +86,7 @@ describe("an edit tracking cannot record is stopped, and the host is told why", 
     // heabcllo 1–9: the replacement carries paragraphs, across the insertion's start
     ["a replacement with paragraphs from before the insertion into it", hello, (s: EditorState) =>
       s.tr.insertText("abc", 3).replace(2, 5, new Slice(Fragment.from([p("X"), p("Y")]), 1, 1))],
-    // hello 1–6, wabcorld 8–16: the replacement spans two blocks into the insertion
+    // hello 1–6, abcworld 8–16: the replacement spans two blocks into the insertion
     ["a replacement from the paragraph before into text inserted in the next", hello, (s: EditorState) =>
       s.tr.insertText("abc", 8).replaceWith(3, 10, s.schema.text("Z"))],
     // heabcllo 1–9: the replacement carries paragraphs

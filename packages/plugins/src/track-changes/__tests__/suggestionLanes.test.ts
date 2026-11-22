@@ -67,15 +67,18 @@ describe.each(lanes)("$name", ({ apply, blocked }) => {
 
     expect(laidOut(editor)).toBe("one□two");
   });
+});
 
-  // Several phrases are written in one transaction, each after the last; none
-  // may cross what an earlier one inserted, or tracking would stop the edit.
-  it("records a proposal of several phrases at once", () => {
-    const editor = editorOf(textOf("teh quick brwn fox jumpd"));
-    expect(apply(editor, "the quick brown fox jumped")).toBe(true);
-    expect(pending(editor).length).toBeGreaterThan(0);
+// A lane writes each phrase in one transaction, after the last; none may cross
+// what an earlier one inserted, or tracking would stop the whole proposal.
+// The unchanged words between them are too many to bridge into one phrase.
+describe.each(lanes.slice(0, 2))("$name, several phrases at once", ({ apply }) => {
+  it("records each phrase, beside the one before", () => {
+    const editor = editorOf(textOf("teh a b c d e f g brwn"));
+    expect(apply(editor, "the a b c d e f g brown")).toBe(true);
+    expect(changeActs(pending(editor))).toHaveLength(2);
     decideAll(editor, "accepted");
-    expect(laidOut(editor)).toBe("the quick brown fox jumped");
+    expect(laidOut(editor)).toBe("the a b c d e f g brown");
   });
 });
 
