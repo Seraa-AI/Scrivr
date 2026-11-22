@@ -15,26 +15,29 @@
  * only wrap structure. Word requires every `<w:tc>` to end in a block-level
  * element; our cells always hold paragraphs, so that holds.
  */
-import { compositeColor, parseCssColor, toHex6 } from "../model/cssColor";
-import { cellBackground, cellGridSpan, cellVMerge } from "./attrs";
+import { parseCssColor } from "../model/cssColor";
+import { writtenDocxColor } from "../exports/docxColor";
+import { cellGridSpan, cellVMerge } from "./attrs";
 import type { Node } from "prosemirror-model";
-import { xml, pxToTwips, type DocxNodeHandler, type XmlNode } from "../exports/docx";
+import { xml, pxToTwips, type DocxNodeHandler, type DocxReporter, type XmlNode } from "../exports/docx";
 
 const BORDER_SIZE = "4"; // eighths of a point → 0.5pt, matching the canvas hairline.
 const BORDER_COLOR = "9CA3AF"; // neutral gray, same as the canvas row painter.
 
 /**
- * DOCX shading takes six hex digits, while a cell's fill is whatever CSS
- * literal its source wrote — a name, a hex triple, `rgb(...)`, with or without
- * alpha. Resolving it is what keeps those from being dropped.
+ * A cell's background as DOCX shading, which takes six hex digits, while the
+ * fill is whatever CSS literal its source wrote — a name, a hex triple,
+ * `rgb(...)`, with or without alpha. Resolving it is what keeps those from
+ * being dropped; what cannot be written as written is reported.
  */
-function readHexFill(value: string | null): string | null {
-  if (value === null) return null;
-  const colour = parseCssColor(value);
-  if (!colour || colour.alpha === 0) return null;
-  // DOCX cell shading has no alpha; these documents use an unshaded white page.
-  const opaque = compositeColor(colour, { r: 255, g: 255, b: 255 });
-  return toHex6(opaque).toUpperCase();
+function shadingFill(cell: Node, report: DocxReporter): string | null {
+  const written = cell.attrs["background"];
+  if (typeof written !== "string" || written.length === 0) return null;
+  if (parseCssColor(written) === null) {
+    report.changed(cell.type.name, "background not written: not a color");
+    return null;
+  }
+  return writtenDocxColor(written, cell.type.name, "background", report);
 }
 
 /** Single-line borders on every edge so the table reads like the canvas grid. */
@@ -92,7 +95,7 @@ const tableRowHandler: DocxNodeHandler = (node, children) => {
   return xml("w:tr", undefined, rowChildren);
 };
 
-const cellHandler: DocxNodeHandler = (node, children) => {
+const cellHandler: DocxNodeHandler = (node, children, ctx) => {
   const props: XmlNode[] = [];
 
   const gridSpan = cellGridSpan(node);
@@ -102,7 +105,7 @@ const cellHandler: DocxNodeHandler = (node, children) => {
   if (vMerge === "restart") props.push(xml("w:vMerge", { "w:val": "restart" }));
   else if (vMerge === "continue") props.push(xml("w:vMerge"));
 
-  const fill = readHexFill(cellBackground(node));
+  const fill = shadingFill(node, ctx.report);
   if (fill) props.push(xml("w:shd", { "w:val": "clear", "w:color": "auto", "w:fill": fill }));
 
   const tcChildren: XmlNode[] = [];

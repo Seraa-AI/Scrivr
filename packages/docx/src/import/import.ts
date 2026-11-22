@@ -37,7 +37,7 @@ import type {
   DocxReport,
 } from "@scrivr/core";
 import { readDocxPackage, resolveOpcTarget } from "./opc";
-import { parseOoxml, findChild, attr } from "./xml";
+import { parsePart, findChild, attr, ReadTracker, type OoxmlElement } from "./xml";
 import {
   parseDocumentBody,
   parseBlockContainer,
@@ -121,6 +121,7 @@ export async function importDocx(
   });
   const recorder = reportRecorderOf(ctx);
   const handlers = collectHandlers(editor, options.overrides, recorder);
+  const tracker = options.trackUnread ? new ReadTracker() : undefined;
   // The parser warns through the diagnostics and records what it could not
   // read in the report — the two channels a drop belongs in.
   const parserSink: ParserDiagnostics = {
@@ -148,7 +149,7 @@ export async function importDocx(
         ctx.diagnostics.list(),
       );
     }
-    const root = parseOoxml(documentXml);
+    const root = parsePart(documentXml, "word/document.xml", tracker);
     if (!root || root.name !== "w:document") {
       throw new DocxImportError(
         "Invalid DOCX: word/document.xml does not start with <w:document>",
@@ -156,10 +157,12 @@ export async function importDocx(
       );
     }
 
-    const numbering = readNumberingMap(pkg.readText("word/numbering.xml"));
+    const numbering = readNumberingMap(pkg.readText("word/numbering.xml"), tracker);
     // Before the body is transformed: a run's formatting is its style's,
     // layered under whatever the run says directly.
-    ctx.styles = readStyleSheet(pkg.readText("word/styles.xml"));
+    const styleSheet = readStyleSheet(pkg.readText("word/styles.xml"), tracker);
+    ctx.styles = styleSheet;
+    const listSources = { numbering, styles: styleSheet, diagnostics: parserSink };
 
     // Header/footer support: expose the section references + a part walker so
     // a contribution (HeaderFooter) can reconstruct each part's content
@@ -167,11 +170,40 @@ export async function importDocx(
     const sectionRefs = parseSectionReferences(root);
     ctx.section = {
       ...sectionRefs,
-      evenAndOdd: readEvenAndOddHeaders(pkg.readText("word/settings.xml")),
+      evenAndOdd: readEvenAndOddHeaders(pkg.readText("word/settings.xml"), tracker),
     };
     // Installed with the handler set, before the lifecycle hooks below, so a
     // contribution can walk blocks from `onBeforeImport` as it can `walkPart`.
     ctx.walkBlocks = createBlockWalker(ctx, handlers);
+
+    // One tree per part: a part two section slots share is parsed, and
+    // tracked, once.
+    // A part cut short parses as nothing, never fails the import: a header
+    // the walk asks for is then reported unreadable.
+    const partTrees = new Map<string, OoxmlElement | null>();
+    const partTree = (path: string, xml: string): OoxmlElement | null => {
+      if (!partTrees.has(path)) partTrees.set(path, parsePartOrNull(xml, path, tracker));
+      return partTrees.get(path) ?? null;
+    };
+    if (tracker) {
+      // Every header and footer the document references, and the parts the
+      // import never opens, so a part lost whole shows up as unread whether or
+      // not an extension walks it.
+      for (const rel of rels.list()) {
+        const path = headerFooterPath(rel);
+        if (path === null) continue;
+        const xml = pkg.readText(path);
+        if (xml !== undefined) partTree(path, xml);
+      }
+      // Opened only to list what is in them, so one cut short is a warning.
+      for (const path of UNOPENED_CONTENT_PARTS) {
+        const xml = pkg.readText(path);
+        if (xml !== undefined && parsePartOrNull(xml, path, tracker) === null) {
+          ctx.diagnostics.warn({ code: "docx-part-unreadable", message: `${path} is not readable XML — what it holds is not listed as unread` });
+        }
+      }
+    }
+
     // A header or footer is Word's `w:hdr` or `w:ftr` part. One a walk cannot
     // read is the walking extension's loss; one nothing walks is nobody's.
     const partKind = (relId: string): "w:hdr" | "w:ftr" => {
@@ -197,17 +229,15 @@ export async function importDocx(
       if (!rel) {
         return skipPart(relId, "header-footer-rel", `Unresolved header/footer relationship ${relId} — skipped`);
       }
-      if ((rel.type !== "header" && rel.type !== "footer") || rel.targetMode === "External") {
+      const path = headerFooterPath(rel);
+      if (path === null) {
         return skipPart(relId, "header-footer-rel-type", `Relationship ${relId} is not an internal header/footer part — skipped`);
       }
-      // The reference lives in document.xml.rels, so the target resolves
-      // relative to word/document.xml.
-      const path = resolveOpcTarget("word/document.xml", rel.target);
       const partXml = pkg.readText(path);
       if (partXml === undefined) {
         return skipPart(relId, "header-footer-part-missing", `Missing header/footer part ${path} — skipped`);
       }
-      const partRoot = parseOoxml(partXml);
+      const partRoot = partTree(path, partXml);
       if (!partRoot) {
         return skipPart(relId, "header-footer-part-unreadable", `Header/footer part ${path} is not XML — skipped`);
       }
@@ -239,10 +269,7 @@ export async function importDocx(
         return entry?.type === "hyperlink" ? entry.target : undefined;
       };
       try {
-        const model = reconstructLists(
-          parseBlockContainer(partRoot, parserSink),
-          numbering,
-        );
+        const model = reconstructLists(parseBlockContainer(partRoot, parserSink), listSources);
         return transformToProseMirror(model, ctx, handlers);
       } finally {
         ctx.media.resolveImage = savedResolveImage;
@@ -255,7 +282,7 @@ export async function importDocx(
     }
 
     const rawModel = parseDocumentBody(root, parserSink);
-    const model = reconstructLists(rawModel, numbering);
+    const model = reconstructLists(rawModel, listSources);
     let doc = transformToProseMirror(model, ctx, handlers);
 
     for (const { owner, hook } of lifecycleHooks.onImportComplete) {
@@ -317,10 +344,11 @@ export async function importDocx(
         throw new DocxImportError(fatal.message, finalDiagnostics);
       }
     }
+    const report = recorder.snapshot();
     return {
       doc,
       diagnostics: finalDiagnostics,
-      report: recorder.snapshot(),
+      report: tracker ? { ...report, unread: tracker.unread() } : report,
       fieldValues: importedFieldValues(ctx),
     };
   } catch (err) {
@@ -348,6 +376,28 @@ function isUnsupportedCode(code: string): boolean {
   return UNSUPPORTED_CODES.has(code);
 }
 
+/**
+ * Where a header or footer relationship's part is, or null when it names no
+ * internal header or footer. The reference lives in document.xml.rels, so the
+ * target resolves relative to word/document.xml.
+ */
+function headerFooterPath(rel: { type: string; target: string; targetMode?: string }): string | null {
+  if ((rel.type !== "header" && rel.type !== "footer") || rel.targetMode === "External") return null;
+  return resolveOpcTarget("word/document.xml", rel.target);
+}
+
+/** `parsePart`, with a part that fails to parse read as no part at all. */
+function parsePartOrNull(xml: string, path: string, tracker: ReadTracker | undefined): OoxmlElement | null {
+  try {
+    return parsePart(xml, path, tracker);
+  } catch {
+    return null;
+  }
+}
+
+/** Word content parts the import does not read, tracked so what they hold is reported. */
+const UNOPENED_CONTENT_PARTS = ["word/footnotes.xml", "word/endnotes.xml", "word/comments.xml"];
+
 /** `word/header1.xml` → `word/_rels/header1.xml.rels`. */
 function partRelsPath(partPath: string): string {
   const slash = partPath.lastIndexOf("/");
@@ -355,9 +405,9 @@ function partRelsPath(partPath: string): string {
 }
 
 /** Read `<w:evenAndOddHeaders/>` from settings.xml — activates even-page slots. */
-function readEvenAndOddHeaders(settingsXml: string | undefined): boolean {
+function readEvenAndOddHeaders(settingsXml: string | undefined, tracker?: ReadTracker): boolean {
   if (settingsXml === undefined) return false;
-  const root = parseOoxml(settingsXml);
+  const root = parsePart(settingsXml, "word/settings.xml", tracker);
   if (!root) return false;
   const el = findChild(root, "w:evenAndOddHeaders");
   return el ? isOoxmlOn(attr(el, "w:val")) : false;

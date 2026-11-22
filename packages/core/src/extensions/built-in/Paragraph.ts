@@ -5,6 +5,7 @@ import { splitBlockAs } from "prosemirror-commands";
 import { TextBlockStrategy } from "../../layout/TextBlockStrategy";
 import {
   xml,
+  type DocxContext,
   type DocxNodeHandler,
   type DocxBlockTransform,
 } from "../../exports/docx";
@@ -41,6 +42,24 @@ export function alignToJc(align: unknown): string | null {
   if (align === "right") return "right";
   if (align === "justify") return "both";
   return null;
+}
+
+/**
+ * The textblock attrs neither the Paragraph nor the Heading export writes yet,
+ * reported so a file that loses them says so.
+ */
+export function reportUnwrittenTextblockAttrs(node: PmNode, ctx: DocxContext): void {
+  const kind = node.type.name;
+  if (typeof node.attrs["indent"] === "number" && node.attrs["indent"] !== 0) {
+    ctx.report.changed(kind, "indent not written");
+  }
+  // A negative first-line indent is a hanging one, just as unwritten.
+  if (typeof node.attrs["textIndent"] === "number" && node.attrs["textIndent"] !== 0) {
+    ctx.report.changed(kind, "first-line indent not written");
+  }
+  if (typeof node.attrs["fontFamily"] === "string" && node.attrs["fontFamily"].length > 0) {
+    ctx.report.changed(kind, "font not written");
+  }
 }
 
 /**
@@ -134,7 +153,7 @@ export const Paragraph = Extension.create({
   addNodes() {
     return {
       paragraph: {
-        group: "block",
+        group: "block listItemLead",
         content: "inline*",
         attrs: {
           align: { default: "left" },
@@ -190,7 +209,8 @@ export const Paragraph = Extension.create({
   },
 
   addExports() {
-    const handler: DocxNodeHandler = (node, children) => {
+    const handler: DocxNodeHandler = (node, children, ctx) => {
+      reportUnwrittenTextblockAttrs(node, ctx);
       const jc = alignToJc(node.attrs["align"]);
       const lead = jc ? [xml("w:pPr", undefined, [xml("w:jc", { "w:val": jc })])] : [];
       return xml("w:p", undefined, [...lead, ...children]);

@@ -17,6 +17,7 @@ export type {
   DocxReportCount,
   DocxReportEntry,
   DocxReporter,
+  DocxUnreadElement,
 } from "@scrivr/core";
 
 export type {
@@ -59,6 +60,7 @@ export {
   OVERRIDES_OWNER,
   NO_HANDLER,
   NO_PARSER,
+  LEFT_OUT,
   PART_UNREADABLE,
   HANDLER_RETURNED_NOTHING,
   WRAPPER_DECLINED,

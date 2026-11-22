@@ -1,6 +1,6 @@
 # DOCX Fidelity RFC — a Word file edited in Scrivr comes back as Word had it
 
-Status: Phase 0 shipped (#249); later phases follow. See What shipped.
+Status: Phases 0 (#249) and 1 (#261) shipped; Phase 2 follows. See What shipped.
 
 ## Goal
 
@@ -173,19 +173,26 @@ the largest loss. So import gains an option:
 importDocx(editor, bytes, { trackUnread: true });
 ```
 
-With it on, `parseOoxml` returns its element tree wrapped in a `Proxy` that
-records each read. That covers the helpers (`findChild`, `attr`, …) and the 53
-places where the parser walks `.children` directly, without changing any of
-them. The helpers search the unwrapped tree and mark only what they return.
-Otherwise `findChild(pPr, "w:jc")` would count its sibling `w:spacing` as read.
+With it on, each part is parsed through `parsePart`, which wraps the element
+tree in a `Proxy` that records each read. That covers the helpers (`findChild`,
+`attr`, …) and the places where the parser walks `.children` directly. The helpers search the unwrapped tree: the element searched is read, a
+hit is examined, and the siblings passed over stay unread. Otherwise
+`findChild(pPr, "w:jc")` would count its sibling `w:spacing` as read.
+
+A proxy cannot tell a name that was matched and acted on from one compared and
+passed over. So an element whose name or presence is all the import takes from
+it — a run's `w:tab`, a row's `w:tblHeader` — is read only where the parser
+marks it handled (`markRead`, `hasChild`). Counting every bare element read once
+its name was looked at hid real losses: `w:noBreakHyphen` and `w:softHyphen`
+were dropped from the text and reported as read.
 
 Each element ends with one of these outcomes:
 
 | Outcome | Meaning | Example today |
 |---|---|---|
-| `read` | Its attributes or children were read, or a helper returned it. An element with nothing but its name counts as read once its name is matched | `w:jc`, a run's `w:tab` |
-| `examined` | Its name was matched, but nothing in it was read | `w:pgSz`, `w:pgMar` |
-| `ignored` | On a reviewed list of properties dropped on purpose | `w:szCs`, `w:proofErr`, `rsid*` |
+| `read` | Its attributes or children were read, or the parser marked it handled | `w:jc`, a run's `w:tab` |
+| `examined` | Its name was seen, but nothing in it was read | `w:pgSz`, `w:pgMar`, `w:noBreakHyphen` |
+| `ignored` | On a reviewed list of properties dropped on purpose | `w:szCs`, `w:proofErr`, `w:rsids` |
 | `unread` | Never looked at — a silent drop | `w:ind`, `w:keepNext`, `w:tabs`, `w:pPrDefault` |
 
 The option is off by default because a proxy on every element costs time on a
@@ -414,8 +421,10 @@ Settled on 2026-11-04:
    kept and dropped (§2).
 2. **The 25 documents are committed** as the base fixtures, with provenance
    (§6). Developers add Word-authored fixtures where a pattern is thin.
-3. **Unread tracking records at the boundary.** The proxy wraps the parsed tree;
-   the parser itself is not changed (§3). Confirmed by a spike.
+3. **Unread tracking records at the boundary.** The proxy wraps the parsed tree.
+   The parser changes only to mark elements it acts on by their presence alone
+   (`markRead`, `hasChild`), since a proxy cannot tell those from ones passed
+   over (§3).
 4. **The Word comparison runs in GitHub CI**, inside `pnpm test`, and is written
    to the job summary (§5).
 5. **A known gap does not fail the build.** It is logged. A regression fails: a
@@ -506,5 +515,55 @@ or a DOM, as `LayoutCoordinator.layoutForExport` already does.
   `report-invalid-count` warnings; `normalizeDrawNumber` in core, shared with
   the test phase's logs.
 - Fixed on the way: a style id such as `constructor` crashed the import.
-- Not yet: what the parser skips inside a paragraph or run (Phase 1's
-  `trackUnread`), and the report when a conversion throws.
+- Not yet: the report when a conversion throws.
+
+### Phase 1 — extensions report, and the import lists what it never read (#261)
+
+- The built-in extensions report what their DOCX handlers could not carry:
+  Paragraph, Heading, Image, Color, FontFamily, FontSize, Highlight, Link,
+  Underline, SourcedBlock, List, and Table on export. HardBreak and PageBreak
+  report nothing of their own; the converter's counts cover them. A list's
+  numbering format is read per level (`w:numFmt`), so a bullet level inside a
+  numbered list stays bullets; List reports a format it draws differently
+  from Word's built-in style for that depth (upper roman, "none"), and
+  nothing for Scrivr's own lists, which use that style.
+- A paragraph handler that leaves out formatting or inline objects it was
+  handed — a code block keeping only text — is charged by the converter,
+  which knows which Word mark built each piece of formatting: it moves them
+  from kept to dropped (`LEFT_OUT`), compared by the text that carries them,
+  so "no formatting" values and joined or copied text nodes are not charged,
+  and neither is the paragraph style's own formatting. `report.dropped`
+  keeps one meaning: record a drop.
+- A wrapper's handler (a link, a content control) runs once per wrapper, so
+  a link it cannot resolve is one loss however many runs it spans.
+- A translucent colour, which DOCX cannot carry, is blended onto white and
+  reported wherever it is written: text colour, highlight, cell shading.
+- `importDocx(editor, bytes, { trackUnread: true })` adds `report.unread`:
+  the XML no code read, by part and path, `unread`, `examined` (only its
+  name seen) or `ignored` (on the reviewed list), the top of a skipped
+  subtree only. It covers the body, every header and footer the document
+  references, footnotes, endnotes, comments, styles, numbering and settings.
+  It is an inventory, so it overlaps what `entries` already drops. A part it
+  opens only to list, cut short, is a warning; the option never changes
+  whether an import succeeds. `examined` means "only its name was seen": a
+  name-only element the parser acts on is marked read.
+- One reviewed list (`ignored.ts`) decides what is dropped on purpose, keyed
+  by element or by parent and element (`w:rPr/w:spacing`); several entries
+  are marked known gaps rather than intended drops. The spike's 92 run-level
+  `w:spacing` reads now come out `ignored`, as a known gap.
+- Fixed on the way: a smart tag's text is imported (it was dropped); an
+  underline colour and a hanging indent are reported, not lost silently; a
+  page break inside an inline content control failed the whole import — it
+  is now kept as a line break and reported dropped, and the parser carries
+  page breaks as their own type instead of an `as unknown as` cast; list
+  import no longer drops the paragraphs after one that starts a list deeper
+  than they sit, and a nested list is placed one level below its list, as
+  the editor draws it, so the numbering it is compared against is the drawn
+  one. Numbering a paragraph's style carries — Word's built-in heading
+  numbering — is applied before lists are rebuilt, `numId` and `ilvl` each
+  resolved on its own (paragraph, then style through `basedOn`, then the
+  level `numbering.xml` links to the style). A list counts on across the
+  paragraphs between its items and restarts a level under each new parent;
+  `numId` 0, an undefined `numId` (reported) and a `none` level are drawn
+  unnumbered, as Word draws them.
+

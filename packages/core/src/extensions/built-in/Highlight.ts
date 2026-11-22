@@ -1,4 +1,5 @@
 import { toggleMark } from "prosemirror-commands";
+import { writtenDocxColor } from "../../exports/docxColor";
 import { Extension } from "../Extension";
 import { parseCssColor } from "../../model/cssColor";
 import type { MarkDecorator, SpanRect } from "../types";
@@ -16,6 +17,9 @@ interface HighlightOptions {
   /** Allow multiple highlight colors via attrs. Default: false */
   multicolor: boolean;
 }
+
+/** What an imported highlight loses when the editor draws every highlight in its one colour. */
+const SINGLE_COLOR = "color not kept: the editor has one highlight color";
 
 /**
  * Highlight — yellow background behind text.
@@ -135,14 +139,16 @@ export const Highlight = Extension.create<HighlightOptions>({
     // decides which DocxRunProps field to populate; the walker emits both
     // as plain data with no parsing.
     const fallback = this.options.color;
-    const handler: DocxMarkHandler = (props, mark) => {
+    const handler: DocxMarkHandler = (props, mark, ctx) => {
       const raw = mark.attrs["color"];
       const value = typeof raw === "string" && raw.length > 0 ? raw : fallback;
       const named = docxHighlightName(value);
       if (named) return { ...props, highlight: named };
-      const hex = cssColorToDocxHex(value);
+      // The editor's own colour is drawn onto the white page just as Word blends it.
+      const hex = value === fallback ? cssColorToDocxHex(value) : writtenDocxColor(value, mark.type.name, "color", ctx.report);
       if (hex) return { ...props, shadingFill: hex };
       // Unparseable — fall back to the canonical yellow so something paints.
+      ctx.report.changed(mark.type.name, "unreadable color written as yellow");
       return { ...props, highlight: "yellow" };
     };
     // Same guard as the DOCX lane above: an empty attr is not a colour.
@@ -172,6 +178,9 @@ export const Highlight = Extension.create<HighlightOptions>({
     // (arbitrary background fill). Claim both kinds so the round-trip is
     // exact regardless of which form the source used.
     const multicolor = this.options.multicolor;
+    // What the editor's one highlight colour is written as, so reading it back is no change.
+    const ownFill = cssColorToDocxHex(this.options.color);
+    const isSolidPattern = (pattern: unknown) => pattern === undefined || pattern === "clear" || pattern === "nil";
 
     // A highlight of `none`, or shading with no fill and no pattern, is Word
     // saying "no background": no mark, and nothing lost.
@@ -185,20 +194,24 @@ export const Highlight = Extension.create<HighlightOptions>({
       if (!t) return null;
       if (typeof name !== "string") return null;
       if (multicolor) return t.create({ color: name });
+      ctx.report.changed(mark.kind, SINGLE_COLOR);
       return t.create();
     };
 
     const fromShading: DocxMarkTransform = (mark, ctx) => {
       const fill = mark.attrs?.["fill"];
       const pattern = mark.attrs?.["val"];
-      if (fill === "auto" && (pattern === undefined || pattern === "clear" || pattern === "nil")) {
+      if ((fill === undefined || fill === "auto") && isSolidPattern(pattern)) {
         ctx.report.kept(mark.kind);
         return null;
       }
       const t = ctx.schema.marks["highlight"];
       if (!t) return null;
       if (typeof fill !== "string" || fill === "auto") return null;
+      // A patterned shading — dots, stripes, a percentage — is drawn as its fill alone.
+      if (!isSolidPattern(pattern)) ctx.report.changed(mark.kind, `pattern "${String(pattern)}" not kept`);
       if (multicolor) return t.create({ color: `#${fill}` });
+      if (fill.toUpperCase() !== ownFill) ctx.report.changed(mark.kind, SINGLE_COLOR);
       return t.create();
     };
 

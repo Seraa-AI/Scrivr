@@ -287,7 +287,7 @@ const listPdf: PdfNodeHandler = (block, ctx) => ctx.draw.lines(block, ctx);
  * Nodes added:
  *   bulletList  — unordered list container
  *   orderedList — ordered list container (attrs: order)
- *   listItem    — single list item (content: paragraph block*)
+ *   listItem    — single list item (content: (paragraph | listItemLead) block*)
  *
  * Keyboard behaviour (matches Google Docs / Word):
  *   Enter           → split list item (exit list when item is empty)
@@ -339,7 +339,11 @@ export const List = Extension.create({
         layout: { kind: "transparent", wrap: listWrap },
       },
       listItem: {
-        content: "paragraph block*",
+        // Its first block is one a list item can lead with — a paragraph, or a
+        // heading, which Word numbers as readily — and whatever follows.
+        // Paragraph is named first so a new item starts with one, whatever
+        // order the extensions were registered in.
+        content: "(paragraph | listItemLead) block*",
         defining: true,
         attrs: {
           levelOffset: { default: 0 },
@@ -474,6 +478,13 @@ export const List = Extension.create({
       const attrs = {
         ...(block.start !== undefined && block.listType === "ordered" ? { order: block.start } : {}),
       };
+      // Each level is drawn in Word's built-in style for its depth; a list
+      // Word numbers otherwise there keeps its items but not its numbering.
+      if (items.length > 0 && block.format !== undefined) {
+        const level = listLevel(block.level ?? 0);
+        const drawn = block.listType === "ordered" ? level.ordered.format : "bullet";
+        if (block.format !== drawn) ctx.report.changed(block.type, `"${block.format}" numbering drawn as ${drawn}`);
+      }
       return items.length === 0 ? null : listType.create(attrs, items);
     };
 
@@ -494,35 +505,38 @@ export const List = Extension.create({
         () => new Map(),
       );
 
-      // Each top-level list counts on its own, as on screen. A nested list of
-      // the same kind numbers at its level in its top list's numbering, which
-      // Word restarts under each parent item; one of another kind has its own.
-      const numIdFor = (list: PmNode, kind: ListKind, top: { kind: ListKind; numId: number } | null): number =>
-        top && top.kind === kind
-          ? top.numId
+      // Each top-level list counts on its own, as on screen. A list nested in
+      // one of the same kind numbers at its level in that list's numbering,
+      // which Word restarts under each parent item; any other has its own,
+      // since Word restarts a level only under its own numbering's items; it
+      // starts at the list's own first number, at the level it sits at.
+      const numIdFor = (list: PmNode, kind: ListKind, parent: { kind: ListKind; numId: number } | null, level: number): number =>
+        parent && parent.kind === kind
+          ? parent.numId
           : ctx.numbering.getOrCreate({
               type: kind,
               levels: docxLevels(kind),
               instance: list,
-              ...(kind === "ordered" && !top ? { start: listStart(list) } : {}),
+              ...(kind === "ordered" ? { start: listStart(list), level } : {}),
             }).numId;
 
-      // Where the walk is: the top list's numbering, the level of the list
-      // it is in (null outside any), and that list's numId while its items come next.
-      type Scope = { top: { kind: ListKind; numId: number } | null; listLevel: number | null; listNumId: number | null };
+      // Where the walk is: the list it is in and that list's numbering (null
+      // outside any), the list's level, and its numId while its items come next.
+      type Scope = { parent: { kind: ListKind; numId: number } | null; listLevel: number | null; listNumId: number | null };
       const walk = (node: PmNode, scope: Scope) => {
         const kind = listKind(node);
         let inside: Scope = scope;
         if (kind) {
-          const numId = numIdFor(node, kind, scope.top);
-          inside = { top: scope.top ?? { kind, numId }, listLevel: nestedListLevel(scope.listLevel), listNumId: numId };
+          const listLevel = nestedListLevel(scope.listLevel);
+          const numId = numIdFor(node, kind, scope.parent, Math.min(listLevel, LIST_LEVEL_COUNT - 1));
+          inside = { parent: { kind, numId }, listLevel, listNumId: numId };
         } else if (scope.listNumId !== null && scope.listLevel !== null && node.type.name === "listItem") {
           itemMap.set(node, { numId: scope.listNumId, ilvl: itemLevel(node, scope.listLevel) });
           inside = { ...scope, listNumId: null };
         }
         node.forEach((child) => walk(child, inside));
       };
-      walk(ctx.editor.getState().doc, { top: null, listLevel: null, listNumId: null });
+      walk(ctx.editor.getState().doc, { parent: null, listLevel: null, listNumId: null });
     };
 
     // bulletList / orderedList don't emit their own element — Word lists are

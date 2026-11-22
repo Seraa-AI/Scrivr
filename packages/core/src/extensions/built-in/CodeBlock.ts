@@ -201,6 +201,7 @@ export const CodeBlock = Extension.create<CodeBlockOptions>({
     // codeBlock node. CodeBlock's schema is content="text*" with marks="",
     // so we flatten any marked text children to a single text run and
     // turn hard breaks into literal newlines.
+    // The converter reports the formatting and inline objects this leaves out.
     const importer: DocxParagraphStyleTransform = (_block, content, ctx) => {
       const t = ctx.schema.nodes["codeBlock"];
       if (!t) return null;

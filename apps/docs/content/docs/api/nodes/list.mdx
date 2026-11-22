@@ -20,7 +20,7 @@ No configurable options.
 |------|---------|-------------|
 | `bulletList` | `listItem+` | Unordered list container. |
 | `orderedList` | `listItem+` | Ordered list container. Has an `order` attribute (default `1`) for the starting number. |
-| `listItem` | `paragraph block*` | A single list item. The first child must be a paragraph; subsequent children can be any block (for nested content). |
+| `listItem` | `(paragraph \| listItemLead) block*` | A single list item. The first child is a paragraph or another block in the `listItemLead` group — a heading, as Word allows; subsequent children can be any block (for nested content). |
 
 ---
 

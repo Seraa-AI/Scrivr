@@ -52,6 +52,9 @@ export const NO_PARSER = "no parser";
 /** The reason recorded when a handler took content and gave nothing back. */
 export const HANDLER_RETURNED_NOTHING = "handler returned nothing";
 
+/** The reason for content a paragraph's handler did not keep of what it was handed. */
+export const LEFT_OUT = "left out by its paragraph's handler";
+
 /** The reason for a header or footer part the import could not read; the warning says why. */
 export const PART_UNREADABLE = "part could not be read";
 
@@ -120,6 +123,10 @@ export interface DocxReportRecorder {
   carried(kind: string): void;
   /** The converter's own account: content nothing handled. Its owner is `null`. */
   unhandled(kind: string, reason: string): void;
+  /** One `kind` counted kept that `owner`'s handler then left out: moved to dropped, as `LEFT_OUT`. */
+  leftOut(kind: string, owner: HandlerOwner): void;
+  /** How many of `kind` have been counted so far. */
+  count(kind: string): DocxReportCount;
   /** The report so far, as plain data the caller owns. */
   snapshot(): DocxReport;
 }
@@ -288,6 +295,8 @@ export function createReportRecorder(options: ReportRecorderOptions = {}): DocxR
       const item = lost(result);
       if (item && !level.claimedKept.has(item.kind)) {
         for (const [kind, count] of level.kept) {
+          // A kind whose content was all left out already has nothing to move.
+          if (count === 0) continue;
           countOf(kind).kept -= count;
           addEntry("dropped", kind, insideDropped(item.kind), item.owner, count);
         }
@@ -307,6 +316,18 @@ export function createReportRecorder(options: ReportRecorderOptions = {}): DocxR
     },
     unhandled(kind, reason) {
       addEntry("dropped", kind, reason, null);
+    },
+    leftOut(kind, owner) {
+      // Only content counted kept as it was built is left out; never below none.
+      const count = countOf(kind);
+      if (count.kept > 0) count.kept -= 1;
+      const open = subtrees[subtrees.length - 1];
+      const inside = open?.kept.get(kind) ?? 0;
+      if (open && inside > 0) open.kept.set(kind, inside - 1);
+      addEntry("dropped", kind, LEFT_OUT, owner);
+    },
+    count(kind) {
+      return { ...countOf(kind) };
     },
     snapshot() {
       // `fromEntries` defines own properties, so even a kind named

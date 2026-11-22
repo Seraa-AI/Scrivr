@@ -209,7 +209,13 @@ export interface DocxReporter {
    * a whole number is ignored with a warning.
    */
   kept(kind: string, count?: number): void;
-  /** One `kind` did not make it across, and why. */
+  /**
+   * One `kind` did not make it across, and why. The import names content as
+   * the converter counts it: Word's kinds (`b`, `image`, `field`), not the
+   * editor's. Content a paragraph's handler is handed and leaves out of the
+   * node it returns — a code block keeping only text — the converter finds
+   * and reports itself.
+   */
   dropped(kind: string, reason: string): void;
   /**
    * One `kind` made it across, but not as the source had it ("spacing
@@ -251,6 +257,35 @@ export interface DocxReport {
   counts: Record<string, DocxReportCount>;
   /** Every distinct drop and change, in the order the conversion first met it. */
   entries: DocxReportEntry[];
+  /**
+   * Import only, with `trackUnread` on: the Word XML the import never read,
+   * across the body, every header and footer the document references,
+   * footnotes, endnotes, comments, styles, numbering and settings. A handler
+   * can only report what it is handed, so this is where a property no code
+   * looks at shows up. It is an inventory of the XML, so it also lists what
+   * `entries` already names as dropped — an element nothing parses, a header
+   * nothing reads — and `ignored` is what the import drops on purpose.
+   */
+  unread?: DocxUnreadElement[];
+}
+
+/**
+ * Word XML an import did not read, by where it sits. Repeats of one path share
+ * an entry and add to its `count`. Only the top of a skipped subtree is listed:
+ * what is inside it was skipped with it.
+ */
+export interface DocxUnreadElement {
+  /** The package part it came from: `"word/document.xml"`, `"word/styles.xml"`. */
+  part: string;
+  /** Element names from the part's root down to it: `"w:document/w:body/w:p/w:pPr/w:ind"`. */
+  path: string;
+  /**
+   * `unread`: never looked at. `examined`: its name was seen, but nothing in
+   * it was read — the import knew it was there and took nothing from it.
+   * `ignored`: dropped on purpose, on the import's reviewed list.
+   */
+  outcome: "unread" | "examined" | "ignored";
+  count: number;
 }
 
 // ── Options ─────────────────────────────────────────────────────────────────
@@ -300,13 +335,15 @@ export interface DocxContext {
      * A numbering for these levels. Without `instance`, equal configs share
      * one. With it, each instance (a list) gets its own `numId`, so separate
      * lists restart in Word, over one shared definition; its count starts at
-     * `start` (default 1), written as level 0's `startOverride`.
+     * `start` (default 1), written as the `startOverride` of `level` (default
+     * 0), the level its items sit at.
      */
     getOrCreate(config: {
       type: "bullet" | "ordered" | "task";
       levels: DocxNumberingLevel[];
       instance?: object;
       start?: number;
+      level?: number;
     }): { numId: number };
   };
 
@@ -596,8 +633,12 @@ export interface DocxParagraphAttrs {
   styleId?: string;
   /** From `<w:pPr><w:jc w:val="…"/>`. */
   align?: "left" | "center" | "right" | "justify";
-  /** From `<w:pPr><w:numPr>` — paragraph belongs to a list. */
-  numbering?: { numId: number; ilvl: number };
+  /**
+   * From `<w:pPr><w:numPr>` — paragraph belongs to a list. Either half may be
+   * absent, as in Word: the paragraph style supplies it. `numId` 0 is Word's
+   * "no numbering": the paragraph turns off what its style would number it as.
+   */
+  numbering?: { numId?: number; ilvl?: number };
   /** Word's `<w:pageBreakBefore/>` hint. */
   pageBreakBefore?: boolean;
 }
@@ -645,6 +686,10 @@ export type DocxBlock =
       items: DocxListItem[];
       /** The number an ordered list starts at, when not 1. */
       start?: number;
+      /** Word's nesting level for the list (`w:ilvl`), 0 at the top. */
+      level?: number;
+      /** Word's numbering format at that level (`w:numFmt`): `decimal`, `upperRoman`, `bullet`, … */
+      format?: string;
     }
   | { type: "table"; grid: number[]; rows: DocxTableRow[] }
   | { type: "sdt"; tag: string | null; content: DocxBlock[] };

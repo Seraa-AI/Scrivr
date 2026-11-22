@@ -20,11 +20,13 @@ import {
   StarterKit,
   type FormatContribution,
 } from "@scrivr/core";
+import type { Node as PmNode } from "@scrivr/core/pm";
 import {
   HANDLER_RETURNED_NOTHING,
   NO_HANDLER,
   NO_PARSER,
   OVERRIDES_OWNER,
+  LEFT_OUT,
   PART_UNREADABLE,
   WRAPPER_DECLINED,
   exportDocx,
@@ -38,6 +40,7 @@ import {
   type DocxReportCount,
   type DocxReportEntry,
   type DocxReporter,
+  type DocxUnreadElement,
   type HandlerOwner,
   type WalkerHandlerOwners,
   type WalkerHandlers,
@@ -557,7 +560,7 @@ describe("importDocx — report", () => {
     expect(report.entries).toContainEqual({
       outcome: "dropped",
       kind: "rFonts",
-      reason: "handler returned nothing",
+      reason: "theme font not resolved",
       owner: "fontFamily",
       count: 1,
     });
@@ -801,5 +804,612 @@ describe("the report's vocabulary, as a consumer imports it", () => {
       0,
       "function",
     ]);
+  });
+});
+
+/** The entries `owner` recorded as changed, as `kind: reason`. */
+function changesBy(report: DocxReport, owner: string): string[] {
+  return report.entries
+    .filter((entry) => entry.outcome === "changed" && entry.owner === owner)
+    .map((entry) => `${entry.kind}: ${entry.reason}`);
+}
+
+const PIXEL = "data:image/png;base64,AA==";
+
+describe("exportDocx — what each extension says it could not write", () => {
+  const exportOf = async (content: unknown[], table = false) => {
+    const kit = table ? StarterKit.configure({ table: true }) : StarterKit;
+    const editor = new ServerEditor({ extensions: [kit, SourcedBlockExtension] });
+    editor.setContent({ type: "doc", content });
+    const result = await exportDocx(editor);
+    editor.destroy();
+    return result.report;
+  };
+
+  it("names the paragraph and heading attributes Word is not given", async () => {
+    const attrs = { indent: 2, textIndent: 24, fontFamily: "Georgia" };
+    const report = await exportOf([
+      { type: "paragraph", attrs, content: [{ type: "text", text: "p" }] },
+      { type: "heading", attrs: { level: 2, ...attrs }, content: [{ type: "text", text: "h" }] },
+    ]);
+
+    const unwritten = ["indent not written", "first-line indent not written", "font not written"];
+    expect(changesBy(report, "paragraph")).toEqual(unwritten.map((reason) => `paragraph: ${reason}`));
+    expect(changesBy(report, "heading")).toEqual(unwritten.map((reason) => `heading: ${reason}`));
+  });
+
+  it("names a hanging first-line indent Word is not given", async () => {
+    const report = await exportOf([{ type: "paragraph", attrs: { textIndent: -24 }, content: [{ type: "text", text: "p" }] }]);
+    expect(changesBy(report, "paragraph")).toEqual(["paragraph: first-line indent not written"]);
+  });
+
+  it("says nothing about a paragraph whose attributes are all written", async () => {
+    const report = await exportOf([{ type: "paragraph", attrs: { align: "center" }, content: [{ type: "text", text: "p" }] }]);
+    expect(changesBy(report, "paragraph")).toEqual([]);
+  });
+
+  it("names the image attributes Word is not given", async () => {
+    const report = await exportOf([{
+      type: "paragraph",
+      content: [{ type: "image", attrs: { src: PIXEL, alt: "A cat", zIndex: 2, verticalAlign: "middle" } }],
+    }]);
+    expect(changesBy(report, "image")).toEqual([
+      "image: alt text not written",
+      "image: stacking order not written",
+      "image: vertical alignment not written",
+    ]);
+  });
+
+  it("drops a colour or a font it cannot write, and says why", async () => {
+    const report = await exportOf([{
+      type: "paragraph",
+      content: [
+        { type: "text", text: "a", marks: [{ type: "color", attrs: { color: "not-a-colour" } }] },
+        { type: "text", text: "b", marks: [{ type: "fontFamily", attrs: { family: "" } }] },
+      ],
+    }]);
+    expect(report.entries).toContainEqual({ outcome: "dropped", kind: "color", reason: "not a color DOCX can write", owner: "color", count: 1 });
+    expect(report.entries).toContainEqual({ outcome: "dropped", kind: "fontFamily", reason: "no font named", owner: "fontFamily", count: 1 });
+    expect(report.counts["color"]).toEqual({ kept: 0, dropped: 1, changed: 0 });
+  });
+
+  it("names what Word is given in place of what the document says", async () => {
+    const report = await exportOf([{
+      type: "paragraph",
+      content: [
+        { type: "text", text: "a", marks: [{ type: "fontSize", attrs: { size: 15 } }] },
+        { type: "text", text: "c", marks: [{ type: "link", attrs: { href: "https://example.com", title: "Example" } }] },
+      ],
+    }]);
+    expect(changesBy(report, "fontSize")).toEqual(["fontSize: rounded to a half point"]);
+    expect(changesBy(report, "link")).toEqual(["link: title not written"]);
+    // 16px is 12pt exactly, so there is nothing to say.
+    const exact = await exportOf([{ type: "paragraph", content: [{ type: "text", text: "a", marks: [{ type: "fontSize", attrs: { size: 16 } }] }] }]);
+    expect(changesBy(exact, "fontSize")).toEqual([]);
+  });
+
+  it("names a link's unwritten title once per link, however many runs it spans", async () => {
+    const link = { type: "link", attrs: { href: "https://example.com", title: "Example" } };
+    const report = await exportOf([{
+      type: "paragraph",
+      content: [
+        { type: "text", text: "a", marks: [link] },
+        { type: "text", text: "b", marks: [link, { type: "bold" }] },
+        { type: "text", text: "c", marks: [link, { type: "italic" }] },
+      ],
+    }]);
+    expect(report.counts["link"]).toEqual({ kept: 1, dropped: 0, changed: 1 });
+  });
+
+  it("names no change for a highlight in the editor's own colour", async () => {
+    const report = await exportOf([{ type: "paragraph", content: [{ type: "text", text: "a", marks: [{ type: "highlight" }] }] }]);
+    expect(changesBy(report, "highlight")).toEqual([]);
+  });
+
+  it("names a translucent text colour Word is given blended onto white", async () => {
+    const report = await exportOf([{
+      type: "paragraph",
+      content: [
+        { type: "text", text: "a", marks: [{ type: "color", attrs: { color: "rgba(255, 0, 0, 0.5)" } }] },
+        { type: "text", text: "c", marks: [{ type: "color", attrs: { color: "#00ff00" } }] },
+      ],
+    }]);
+    expect(changesBy(report, "color")).toEqual(["color: translucent color blended onto white"]);
+  });
+
+  it("says why it wrote nothing for a mark with no value", async () => {
+    const report = await exportOf([{
+      type: "paragraph",
+      content: [
+        { type: "text", text: "a", marks: [{ type: "color", attrs: { color: "" } }] },
+        { type: "text", text: "b", marks: [{ type: "fontSize", attrs: { size: null } }] },
+      ],
+    }]);
+    expect(report.entries).toContainEqual({ outcome: "dropped", kind: "color", reason: "no color", owner: "color", count: 1 });
+    expect(report.entries).toContainEqual({ outcome: "dropped", kind: "fontSize", reason: "no size", owner: "fontSize", count: 1 });
+  });
+
+  it("names a table cell background Word is given differently, or not at all", async () => {
+    const cell = (background: string) => ({ type: "tableCell", attrs: { background }, content: [{ type: "paragraph" }] });
+    const report = await exportOf(
+      [{ type: "table", attrs: { grid: [100, 100] }, content: [{ type: "tableRow", content: [cell("rgba(255, 0, 0, 0.5)"), cell("nonsense")] }] }],
+      true,
+    );
+    expect(changesBy(report, "table")).toEqual([
+      "tableCell: translucent background blended onto white",
+      "tableCell: background not written: not a color",
+    ]);
+  });
+
+  it("names a sourced block whose source link does not fit in Word", async () => {
+    const report = await exportOf([{
+      type: "sourcedBlock",
+      attrs: { instanceId: "i", kind: "clause", resourceId: "r".repeat(300), versionId: "v" },
+      content: [{ type: "paragraph", content: [{ type: "text", text: "body" }] }],
+    }]);
+    expect(changesBy(report, "sourcedBlock")).toEqual(["sourcedBlock: source link not written: over 255 characters"]);
+  });
+});
+
+describe("importDocx — what each extension says it could not keep", () => {
+  const run = (rPr: string, text = "x") => `<w:r><w:rPr>${rPr}</w:rPr><w:t>${text}</w:t></w:r>`;
+  const importOf = async (body: string) =>
+    (await importDocx(new ServerEditor({ extensions: [StarterKit] }), await docWithBody(body))).report;
+
+  it("names formatting it keeps in a simpler form", async () => {
+    const report = await importOf(
+      `<w:p>${run(`<w:u w:val="double"/>`)}${run(`<w:sz w:val="23"/>`)}` +
+        `${run(`<w:highlight w:val="green"/>`)}${run(`<w:shd w:val="pct25" w:color="auto" w:fill="FF0000"/>`)}` +
+        `${run(`<w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:eastAsia="MS Mincho"/>`)}</w:p>`,
+    );
+    expect(changesBy(report, "underline")).toEqual([`u: "double" underline imported as single`]);
+    expect(changesBy(report, "fontSize")).toEqual(["sz: rounded to a whole pixel"]);
+    expect(changesBy(report, "highlight")).toEqual([
+      "highlight: color not kept: the editor has one highlight color",
+      `shd: pattern "pct25" not kept`,
+      "shd: color not kept: the editor has one highlight color",
+    ]);
+    expect(changesBy(report, "fontFamily")).toEqual(["rFonts: one font kept of several named"]);
+  });
+
+  it("says why it built nothing for formatting it cannot read", async () => {
+    const report = await importOf(
+      `<w:p>${run(`<w:sz w:val="big"/>`)}${run(`<w:rFonts w:asciiTheme="minorHAnsi"/>`)}</w:p>` +
+        `<w:p><w:hyperlink r:id="rIdMissing">${run("")}</w:hyperlink></w:p>`,
+    );
+    expect(report.entries).toContainEqual({ outcome: "dropped", kind: "sz", reason: "not a valid size", owner: "fontSize", count: 1 });
+    expect(report.entries).toContainEqual({ outcome: "dropped", kind: "rFonts", reason: "theme font not resolved", owner: "fontFamily", count: 1 });
+    expect(report.entries).toContainEqual({ outcome: "dropped", kind: "hyperlink", reason: "no usable target", owner: "link", count: 1 });
+  });
+
+  it("keeps the text of a smart tag inside a link", async () => {
+    const body = `<w:p><w:hyperlink w:anchor="top"><w:r><w:t xml:space="preserve">Visit </w:t></w:r><w:smartTag w:uri="urn:x" w:element="place"><w:r><w:t>Nairobi</w:t></w:r></w:smartTag></w:hyperlink></w:p>`;
+    const { doc } = await importDocx(new ServerEditor({ extensions: [StarterKit] }), await docWithBody(body));
+    expect(doc.textContent).toContain("Visit Nairobi");
+  });
+
+  it("numbers headings Word numbers through their style, and not one that turns it off", async () => {
+    const editor = new ServerEditor();
+    const heading = (level: number, text: string) => ({ type: "heading", attrs: { level }, content: [{ type: "text", text }] });
+    editor.setContent({ type: "doc", content: [
+      heading(1, "Intro"),
+      heading(2, "Scope"),
+      heading(1, "Terms"),
+      heading(1, "Unnumbered"),
+      { type: "orderedList", content: [{ type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "x" }] }] }] },
+    ] });
+    const files = unzipSync(await exportDocxBytes(editor));
+    // Word's built-in heading numbering: the numbering sits on the styles, and
+    // each level names the style it numbers. Heading 2 gives no level of its own.
+    const styles = strFromU8(files["word/styles.xml"]!)
+      .replace(/(<w:style [^>]*w:styleId="Heading1"[^>]*>)/, `$1<w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr>`)
+      .replace(/(<w:style [^>]*w:styleId="Heading2"[^>]*>)/, `$1<w:pPr><w:numPr><w:numId w:val="1"/></w:numPr></w:pPr>`);
+    const numbering = strFromU8(files["word/numbering.xml"]!)
+      .replace(/(<w:lvl w:ilvl="1">)/, `$1<w:pStyle w:val="Heading2"/>`);
+    // The last heading turns its style's numbering off.
+    const document = strFromU8(files["word/document.xml"]!).replace(
+      /(<w:pStyle w:val="Heading1"\/>)((?:(?!<w:pStyle).)*?Unnumbered)/s,
+      `$1<w:numPr><w:ilvl w:val="0"/><w:numId w:val="0"/></w:numPr>$2`,
+    );
+    expect(styles).toContain('w:styleId="Heading2"');
+    const { doc } = await importDocx(new ServerEditor(), zipSync({
+      ...files,
+      "word/styles.xml": strToU8(styles),
+      "word/numbering.xml": strToU8(numbering),
+      "word/document.xml": strToU8(document),
+    }));
+
+    const placed: string[] = [];
+    doc.descendants((node, _pos, parent) => {
+      if (node.type.name !== "heading") return;
+      placed.push(`${node.textContent}:${parent?.type.name}`);
+    });
+    expect(placed).toEqual(["Intro:listItem", "Scope:listItem", "Terms:listItem", "Unnumbered:doc"]);
+    // Scope, a Heading 2, sits a level below Intro.
+    const intro = doc.child(0).child(0);
+    expect(intro.child(1).type.name).toBe("orderedList");
+    expect(intro.child(1).child(0).child(0).textContent).toBe("Scope");
+  });
+
+  describe("numbering a style carries, as Word draws it", () => {
+    const W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
+    const lvl = (ilvl: number, fmt: string, style?: string) =>
+      `<w:lvl w:ilvl="${ilvl}"><w:start w:val="1"/><w:numFmt w:val="${fmt}"/>${style ? `<w:pStyle w:val="${style}"/>` : ""}</w:lvl>`;
+    // numId 1 is the closing list's own; numId 5 is the headings', linked level by level.
+    const numberingXml = `<w:numbering ${W}>`
+      + `<w:abstractNum w:abstractNumId="1">${lvl(0, "decimal")}</w:abstractNum>`
+      + `<w:abstractNum w:abstractNumId="2">${lvl(0, "decimal", "Heading1")}${lvl(1, "decimal", "Heading2")}${lvl(2, "decimal")}${lvl(3, "none", "Heading4")}</w:abstractNum>`
+      + `<w:num w:numId="1"><w:abstractNumId w:val="1"/></w:num><w:num w:numId="5"><w:abstractNumId w:val="2"/></w:num></w:numbering>`;
+    const heading = (level: number, text: string) => ({ type: "heading", attrs: { level }, content: [{ type: "text", text }] });
+    const para = (text: string) => ({ type: "paragraph", content: [{ type: "text", text }] });
+    const closingList = { type: "orderedList", content: [{ type: "listItem", content: [para("closing")] }] };
+    const numPr = (numId?: number, ilvl?: number) =>
+      `<w:numPr>${ilvl === undefined ? "" : `<w:ilvl w:val="${ilvl}"/>`}${numId === undefined ? "" : `<w:numId w:val="${numId}"/>`}</w:numPr>`;
+
+    /** Import `blocks` with `styles` numbering its styles (id → numPr) and `extra` styles and paragraph edits added. */
+    const importNumbered = async (
+      blocks: unknown[],
+      styles: Record<string, string>,
+      edit: { addStyles?: string; document?: (xml: string) => string } = {},
+    ) => {
+      const editor = new ServerEditor();
+      editor.setContent({ type: "doc", content: [...blocks, closingList] });
+      const files = unzipSync(await exportDocxBytes(editor));
+      let stylesXml = strFromU8(files["word/styles.xml"]!);
+      for (const [id, pr] of Object.entries(styles)) {
+        const opening = new RegExp(`(<w:style [^>]*w:styleId="${id}"[^>]*>)`);
+        expect(stylesXml).toMatch(opening);
+        stylesXml = stylesXml.replace(opening, `$1<w:pPr>${pr}</w:pPr>`);
+      }
+      stylesXml = stylesXml.replace("</w:styles>", `${edit.addStyles ?? ""}</w:styles>`);
+      const documentXml = (edit.document ?? ((xml: string) => xml))(strFromU8(files["word/document.xml"]!));
+      return importDocx(new ServerEditor(), zipSync({
+        ...files,
+        "word/styles.xml": strToU8(stylesXml),
+        "word/numbering.xml": strToU8(numberingXml),
+        "word/document.xml": strToU8(documentXml),
+      }));
+    };
+    /** Give the paragraph holding `text` the paragraph properties `pPr`. */
+    const withPPr = (text: string, pPr: string) => (xml: string) =>
+      xml.replace(new RegExp(`<w:p>((?:(?!</w:p>).)*?>${text}<)`, "s"), `<w:p><w:pPr>${pPr}</w:pPr>$1`)
+        .replace(new RegExp(`(<w:pPr>(?:(?!</w:pPr>).)*?)</w:pPr>((?:(?!</w:p>).)*?>${text}<)`, "s"), (m, head: string, rest: string) =>
+          head.includes(pPr) ? m : `${head}${pPr}</w:pPr>${rest}`);
+    /** Each block holding `text`: how many list items it sits in, and its list's first number. */
+    const placeOf = (doc: PmNode, text: string) => {
+      let found: { depth: number; order: unknown } | null = null;
+      doc.descendants((node, pos) => {
+        if (found || !node.isTextblock || node.textContent !== text) return;
+        const $pos = doc.resolve(pos + 1);
+        let depth = 0;
+        let order: unknown = null;
+        for (let d = $pos.depth; d > 0; d--) {
+          const n = $pos.node(d);
+          if (n.type.name === "listItem") depth++;
+          if (order === null && n.type.name === "orderedList") order = n.attrs["order"];
+        }
+        found = { depth, order };
+      });
+      return found;
+    };
+
+    it("counts on across body text, and restarts a level under each new parent", async () => {
+      const { doc } = await importNumbered(
+        [heading(1, "Intro"), para("b1"), heading(1, "Terms"), heading(2, "Scope"), para("b2"), heading(2, "Detail"), heading(1, "End"), heading(2, "Last")],
+        { Heading1: numPr(5), Heading2: numPr(5) },
+      );
+      expect(placeOf(doc, "Intro")).toEqual({ depth: 1, order: 1 });
+      expect(placeOf(doc, "Terms")).toEqual({ depth: 1, order: 2 });
+      expect(placeOf(doc, "Scope")).toEqual({ depth: 2, order: 1 });
+      expect(placeOf(doc, "Detail")).toMatchObject({ order: 2 });
+      expect(placeOf(doc, "End")).toEqual({ depth: 1, order: 3 });
+      expect(placeOf(doc, "Last")).toEqual({ depth: 2, order: 1 });
+      expect(placeOf(doc, "b1")).toEqual({ depth: 0, order: null });
+    });
+
+    it("takes a level the paragraph or a derived style gives, with the numbering from the style", async () => {
+      const { doc } = await importNumbered(
+        [heading(1, "Intro"), heading(1, "Deeper"), para("Deepest")],
+        { Heading1: numPr(5) },
+        {
+          addStyles: `<w:style w:type="paragraph" w:styleId="Sub"><w:basedOn w:val="Heading1"/><w:pPr>${numPr(undefined, 2)}</w:pPr></w:style>`,
+          document: (xml) => withPPr("Deepest", `<w:pStyle w:val="Sub"/>`)(xml.replace(/(<w:pStyle w:val="Heading1"\/>)((?:(?!<\/w:p>).)*?>Deeper<)/s, `$1${numPr(undefined, 1)}$2`)),
+        },
+      );
+      expect(placeOf(doc, "Intro")).toMatchObject({ depth: 1 });
+      expect(placeOf(doc, "Deeper")).toMatchObject({ depth: 2 });
+      expect(placeOf(doc, "Deepest")).toMatchObject({ depth: 3 });
+    });
+
+    it("leaves a heading unnumbered where Word draws no number, and says why when the numbering is missing", async () => {
+      const { doc, report } = await importNumbered(
+        [heading(4, "Outline only"), heading(3, "Dangling")],
+        { Heading4: numPr(5), Heading3: numPr(9, 0) },
+      );
+      expect(placeOf(doc, "Outline only")).toEqual({ depth: 0, order: null });
+      expect(placeOf(doc, "Dangling")).toEqual({ depth: 0, order: null });
+      expect(dropsOf(report).filter((entry) => entry.kind === "w:numPr").map((entry) => entry.count)).toEqual([1]);
+    });
+
+    it("numbers a paragraph with no style of its own through the default paragraph style", async () => {
+      const { doc } = await importNumbered([para("body")], { Normal: numPr(5, 2) });
+      expect(placeOf(doc, "body")).toMatchObject({ depth: 1 });
+    });
+  });
+
+  it("keeps a heading in a list a numbered heading, there and back", async () => {
+    const editor = new ServerEditor();
+    editor.setContent({ type: "doc", content: [{ type: "orderedList", content: [
+      { type: "listItem", content: [{ type: "heading", attrs: { level: 2 }, content: [{ type: "text", text: "Scope" }] }] },
+      { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "Terms" }] }] },
+    ] }] });
+    const bytes = await exportDocxBytes(editor);
+    expect(strFromU8(unzipSync(bytes)["word/document.xml"]!)).toMatch(/<w:pStyle w:val="Heading2"\/>.*<w:numPr>/s);
+
+    const { doc, report } = await importDocx(new ServerEditor(), bytes);
+    const list = doc.child(0);
+    expect(list.type.name).toBe("orderedList");
+    expect(list.child(0).child(0).type.name).toBe("heading");
+    expect(list.child(0).child(0).attrs["level"]).toBe(2);
+    expect(dropsOf(report)).toEqual([]);
+  });
+
+  it("names a list numbering format the editor draws differently, and nothing for its own", async () => {
+    const editor = new ServerEditor();
+    const item = (text: string, nested?: unknown) => ({
+      type: "listItem",
+      content: [{ type: "paragraph", content: [{ type: "text", text }] }, ...(nested ? [nested] : [])],
+    });
+    editor.setContent({ type: "doc", content: [{ type: "orderedList", content: [item("a", { type: "orderedList", content: [item("b")] })] }] });
+    const files = unzipSync(await exportDocxBytes(editor));
+
+    const own = await importDocx(new ServerEditor(), zipSync(files));
+    expect(changesBy(own.report, "list")).toEqual([]);
+
+    // Level 0 in upper roman, level 1 as bullets, where the editor draws 1. and a.
+    const numbering = strFromU8(files["word/numbering.xml"]!)
+      .replace(/(<w:lvl w:ilvl="0">.*?<w:numFmt w:val=")decimal(")/, "$1upperRoman$2")
+      .replace(/(<w:lvl w:ilvl="1">.*?<w:numFmt w:val=")lowerLetter(")/, "$1bullet$2");
+    const { report, doc } = await importDocx(new ServerEditor(), zipSync({ ...files, "word/numbering.xml": strToU8(numbering) }));
+    expect(changesBy(report, "list")).toEqual(['list: "upperRoman" numbering drawn as decimal']);
+    expect(doc.child(0).child(0).child(1).type.name).toBe("bulletList");
+  });
+
+  it("keeps a page break inside a content control as a line break, and says so", async () => {
+    const control =
+      `<w:sdt><w:sdtPr><w:tag w:val="mystery"/></w:sdtPr><w:sdtContent>` +
+      `<w:r><w:t>before</w:t><w:br w:type="page"/><w:t>after</w:t></w:r></w:sdtContent></w:sdt>`;
+    const { doc, report } = await importDocx(new ServerEditor({ extensions: [StarterKit] }), await docWithBody(`<w:p>${control}</w:p>`));
+    const paragraph = doc.child(1);
+    expect(paragraph.textBetween(0, paragraph.content.size, "", "|")).toBe("before|after");
+    expect(report.entries).toContainEqual({
+      outcome: "dropped",
+      kind: "pageBreak",
+      reason: "inside a content control; a line break stands in",
+      owner: null,
+      count: 1,
+    });
+  });
+
+  it("keeps the text of a content control inside a link", async () => {
+    const control = `<w:sdt><w:sdtPr><w:tag w:val="mystery"/></w:sdtPr><w:sdtContent><w:r><w:t>INSIDE</w:t></w:r></w:sdtContent></w:sdt>`;
+    const body = `<w:p><w:hyperlink w:anchor="top"><w:r><w:t xml:space="preserve">vis </w:t></w:r>${control}</w:hyperlink></w:p>`;
+    const { doc } = await importDocx(new ServerEditor({ extensions: [StarterKit] }), await docWithBody(body));
+    expect(doc.textContent).toContain("vis INSIDE");
+  });
+
+  it("names an underline colour it does not keep", async () => {
+    const report = await importOf(`<w:p>${run(`<w:u w:val="single" w:color="FF0000"/>`)}${run(`<w:u w:val="single" w:color="auto"/>`)}</w:p>`);
+    expect(changesBy(report, "underline")).toEqual(["u: underline color not kept"]);
+  });
+
+  it("says why it built nothing for a font or an image it has no way to keep", async () => {
+    const report = await importOf(`<w:p>${run(`<w:rFonts w:eastAsia="SimSun"/>`)}</w:p>`);
+    expect(report.entries).toContainEqual({ outcome: "dropped", kind: "rFonts", reason: "no Latin font named", owner: "fontFamily", count: 1 });
+
+    const editor = new ServerEditor();
+    editor.setContent({ type: "doc", content: [{ type: "paragraph", content: [{ type: "image", attrs: { src: PIXEL } }] }] });
+    const dropped = await importDocx(new ServerEditor(), await exportDocxBytes(editor), { media: "drop" });
+    expect(dropped.report.entries).toContainEqual({ outcome: "dropped", kind: "image", reason: "media option is drop", owner: "image", count: 1 });
+  });
+
+  it("keeps the text inside a smart tag", async () => {
+    const body = `<w:p><w:r><w:t xml:space="preserve">Call </w:t></w:r><w:smartTag w:uri="urn:x" w:element="place"><w:smartTagPr/><w:r><w:t>Nairobi</w:t></w:r></w:smartTag></w:p>`;
+    const { doc, report } = await importDocx(new ServerEditor({ extensions: [StarterKit] }), await docWithBody(body));
+    expect(doc.textContent).toContain("Call Nairobi");
+    expect(dropsOf(report)).toEqual([]);
+  });
+
+  it("counts no loss for shading that sets no fill", async () => {
+    const report = await importOf(`<w:p>${run(`<w:shd w:val="nil"/>`)}${run(`<w:shd w:val="clear" w:color="auto"/>`)}</w:p>`);
+    expect(dropsOf(report)).toEqual([]);
+  });
+
+  it("names no change for a highlight in the editor's own colour", async () => {
+    const editor = new ServerEditor({ extensions: [StarterKit] });
+    editor.setContent({ type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "x", marks: [{ type: "highlight" }] }] }] });
+    const { report } = await importDocx(new ServerEditor({ extensions: [StarterKit] }), await exportDocxBytes(editor));
+    expect(changesBy(report, "highlight")).toEqual([]);
+  });
+
+  it("drops a link it cannot resolve once, though it covers an image", async () => {
+    const editor = new ServerEditor();
+    editor.setContent({ type: "doc", content: [{ type: "paragraph", content: [{ type: "image", attrs: { src: PIXEL } }] }] });
+    const files = unzipSync(await exportDocxBytes(editor));
+    const document = strFromU8(files["word/document.xml"]!).replace(/(<w:r>(?:(?!<w:r>).)*?<w:drawing>.*?<\/w:r>)/s, `<w:hyperlink r:id="rIdMissing">$1</w:hyperlink>`);
+    expect(document).toContain("rIdMissing");
+    const { report } = await importDocx(new ServerEditor(), zipSync({ ...files, "word/document.xml": strToU8(document) }));
+    expect(report.counts["hyperlink"]).toMatchObject({ kept: 0, dropped: 1 });
+  });
+
+  it("drops a link it cannot resolve once, however many runs it spans", async () => {
+    const report = await importOf(`<w:p><w:hyperlink r:id="rIdMissing">${run("")}${run("")}${run("")}</w:hyperlink></w:p>`);
+
+    expect(report.counts["hyperlink"]).toMatchObject({ kept: 0, dropped: 1 });
+  });
+
+  it("says why an image it cannot find is missing", async () => {
+    const drawing =
+      `<w:drawing><wp:inline><wp:extent cx="9525" cy="9525"/><a:graphic><a:graphicData>` +
+      `<pic:pic><pic:blipFill><a:blip r:embed="rIdMissing"/></pic:blipFill></pic:pic>` +
+      `</a:graphicData></a:graphic></wp:inline></w:drawing>`;
+    const report = await importOf(`<w:p><w:r>${drawing}</w:r></w:p>`);
+    expect(report.entries).toContainEqual({ outcome: "dropped", kind: "image", reason: "image part not found", owner: "image", count: 1 });
+  });
+
+  it("takes an image out of what it kept when a code block leaves it behind", async () => {
+    const editor = new ServerEditor();
+    editor.setContent({
+      type: "doc",
+      content: [{ type: "paragraph", content: [{ type: "text", text: "code ", marks: [{ type: "bold" }] }, { type: "image", attrs: { src: PIXEL } }] }],
+    });
+    const entries = unzipSync(await exportDocxBytes(editor));
+    const documentXml = strFromU8(entries["word/document.xml"]!);
+    entries["word/document.xml"] = strToU8(documentXml.replace("<w:p>", `<w:p><w:pPr><w:pStyle w:val="CodeBlock"/></w:pPr>`));
+    const { report, doc } = await importDocx(new ServerEditor(), zipSync(entries));
+
+    expect(doc.child(0).type.name).toBe("codeBlock");
+    for (const kind of ["image", "b"]) {
+      expect(report.counts[kind], kind).toEqual({ kept: 0, dropped: 1, changed: 0 });
+      expect(report.entries).toContainEqual({ outcome: "dropped", kind, reason: LEFT_OUT, owner: "codeBlock", count: 1 });
+    }
+  });
+
+  it("reports nothing lost for a code block Scrivr wrote", async () => {
+    const editor = new ServerEditor();
+    editor.setContent({ type: "doc", content: [{ type: "codeBlock", content: [{ type: "text", text: "let x = 1;" }] }] });
+    const { report, doc } = await importDocx(new ServerEditor(), await exportDocxBytes(editor));
+
+    expect(doc.child(0).type.name).toBe("codeBlock");
+    expect(report.entries.filter((entry) => entry.owner === "codeBlock")).toEqual([]);
+  });
+
+  it("counts no loss for the line breaks a code block keeps as newlines", async () => {
+    const editor = new ServerEditor();
+    editor.setContent({ type: "doc", content: [{ type: "codeBlock", content: [{ type: "text", text: "line1\nline2\nline3" }] }] });
+    const { doc, report } = await importDocx(new ServerEditor(), await exportDocxBytes(editor));
+
+    expect(doc.child(0).textContent).toBe("line1\nline2\nline3");
+    expect(dropsOf(report)).toEqual([]);
+  });
+
+  it("names a content control a code block leaves behind by Word's kind", async () => {
+    const editor = new ServerEditor({ extensions: [StarterKit, Field] });
+    editor.setContent({ type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "sign " }, { type: "field", attrs: { nodeId: "who", kind: "name", fill: "signer", role: "client", width: 160, height: 24 } }] }] });
+    const files = unzipSync(await exportDocxBytes(editor));
+    const documentXml = strFromU8(files["word/document.xml"]!).replace("<w:p>", `<w:p><w:pPr><w:pStyle w:val="CodeBlock"/></w:pPr>`);
+    const { report } = await importDocx(new ServerEditor({ extensions: [StarterKit, Field] }), zipSync({ ...files, "word/document.xml": strToU8(documentXml) }));
+
+    expect(report.counts["sdt"]).toMatchObject({ kept: 0, dropped: 1 });
+    expect(report.counts["field"]).toBeUndefined();
+  });
+
+  it("charges no loss when a field is shown as text", async () => {
+    const FieldAsText = Extension.create({
+      name: "fieldAsText",
+      addImports() {
+        return { docx: { inlines: { field: (_item, marks, ctx) => ctx.schema.text("3", marks) } } };
+      },
+    });
+    const { doc, report } = await importDocx(
+      new ServerEditor({ extensions: [StarterKit, FieldAsText] }),
+      await docWithBody(`<w:p>${run("", "Page ")}<w:fldSimple w:instr=" PAGE "/>${run("", " of")}</w:p>`),
+    );
+    expect(doc.textContent).toContain("Page 3 of");
+    expect(dropsOf(report)).toEqual([]);
+    for (const count of Object.values(report.counts)) expect(count.kept).toBeGreaterThanOrEqual(0);
+  });
+
+  it("charges a line break a handler leaves out, though not one it keeps as a newline", async () => {
+    const TextOnly = Extension.create({
+      name: "textOnly",
+      addImports() {
+        return {
+          docx: {
+            paragraphStyles: {
+              TextOnly: (_block, content, ctx) =>
+                ctx.schema.nodes["paragraph"]!.create(null, content.filter((node) => node.isText)),
+            },
+          },
+        };
+      },
+    });
+    const { report } = await importDocx(
+      new ServerEditor({ extensions: [StarterKit, TextOnly] }),
+      await docWithBody(`<w:p><w:pPr><w:pStyle w:val="TextOnly"/></w:pPr><w:r><w:t>a</w:t><w:br/><w:t>b</w:t></w:r></w:p>`),
+    );
+    expect(report.counts["hardBreak"]).toMatchObject({ kept: 0, dropped: 1 });
+  });
+
+  it("leaves no empty entry when a handler builds nothing from what it was handed", async () => {
+    const Empty = Extension.create({
+      name: "empty",
+      addImports() {
+        return { docx: { blocks: { paragraph: () => [] } } };
+      },
+    });
+    const { report } = await importDocx(
+      new ServerEditor({ extensions: [StarterKit, Empty] }),
+      await docWithBody(`<w:p>${run("<w:b/>")}</w:p>`),
+    );
+    expect(report.entries.filter((entry) => entry.count === 0)).toEqual([]);
+    expect(report.counts["b"]).toMatchObject({ kept: 0, dropped: 1 });
+  });
+
+  it("counts no loss for formatting a code block leaves behind that carried nothing", async () => {
+    const noFormatting = `<w:rFonts w:hint="eastAsia"/><w:color w:val="auto"/><w:highlight w:val="none"/><w:shd w:val="clear" w:fill="auto"/>`;
+    const report = await importOf(`<w:p><w:pPr><w:pStyle w:val="CodeBlock"/></w:pPr>${run(noFormatting, "let x;")}</w:p>`);
+
+    expect(dropsOf(report)).toEqual([]);
+  });
+
+  it("counts formatting a code block leaves behind inside a content control", async () => {
+    const control = `<w:sdt><w:sdtPr><w:tag w:val="mystery"/></w:sdtPr><w:sdtContent>${run("<w:b/>")}</w:sdtContent></w:sdt>`;
+    const report = await importOf(`<w:p><w:pPr><w:pStyle w:val="CodeBlock"/></w:pPr>${control}</w:p>`);
+
+    expect(report.counts["b"]).toMatchObject({ kept: 0, dropped: 1 });
+  });
+
+  it("records a handler's own drop whatever came before it in the document", async () => {
+    const Lossy = Extension.create({
+      name: "lossy",
+      addImports() {
+        return {
+          docx: {
+            paragraphStyles: {
+              Lossy: (_block, content, ctx) => {
+                ctx.report.dropped("b", "lossy");
+                return ctx.schema.nodes["paragraph"]!.create(null, content);
+              },
+            },
+          },
+        };
+      },
+    });
+    for (const order of ["first", "last"]) {
+      const heading = `<w:p>${run("<w:b/>", "H")}</w:p>`;
+      const lossy = `<w:p><w:pPr><w:pStyle w:val="Lossy"/></w:pPr>${run("", "x")}</w:p>`;
+      const editor = new ServerEditor({ extensions: [StarterKit, Lossy] });
+      const { report } = await importDocx(editor, await docWithBody(order === "first" ? heading + lossy : lossy + heading));
+
+      expect(report.entries, order).toContainEqual({ outcome: "dropped", kind: "b", reason: "lossy", owner: "lossy", count: 1 });
+    }
+  });
+
+  it("does not count a field twice when a code block leaves behind one nothing built", async () => {
+    const bytes = await docWithBody(
+      `<w:p><w:pPr><w:pStyle w:val="CodeBlock"/></w:pPr><w:r><w:t>page </w:t></w:r><w:fldSimple w:instr=" PAGE "/></w:p>`,
+    );
+    const { report } = await importDocx(new ServerEditor(), bytes);
+    expect(report.counts["field"]).toEqual({ kept: 0, dropped: 1, changed: 0 });
+  });
+});
+
+describe("importDocx — unread, as a consumer imports it", () => {
+  it("lists what the import never read, from the package entry", async () => {
+    const bytes = await docWithBody(`<w:p><w:pPr><w:keepNext/></w:pPr><w:r><w:t>x</w:t></w:r></w:p>`);
+    const { report } = await importDocx(new ServerEditor(), bytes, { trackUnread: true });
+    const keepNext: DocxUnreadElement | undefined = report.unread?.find((u) => u.path.endsWith("/w:pPr/w:keepNext"));
+    expect(keepNext).toEqual({ part: "word/document.xml", path: "w:document/w:body/w:p/w:pPr/w:keepNext", outcome: "unread", count: 1 });
   });
 });
