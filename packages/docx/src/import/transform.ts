@@ -35,6 +35,7 @@ import type {
   DocxMark,
 } from "@scrivr/core";
 import {
+  LEFT_OUT,
   NOT_MINE,
   NO_HANDLER,
   entryOf,
@@ -206,12 +207,14 @@ function transformParagraph(
     );
     settleUnlanded(recorder);
     if (!dispatch) return fallbackParagraph(block, content, ctx, recorder);
-    return recorder.handle(
+    const result = recorder.handle(
       dispatch.owner,
       "paragraph",
       () => dispatch.handler(block, content, ctx),
       producedNodes,
     );
+    chargeLeftOut(content, result, ctx.styles.runMarks(styleId), dispatch.owner, recorder);
+    return result;
   }, lostUnlessProduced("paragraph", dispatch?.owner ?? null));
 }
 
@@ -255,14 +258,18 @@ function transformInlines(
     if (item.type === "text") {
       if (item.text.length === 0) continue;
       const marks = transformMarks(layer(inherited, item.marks), ctx, handlers, recorder);
-      out.push(ctx.schema.text(item.text, marks.length > 0 ? marks : undefined));
+      const text = ctx.schema.text(item.text, marks.length > 0 ? marks : undefined);
+      builtInlines.set(text, { sources: lastSources });
+      out.push(text);
       recorder.carried("text");
     } else if (item.type === "hardBreak") {
       const hb = ctx.schema.nodes["hardBreak"];
       if (hb) {
         // Marked like its run, so a break inside a field stays inside it.
         const marks = transformMarks(layer(inherited, item.marks), ctx, handlers, recorder);
-        out.push(hb.create(null, null, marks));
+        const hardBreak = hb.create(null, null, marks);
+        builtInlines.set(hardBreak, { sources: lastSources });
+        out.push(hardBreak);
         recorder.carried("hardBreak");
       } else {
         dropUnhandled(ctx, recorder, "hardBreak", noSchemaNode("hardBreak"), {
@@ -372,17 +379,23 @@ function transformAtom(
     return null;
   }
   const owner = ownerOf(handlers.owners.inlines, item.type);
+  let sources: MarkSource[] = [];
   const node = recorder.subtree(
     () => {
       const pmMarks = transformMarks(formatting, ctx, handlers, recorder);
+      sources = [...lastSources];
       for (const mark of wrappers) {
         const wrapper = buildWrapper(mark, ctx, handlers, recorder).mark;
-        if (wrapper) pmMarks.push(wrapper);
+        if (wrapper) {
+          pmMarks.push(wrapper);
+          sources.push({ docx: mark, pm: wrapper });
+        }
       }
       return recorder.handle(owner, item.type, () => handler(item, pmMarks, ctx), built);
     },
     (atom) => (atom ? null : { kind: item.type, owner }),
   );
+  if (node) builtInlines.set(node, { sources, atom: item.type });
   for (const mark of wrappers) {
     if (!node) unlanded.push({ mark, atom: item.type });
     else if (!countedWrappers.has(mark)) {
@@ -454,6 +467,11 @@ function transformMarks(
   recorder: DocxReportRecorder,
 ): PmMark[] {
   const out: PmMark[] = [];
+  const sources: MarkSource[] = [];
+  const push = (docx: DocxMark, pm: PmMark) => {
+    out.push(pm);
+    sources.push({ docx, pm });
+  };
   for (const mark of marks) {
     // The run refused this formatting. It has already outranked whatever the
     // style offered; there is nothing left to draw.
@@ -462,7 +480,7 @@ function transformMarks(
     if (WRAPPER_KINDS.has(mark.kind)) {
       if (countedWrappers.has(mark)) {
         const repeated = builtWrappers.get(mark)?.mark;
-        if (repeated) out.push(repeated);
+        if (repeated) push(mark, repeated);
         continue;
       }
       countedWrappers.add(mark);
@@ -471,7 +489,7 @@ function transformMarks(
         // Built over an atom that was lost; this run is where it lands.
         if (prebuilt.mark) {
           recorder.handle(ownerOf(handlers.owners.marks, mark.kind), mark.kind, () => prebuilt.mark, built);
-          out.push(prebuilt.mark);
+          push(mark, prebuilt.mark);
         } else if (!prebuilt.reported) {
           recorder.handle(ownerOf(handlers.owners.marks, mark.kind), mark.kind, () => null, built);
         }
@@ -508,9 +526,71 @@ function transformMarks(
     );
     // Later runs under the same wrapper reuse this, without asking the handler again.
     if (WRAPPER_KINDS.has(mark.kind)) builtWrappers.set(mark, { mark: result, reported: true });
-    if (result) out.push(result);
+    if (result) push(mark, result);
   }
+  lastSources = sources;
   return out;
+}
+
+/** The Word mark that built a piece of formatting, so a handler that leaves it out can be charged for it. */
+interface MarkSource {
+  docx: DocxMark;
+  pm: PmMark;
+}
+/** The sources of the marks the last `transformMarks` call built, for the node about to carry them. */
+let lastSources: MarkSource[] = [];
+/** Each inline node the converter built: the Word marks behind its formatting, and its kind if it is an atom. */
+const builtInlines = new WeakMap<PmNode, { sources: MarkSource[]; atom?: string }>();
+
+/**
+ * A paragraph handler hands back a node built from `content`. Formatting and
+ * inline objects in `content` that the node does not carry — a code block
+ * keeping only text — were counted kept as they were built, so they move to
+ * dropped under the handler. Formatting is compared by how much text carries
+ * it, which joining or copying text nodes does not change; the paragraph
+ * style's own formatting is what the node stands for, so it is never charged.
+ */
+function chargeLeftOut(
+  content: readonly PmNode[],
+  result: PmNode | PmNode[] | null,
+  styleMarks: readonly DocxMark[],
+  owner: HandlerOwner,
+  recorder: DocxReportRecorder,
+): void {
+  if (!result) return;
+  const weight = (node: PmNode) => (node.isText ? (node.text ?? "").length : 1);
+  const tally = (nodes: readonly PmNode[]) => {
+    const marks = new Map<string, number>();
+    const atoms = new Map<string, number>();
+    const visit = (node: PmNode) => {
+      node.marks.forEach((mark) => marks.set(mark.type.name, (marks.get(mark.type.name) ?? 0) + weight(node)));
+      if (node.isInline && node.isLeaf && !node.isText) atoms.set(node.type.name, (atoms.get(node.type.name) ?? 0) + 1);
+    };
+    for (const node of nodes) {
+      visit(node);
+      node.descendants((child) => void visit(child));
+    }
+    return { marks, atoms };
+  };
+  const given = tally(content);
+  const kept = tally(Array.isArray(result) ? result : [result]);
+  const fromStyle = new Set(styleMarks);
+  const charged = new Set<DocxMark>();
+  for (const [type, amount] of given.marks) {
+    let missing = amount - (kept.marks.get(type) ?? 0);
+    for (const node of content) {
+      for (const { docx, pm } of builtInlines.get(node)?.sources ?? []) {
+        if (missing <= 0 || pm.type.name !== type) continue;
+        missing -= weight(node);
+        if (charged.has(docx) || fromStyle.has(docx)) continue;
+        charged.add(docx);
+        recorder.leftOut(docx.kind, LEFT_OUT, owner);
+      }
+    }
+  }
+  for (const [type, count] of given.atoms) {
+    for (let i = count - (kept.atoms.get(type) ?? 0); i > 0; i--) recorder.leftOut(type, LEFT_OUT, owner);
+  }
 }
 
 // ── Universal fallbacks ─────────────────────────────────────────────────────

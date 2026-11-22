@@ -210,11 +210,11 @@ export interface DocxReporter {
    */
   kept(kind: string, count?: number): void;
   /**
-   * One `kind` did not make it across, and why. For content inside the item
-   * being handled — an image a code block leaves out — one is also taken off
-   * what was counted kept, and nothing is recorded if none of that kind was
-   * kept there. The import names content as the converter counts it: Word's
-   * kinds (`b`, `image`, `field`), not the editor's.
+   * One `kind` did not make it across, and why. The import names content as
+   * the converter counts it: Word's kinds (`b`, `image`, `field`), not the
+   * editor's. Content a paragraph's handler is handed and leaves out of the
+   * node it returns — a code block keeping only text — the converter finds
+   * and reports itself.
    */
   dropped(kind: string, reason: string): void;
   /**

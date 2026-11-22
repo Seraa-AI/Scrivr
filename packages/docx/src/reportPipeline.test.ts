@@ -25,6 +25,7 @@ import {
   NO_HANDLER,
   NO_PARSER,
   OVERRIDES_OWNER,
+  LEFT_OUT,
   PART_UNREADABLE,
   WRAPPER_DECLINED,
   exportDocx,
@@ -963,7 +964,7 @@ describe("importDocx — what each extension says it could not keep", () => {
     expect(doc.child(0).type.name).toBe("codeBlock");
     for (const kind of ["image", "b"]) {
       expect(report.counts[kind], kind).toEqual({ kept: 0, dropped: 1, changed: 0 });
-      expect(report.entries).toContainEqual({ outcome: "dropped", kind, reason: "a code block holds only text", owner: "codeBlock", count: 1 });
+      expect(report.entries).toContainEqual({ outcome: "dropped", kind, reason: LEFT_OUT, owner: "codeBlock", count: 1 });
     }
   });
 
@@ -974,6 +975,46 @@ describe("importDocx — what each extension says it could not keep", () => {
 
     expect(doc.child(0).type.name).toBe("codeBlock");
     expect(report.entries.filter((entry) => entry.owner === "codeBlock")).toEqual([]);
+  });
+
+  it("counts no loss for formatting a code block leaves behind that carried nothing", async () => {
+    const noFormatting = `<w:rFonts w:hint="eastAsia"/><w:color w:val="auto"/><w:highlight w:val="none"/><w:shd w:val="clear" w:fill="auto"/>`;
+    const report = await importOf(`<w:p><w:pPr><w:pStyle w:val="CodeBlock"/></w:pPr>${run(noFormatting, "let x;")}</w:p>`);
+
+    expect(dropsOf(report)).toEqual([]);
+  });
+
+  it("counts formatting a code block leaves behind inside a content control", async () => {
+    const control = `<w:sdt><w:sdtPr><w:tag w:val="mystery"/></w:sdtPr><w:sdtContent>${run("<w:b/>")}</w:sdtContent></w:sdt>`;
+    const report = await importOf(`<w:p><w:pPr><w:pStyle w:val="CodeBlock"/></w:pPr>${control}</w:p>`);
+
+    expect(report.counts["b"]).toMatchObject({ kept: 0, dropped: 1 });
+  });
+
+  it("records a handler's own drop whatever came before it in the document", async () => {
+    const Lossy = Extension.create({
+      name: "lossy",
+      addImports() {
+        return {
+          docx: {
+            paragraphStyles: {
+              Lossy: (_block, content, ctx) => {
+                ctx.report.dropped("b", "lossy");
+                return ctx.schema.nodes["paragraph"]!.create(null, content);
+              },
+            },
+          },
+        };
+      },
+    });
+    for (const order of ["first", "last"]) {
+      const heading = `<w:p>${run("<w:b/>", "H")}</w:p>`;
+      const lossy = `<w:p><w:pPr><w:pStyle w:val="Lossy"/></w:pPr>${run("", "x")}</w:p>`;
+      const editor = new ServerEditor({ extensions: [StarterKit, Lossy] });
+      const { report } = await importDocx(editor, await docWithBody(order === "first" ? heading + lossy : lossy + heading));
+
+      expect(report.entries, order).toContainEqual({ outcome: "dropped", kind: "b", reason: "lossy", owner: "lossy", count: 1 });
+    }
   });
 
   it("does not count a field twice when a code block leaves behind one nothing built", async () => {
