@@ -69,8 +69,6 @@ export function transformToProseMirror(
   ctx: DocxImportContext,
   handlers: ResolvedImportHandlers,
 ): PmNode {
-  // Links a walk left pending belong to that walk: one that threw leaves none for this one.
-  unlanded.length = 0;
   const blocks = [...ctx.walkBlocks(model.blocks)];
   // Schemas typically require at least one block child in `doc`.
   if (blocks.length === 0) {
@@ -374,7 +372,7 @@ function transformAtom(
     for (const mark of formatting) {
       if (!mark.off) recorder.unhandled(mark.kind, insideDropped(item.type));
     }
-    wrappers.forEach((mark) => unlanded.push({ mark, atom: item.type }));
+    wrappers.forEach((mark) => unlandedOf(recorder).push({ mark, atom: item.type }));
     return null;
   }
   const owner = ownerOf(handlers.owners.inlines, item.type);
@@ -397,7 +395,7 @@ function transformAtom(
   );
   if (node) builtInlines.set(node, { sources, atom: item.type });
   for (const mark of wrappers) {
-    if (!node) unlanded.push({ mark, atom: item.type });
+    if (!node) unlandedOf(recorder).push({ mark, atom: item.type });
     else if (!countedWrappers.has(mark)) {
       countedWrappers.add(mark);
       const { mark: wrapper, outcomeRecorded } = builtWrappers.get(mark) ?? { mark: null, outcomeRecorded: false };
@@ -440,10 +438,15 @@ function buildWrapper(
  * paragraph: one that lands on a run there is counted kept, one that never
  * does is counted dropped once.
  */
-const unlanded: Array<{ mark: DocxMark; atom: string }> = [];
+const unlandedByImport = new WeakMap<DocxReportRecorder, Array<{ mark: DocxMark; atom: string }>>();
+function unlandedOf(recorder: DocxReportRecorder): Array<{ mark: DocxMark; atom: string }> {
+  let list = unlandedByImport.get(recorder);
+  if (!list) unlandedByImport.set(recorder, (list = []));
+  return list;
+}
 
 function settleUnlanded(recorder: DocxReportRecorder): void {
-  for (const { mark, atom } of unlanded.splice(0)) {
+  for (const { mark, atom } of unlandedOf(recorder).splice(0)) {
     if (countedWrappers.has(mark)) continue;
     countedWrappers.add(mark);
     // A wrapper whose handler already reported it dropped is not lost a second time.
@@ -565,13 +568,17 @@ function chargeLeftOut(
   recorder: DocxReportRecorder,
 ): void {
   if (!result || !producedNodes(result)) return;
-  // An object is counted by the Word kind it was built from; a line break is
-  // not one, since a handler can keep it as a newline.
+  // An object is counted by the Word kind it was built from — only where its
+  // node type is one no other inline here has, since a field shown as text is
+  // indistinguishable from the text around it.
   const atomKinds = new Map<string, string>();
+  const sharedTypes = new Set<string>();
   for (const node of content) {
     const atom = builtInlines.get(node)?.atom;
     if (atom) atomKinds.set(node.type.name, atom);
+    else sharedTypes.add(node.type.name);
   }
+  for (const type of sharedTypes) atomKinds.delete(type);
   const weight = (node: PmNode) => (node.isText ? (node.text ?? "").length : 1);
   const tally = (nodes: readonly PmNode[]) => {
     const marks = new Map<string, number>();
@@ -607,6 +614,21 @@ function chargeLeftOut(
   for (const [type, count] of given.atoms) {
     for (let i = count - (kept.atoms.get(type) ?? 0); i > 0; i--) recorder.leftOut(type, owner);
   }
+  // A line break is kept as a break, or as a newline in a node that holds plain text.
+  const breaks = (nodes: readonly PmNode[]) => {
+    let total = 0;
+    const visit = (node: PmNode) => {
+      if (node.type.name === "hardBreak") total += 1;
+      else if (node.isText) total += (node.text ?? "").split("\n").length - 1;
+    };
+    for (const node of nodes) {
+      visit(node);
+      node.descendants((child) => void visit(child));
+    }
+    return total;
+  };
+  const resultNodes = Array.isArray(result) ? result : [result];
+  for (let i = breaks(content) - breaks(resultNodes); i > 0; i--) recorder.leftOut("hardBreak", owner);
 }
 
 // ── Universal fallbacks ─────────────────────────────────────────────────────

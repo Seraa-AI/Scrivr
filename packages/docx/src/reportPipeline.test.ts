@@ -987,6 +987,13 @@ describe("importDocx — what each extension says it could not keep", () => {
     expect(doc.textContent).toContain("Visit Nairobi");
   });
 
+  it("keeps the text of a content control inside a link", async () => {
+    const control = `<w:sdt><w:sdtPr><w:tag w:val="mystery"/></w:sdtPr><w:sdtContent><w:r><w:t>INSIDE</w:t></w:r></w:sdtContent></w:sdt>`;
+    const body = `<w:p><w:hyperlink w:anchor="top"><w:r><w:t xml:space="preserve">vis </w:t></w:r>${control}</w:hyperlink></w:p>`;
+    const { doc } = await importDocx(new ServerEditor({ extensions: [StarterKit] }), await docWithBody(body));
+    expect(doc.textContent).toContain("vis INSIDE");
+  });
+
   it("names an underline colour it does not keep", async () => {
     const report = await importOf(`<w:p>${run(`<w:u w:val="single" w:color="FF0000"/>`)}${run(`<w:u w:val="single" w:color="auto"/>`)}</w:p>`);
     expect(changesBy(report, "underline")).toEqual(["u: underline color not kept"]);
@@ -1091,6 +1098,43 @@ describe("importDocx — what each extension says it could not keep", () => {
 
     expect(report.counts["sdt"]).toMatchObject({ kept: 0, dropped: 1 });
     expect(report.counts["field"]).toBeUndefined();
+  });
+
+  it("charges no loss when a field is shown as text", async () => {
+    const FieldAsText = Extension.create({
+      name: "fieldAsText",
+      addImports() {
+        return { docx: { inlines: { field: (_item, marks, ctx) => ctx.schema.text("3", marks) } } };
+      },
+    });
+    const { doc, report } = await importDocx(
+      new ServerEditor({ extensions: [StarterKit, FieldAsText] }),
+      await docWithBody(`<w:p>${run("", "Page ")}<w:fldSimple w:instr=" PAGE "/>${run("", " of")}</w:p>`),
+    );
+    expect(doc.textContent).toContain("Page 3 of");
+    expect(dropsOf(report)).toEqual([]);
+    for (const count of Object.values(report.counts)) expect(count.kept).toBeGreaterThanOrEqual(0);
+  });
+
+  it("charges a line break a handler leaves out, though not one it keeps as a newline", async () => {
+    const TextOnly = Extension.create({
+      name: "textOnly",
+      addImports() {
+        return {
+          docx: {
+            paragraphStyles: {
+              TextOnly: (_block, content, ctx) =>
+                ctx.schema.nodes["paragraph"]!.create(null, content.filter((node) => node.isText)),
+            },
+          },
+        };
+      },
+    });
+    const { report } = await importDocx(
+      new ServerEditor({ extensions: [StarterKit, TextOnly] }),
+      await docWithBody(`<w:p><w:pPr><w:pStyle w:val="TextOnly"/></w:pPr><w:r><w:t>a</w:t><w:br/><w:t>b</w:t></w:r></w:p>`),
+    );
+    expect(report.counts["hardBreak"]).toMatchObject({ kept: 0, dropped: 1 });
   });
 
   it("leaves no empty entry when a handler builds nothing from what it was handed", async () => {

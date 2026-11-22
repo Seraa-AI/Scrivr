@@ -318,8 +318,9 @@ export function createReportRecorder(options: ReportRecorderOptions = {}): DocxR
       addEntry("dropped", kind, reason, null);
     },
     leftOut(kind, owner) {
-      // Only content counted kept as it was built is ever left out.
-      countOf(kind).kept -= 1;
+      // Only content counted kept as it was built is left out; never below none.
+      const count = countOf(kind);
+      if (count.kept > 0) count.kept -= 1;
       const open = subtrees[subtrees.length - 1];
       const inside = open?.kept.get(kind) ?? 0;
       if (open && inside > 0) open.kept.set(kind, inside - 1);

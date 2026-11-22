@@ -407,17 +407,10 @@ function parseParagraphInlines(el: OoxmlElement, diag: ParserDiagnostics): DocxI
       // inline produced by its inner runs. Stage 2 (Link extension)
       // resolves the relId → URL via `ctx.rels.resolveHyperlink`.
       const linkMark = buildHyperlinkMark(child);
-      for (const inner of child.children) {
-        if (typeof inner === "string") continue;
-        if (inner.name === "w:r") {
-          for (const item of parseRun(inner, diag)) {
-            content.push(addMark(item, linkMark));
-          }
-        } else if (inner.name === "w:smartTag") {
-          for (const item of parseParagraphInlines(inner, diag)) {
-            content.push(addMark(item, linkMark));
-          }
-        }
+      // Everything a link holds — runs, smart tags, content controls, simple
+      // fields — is read as a paragraph's content is, under the link.
+      for (const item of parseParagraphInlines(child, diag)) {
+        content.push(addMark(item, linkMark));
       }
     }
   }
