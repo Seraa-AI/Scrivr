@@ -45,7 +45,7 @@ export function reconstructLists(model: DocxImportModel, sources: ListSources): 
   let i = 0;
   while (i < blocks.length) {
     const b = blocks[i]!;
-    if (isListParagraph(b) && numbering.format(b.attrs.numbering.numId, b.attrs.numbering.ilvl) === "none") {
+    if (isListParagraph(b) && isUnnumberedItem(b, numbering)) {
       // An item Word draws without a number: a plain paragraph here, but it
       // still counts, and the levels under it restart.
       countItem(counts, b.attrs.numbering.numId, b.attrs.numbering.ilvl);
@@ -57,7 +57,7 @@ export function reconstructLists(model: DocxImportModel, sources: ListSources): 
       // separate list blocks instead of merging.
       const startIlvl = b.attrs.numbering.ilvl;
       const startNumId = b.attrs.numbering.numId;
-      const endIdx = findListEnd(blocks, i, startNumId, startIlvl);
+      const endIdx = findListEnd(blocks, i, startNumId, startIlvl, numbering);
       out.push(...buildLists(blocks.slice(i, endIdx), 0, numbering, counts));
       i = endIdx;
     } else {
@@ -82,16 +82,23 @@ function isListParagraph(b: DocxBlock): b is ListParagraph {
   return b.type === "paragraph" && b.attrs.numbering?.numId !== undefined && b.attrs.numbering.ilvl !== undefined;
 }
 
+/** A list item at a level formatted `none`: Word counts it but draws no number. */
+function isUnnumberedItem(b: DocxBlock, numbering: NumberingResolver): boolean {
+  return isListParagraph(b) && numbering.format(b.attrs.numbering.numId, b.attrs.numbering.ilvl) === "none";
+}
+
 function findListEnd(
   blocks: DocxBlock[],
   start: number,
   startNumId: number,
   startIlvl: number,
+  numbering: NumberingResolver,
 ): number {
   let i = start;
   while (i < blocks.length) {
     const b = blocks[i]!;
-    if (!isListParagraph(b)) break;
+    // An unnumbered item ends the run too: it stays a plain paragraph.
+    if (!isListParagraph(b) || isUnnumberedItem(b, numbering)) break;
     const { numId, ilvl } = b.attrs.numbering;
     if (numId === startNumId) {
       // Same logical list — continue regardless of depth.

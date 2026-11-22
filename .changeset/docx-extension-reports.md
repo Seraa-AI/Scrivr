@@ -32,4 +32,4 @@ The built-in extensions report what their DOCX handlers could not carry across, 
   - A level nothing names is the one `numbering.xml` links to the style.
   - Numbering counts on across the paragraphs between items, and a level restarts under each new item of a shallower one, so sections separated by body text number 1, 2, 3 rather than 1, 1, 1.
   - Where Word draws no number, nothing is numbered: `numId` 0, and a `numId` the document does not define, reported as a dropped `w:numPr`. A level formatted `none` is drawn without a number but still counts, so the levels under it restart.
-  - DOCX export gives a list nested under one of another kind its own numbering, so an ordered list under a bullet list restarts at 1 in Word, as on screen.
+  - DOCX export gives a list nested under one of another kind its own numbering, starting at the list's own first number at the level its items sit at, so an ordered list under a bullet list restarts in Word as on screen, and its `order` comes back on import. `ctx.numbering.getOrCreate` takes the `level` its `start` applies to.

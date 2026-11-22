@@ -508,15 +508,16 @@ export const List = Extension.create({
       // Each top-level list counts on its own, as on screen. A list nested in
       // one of the same kind numbers at its level in that list's numbering,
       // which Word restarts under each parent item; any other has its own,
-      // since Word restarts a level only under its own numbering's items.
-      const numIdFor = (list: PmNode, kind: ListKind, parent: { kind: ListKind; numId: number } | null): number =>
+      // since Word restarts a level only under its own numbering's items; it
+      // starts at the list's own first number, at the level it sits at.
+      const numIdFor = (list: PmNode, kind: ListKind, parent: { kind: ListKind; numId: number } | null, level: number): number =>
         parent && parent.kind === kind
           ? parent.numId
           : ctx.numbering.getOrCreate({
               type: kind,
               levels: docxLevels(kind),
               instance: list,
-              ...(kind === "ordered" && !parent ? { start: listStart(list) } : {}),
+              ...(kind === "ordered" ? { start: listStart(list), level } : {}),
             }).numId;
 
       // Where the walk is: the list it is in and that list's numbering (null
@@ -526,8 +527,9 @@ export const List = Extension.create({
         const kind = listKind(node);
         let inside: Scope = scope;
         if (kind) {
-          const numId = numIdFor(node, kind, scope.parent);
-          inside = { parent: { kind, numId }, listLevel: nestedListLevel(scope.listLevel), listNumId: numId };
+          const listLevel = nestedListLevel(scope.listLevel);
+          const numId = numIdFor(node, kind, scope.parent, listLevel);
+          inside = { parent: { kind, numId }, listLevel, listNumId: numId };
         } else if (scope.listNumId !== null && scope.listLevel !== null && node.type.name === "listItem") {
           itemMap.set(node, { numId: scope.listNumId, ilvl: itemLevel(node, scope.listLevel) });
           inside = { ...scope, listNumId: null };

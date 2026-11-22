@@ -58,8 +58,10 @@ export interface NumberingEntry {
   config: { type: "bullet" | "ordered" | "task"; levels: DocxNumberingLevel[] };
   /** The list this numbering is for, when it is one list's own. */
   instance?: object;
-  /** Level 0's first number, written as its `startOverride`, when this is one list's own. */
+  /** The first number at `level`, written as its `startOverride`, when this is one list's own. */
   start?: number;
+  /** The level the list's items sit at; 0 unless it is nested. */
+  level?: number;
 }
 
 export interface RelEntry {
@@ -152,7 +154,7 @@ export function createDocxContext(
       table: { getOrCreate: (n, s) => getOrCreateStyle("table", n, s) },
     },
     numbering: {
-      getOrCreate({ instance, start, ...config }) {
+      getOrCreate({ instance, start, level, ...config }) {
         const key = numberingKey(config);
         const sameLevels = state.numbering.find((entry) => numberingKey(entry.config) === key);
         const existing = instance
@@ -161,7 +163,7 @@ export function createDocxContext(
         if (existing) return { numId: existing.numId };
         const numId = state.numbering.length + 1;
         const abstractId = sameLevels?.abstractId ?? Math.max(0, ...state.numbering.map((entry) => entry.abstractId)) + 1;
-        state.numbering.push({ numId, abstractId, config, ...(instance ? { instance, start: start ?? 1 } : {}) });
+        state.numbering.push({ numId, abstractId, config, ...(instance ? { instance, start: start ?? 1, ...(level ? { level } : {}) } : {}) });
         return { numId };
       },
     },

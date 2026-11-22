@@ -193,6 +193,34 @@ describe("list numbering, as Word counts it", () => {
       + `<w:num w:numId="1"><w:abstractNumId w:val="1"/></w:num></w:numbering>`;
     const { doc } = await importDocx(new ServerEditor(), zipSync({ ...files, "word/numbering.xml": strToU8(numbering) }));
     expect(doc.textContent).toBe("Ch1abCh2c");
+    // Each chapter is a plain paragraph, wherever it falls; only its sections are numbered.
+    expect(doc.content.content.map((n) => n.type.name)).toEqual(["paragraph", "orderedList", "paragraph", "orderedList"]);
     expect(ordersOf(doc)).toEqual([1, 1]);
+  });
+
+  it("draws no number for a level formatted none in the middle of a list", async () => {
+    const W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
+    const bytes = await bytesOf({ type: "doc", content: [{ type: "orderedList", content: [
+      li("one", { type: "orderedList", content: [li("sub", { type: "orderedList", content: [li("deep")] })] }),
+    ] }] });
+    const files = unzipSync(bytes);
+    const lvl = (ilvl: number, fmt: string) => `<w:lvl w:ilvl="${ilvl}"><w:start w:val="1"/><w:numFmt w:val="${fmt}"/></w:lvl>`;
+    const numbering = `<w:numbering ${W}><w:abstractNum w:abstractNumId="1">${lvl(0, "decimal")}${lvl(1, "none")}${lvl(2, "decimal")}</w:abstractNum>`
+      + `<w:num w:numId="1"><w:abstractNumId w:val="1"/></w:num></w:numbering>`;
+    const { doc } = await importDocx(new ServerEditor(), zipSync({ ...files, "word/numbering.xml": strToU8(numbering) }));
+    const kinds: string[] = [];
+    doc.descendants((n) => { if (n.type.name.endsWith("List")) kinds.push(n.type.name); });
+    expect(kinds).not.toContain("bulletList");
+    expect(doc.textContent).toBe("onesubdeep");
+  });
+
+  it("keeps the first number of a list nested under a bullet list, there and back", async () => {
+    const bytes = await bytesOf({ type: "doc", content: [{ type: "bulletList", content: [
+      li("A", { type: "orderedList", attrs: { order: 5 }, content: [li("x"), li("y")] }),
+      li("B", { type: "orderedList", attrs: { order: 3 }, content: [li("z")] }),
+    ] }] });
+    expect(strFromU8(unzipSync(bytes)["word/numbering.xml"]!)).toContain('<w:lvlOverride w:ilvl="1"><w:startOverride w:val="5"/>');
+    const { doc } = await importDocx(new ServerEditor(), bytes);
+    expect(ordersOf(doc)).toEqual([5, 3]);
   });
 });
