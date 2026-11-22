@@ -111,8 +111,9 @@ function buildList(
   const first = slice[0];
   if (!first || !isListParagraph(first)) return null;
   const numId = first.attrs.numbering.numId;
-  const listType = numbering.resolve(numId);
   const targetIlvl = Math.max(first.attrs.numbering.ilvl, expectedIlvl);
+  const listType = numbering.resolve(numId, targetIlvl);
+  const format = numbering.format(numId, targetIlvl);
   const levelOffset = targetIlvl - expectedIlvl;
 
   const items: DocxListItem[] = [];
@@ -156,6 +157,8 @@ function buildList(
     type: "list",
     listType,
     items,
+    level: targetIlvl,
+    ...(format !== undefined ? { format } : {}),
     ...(start !== 1 ? { start } : {}),
   };
 }

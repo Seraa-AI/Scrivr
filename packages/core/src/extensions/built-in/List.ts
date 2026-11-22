@@ -474,6 +474,13 @@ export const List = Extension.create({
       const attrs = {
         ...(block.start !== undefined && block.listType === "ordered" ? { order: block.start } : {}),
       };
+      // Each level is drawn in Word's built-in style for its depth; a list
+      // Word numbers otherwise there keeps its items but not its numbering.
+      if (items.length > 0 && block.format !== undefined) {
+        const level = listLevel(block.level ?? 0);
+        const drawn = block.listType === "ordered" ? level.ordered.format : "bullet";
+        if (block.format !== drawn) ctx.report.changed(block.type, `"${block.format}" numbering drawn as ${drawn}`);
+      }
       return items.length === 0 ? null : listType.create(attrs, items);
     };
 

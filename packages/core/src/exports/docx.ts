@@ -680,6 +680,10 @@ export type DocxBlock =
       items: DocxListItem[];
       /** The number an ordered list starts at, when not 1. */
       start?: number;
+      /** Word's nesting level for the list (`w:ilvl`), 0 at the top. */
+      level?: number;
+      /** Word's numbering format at that level (`w:numFmt`): `decimal`, `upperRoman`, `bullet`, … */
+      format?: string;
     }
   | { type: "table"; grid: number[]; rows: DocxTableRow[] }
   | { type: "sdt"; tag: string | null; content: DocxBlock[] };

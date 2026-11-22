@@ -987,6 +987,27 @@ describe("importDocx — what each extension says it could not keep", () => {
     expect(doc.textContent).toContain("Visit Nairobi");
   });
 
+  it("names a list numbering format the editor draws differently, and nothing for its own", async () => {
+    const editor = new ServerEditor();
+    const item = (text: string, nested?: unknown) => ({
+      type: "listItem",
+      content: [{ type: "paragraph", content: [{ type: "text", text }] }, ...(nested ? [nested] : [])],
+    });
+    editor.setContent({ type: "doc", content: [{ type: "orderedList", content: [item("a", { type: "orderedList", content: [item("b")] })] }] });
+    const files = unzipSync(await exportDocxBytes(editor));
+
+    const own = await importDocx(new ServerEditor(), zipSync(files));
+    expect(changesBy(own.report, "list")).toEqual([]);
+
+    // Level 0 in upper roman, level 1 as bullets, where the editor draws 1. and a.
+    const numbering = strFromU8(files["word/numbering.xml"]!)
+      .replace(/(<w:lvl w:ilvl="0">.*?<w:numFmt w:val=")decimal(")/, "$1upperRoman$2")
+      .replace(/(<w:lvl w:ilvl="1">.*?<w:numFmt w:val=")lowerLetter(")/, "$1bullet$2");
+    const { report, doc } = await importDocx(new ServerEditor(), zipSync({ ...files, "word/numbering.xml": strToU8(numbering) }));
+    expect(changesBy(report, "list")).toEqual(['list: "upperRoman" numbering drawn as decimal']);
+    expect(doc.child(0).child(0).child(1).type.name).toBe("bulletList");
+  });
+
   it("keeps the text of a content control inside a link", async () => {
     const control = `<w:sdt><w:sdtPr><w:tag w:val="mystery"/></w:sdtPr><w:sdtContent><w:r><w:t>INSIDE</w:t></w:r></w:sdtContent></w:sdt>`;
     const body = `<w:p><w:hyperlink w:anchor="top"><w:r><w:t xml:space="preserve">vis </w:t></w:r>${control}</w:hyperlink></w:p>`;
