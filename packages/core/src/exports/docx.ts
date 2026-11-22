@@ -262,7 +262,9 @@ export interface DocxReport {
    * across the body, every header and footer the document references,
    * footnotes, endnotes, comments, styles, numbering and settings. A handler
    * can only report what it is handed, so this is where a property no code
-   * looks at shows up.
+   * looks at shows up. It is an inventory of the XML, so it also lists what
+   * `entries` already names as dropped — an element nothing parses, a header
+   * nothing reads — and `ignored` is what the import drops on purpose.
    */
   unread?: DocxUnreadElement[];
 }

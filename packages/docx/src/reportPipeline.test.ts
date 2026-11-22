@@ -913,6 +913,18 @@ describe("exportDocx — what each extension says it could not write", () => {
     expect(changesBy(report, "highlight")).toEqual(["highlight: translucent color blended onto white"]);
   });
 
+  it("says why it wrote nothing for a mark with no value", async () => {
+    const report = await exportOf([{
+      type: "paragraph",
+      content: [
+        { type: "text", text: "a", marks: [{ type: "color", attrs: { color: "" } }] },
+        { type: "text", text: "b", marks: [{ type: "fontSize", attrs: { size: null } }] },
+      ],
+    }]);
+    expect(report.entries).toContainEqual({ outcome: "dropped", kind: "color", reason: "no color", owner: "color", count: 1 });
+    expect(report.entries).toContainEqual({ outcome: "dropped", kind: "fontSize", reason: "no size", owner: "fontSize", count: 1 });
+  });
+
   it("names a table cell background Word is given differently, or not at all", async () => {
     const cell = (background: string) => ({ type: "tableCell", attrs: { background }, content: [{ type: "paragraph" }] });
     const report = await exportOf(
@@ -969,6 +981,16 @@ describe("importDocx — what each extension says it could not keep", () => {
   it("names an underline colour it does not keep", async () => {
     const report = await importOf(`<w:p>${run(`<w:u w:val="single" w:color="FF0000"/>`)}${run(`<w:u w:val="single" w:color="auto"/>`)}</w:p>`);
     expect(changesBy(report, "underline")).toEqual(["u: underline color not kept"]);
+  });
+
+  it("says why it built nothing for a font or an image it has no way to keep", async () => {
+    const report = await importOf(`<w:p>${run(`<w:rFonts w:eastAsia="SimSun"/>`)}</w:p>`);
+    expect(report.entries).toContainEqual({ outcome: "dropped", kind: "rFonts", reason: "no Latin font named", owner: "fontFamily", count: 1 });
+
+    const editor = new ServerEditor();
+    editor.setContent({ type: "doc", content: [{ type: "paragraph", content: [{ type: "image", attrs: { src: PIXEL } }] }] });
+    const dropped = await importDocx(new ServerEditor(), await exportDocxBytes(editor), { media: "drop" });
+    expect(dropped.report.entries).toContainEqual({ outcome: "dropped", kind: "image", reason: "media option is drop", owner: "image", count: 1 });
   });
 
   it("keeps the text inside a smart tag", async () => {
