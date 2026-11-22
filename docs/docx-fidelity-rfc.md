@@ -490,9 +490,8 @@ or a DOM, as `LayoutCoordinator.layoutForExport` already does.
   only counted; no handler runs on it, so nothing it would have left behind
   (a field's answer, a resolved image) outlives it. A handler reporting `kept` or `dropped` for
   the kind it was handed replaces the converter's account.
-- A link or an inline content control counts kept once where it lands,
-  however many runs it spans; a piece of it lost with an image is dropped
-  with the image.
+- A link or an inline content control counts once however many runs it
+  spans: kept if any run under it lands, dropped once if none does.
 - A header or footer nothing reads, or whose part cannot be read, is dropped
   as `w:hdr` / `w:ftr`, one per part, with a warning: `NO_HANDLER` and
   `header-footer-unread` when nothing reads it, `PART_UNREADABLE` and the

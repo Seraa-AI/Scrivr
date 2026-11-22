@@ -182,7 +182,11 @@ export async function importDocx(
       return sectionRefs.footers.some((ref) => ref.relId === relId) ? "w:ftr" : "w:hdr";
     };
     const walked = new Set<string>();
+    const skipped = new Set<string>();
     const skipPart = (relId: string, code: string, message: string): null => {
+      // One part may serve several slots; it is one part lost.
+      if (skipped.has(relId)) return null;
+      skipped.add(relId);
       ctx.diagnostics.warn({ code, message });
       ctx.report.dropped(partKind(relId), PART_UNREADABLE);
       return null;

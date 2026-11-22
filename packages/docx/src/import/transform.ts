@@ -203,6 +203,7 @@ function transformParagraph(
       recorder,
       ctx.styles.runMarks(styleId),
     );
+    settleUnlanded(recorder);
     if (!dispatch) return fallbackParagraph(block, content, ctx, recorder);
     return recorder.handle(
       dispatch.owner,
@@ -338,6 +339,10 @@ function transformAtom(
   recorder: DocxReportRecorder,
 ): PmNode | null {
   const marks = layer(inherited, item.marks);
+  // A link over the atom is counted where it lands, not here: the atom only
+  // records its outcome when it lands, and otherwise leaves it to the runs.
+  const wrappers = marks.filter((mark) => WRAPPER_KINDS.has(mark.kind) && !mark.off);
+  const formatting = marks.filter((mark) => !WRAPPER_KINDS.has(mark.kind));
   const handler = entryOf(handlers.inlines, item.type);
   if (!handler) {
     dropUnhandled(
@@ -359,25 +364,51 @@ function transformAtom(
     // Its formatting goes with it. Not dispatched: nothing would carry the
     // marks, and a mark nobody claims would add an `unsupported-mark`, which
     // fails an import under `unsupported: "throw"`, though this drop is not fatal.
-    for (const mark of marks) {
+    for (const mark of formatting) {
       if (!mark.off) recorder.unhandled(mark.kind, insideDropped(item.type));
     }
+    wrappers.forEach((mark) => unlanded.push({ mark, atom: item.type }));
     return null;
   }
   const owner = ownerOf(handlers.owners.inlines, item.type);
-  const uncountedWrappers = marks.filter((mark) => WRAPPER_KINDS.has(mark.kind) && !countedWrappers.has(mark));
+  const wrapperMarks = new Map<DocxMark, PmMark | null>();
   const node = recorder.subtree(
     () => {
-      const pmMarks = transformMarks(marks, ctx, handlers, recorder);
+      const pmMarks = transformMarks(formatting, ctx, handlers, recorder);
+      for (const mark of wrappers) {
+        const wrapperHandler = entryOf(handlers.marks, mark.kind);
+        const pm = wrapperHandler ? recorder.fileUnder(ownerOf(handlers.owners.marks, mark.kind), () => wrapperHandler(mark, ctx)) : null;
+        wrapperMarks.set(mark, pm);
+        if (pm) pmMarks.push(pm);
+      }
       return recorder.handle(owner, item.type, () => handler(item, pmMarks, ctx), built);
     },
     (atom) => (atom ? null : { kind: item.type, owner }),
   );
-  // A link counts kept once where it lands. An atom that was lost took its
-  // piece of the link with it, as dropped, and leaves the kept count to the
-  // runs that land.
-  if (!node) uncountedWrappers.forEach((mark) => countedWrappers.delete(mark));
+  for (const [mark, pm] of wrapperMarks) {
+    if (!node) unlanded.push({ mark, atom: item.type });
+    else if (!countedWrappers.has(mark)) {
+      countedWrappers.add(mark);
+      if (entryOf(handlers.marks, mark.kind)) recorder.handle(ownerOf(handlers.owners.marks, mark.kind), mark.kind, () => pm, built);
+      else dropUnhandled(ctx, recorder, mark.kind, NO_HANDLER);
+    }
+  }
   return node;
+}
+
+/**
+ * Links lost with every atom they covered, waiting for the end of their
+ * paragraph: one that lands on a run there is counted kept, one that never
+ * does is counted dropped once.
+ */
+const unlanded: Array<{ mark: DocxMark; atom: string }> = [];
+
+function settleUnlanded(recorder: DocxReportRecorder): void {
+  for (const { mark, atom } of unlanded.splice(0)) {
+    if (countedWrappers.has(mark)) continue;
+    countedWrappers.add(mark);
+    recorder.unhandled(mark.kind, insideDropped(atom));
+  }
 }
 
 /**

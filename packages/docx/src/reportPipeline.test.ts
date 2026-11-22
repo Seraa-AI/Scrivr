@@ -584,17 +584,23 @@ describe("importDocx — report", () => {
     expect(report.counts["text"]?.kept).toBe(4);
   });
 
-  it("counts a link kept where it lands, though an image it also covered was lost", async () => {
+  it("counts a link once: kept where it lands, else dropped once", async () => {
     const lostImage =
       '<w:r><w:drawing><wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"><wp:extent cx="9525" cy="9525"/>' +
       '<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">' +
       '<pic:blipFill><a:blip xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:embed="rIdNope"/></pic:blipFill></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>';
-    const bytes = await docWithBody(`<w:p><w:hyperlink w:anchor="top">${lostImage}<w:r><w:t>click</w:t></w:r></w:hyperlink></w:p>`);
+    const link = (inner: string) => docWithBody(`<w:p><w:hyperlink w:anchor="top">${inner}</w:hyperlink></w:p>`);
+    const text = "<w:r><w:t>click</w:t></w:r>";
     for (const extensions of [[StarterKit], [StarterKit.configure({ image: false })]]) {
-      const { report } = await importDocx(new ServerEditor({ extensions }), bytes);
-
-      // The link is kept on the text; the piece of it on the lost image went with the image.
-      expect(report.counts["hyperlink"]).toMatchObject({ kept: 1, dropped: 1 });
+      const editor = () => new ServerEditor({ extensions });
+      // Kept where it lands, however many of its images were lost.
+      for (const inner of [lostImage + text, lostImage + lostImage + text, text + lostImage]) {
+        const { report } = await importDocx(editor(), await link(inner));
+        expect(report.counts["hyperlink"]).toMatchObject({ kept: 1, dropped: 0 });
+      }
+      // Lost once when nothing under it lands.
+      const { report } = await importDocx(editor(), await link(lostImage + lostImage));
+      expect(report.counts["hyperlink"]).toMatchObject({ kept: 0, dropped: 1 });
     }
   });
 
@@ -655,16 +661,22 @@ describe("importDocx — report", () => {
     }
   });
 
-  it("records one header serving two slots as one part lost", async () => {
-    const entries = unzipSync(await docWithHeader("HEADER"));
-    const document = strFromU8(entries["word/document.xml"]!);
-    entries["word/document.xml"] = strToU8(
-      document.replace("<w:sectPr>", '<w:sectPr><w:headerReference w:type="first" r:id="rIdHeader1"/>'),
-    );
-    const { report, diagnostics } = await importDocx(new ServerEditor({ extensions: [StarterKit] }), zipSync(entries));
+  it("records one header serving two slots as one part lost, read or not", async () => {
+    const cases: Array<{ extensions: Extension[]; part: null | undefined; code: string }> = [
+      { extensions: [StarterKit], part: undefined, code: "header-footer-unread" },
+      { extensions: [StarterKit, PartReader], part: null, code: "header-footer-part-missing" },
+    ];
+    for (const { extensions, part, code } of cases) {
+      const entries = unzipSync(await docWithHeader("HEADER", part));
+      const document = strFromU8(entries["word/document.xml"]!);
+      entries["word/document.xml"] = strToU8(
+        document.replace("<w:sectPr>", '<w:sectPr><w:headerReference w:type="first" r:id="rIdHeader1"/>'),
+      );
+      const { report, diagnostics } = await importDocx(new ServerEditor({ extensions }), zipSync(entries));
 
-    expect(dropsOf(report).map((entry) => [entry.kind, entry.count])).toEqual([["w:hdr", 1]]);
-    expect(diagnostics.filter((d) => d.code === "header-footer-unread")).toHaveLength(1);
+      expect(dropsOf(report).map((entry) => [entry.kind, entry.count])).toEqual([["w:hdr", 1]]);
+      expect(diagnostics.filter((d) => d.code === code)).toHaveLength(1);
+    }
   });
 
   it("records nothing lost for a header an extension reads", async () => {
