@@ -208,6 +208,30 @@ describe("a field filled in Word", () => {
     expect(listSignerFields(doc).map((f) => f.id)).toEqual(["who"]);
   });
 
+  it("answers nothing for a field the import lost with the table around it", async () => {
+    const field = { type: "field", attrs: { nodeId: "who", kind: "name", fill: "signer", role: "client", width: 160, height: 24 } };
+    const editor = new ServerEditor({
+      extensions: [StarterKit.configure({ table: true }), Field],
+      content: {
+        type: "doc",
+        content: [{
+          type: "table",
+          content: [{ type: "tableRow", content: [{ type: "tableCell", content: [{ type: "paragraph", content: [field] }] }] }],
+        }],
+      },
+    });
+    const files = unzipSync(await exportDocxBytes(editor));
+    const document = strFromU8(files["word/document.xml"]!)
+      .replace("<w:showingPlcHdr/>", "")
+      .replace(/(<w:sdtContent>.*?<w:t[^>]*>)[^<]*(<\/w:t>)/s, "$1Alice$2");
+    expect(document).toContain("<w:tbl>");
+    const bytes = zipSync({ ...files, "word/document.xml": strToU8(document) });
+
+    const { doc, fieldValues } = await importDocx(new ServerEditor({ extensions }), bytes);
+    expect(listSignerFields(doc)).toEqual([]);
+    expect(fieldValues).toEqual({});
+  });
+
   it("keeps the choice a signer made in a dropdown, by its id", async () => {
     const options = [{ id: "net-30", label: "Net 30" }, { id: "net-60", label: "Net 60" }];
     const chosen = await importDocx(new ServerEditor({ extensions }), await filledInWord("dropdown", "Net 60", { options }));

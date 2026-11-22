@@ -73,3 +73,20 @@ export interface FormatImportHandlers {}
 export type ImportContributionMap = {
   [F in keyof FormatImportHandlers]?: FormatImportHandlers[F];
 };
+
+// ── Named contributions ─────────────────────────────────────────────────────
+
+/**
+ * One extension's format contributions, with the extension's name.
+ *
+ * A format package merges every extension's handlers into one table, and the
+ * table forgets who supplied each entry. A package that tells the user what
+ * became of their content — "the Image extension dropped this" — needs the
+ * name before the merge, so it reads contributions in this form.
+ */
+export interface FormatContribution {
+  /** The contributing extension's `name`. */
+  readonly extension: string;
+  readonly exports: ExportContributionMap;
+  readonly imports: ImportContributionMap;
+}

@@ -669,10 +669,8 @@ describe("importDocx — unsupported policy", () => {
 });
 
 describe("importDocx — extension dispatch", () => {
-  it("invokes the editor's getImportContributions for marks", async () => {
-    // Round-trip with bold — without a Bold extension's addImports, the
-    // mark is dropped. We'll wire the real one in the next commit;
-    // here we override per-call to assert the dispatch lane works.
+  it("dispatches marks to the import handlers the call supplies", async () => {
+    // A handler passed in the call is dispatched like an extension's.
     const editor = new ServerEditor();
     editor.setContent({
       type: "doc",
