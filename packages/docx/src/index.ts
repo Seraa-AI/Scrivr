@@ -60,6 +60,7 @@ export {
   OVERRIDES_OWNER,
   NO_HANDLER,
   NO_PARSER,
+  PART_UNREADABLE,
   HANDLER_RETURNED_NOTHING,
   WRAPPER_DECLINED,
   insideDropped,
@@ -74,7 +75,8 @@ export { importDocx } from "./import/import";
 export type { DocxImportResult, DocxImportOptions } from "./import/import";
 
 export { DocxImport } from "./import/DocxImport";
-export { applyImportedDocument } from "./import/applyDocument";
+// Lives in core, shared with the HTML importer; re-exported for `@scrivr/docx` consumers.
+export { applyImportedDocument } from "@scrivr/core";
 
 export { DocxImportError } from "./import/error";
 

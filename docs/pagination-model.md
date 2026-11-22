@@ -33,8 +33,8 @@ For each `FlowBlock` it tracks a `y` cursor (starting at `margins.top`) and a `c
    - **Leaf block** (no lines, e.g. image, HR) → move whole block to a new page. If it's taller than any page (`tooTallForAnyPage`), it's force-placed on the current page and allowed to overflow.
    - **Text block** → enter the split loop (`PageLayout.ts:606`–`723`). Greedily take as many lines as fit in `pageAvailable`, emit a `LayoutBlock` with `isContinuation` / `continuesOnNextPage` flags and a `fragmentIndex`, open a new page, slice remaining lines, repeat.
 5. The split loop has two edge cases worth knowing:
-   - **Gap suppression** — if inter-block spacing pushes `targetY` into a "dead zone" where zero lines fit but one line *would* fit without the gap, it retries from `y` instead of advancing pages.
-   - **Top-of-page / sub-pixel guard** — if `linesFit === 0` at top of page (or after gap-suppress), force one line to avoid empty-page loops caused by sub-pixel shortfalls.
+   - **The gap is kept** — as in Word, a block whose first line does not fit after the inter-block gap starts the next page, where the gap is dropped.
+   - **Top-of-page / sub-pixel guard** — if `linesFit === 0` at top of page, or the first line overhangs the bottom by under half a pixel, force one line to avoid empty-page loops caused by sub-pixel shortfalls.
 
 ## Fragment identity
 

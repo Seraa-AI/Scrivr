@@ -1,5 +1,71 @@
 # @scrivr/export-pdf
 
+## 1.0.25
+
+### Patch Changes
+
+- 3c14937: A certificate of completion can be laid out by the host. `content` may return a `body` — the certificate as document nodes in the host's schema — with slots for Scrivr's parts: `verified` (what was checked, exactly once), `record` (the issuer's title) and `signature` per role, which puts a signature in its signer's card. The body is checked against the schema, and a layout that drops or repeats what was checked, or names a role no party plays, is refused.
+
+  Certificates are now printed in the signers' own editor setup rather than StarterKit alone, so a host's extensions, tables, colour, links and header and footer work on them. The block form (`before`, `record`, `after`) keeps its layout, but it takes the setup's styles, and a setup that cannot hold what it prints — headings, paragraphs, bold, and images when a signature is drawn — is refused with `unprintable-certificate`.
+
+- Updated dependencies [29af9a4]
+- Updated dependencies [29af9a4]
+- Updated dependencies [a6b92e1]
+  - @scrivr/core@1.0.25
+
+## 1.0.24
+
+### Patch Changes
+
+- 3da6dba: Observe standard field printing at the renderer boundary. Completion certificates now require this evidence for answered signatures and report `unverified-signature-print` for custom or replacement printers. Capture resolved signature bytes under self-contained image URLs shared by the executed PDF, certificate PDF, and returned viewer document.
+- 3da6dba: Certificate of completion. `exportCompletionCertificate(snapshot, values, { editorOptions, record })` (export-pdf) issues the executed PDF and its certificate from one printing: _Verified at issue_ holds only what it checked — the snapshot against its hash, the executed PDF's hash, each signature as that PDF prints it — and the host's parties, events and signing times follow under the issuer's name. It refuses as `exportExecutedPdf` does (a drawing with no area now answers nothing), and for an unknown field kind, a record with no issuer or two parties for one role, a record that does not fit the document, an undated or unzoned time, an event it cannot name, or events out of order. `bundleCertificate` joins the two PDFs; labels are overridable for other languages, and `content` — handed the labels in use, and the verified facts frozen and typed read-only — adds a host's blocks before and after the certificate or replaces the record's body, never what was verified. Each drawing on the certificate is the bytes the executed PDF embedded. Core adds `snapshotDocument`, `readSigningMoment` (with `SigningMoment`), `documentFromBlocks` and `fieldSize`: a field whose own size is zero, negative or not a number is laid out, printed and exported to Word at its kind's size, as a pasted one already was.
+- fd2b37d: The executed document: with `Field.configure({ values })`, a PDF export prints each completed value in its field's box. A drawn signature keeps its proportions, a typed value prints as text, and an uncompleted field prints as the empty field. The values never enter the document. `PdfImageOp` gains `fit: "contain"`. `FieldValue` is exported from `@scrivr/core` and `@scrivr/plugins`.
+- fd2b37d: Fields are easier to read and to complete.
+
+  - **Who signs where:** a field is drawn in quiet ink, a dotted rule in its party's colour (`fieldRoleColor`, the same for a role everywhere) with an icon and its label standing on it. The PDF prints the same blank as a solid line. An author's text field still showing its prompt is drawn the same way, on a rule in the neutral colour of a field the author fills. A field that holds text fills its line as a word does, above the baseline and below (`text-bottom`), so its line keeps its height and its label and rule sit inside its own box, as a Word content control does; drawn fields — signatures, initials — keep their size on the baseline, as an inline image does.
+  - **While authoring:** an arrow pointer over a field, and a tag saying who fills a selected one. Backspace or Delete beside a field selects it first and the next press removes it; typing over a selected field is refused, and undo still puts back what it replaced. Extensions can set the pointer with `editor.addPointerCursor` — a member `IEditor` now requires, which a custom implementation must provide — and `KeymapPriority.inlineObject` outranks every other binding.
+  - **While signing:** `FieldCompletion` draws the viewer's own empty fields solid in their colour with what to do on a badge ("Sign", "Date"), fades everyone else's, and tags them on hover. A hand pointer and a wash show what opens. Tab and Shift+Tab move between the viewer's fields and Enter opens one. A completed field reopens with its value (`onFieldRequest(field, current)`), and a completed value is plain text in the document's font, with no rule. `requestField` and `moveFieldFocus` let a host open a field from its own list or a "Next field" button. `accentColor` is optional and defaults to the party's colour; kinds and party colours are the ones given to `Field`.
+  - **No caret** in a read-only or sealed document; selecting still works.
+  - **Values live in `Field`:** `Field.configure({ values })` opens an editor with them, `setFieldValue(editor, id, value)` gives one (and replaces `FieldCompletion`'s option `values` and the plugins' `setFieldValue`), and `fieldValues(state)` reads them. They are held beside the document, never in it, so a sealed document takes them and its hash holds. `FieldCompletion` gives the values it captures to `Field`.
+  - **Fields fit what they hold:** a dropdown is as wide as its widest choice, and a field holding a value is as wide as that value, so the line closes up around it — on screen while signing and in the executed PDF alike, which is laid out exactly as the signers saw it. A typed value is set in the size of the text around it; a typed signature is set as text. A field takes the formatting of its run, so a bold field prints its value bold. `editor.invalidateLayout({ remeasure: true })` measures every block again when something a strategy measures from changes outside the document.
+  - **Host seal checks:** `createSnapshot` (and `snapshotFromYDoc`) take `checks: { before, after }`, the host's own `SealCheck`s (an approved template, a signing order), which refuse with `{ reason: "host", code, message }`.
+  - **Inline objects know their line:** `InlineStrategy.render` receives the line it stands in (`InlineLine`: its `baselineY`, and the run's `font`), `measure` may return the `verticalAlign` of the node it measured, the strategy's own `verticalAlign` default is now honoured (it was documented but ignored), object rects carry their `baseline`, and a PDF inline atom's context carries `baselineY`.
+  - **The host's own look:** `Field.configure({ roleColors, paint, print })` and `FieldCompletion.configure({ paint })`. `roleColors` sets a party's colour everywhere it is drawn, the signing view included. `paint` (screen) and `print` (PDF) draw a field the host's way, handed a `FieldDrawing` (`box`, `baselineY`, `kind`, `control`, `label`, `role`, `color`, `theme`, `value`), or a `SigningFieldDrawing` with `own`, `active`, `focused`, `pending`, `answered` and `datedWhenSigned` while signing; returning `false` falls back to Scrivr's look. `fieldDrawingAt(editor, pos, at)` builds the same `FieldDrawing`, and `fieldRoleColor(role, overrides)` resolves a colour the same way. An empty field in the PDF names its party beside its label, since a printed page may have no colour.
+  - A field's icon is set like a capital letter, standing on the baseline as tall as its label's capitals, so it lines up with the text.
+  - **A dropdown's answer is its choice's id:** `FieldValue` gains `{ kind: "choice", id }`. `Field` sets the label a person reads, so a label renamed in a later template still answers the same choice, and a choice since withdrawn, like blank text, answers nothing and leaves the field empty. A choice made in Word comes back as the id of the choice its text names.
+  - **Date signed:** the built-in kind `dateSigned` (a date or text kind declares it with `datedWhenSigned`) shows when its party signed. It is never a value and never asked for: a signature value carries `signedAt` — an ISO timestamp with `Z` or the signer's offset (or an ISO day), naming a day that exists, from the host's own record of the signing; `parseSignedAt` reads one the same in every engine, `signedAtOf(value)` reads a value's, and anything else is no moment. The date shows the day the latest of the party's answered signatures names, in its own offset — the signer's day, on every machine — through `Field.configure({ formatSignedDate })`, which is handed that signature's own `signedAt` (`defaultSignedDate`, "14 November 2026", otherwise). A format that throws or gives nothing shows no date. `FieldCompletion` refuses, through `onFieldRequestError`, a signature with no usable `signedAt` when its party has a date signed. A signer cannot press a date signed or Tab to it, and an import never takes a date typed into its Word control. A signature stored before this change without `signedAt`, or with a time that has no zone, dates no one.
+  - **Text the author filled, under the pointer:** `Field` reports it as a `fieldRange` hover target, and the signing view frames it faintly with its prompt on a tag, as Word frames a content control, so a reader can tell the words filled in for this document from the template's own.
+  - **A native checkbox:** `paintCheckbox` draws a rounded box in the field's colour, filled with a white tick once checked, in the editor and the signing view alike; it replaces `paintCheckboxTick`. Keyboard focus in the signing view is a soft rounded ring clear of the field.
+  - **A signature comes last:** until the viewer's other required fields are answered, going to sign moves focus to the first of them — never answering it for them — and `FieldCompletion`'s `onSignatureBlocked(signature, missing)` says which. `unansweredBeforeSigning(fields, values, role, kinds)` in `@scrivr/core` is the same rule for a server to check, over the whole role, when it records a signature.
+  - **Answered means printed:** `isFieldAnswered(field, value, kinds)` counts only what a field can show — a ticked box, words that are not blank, a choice still offered, and on a signature or initials a drawing given as an inline PNG or JPEG — each on a control that shows it; a checkbox holding words, or a signature given as a link or an SVG, answers nothing. `Field` lays out, draws and prints by the same rule, and gives values to signer fields only: what an author sealed is never laid over. A drawing must open as the PNG or JPEG it names and be no larger than `MAX_DRAWING_BYTES`; `safeDrawingUrl` checks one, giving it a canonical prefix, before a host hands it over. `valuesOnRecord(fields, values, kinds, formatSignedDate)` gives the values as a record shows them, each date signed derived from its party's signature, and `Field` shows values by it on screen and in print, however they arrived. A text kind declares `drawn` to take a drawing, as the built-in initials do, and `verb` for its badge; `isDrawnKind` reads the first (a signature line is always drawn, a date, dropdown or checkbox never), and `FieldDrawing.verb` carries the second. A host's kind under a built-in name refines the built-in rather than replacing it; one that changes the control drops `drawn`, `verb` and `datedWhenSigned`. `valuesOnRecordOf(editor)` gives the record an editor's `Field` shows and prints, as `FieldValues`.
+  - **Signing rules live on the kind:** `fieldKindsOf(editor)` gives an editor's kinds; `isSigningKind` (a `signatureLine` control) and `isDatedWhenSigned` read what a kind declares, so a host's own signature kind is held back and dates its party's fields as the built-in one does. `createSnapshot` (and `snapshotFromYDoc`) require `kinds`, and refuse a party whose required date signed has no required signature (`dates-without-signature`). The built-in checkbox is labelled "Checkbox", its name in Word and in a host's drawing.
+  - **The executed PDF in one call:** `exportExecutedPdf(snapshot, values, { editorOptions })` in `@scrivr/export-pdf` verifies the snapshot against its hash, prints the values as `Field` shows them (`valuesOnRecordOf`, in its own `formatSignedDate`) into the sealed document laid out as the signers saw it, refuses while a required field would print blank (`{ ok: false, refusal: { reason: "snapshot-altered" | "unanswered-fields" } }`), counts a drawing only once it embeds as the PDF will embed it, throws when `Field` is not among `editorOptions.extensions` or a plugin refuses a value, and returns the PDF with `artifactHash`, the hash of exactly those bytes.
+
+- fd2b37d: Add `replaceFieldValues` to replace a complete field record atomically without changing the document. Executed PDF export uses this boundary so configured initial values cannot fill missing answers or replace unprintable signatures. Field completion reports editor refusals through `onFieldRequestError`, preserves the previous answer, and allows retry.
+- Updated dependencies [3da6dba]
+- Updated dependencies [3da6dba]
+- Updated dependencies [0b97d54]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+- Updated dependencies [fd2b37d]
+  - @scrivr/core@1.0.24
+
 ## 1.0.23
 
 ### Patch Changes

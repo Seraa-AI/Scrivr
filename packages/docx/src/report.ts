@@ -52,6 +52,9 @@ export const NO_PARSER = "no parser";
 /** The reason recorded when a handler took content and gave nothing back. */
 export const HANDLER_RETURNED_NOTHING = "handler returned nothing";
 
+/** The reason for a header or footer part the import could not read; the warning says why. */
+export const PART_UNREADABLE = "part could not be read";
+
 /** The reason recorded when a mark's wrapper handed its run back unwrapped. */
 export const WRAPPER_DECLINED = "wrapper left the run unwrapped";
 
@@ -64,6 +67,9 @@ export function insideDropped(parentKind: string): string {
 export function noSchemaNode(nodeName: string): string {
   return `the schema has no ${nodeName} node`;
 }
+
+/** For `handle`: an empty result means the item is not the handler's, which is no loss. */
+export const NOT_MINE: unique symbol = Symbol("not mine");
 
 /** The item whose content a subtree held, when that item was lost. */
 export interface LostItem {
@@ -79,30 +85,30 @@ export interface DocxReportRecorder {
    * reports is filed under `owner`. If it reported neither `kept` (of at least
    * one) nor `dropped` for `kind` itself, the outcome is recorded from its
    * result: kept when `produced(result)`, otherwise dropped with `ifNothing`.
-   * A `null` `ifNothing` records nothing: the handler declined, and the caller
-   * accounts for the item another way.
+   * `NOT_MINE` records nothing: the handler said the item is not its, and the
+   * caller accounts for it another way.
    */
   handle<T>(
     owner: HandlerOwner,
     kind: string,
     run: () => T,
     produced: (result: T) => boolean,
-    ifNothing?: string | null,
+    ifNothing?: string | typeof NOT_MINE,
   ): T;
   /**
    * Run code `owner` contributed that is not handed one item — a lifecycle
    * hook, or a mark handler whose mark another handler accounts for. Only
    * attributes; it records no outcome of its own.
    */
-  attribute<T>(owner: HandlerOwner, run: () => T): T;
+  fileUnder<T>(owner: HandlerOwner, run: () => T): T;
   /**
    * Run a handler that answers for the one `handle` is running, after it
    * declined: what `run` reports is filed under `owner`, and the item stays
    * the frame's to decide.
    */
-  asOwner<T>(owner: HandlerOwner, run: () => T): T;
-  /** `attribute` for a hook the converter awaits. The frame stays open until it settles. */
-  attributeAsync<T>(owner: HandlerOwner, run: () => T | Promise<T>): Promise<T>;
+  answerAs<T>(owner: HandlerOwner, run: () => T): T;
+  /** `fileUnder` for a hook the converter awaits. The frame stays open until it settles. */
+  fileUnderAsync<T>(owner: HandlerOwner, run: () => T | Promise<T>): Promise<T>;
   /**
    * Run the walk of one item's content together with the item's own handler.
    * When `lost(result)` names the item, everything counted kept inside is
@@ -252,7 +258,7 @@ export function createReportRecorder(options: ReportRecorderOptions = {}): DocxR
       const result = within(frame, run);
       if (!frame.decided) {
         if (produced(result)) addKept(kind, 1);
-        else if (ifNothing !== null) addEntry("dropped", kind, ifNothing, owner);
+        else if (ifNothing !== NOT_MINE) addEntry("dropped", kind, ifNothing, owner);
       } else if (frame.claimedKept) {
         // A handler can keep an item without returning it here — writing it
         // to another part, say — so its enclosing subtree must not move its
@@ -261,10 +267,10 @@ export function createReportRecorder(options: ReportRecorderOptions = {}): DocxR
       }
       return result;
     },
-    attribute(owner, run) {
+    fileUnder(owner, run) {
       return within({ owner, kind: null, decided: false, claimedKept: false }, run);
     },
-    asOwner(owner, run) {
+    answerAs(owner, run) {
       const frame = innermost();
       if (!frame) return run();
       const handedOver = frame.owner;
@@ -275,7 +281,7 @@ export function createReportRecorder(options: ReportRecorderOptions = {}): DocxR
         frame.owner = handedOver;
       }
     },
-    async attributeAsync(owner, run) {
+    async fileUnderAsync(owner, run) {
       // Hooks run one at a time, each awaited before the next, so the stack
       // stays balanced across the await.
       frames.push({ owner, kind: null, decided: false, claimedKept: false });

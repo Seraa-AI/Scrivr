@@ -701,9 +701,6 @@ export const Image = Extension.create({
           {
             tag: "img[src]",
             getAttrs(dom) {
-              // dom is typed as `Node | string` from ProseMirror; narrow via
-              // `instanceof Element` so we can call getAttribute without a cast.
-              if (!(dom instanceof Element)) return false;
               // Ingestion-time URL validation — see model/safeUrl.ts.
               // Reject the entire image node on unsafe src (returning false
               // from getAttrs drops the matched element) rather than store

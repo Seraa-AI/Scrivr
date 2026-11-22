@@ -8,6 +8,7 @@ import {
   renderTrackedFormatting,
   renderTrackedMove,
   renderTrackedRow,
+  spansToFragment,
 } from "@scrivr/core";
 import type {
   CharacterMap,
@@ -18,12 +19,12 @@ import type {
 } from "@scrivr/core";
 import type { EditorState, Node, Transaction } from "@scrivr/core/pm";
 
-import { setAction, skipTracking, TrackChangesAction } from "./actions";
+import { setAction, TrackChangesAction } from "./actions";
 import { trackChangesPlugin, trackChangesPluginKey } from "./engine/trackChangesPlugin";
 import { lastCutPlugin } from "./lib/cutAndPaste";
-import { suggestedContent } from "./lib/suggestedContent";
-import { addTrackIdIfDoesntExist, createNewDeleteAttrs, createNewInsertAttrs, createNewPendingAttrs, proposedForDeletion } from "./helpers";
-import { CHANGE_OPERATION, CHANGE_STATUS, TrackChangesOptions, TrackChangesStatus, type TrackedChange } from "./types";
+import { proposedForDeletion } from "./helpers";
+import { dispatchSuggestion } from "./suggestionBlocked";
+import { CHANGE_OPERATION, CHANGE_STATUS, TrackChangesOptions, TrackChangesStatus, type ReplacementView, type TrackedChange } from "./types";
 import { planReviewIn } from "./reviewChanges";
 import { changeActs } from "./reviewPlan";
 import type { ChangeSet } from "./ChangeSet";
@@ -47,11 +48,14 @@ declare module "@scrivr/core" {
       setChangeStatuses: (status: "accepted" | "rejected", ids: string[]) => ReturnType;
       /** Update the userID attributed to future tracked changes. */
       setTrackChangesUserID: (userID: string) => ReturnType;
+      /** Show replacements as one card (`"paired"`) or split as Word shows them (`"split"`). */
+      setReplacementView: (view: ReplacementView) => ReturnType;
       /** Force a refresh of the tracked-changes decoration state. */
       refreshChanges: () => ReturnType;
       /**
-       * Insert text as a pending tracked-insert suggestion.
-       * Any existing text in [from, to] is wrapped in a tracked-delete mark.
+       * Suggest `text` in place of [from, to], as `authorID` typing it in
+       * suggesting mode. A "\n" is a line break. Returns false, writing
+       * nothing, when the suggestion would not be recorded (`suggestionBlocked`).
        */
       insertAsSuggestion: (text: string, from: number, to: number, authorID: string) => ReturnType;
     };
@@ -201,6 +205,7 @@ function deleteColor(authorID: string): string {
  *   setTrackingStatus(status?)  — toggle or set tracking status
  *   setChangeStatuses(status, ids) — accept or reject changes; false when the plan is blocked
  *   setTrackChangesUserID(userID) — update the current user ID
+ *   setReplacementView(view)     — one card per replacement, or split as Word shows it
  *   refreshChanges()             — force-rebuild the ChangeSet
  */
 export const TrackChanges = Extension.create<TrackChangesOptions>({
@@ -277,6 +282,7 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
     if (this.options.canAcceptReject !== undefined) opts.canAcceptReject = this.options.canAcceptReject;
     if (this.options.skipTrsWithMetas !== undefined) opts.skipTrsWithMetas = this.options.skipTrsWithMetas;
     if (this.options.onRefused !== undefined) opts.onRefused = this.options.onRefused;
+    if (this.options.replacementView !== undefined) opts.replacementView = this.options.replacementView;
     return [
       trackChangesPlugin(opts),
       lastCutPlugin(),
@@ -329,6 +335,13 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
           return true;
         },
 
+      setReplacementView:
+        (view: ReplacementView) =>
+        (state: EditorState, dispatch: ((tr: Transaction) => void) | undefined) => {
+          dispatch?.(setAction(state.tr, TrackChangesAction.setReplacementView, view));
+          return true;
+        },
+
       refreshChanges:
         () =>
         (state: EditorState, dispatch: ((tr: Transaction) => void) | undefined) => {
@@ -339,9 +352,11 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
         },
 
       /**
-       * Insert text as a pending suggestion, regardless of the current tracking
-       * status. The inserted text gets a `trackedInsert` mark attributed to
-       * `authorID`, and any replaced selection gets a `trackedDelete` mark.
+       * Insert text as a pending suggestion by `authorID`, whatever the
+       * tracking status. Writes nothing and returns false when the suggestion
+       * would not be recorded (`suggestionBlocked`). It is a plain edit the
+       * engine records, so a replaced selection and the text typed over it are
+       * one replacement.
        *
        * This is the correct way for AI assistants to propose edits — they always
        * show up as suggestions the user can accept or reject, never as direct edits.
@@ -351,38 +366,8 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
       insertAsSuggestion:
         (text: string, from: number, to: number, authorID: string) =>
         (state: EditorState, dispatch: ((tr: Transaction) => void) | undefined) => {
-          const schema = state.schema;
-          const insertMarkType = schema.marks.trackedInsert;
-          const deleteMarkType = schema.marks.trackedDelete;
-          if (!insertMarkType) return false; // TrackChanges not in schema
-
-          const now = Date.now();
-          const baseAttrs = createNewPendingAttrs(now, authorID);
-
-          // Plain text: a "\n" is a space, as this command has always written it.
-          const content = suggestedContent([{ text: text.replace(/\n/g, " "), marks: [] }], schema, state.doc.resolve(from).parent.type, createNewInsertAttrs(baseAttrs));
-
-          const tr = state.tr;
-
-          // If replacing a selection, mark the old text as deleted (it stays in the
-          // document so the user can see what would be removed).
-          if (from < to && deleteMarkType) {
-            const deleteMark = deleteMarkType.create({
-              dataTracked: addTrackIdIfDoesntExist(createNewDeleteAttrs(baseAttrs)),
-            });
-            tr.addMark(from, to, deleteMark);
-          }
-
-          // Insert the suggestion at `from` (before any "deleted" text).
-          tr.insert(from, content);
-
-          // Prevent appendTransaction from trying to re-track this transaction.
-          skipTracking(tr);
-          // Ensure the changeSet is rebuilt so the new marks are visible.
-          setAction(tr, TrackChangesAction.refreshChanges, true);
-
-          dispatch?.(tr);
-          return true;
+          const content = spansToFragment([{ text, marks: [] }], state.schema, { parentType: state.doc.resolve(from).parent.type });
+          return dispatchSuggestion(state, state.tr.replaceWith(from, to, content), authorID, dispatch);
         },
     };
   },

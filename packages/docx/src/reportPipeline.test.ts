@@ -14,6 +14,7 @@ import { describe, it, expect } from "vitest";
 import { unzipSync, zipSync, strFromU8, strToU8 } from "fflate";
 import {
   Extension,
+  Field,
   ServerEditor,
   SourcedBlockExtension,
   StarterKit,
@@ -24,6 +25,7 @@ import {
   NO_HANDLER,
   NO_PARSER,
   OVERRIDES_OWNER,
+  PART_UNREADABLE,
   WRAPPER_DECLINED,
   exportDocx,
   exportDocxBytes,
@@ -133,6 +135,43 @@ async function docWithBody(body: string): Promise<Uint8Array> {
   entries["word/document.xml"] = strToU8(original.replace("<w:sectPr", body + "<w:sectPr"));
   return zipSync(entries);
 }
+
+/**
+ * An exported document with a default header reading `text`. `part` replaces
+ * the header part's XML, or `null` leaves the part out of the package.
+ */
+async function docWithHeader(text: string, part?: string | null): Promise<Uint8Array> {
+  const entries = unzipSync(await exportDocxBytes(new ServerEditor({ content: "body" })));
+  const document = strFromU8(entries["word/document.xml"]!);
+  entries["word/document.xml"] = strToU8(
+    document.replace("<w:sectPr>", '<w:sectPr><w:headerReference w:type="default" r:id="rIdHeader1"/>'),
+  );
+  const rels = strFromU8(entries["word/_rels/document.xml.rels"]!);
+  entries["word/_rels/document.xml.rels"] = strToU8(
+    rels.replace(
+      "</Relationships>",
+      '<Relationship Id="rIdHeader1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/></Relationships>',
+    ),
+  );
+  const header = `<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p><w:r><w:t>${text}</w:t></w:r></w:p></w:hdr>`;
+  if (part !== null) entries["word/header1.xml"] = strToU8(part ?? header);
+  return zipSync(entries);
+}
+
+/** Walks every header and footer reference, as a header/footer extension does. */
+const PartReader = Extension.create({
+  name: "partReader",
+  addImports() {
+    return {
+      docx: {
+        onImportComplete(doc, ctx) {
+          for (const { relId } of [...ctx.section.headers, ...ctx.section.footers]) ctx.walkPart(relId);
+          return doc;
+        },
+      },
+    };
+  },
+});
 
 function dropsOf(report: DocxReport): DocxReportEntry[] {
   return report.entries.filter((entry) => entry.outcome === "dropped");
@@ -525,6 +564,129 @@ describe("importDocx — report", () => {
     });
   });
 
+  it("records what a block nothing imports held as dropped inside it", async () => {
+    const cell = (text: string) => `<w:tc><w:p><w:r><w:t>${text}</w:t></w:r></w:p></w:tc>`;
+    const table = `<w:tbl><w:tblGrid><w:gridCol w:w="2000"/><w:gridCol w:w="2000"/></w:tblGrid><w:tr>${cell("a")}${cell("b")}</w:tr></w:tbl>`;
+    const { report } = await importDocx(new ServerEditor({ extensions: [StarterKit] }), await docWithBody(table));
+
+    expect(dropsOf(report).map(({ kind, reason, count }) => [kind, reason, count])).toEqual([
+      ["table", NO_HANDLER, 1],
+      ["paragraph", insideDropped("table"), 2],
+      ["text", insideDropped("table"), 2],
+    ]);
+  });
+
+  it("counts a link once, however many runs it spans", async () => {
+    const runs = ["one", "two", "three"].map((t) => `<w:r><w:t xml:space="preserve">${t} </w:t></w:r>`).join("");
+    const bytes = await docWithBody(`<w:p><w:hyperlink w:anchor="top">${runs}</w:hyperlink></w:p>`);
+    const { report } = await importDocx(new ServerEditor({ extensions: [StarterKit] }), bytes);
+
+    expect(report.counts["hyperlink"]?.kept).toBe(1);
+    expect(report.counts["text"]?.kept).toBe(4);
+  });
+
+  it("counts a link once: kept where it lands, else dropped once", async () => {
+    const lostImage =
+      '<w:r><w:drawing><wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"><wp:extent cx="9525" cy="9525"/>' +
+      '<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">' +
+      '<pic:blipFill><a:blip xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:embed="rIdNope"/></pic:blipFill></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>';
+    const link = (inner: string) => docWithBody(`<w:p><w:hyperlink w:anchor="top">${inner}</w:hyperlink></w:p>`);
+    const text = "<w:r><w:t>click</w:t></w:r>";
+    for (const extensions of [[StarterKit], [StarterKit.configure({ image: false })]]) {
+      const editor = () => new ServerEditor({ extensions });
+      // Kept where it lands, however many of its images were lost.
+      for (const inner of [lostImage + text, lostImage + lostImage + text, text + lostImage]) {
+        const { report } = await importDocx(editor(), await link(inner));
+        expect(report.counts["hyperlink"]).toMatchObject({ kept: 1, dropped: 0 });
+      }
+      // Lost once when nothing under it lands.
+      const { report } = await importDocx(editor(), await link(lostImage + lostImage));
+      expect(report.counts["hyperlink"]).toMatchObject({ kept: 0, dropped: 1 });
+    }
+  });
+
+  it("counts a content control nothing carries once, however many runs it holds", async () => {
+    const runs = ["a", "b", "c"].map((t) => `<w:r><w:t>${t}</w:t></w:r>`).join("");
+    const sdt = `<w:p><w:sdt><w:sdtPr><w:tag w:val="mystery"/></w:sdtPr><w:sdtContent>${runs}</w:sdtContent></w:sdt></w:p>`;
+    for (const extensions of [[StarterKit], [StarterKit, Field]]) {
+      const { report } = await importDocx(new ServerEditor({ extensions }), await docWithBody(sdt));
+
+      expect(dropsOf(report).filter((entry) => entry.kind === "sdt").map((entry) => entry.count)).toEqual([1]);
+    }
+  });
+
+  it("counts a lost table's content as the same table kept would count it", async () => {
+    const runs =
+      '<w:r><w:t></w:t></w:r><w:r><w:rPr><w:b/></w:rPr><w:t>bold</w:t></w:r>' +
+      '<w:hyperlink w:anchor="top"><w:r><w:t>one</w:t></w:r><w:r><w:t>two</w:t></w:r></w:hyperlink>';
+    const cell = `<w:tc><w:p><w:pPr><w:pStyle w:val="Loud"/></w:pPr>${runs}</w:p></w:tc>`;
+    const table = `<w:tbl><w:tblGrid><w:gridCol w:w="2000"/></w:tblGrid><w:tr>${cell}</w:tr></w:tbl>`;
+    // A paragraph style that sets formatting its runs inherit.
+    const entries = unzipSync(await docWithBody(table));
+    const styles = strFromU8(entries["word/styles.xml"]!);
+    entries["word/styles.xml"] = strToU8(
+      styles.replace("</w:styles>", '<w:style w:type="paragraph" w:styleId="Loud"><w:rPr><w:i/></w:rPr></w:style></w:styles>'),
+    );
+    const bytes = zipSync(entries);
+    const kept = (await importDocx(new ServerEditor({ extensions: [StarterKit.configure({ table: true })] }), bytes)).report;
+    const lost = (await importDocx(new ServerEditor({ extensions: [StarterKit] }), bytes)).report;
+
+    const content = (kind: string) => !["table", "tableRow", "tableCell", "tableHeader", "paragraph"].includes(kind);
+    // What the table held: kept with it, less what the document outside it keeps either way.
+    const keptContent = Object.fromEntries(
+      Object.entries(kept.counts)
+        .filter(([kind]) => content(kind))
+        .map(([kind, count]) => [kind, count.kept - (lost.counts[kind]?.kept ?? 0)]),
+    );
+    const lostContent = Object.fromEntries(
+      dropsOf(lost).filter((entry) => entry.reason === insideDropped("table") && content(entry.kind)).map((entry) => [entry.kind, entry.count]),
+    );
+    expect(lostContent).toEqual(keptContent);
+    expect(Object.keys(keptContent).sort()).toEqual(["b", "hyperlink", "i", "text"]);
+  });
+
+  it("records a header nothing reads as dropped, with a warning", async () => {
+    const { report, diagnostics } = await importDocx(new ServerEditor({ extensions: [StarterKit] }), await docWithHeader("HEADER"));
+
+    expect(dropsOf(report)).toEqual([{ outcome: "dropped", kind: "w:hdr", reason: NO_HANDLER, owner: null, count: 1 }]);
+    expect(diagnostics.map((d) => d.code)).toContain("header-footer-unread");
+  });
+
+  it("records a header part it cannot read as dropped, under the extension that asked for it", async () => {
+    const unreadable = [null, "", "<w:ftr/>"];
+    for (const part of unreadable) {
+      const editor = new ServerEditor({ extensions: [StarterKit, PartReader] });
+      const { report } = await importDocx(editor, await docWithHeader("HEADER", part));
+
+      expect(dropsOf(report).map((entry) => [entry.kind, entry.reason, entry.owner])).toEqual([["w:hdr", PART_UNREADABLE, "partReader"]]);
+    }
+  });
+
+  it("records one header serving two slots as one part lost, read or not", async () => {
+    const cases: Array<{ extensions: Extension[]; part: null | undefined; code: string }> = [
+      { extensions: [StarterKit], part: undefined, code: "header-footer-unread" },
+      { extensions: [StarterKit, PartReader], part: null, code: "header-footer-part-missing" },
+    ];
+    for (const { extensions, part, code } of cases) {
+      const entries = unzipSync(await docWithHeader("HEADER", part));
+      const document = strFromU8(entries["word/document.xml"]!);
+      entries["word/document.xml"] = strToU8(
+        document.replace("<w:sectPr>", '<w:sectPr><w:headerReference w:type="first" r:id="rIdHeader1"/>'),
+      );
+      const { report, diagnostics } = await importDocx(new ServerEditor({ extensions }), zipSync(entries));
+
+      expect(dropsOf(report).map((entry) => [entry.kind, entry.count])).toEqual([["w:hdr", 1]]);
+      expect(diagnostics.filter((d) => d.code === code)).toHaveLength(1);
+    }
+  });
+
+  it("records nothing lost for a header an extension reads", async () => {
+    const editor = new ServerEditor({ extensions: [StarterKit, PartReader] });
+    const { report } = await importDocx(editor, await docWithHeader("HEADER"));
+
+    expect(dropsOf(report)).toEqual([]);
+  });
+
   it("imports a paragraph whose style id is a name Object already has", async () => {
     const paragraphs = ["constructor", "toString", "__proto__"]
       .map((id) => `<w:p><w:pPr><w:pStyle w:val="${id}"/></w:pPr><w:r><w:t>${id}</w:t></w:r></w:p>`)
@@ -618,6 +780,7 @@ describe("the report's vocabulary, as a consumer imports it", () => {
       "handler returned nothing",
       "wrapper left the run unwrapped",
     ]);
+    expect(PART_UNREADABLE).toBe("part could not be read");
     expect(OVERRIDES_OWNER).toBe("overrides");
     expect(insideDropped("table")).toBe("inside a table that was dropped");
     expect(noSchemaNode("hardBreak")).toBe("the schema has no hardBreak node");

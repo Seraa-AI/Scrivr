@@ -1,9 +1,13 @@
 import type { IBaseEditor } from "@scrivr/core";
-import type { EditorState } from "@scrivr/core/pm";
+import { EditorState } from "@scrivr/core/pm";
 
 import { setAction, TrackChangesAction } from "./actions";
 import { trackChangesPluginKey } from "./engine/trackChangesPlugin";
+import { settleMarks } from "./applyChanges";
+import type { ChangeSet } from "./ChangeSet";
+import { findChanges } from "./findChanges";
 import { planChangeReview } from "./reviewPlan";
+import { CHANGE_STATUS } from "./types";
 import type { ReviewDecisions, ReviewOutcome, ReviewPlan, ReviewPlanResult } from "./reviewPlan";
 
 const decisionsOf = ({ accepted, rejected }: ReviewDecisions): ReviewDecisions => ({
@@ -24,7 +28,33 @@ export function planReviewIn(state: EditorState, decisions: ReviewDecisions): Re
   if (!pluginState?.canAcceptReject) {
     return { status: "blocked", ...decisionsOf(decisions), reason: "not-permitted" };
   }
-  return planChangeReview(pluginState.changeSet, decisions);
+  const plan = planChangeReview(pluginState.changeSet, decisions, pluginState.replacementView);
+  if (plan.status !== "ready") return plan;
+  const displaced = displacedBy(state, pluginState.changeSet, plan);
+  return displaced.length > 0 ? { ...plan, rejected: [...plan.rejected, ...displaced] } : plan;
+}
+
+/**
+ * The formatting suggestions a decision leaves no place for — held by an
+ * accepted change, on a mark whose removal is accepted, under a rejected
+ * suggestion that restores nothing — found by settling the marks as the review
+ * will, so the plan names every change the review decides and none is dropped
+ * undecided.
+ */
+function displacedBy(state: EditorState, changeSet: ChangeSet, plan: ReviewDecisions): string[] {
+  const decided = new Set([...plan.accepted, ...plan.rejected]);
+  const undecidedMarks = changeSet.pending.filter(change => change.type === "mark-change" && !decided.has(change.id));
+  if (undecidedMarks.length === 0 || ![...decided].some(id => changeSet.pending.some(c => c.id === id && c.type === "mark-change"))) {
+    return [];
+  }
+  const statuses = new Map<string, CHANGE_STATUS.accepted | CHANGE_STATUS.rejected>([
+    ...plan.accepted.map((id): [string, CHANGE_STATUS.accepted] => [id, CHANGE_STATUS.accepted]),
+    ...plan.rejected.map((id): [string, CHANGE_STATUS.rejected] => [id, CHANGE_STATUS.rejected]),
+  ]);
+  const scratch = state.tr;
+  settleMarks(scratch, id => statuses.get(id));
+  const left = new Set(findChanges(EditorState.create({ doc: scratch.doc })).pending.map(change => change.id));
+  return undecidedMarks.filter(change => !left.has(change.id)).map(change => change.id);
 }
 
 /**

@@ -79,15 +79,6 @@ export function walkDocument(
   return out;
 }
 
-export function walkNode(
-  node: Node,
-  ctx: DocxContext,
-  handlers: WalkerHandlers,
-  meta: DocxNodeMeta,
-): XmlNode[] {
-  return walk(node, ctx, handlers, meta, reportRecorderOf(ctx));
-}
-
 function walk(
   node: Node,
   ctx: DocxContext,
@@ -188,9 +179,9 @@ function mergeMarks(
     }
     const owner = ownerOf(handlers.owners?.marks, type);
     const apply = () => handler(props, mark, ctx);
-    // A property handler always returns a bag, so when it accounts for the
-    // mark it kept it unless it said otherwise.
-    props = hasWrapper ? recorder.attribute(owner, apply) : recorder.handle(owner, type, apply, () => true);
+    // A property handler always returns a bag, so the mark counts kept unless
+    // the handler reports otherwise.
+    props = hasWrapper ? recorder.fileUnder(owner, apply) : recorder.handle(owner, type, apply, () => true);
   }
   return props;
 }

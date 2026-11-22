@@ -27,6 +27,8 @@ export function fixInconsistentChanges(
   let changed = false;
 
   changeSet.invalidChanges.forEach(c => {
+    // A held suggestion is in its holder's record, not on the text: repairing it would write it there.
+    if (c.type === "mark-change" && "within" in c && c.within !== undefined) return;
     const { id, authorID, reviewedByID, status, createdAt, statusUpdateAt, updatedAt } = c.dataTracked;
     const piece = !!id && claimed.has(id);
     const newAttrs = {

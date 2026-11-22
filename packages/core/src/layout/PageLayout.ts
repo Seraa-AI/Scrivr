@@ -46,7 +46,7 @@ import { fitLinesInCapacity } from "./splitLines";
 import {
   assignGlobalY,
   collapseMargins,
-  fitsWithoutGap,
+  lineFitsAt,
   flowCursorAfter,
   pageLocalYForGlobalY,
   targetPageNumber,
@@ -1126,11 +1126,6 @@ export function paginateFlow(
       let markerPlaced = false;
       let currentPartStartY = targetY;
       let fragmentIdx = 0;
-      // Tracks whether gap-suppression has already been applied for this block.
-      // If linesFit=0 fires a second time after gap-suppress, force 1 line
-      // (sub-pixel shortfall: pageBottom - y is just barely less than lineHeight).
-      let gapSuppressApplied = false;
-
       while (remainingLines.length > 0) {
         const partStartY = currentPartStartY;
         // Per-page metrics snapshot for THIS iteration of the split loop.
@@ -1152,22 +1147,18 @@ export function paginateFlow(
         }
 
         if (linesFit === 0) {
-          if (hasPlacedAnyPart || partStartY === splitMetrics.contentTop || gapSuppressApplied) {
+          if (
+            hasPlacedAnyPart ||
+            partStartY === splitMetrics.contentTop ||
+            lineFitsAt(splitMetrics.contentBottom, partStartY, remainingLines[0]?.lineHeight ?? 0)
+          ) {
             // Force one line: top-of-page guard or sub-pixel shortfall.
             if ((globalThis as Record<string,unknown>).__LAYOUT_DEBUG__) {
               console.log(`    → linesFit=0 FORCE 1 line (top-of-page / sub-pixel guard)`);
             }
             linesFit = 1;
-          } else if (fitsWithoutGap(splitMetrics.contentBottom, y, remainingLines[0]?.lineHeight ?? 0)) {
-            // Inter-block gap pushed targetY into dead zone. Suppress and retry.
-            if ((globalThis as Record<string,unknown>).__LAYOUT_DEBUG__) {
-              console.log(`    → linesFit=0 GAP SUPPRESS: retry at y=${y.toFixed(1)}`);
-            }
-            currentPartStartY = y;
-            gapSuppressApplied = true;
-            continue;
           } else {
-            // No room on this page at all — advance to next.
+            // The gap is kept, as Word keeps it: no room after it means the next page.
             if ((globalThis as Record<string,unknown>).__LAYOUT_DEBUG__) {
               console.log(`    → linesFit=0 ADVANCE to page ${pages.length + 2}`);
             }
@@ -1176,7 +1167,6 @@ export function paginateFlow(
             metrics.push(metricsFor(currentPage.pageNumber));
             prevSpaceAfter = 0;
             currentPartStartY = metricsFor(currentPage.pageNumber).contentTop;
-            gapSuppressApplied = false;
             continue;
           }
         }

@@ -301,6 +301,12 @@ export interface SemanticChange {
    */
   oldAttrs?: Record<string, unknown>;
   /**
+   * A formatting change held under another author's: `{ marks: [...] }`, what
+   * it proposes. The text shows the holder's value, so it cannot be read from
+   * the spans; absent for a change the text shows.
+   */
+  newAttrs?: Record<string, unknown>;
+  /**
    * The image an inserted or deleted image is. Each image an act adds or
    * removes is a change of its own, under the act's id.
    */

@@ -63,6 +63,8 @@ import type { ParserDiagnostics } from "./parser";
 import {
   assignOwned,
   entryOf,
+  NO_HANDLER,
+  PART_UNREADABLE,
   ownedBundles,
   ownerOf,
   reportRecorderOf,
@@ -195,42 +197,52 @@ export async function importDocx(
       }
     }
 
+    // A header or footer is Word's `w:hdr` or `w:ftr` part. One a walk cannot
+    // read is the walking extension's loss; one nothing walks is nobody's.
+    const partKind = (relId: string): "w:hdr" | "w:ftr" => {
+      const type = rels.get(relId)?.type;
+      if (type === "header") return "w:hdr";
+      if (type === "footer") return "w:ftr";
+      // No header or footer relationship: the slot that referenced it says which.
+      return sectionRefs.footers.some((ref) => ref.relId === relId) ? "w:ftr" : "w:hdr";
+    };
+    const walked = new Set<string>();
+    const skipped = new Set<string>();
+    const skipPart = (relId: string, code: string, message: string): null => {
+      // One part may serve several slots; it is one part lost.
+      if (skipped.has(relId)) return null;
+      skipped.add(relId);
+      ctx.diagnostics.warn({ code, message });
+      ctx.report.dropped(partKind(relId), PART_UNREADABLE);
+      return null;
+    };
     ctx.walkPart = (relId: string): PmNode | null => {
+      walked.add(relId);
       const rel = rels.get(relId);
       if (!rel) {
-        ctx.diagnostics.warn({
-          code: "header-footer-rel",
-          message: `Unresolved header/footer relationship ${relId} — skipped`,
-        });
-        return null;
+        return skipPart(relId, "header-footer-rel", `Unresolved header/footer relationship ${relId} — skipped`);
       }
       if ((rel.type !== "header" && rel.type !== "footer") || rel.targetMode === "External") {
-        ctx.diagnostics.warn({
-          code: "header-footer-rel-type",
-          message: `Relationship ${relId} is not an internal header/footer part — skipped`,
-        });
-        return null;
+        return skipPart(relId, "header-footer-rel-type", `Relationship ${relId} is not an internal header/footer part — skipped`);
       }
       // The reference lives in document.xml.rels, so the target resolves
       // relative to word/document.xml.
       const path = resolveOpcTarget("word/document.xml", rel.target);
       const partXml = pkg.readText(path);
       if (partXml === undefined) {
-        ctx.diagnostics.warn({
-          code: "header-footer-part-missing",
-          message: `Missing header/footer part ${path} — skipped`,
-        });
-        return null;
+        return skipPart(relId, "header-footer-part-missing", `Missing header/footer part ${path} — skipped`);
       }
       const partRoot = partTree(path, partXml);
-      if (!partRoot) return null;
+      if (!partRoot) {
+        return skipPart(relId, "header-footer-part-unreadable", `Header/footer part ${path} is not XML — skipped`);
+      }
       const expectedRoot = rel.type === "header" ? "w:hdr" : "w:ftr";
       if (partRoot.name !== expectedRoot) {
-        ctx.diagnostics.warn({
-          code: "header-footer-part-type",
-          message: `Relationship ${relId} expected <${expectedRoot}> but found <${partRoot.name}> — skipped`,
-        });
-        return null;
+        return skipPart(
+          relId,
+          "header-footer-part-type",
+          `Relationship ${relId} expected <${expectedRoot}> but found <${partRoot.name}> — skipped`,
+        );
       }
 
       // Relationships are part-scoped: a relId inside header1.xml resolves
@@ -264,7 +276,7 @@ export async function importDocx(
     };
 
     for (const { owner, hook } of lifecycleHooks.onBeforeImport) {
-      await recorder.attributeAsync(owner, () => hook(ctx));
+      await recorder.fileUnderAsync(owner, () => hook(ctx));
     }
 
     const rawModel = parseDocumentBody(root, parserSink);
@@ -273,7 +285,16 @@ export async function importDocx(
 
     for (const { owner, hook } of lifecycleHooks.onImportComplete) {
       const current = doc;
-      doc = await recorder.attributeAsync(owner, () => hook(current, ctx));
+      doc = await recorder.fileUnderAsync(owner, () => hook(current, ctx));
+    }
+    // One part may serve several slots; it is one part lost.
+    for (const relId of new Set([...sectionRefs.headers, ...sectionRefs.footers].map((ref) => ref.relId))) {
+      if (walked.has(relId)) continue;
+      ctx.diagnostics.warn({
+        code: "header-footer-unread",
+        message: `No extension reads header/footer ${relId} — its content was not imported`,
+      });
+      recorder.unhandled(partKind(relId), NO_HANDLER);
     }
 
     // After the hooks, so a contribution's own blocks are addressable too.
@@ -426,7 +447,7 @@ function layerOver<Args extends unknown[], Result>(
     const earlier = entryOf(registry, key);
     const earlierOwner = ownerOf(owners, key);
     registry[key] = earlier
-      ? (...args: Args) => later(...args) ?? recorder.asOwner(earlierOwner, () => earlier(...args))
+      ? (...args: Args) => later(...args) ?? recorder.answerAs(earlierOwner, () => earlier(...args))
       : later;
     owners[key] = owner;
   }

@@ -1,11 +1,12 @@
-import { Node as PMNode, Schema } from "@scrivr/core/pm";
+import { type Mark, Node as PMNode, Schema } from "@scrivr/core/pm";
 import { Transaction } from "@scrivr/core/pm";
 import { Mapping } from "@scrivr/core/pm";
 
 import { revertWrapNodeChange } from "./lib/revertChanges";
 import { restoreNode, updateChangeChildrenAttributes } from "./engine/updateAttributes";
 import { ChangeSet } from "./ChangeSet";
-import { excludeFromTracked } from "./helpers";
+import { excludeFromTracked, isValidTrackableMark } from "./helpers";
+import { type DecisionOf, hasDecision, settle } from "./formatSuggestions";
 import { deleteNode } from "./lib/deleteNode";
 import { clearTextChange } from "./lib/clearTextChange";
 import { rejectMove } from "./engine/moveIdentity";
@@ -37,6 +38,37 @@ function isEntirelyGone(change: TrackedChange, deleteMap: Mapping) {
   return deleted && !(spansText && deleteMap.map(change.to, -1) > pos);
 }
 
+/** Each change's decision in this review, by id. */
+function decisionsIn(changeSet: ChangeSet): DecisionOf {
+  const decided = new Map<string, CHANGE_STATUS.accepted | CHANGE_STATUS.rejected>();
+  for (const change of changeSet.changes) {
+    const status = change.dataTracked.status;
+    if (status === CHANGE_STATUS.accepted || status === CHANGE_STATUS.rejected) decided.set(change.id, status);
+  }
+  return id => decided.get(id);
+}
+
+/**
+ * Settles every formatting mark in the document that a decision reaches — on
+ * the mark, or held by it — so a mark is settled once from all its decisions,
+ * whichever of its changes comes first.
+ */
+export function settleMarks(tr: Transaction, decided: DecisionOf) {
+  const reached: { from: number; to: number; mark: Mark }[] = [];
+  tr.doc.descendants((node, pos) => {
+    if (!node.isInline) return;
+    for (const mark of node.marks) {
+      if (isValidTrackableMark(mark) && hasDecision(mark, decided)) {
+        reached.push({ from: pos, to: pos + node.nodeSize, mark });
+      }
+    }
+  });
+  for (const { from: start, to: end, mark } of reached) {
+    tr.removeMark(start, end, mark);
+    for (const settled of settle(mark, decided)) tr.addMark(start, end, settled);
+  }
+}
+
 /**
  * Applies accepted/rejected changes to the document and clears tracking metadata.
  */
@@ -57,6 +89,9 @@ export function applyChanges(
     }
     return c1.dataTracked.updatedAt - c2.dataTracked.updatedAt;
   });
+
+  const decided = decisionsIn(changeSet);
+  let settledAll = false;
 
   // ── First pass — everything except move/structure ──────────────────────────
   changes.forEach(change => {
@@ -130,24 +165,24 @@ export function applyChanges(
         node.marks,
       );
     } else if (ChangeSet.isMarkChange(change)) {
-      // The mark keeps what it says — a colour, a size, a link — and loses only this record.
-      const newMark = change.mark.type.create({
-        ...change.mark.attrs,
-        dataTracked: excludeFromTracked(change.mark.attrs.dataTracked, change.id),
-      });
+      if (ChangeSet.isInlineMarkChange(change)) {
+        // A decision reaches every copy of its record — on the text, or held — wherever it is.
+        if (!settledAll) settleMarks(tr, decided);
+        settledAll = true;
+        return;
+      }
+      // A node mark keeps what it says and loses only this record.
       const isInsert = change.dataTracked.operation === CHANGE_OPERATION.insert;
       const isDelete = change.dataTracked.operation === CHANGE_OPERATION.delete;
       const toBeRestored =
         (change.dataTracked.status === CHANGE_STATUS.accepted && isInsert) ||
         (change.dataTracked.status === CHANGE_STATUS.rejected && isDelete);
-
-      if (ChangeSet.isInlineMarkChange(change)) {
-        const to = deleteMap.map(change.to);
-        tr.removeMark(from, to, change.mark);
-        if (toBeRestored) tr.addMark(from, to, newMark);
-      } else {
-        tr.removeNodeMark(from, change.mark);
-        if (toBeRestored) tr.addNodeMark(from, newMark);
+      tr.removeNodeMark(from, change.mark);
+      if (toBeRestored) {
+        tr.addNodeMark(from, change.mark.type.create({
+          ...change.mark.attrs,
+          dataTracked: excludeFromTracked(change.mark.attrs.dataTracked, change.id) ?? [],
+        }));
       }
     }
   });

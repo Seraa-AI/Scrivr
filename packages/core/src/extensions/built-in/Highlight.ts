@@ -1,5 +1,6 @@
 import { toggleMark } from "prosemirror-commands";
 import { Extension } from "../Extension";
+import { parseCssColor } from "../../model/cssColor";
 import type { MarkDecorator, SpanRect } from "../types";
 import {
   cssColorToDocxHex,
@@ -51,8 +52,21 @@ export const Highlight = Extension.create<HighlightOptions>({
             tag: "mark",
             getAttrs: (node) =>
               this.options.multicolor
-                ? { color: (node as HTMLElement).style.backgroundColor || this.options.color }
+                ? { color: node.style.backgroundColor || this.options.color }
                 : {},
+          },
+          {
+            // Only a span: a block's or a cell's background is its own fill.
+            tag: "span",
+            consuming: false,
+            getAttrs: (node) => {
+              const color = node.style.backgroundColor;
+              // A colour nobody can see is not a highlight: transparent,
+              // zero alpha, or a keyword such as `inherit` that names none.
+              const rgba = parseCssColor(color);
+              if (!rgba || rgba.alpha === 0) return false;
+              return this.options.multicolor ? { color } : {};
+            },
           },
         ],
         toDOM: (mark) => {

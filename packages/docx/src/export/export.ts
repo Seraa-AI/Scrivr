@@ -101,7 +101,7 @@ export async function exportDocx(
 
   try {
     for (const { owner, hook } of lifecycleHooks.onBeforeExport) {
-      await recorder.attributeAsync(owner, () => hook(ctx));
+      await recorder.fileUnderAsync(owner, () => hook(ctx));
     }
 
     const body = walkDocument(editor.getState().doc, ctx, walkerHandlers);
@@ -111,12 +111,12 @@ export async function exportDocx(
     ctx.document = buildDocumentRoot(body);
 
     for (const { owner, hook } of lifecycleHooks.onBuildTreeComplete) {
-      await recorder.attributeAsync(owner, () => hook(ctx));
+      await recorder.fileUnderAsync(owner, () => hook(ctx));
     }
 
     const finalize = lifecycleHooks.onFinalize;
     const pkg = finalize
-      ? await recorder.attributeAsync(finalize.owner, () => finalize.hook(ctx))
+      ? await recorder.fileUnderAsync(finalize.owner, () => finalize.hook(ctx))
       : buildDocxPackage(ctx.document, state);
 
     return {

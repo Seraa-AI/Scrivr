@@ -5,11 +5,12 @@ import type { Node as PMNode } from "@scrivr/core/pm";
 import { trackChangesPluginKey } from "./engine/trackChangesPlugin";
 import { describeAttrChanges } from "./attrChanges";
 import { changeActs } from "./reviewPlan";
+import { marksToRestore, toReplacedMark } from "./formatSuggestions";
 import {
   CHANGE_OPERATION,
   CHANGE_STATUS,
 } from "./types";
-import type { TrackedChange } from "./types";
+import type { ReplacedMark, ReplacementView, TrackedChange } from "./types";
 
 export interface ChangePopoverInfo {
   id: string;
@@ -80,6 +81,17 @@ export interface ChangePopoverInfo {
    */
   markName?: string;
   /**
+   * For an added mark that replaced others (a recolour, a new size): the marks
+   * it replaced, which rejecting it restores — the "blue" of "blue → red".
+   */
+  replacedMarks?: ReplacedMark[];
+  /**
+   * For a change set over other authors' suggestions: those suggestions, still
+   * theirs and each decidable — the "over Bob's blue → red" of "Alice: red →
+   * green". Rejecting this change gives them back; accepting it discards them.
+   */
+  heldChanges?: ChangePopoverInfo[];
+  /**
    * Discriminator for the change kind — mirrors TrackedChange.type without the
    * "-change" suffix. Lets UI components render the correct label and preview
    * without having to infer the kind from operation + markName + oldAttrs.
@@ -112,20 +124,57 @@ export interface ChangePopoverCallbacks {
   getPopoverElement?: () => HTMLElement | null;
 }
 
+/** A suggestion held by another change rather than standing on the text itself. */
+const isHeld = (change: TrackedChange) => change.type === "mark-change" && change.within !== undefined;
+
+/**
+ * The conflict at the caret, if any: every pending change overlapping a change
+ * flagged as a conflict, or, unflagged, opposing changes by different authors
+ * under the caret. `parties` is one per act, as the reader's view groups them:
+ * a whole-paragraph change recorded on the node and on its text is one party,
+ * and a replacement is one party paired or two split.
+ */
+export function conflictAt(
+  pending: readonly TrackedChange[],
+  primary: TrackedChange,
+  head: number,
+  view: ReplacementView = "paired",
+): { group: TrackedChange[]; parties: TrackedChange[] } | null {
+  let group: TrackedChange[];
+  if (primary.dataTracked.isConflict) {
+    // Both parties show even where only one sits at the caret: a deletion and
+    // an insertion at its edge share the conflict range.
+    group = pending.filter((c) => c.from <= primary.to && c.to >= primary.from && !isHeld(c));
+  } else {
+    // Same-author or same-operation overlaps are coexistence, not conflict.
+    group = pending.filter((c) => head >= c.from && head <= c.to && !isHeld(c));
+    const authors = new Set(group.map((c) => c.dataTracked.authorID));
+    const operations = new Set(group.map((c) => c.dataTracked.operation));
+    const opposing = operations.has(CHANGE_OPERATION.insert) && operations.has(CHANGE_OPERATION.delete);
+    if (group.length < 2 || authors.size < 2 || !opposing) return null;
+  }
+  return { group, parties: changeActs(group, view).map((act) => act.primary) };
+}
+
 /**
  * The change a popover offers at the caret: the act that owns the innermost
  * pending record there, shown by that act's primary. Inside a row someone
  * added, that is the row — its words are part of adding it — while an edit
  * someone else made inside the row is its own act and shows as itself.
  */
-export function changeAtCaret(pending: readonly TrackedChange[], head: number): TrackedChange | undefined {
-  const atCaret = pending.filter((c) => head >= c.from && head <= c.to);
+export function changeAtCaret(
+  pending: readonly TrackedChange[],
+  head: number,
+  view: ReplacementView = "paired",
+): TrackedChange | undefined {
+  // A held suggestion is not on the text: its holder is, and shows it.
+  const atCaret = pending.filter((c) => head >= c.from && head <= c.to && !isHeld(c));
   const innermost = atCaret.reduce<TrackedChange | undefined>(
     (best, c) => (!best || c.to - c.from < best.to - best.from ? c : best),
     undefined,
   );
   if (!innermost) return undefined;
-  return changeActs(pending).find((act) => act.records.includes(innermost))?.primary ?? innermost;
+  return changeActs(pending, view).find((act) => act.records.includes(innermost))?.primary ?? innermost;
 }
 
 /**
@@ -196,7 +245,8 @@ export function createChangePopover(
       (c) => c.dataTracked.status === CHANGE_STATUS.pending,
     );
 
-    const primary = changeAtCaret(pending, head);
+    const view = pluginState.replacementView;
+    const primary = changeAtCaret(pending, head, view);
 
     if (!primary) {
       if (visible) {
@@ -220,39 +270,7 @@ export function createChangePopover(
       return;
     }
 
-    const primaryIsConflict = !!primary.dataTracked.isConflict;
-
-    // When the primary change is flagged as a conflict, collect ALL pending
-    // changes that overlap its range — not just those at the cursor.
-    // This ensures both parties are always shown (e.g. user's deletion at
-    // [4,11] and AI's insertion at [4,4] share the conflict range).
-    let conflictGroup: typeof pending = [];
-    let isConflict = false;
-
-    if (primaryIsConflict) {
-      conflictGroup = pending.filter(
-        (c) => c.from <= primary.to && c.to >= primary.from,
-      );
-      isConflict = conflictGroup.length > 1 || primaryIsConflict;
-    } else {
-      // Check if multiple pending changes overlap the cursor (non-flagged overlap).
-      // Only treat as a conflict when different authors have opposing operations
-      // (insert vs delete). Same-author overlaps or same-operation overlaps are
-      // normal multi-author coexistence, not conflicts.
-      const atCursor = pending.filter((c) => head >= c.from && head <= c.to);
-      if (atCursor.length > 1) {
-        const uniqueAuthors = new Set(
-          atCursor.map((c) => c.dataTracked.authorID),
-        );
-        const ops = new Set(atCursor.map((c) => c.dataTracked.operation));
-        const hasOpposingOps =
-          ops.has(CHANGE_OPERATION.insert) && ops.has(CHANGE_OPERATION.delete);
-        if (uniqueAuthors.size > 1 && hasOpposingOps) {
-          conflictGroup = atCursor;
-          isConflict = true;
-        }
-      }
-    }
+    const conflict = conflictAt(pending, primary, head, view);
 
     const readText = (from: number, to: number): string => {
       if (from >= to) return "";
@@ -264,9 +282,10 @@ export function createChangePopover(
     };
 
     // Build group information for the primary change.
-    // A replacement's deletion and insertion share a groupId; aggregate them so
-    // the popover shows the whole replacement. Deciding either half decides both.
-    const primaryGroupId = primary.dataTracked.groupId;
+    // A replacement's deletion and insertion share a groupId; in the paired
+    // view the popover shows the whole replacement, and deciding either half
+    // decides both.
+    const primaryGroupId = view === "paired" ? primary.dataTracked.groupId : undefined;
     let groupIds: string[] = [primary.id];
     let replacedText: string | undefined;
     let insertedText: string | undefined;
@@ -342,9 +361,13 @@ export function createChangePopover(
       }
 
       // ── Mark change fields ───────────────────────────────────────────────────
+      const held = pending.filter((p) => p.type === "mark-change" && !!p.within?.includes(c.id));
       let markName: string | undefined;
+      let replacedMarks: ReplacedMark[] | undefined;
       if (c.type === "mark-change") {
         markName = c.mark.type.name;
+        const restored = marksToRestore(c.dataTracked, c.mark.type.schema);
+        if (restored.length > 0) replacedMarks = restored.map(toReplacedMark);
       }
 
       // ── Text preview — kind-aware ────────────────────────────────────────────
@@ -390,21 +413,20 @@ export function createChangePopover(
         ...(c.dataTracked.moveId !== undefined ? { moveId: c.dataTracked.moveId } : {}),
         ...(moveRole !== undefined ? { moveRole } : {}),
         ...(markName !== undefined ? { markName } : {}),
+        ...(replacedMarks !== undefined ? { replacedMarks } : {}),
+        ...(held.length > 0 ? { heldChanges: held.map(toInfo) } : {}),
         ...(c.type === "node-change" || c.type === "node-attr-change" ? { nodeTypeName: c.node.type.name } : {}),
       };
     };
 
     const primaryInfo = toInfo(primary);
-    primaryInfo.isConflict = isConflict;
-    // One party per act: a whole-paragraph change is recorded on the node and on
-    // its text, and those are one thing to keep or to discard.
-    const parties = changeActs(conflictGroup).map((act) => act.primary);
-    primaryInfo.conflictChanges = isConflict ? parties.map(toInfo) : [];
+    primaryInfo.isConflict = conflict !== null;
+    primaryInfo.conflictChanges = conflict?.parties.map(toInfo) ?? [];
 
     // Stable key: use groupId when available (so moving across chars within the
     // same replacement group doesn't re-trigger onShow), or sorted ids for conflicts.
-    const key = isConflict
-      ? conflictGroup
+    const key = conflict
+      ? conflict.group
           .map((c) => c.id)
           .sort()
           .join("|")

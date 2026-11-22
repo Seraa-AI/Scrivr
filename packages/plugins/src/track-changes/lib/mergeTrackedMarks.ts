@@ -2,7 +2,7 @@ import { Fragment, Mark, Node as PMNode, Schema } from "@scrivr/core/pm";
 import { Transaction } from "@scrivr/core/pm";
 import { stableStringify } from "@scrivr/core";
 
-import { genId, isValidTrackableMark, shouldMergeTrackedAttributes } from "../helpers";
+import { genId, isValidTrackableMark, markRecords, shouldMergeTrackedAttributes } from "../helpers";
 import { ChangeStep, DeleteNodeStep, DeleteTextStep } from "../types";
 import { TrackedAttrs } from "../types";
 
@@ -74,6 +74,7 @@ function descriptorOf(mark: Mark): Partial<TrackedAttrs> | null {
   return dt;
 }
 
+
 /** A mark eligible for adjacency-merge: a tracked-text mark or a pending trackable formatting mark. */
 function isMergeableTrackedMark(mark: Mark, schema: Schema): boolean {
   if (mark.type === schema.marks.trackedInsert || mark.type === schema.marks.trackedDelete) {
@@ -92,14 +93,13 @@ function sameOwnAttrs(a: Mark, b: Mark): boolean {
 }
 
 /**
- * Merges adjacent tracked marks at a position so one logical change isn't split
- * into many. Covers tracked insert/delete text AND formatting marks
- * (bold/highlight/color/…): a run of the same mark, same author, operation and
- * status collapses to one tracking id — the same grouping typing already gets,
- * now for formatting. Marks with different OWN attrs (e.g. two colors) never
- * merge. Merging is keyed on userID + operation + status.
+ * Merges adjacent tracked marks at a position so one change isn't split into
+ * many, tracked insert/delete text and formatting marks alike. Marks with
+ * different own attrs (two colors) never merge; otherwise
+ * `shouldMergeTrackedAttributes` decides, and only the single records of
+ * `authorID`, the author writing, fuse: fusing renames records.
  */
-export function mergeTrackedMarks(pos: number, doc: PMNode, newTr: Transaction, schema: Schema) {
+export function mergeTrackedMarks(pos: number, doc: PMNode, newTr: Transaction, schema: Schema, authorID: string) {
   const resolved = doc.resolve(pos);
   const { nodeAfter, nodeBefore } = resolved;
 
@@ -119,6 +119,8 @@ export function mergeTrackedMarks(pos: number, doc: PMNode, newTr: Transaction, 
     const rightMark = rightMarks.find(m => m.type === leftMark.type && sameOwnAttrs(m, leftMark));
     if (!rightMark) continue;
 
+    // A mark carrying several records is not one change: fusing keeps only one of them.
+    if (markRecords(leftMark).length > 1 || markRecords(rightMark).length > 1) continue;
     const leftDataTracked = descriptorOf(leftMark);
     const rightDataTracked = descriptorOf(rightMark);
     if (!leftDataTracked || !rightDataTracked) continue;
@@ -127,6 +129,8 @@ export function mergeTrackedMarks(pos: number, doc: PMNode, newTr: Transaction, 
     if (leftDataTracked.id && leftDataTracked.id === rightDataTracked.id) continue;
 
     if (!shouldMergeTrackedAttributes(leftDataTracked, rightDataTracked)) continue;
+    // Fusing gives the run one id, renaming the records it fuses: only the author writing does that to their own.
+    if (leftDataTracked.authorID !== authorID) continue;
 
     const isLeftOlder = (leftDataTracked.createdAt || 0) < (rightDataTracked.createdAt || 0);
     const ancestorAttrs = isLeftOlder ? leftDataTracked : rightDataTracked;

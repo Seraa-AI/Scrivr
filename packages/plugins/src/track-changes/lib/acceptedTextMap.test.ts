@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { Schema } from "@scrivr/core/pm";
+import { ServerEditor, StarterKit } from "@scrivr/core";
 import type { Mark } from "@scrivr/core/pm";
 import {
   buildAcceptedTextMap,
@@ -314,5 +315,55 @@ describe("acceptedTextMapFor", () => {
     acceptedTextMapFor(para, 10, schema);
 
     expect(acceptedTextMapFor(para, 0, schema).map[0]!.docPos).toBe(1);
+  });
+});
+
+// ── Line breaks, read as the rich lane and the semantic export read them ──────
+
+describe("buildAcceptedTextMap with line breaks", () => {
+  const editor = new ServerEditor({
+    extensions: [StarterKit],
+    content: {
+      type: "doc",
+      content: [{ type: "paragraph", content: [{ type: "text", text: "a" }, { type: "hardBreak" }, { type: "text", text: "b" }] }],
+    },
+  });
+  const { schema: kitSchema } = editor.getState();
+  const paragraph = editor.getState().doc.child(0);
+  const hardBreak = paragraph.child(1);
+
+  /** The paragraph with its break carrying `records`. */
+  const withBreakRecords = (records: unknown[]) =>
+    paragraph.copy(paragraph.content.replaceChild(1, hardBreak.type.create({ ...hardBreak.attrs, dataTracked: records })));
+
+  it("reads a line break as a newline, mapped to the break", () => {
+    const { acceptedText, map } = buildAcceptedTextMap(paragraph, 0, kitSchema);
+    expect(acceptedText).toBe("a\nb");
+    expect(map.map((entry) => entry.docPos)).toEqual([1, 2, 3]);
+  });
+
+  it("leaves out a line break pending deletion", () => {
+    const struck = withBreakRecords([{ id: "d", authorID: "bob", operation: "delete", status: "pending" }]);
+    expect(buildAcceptedTextMap(struck, 0, kitSchema).acceptedText).toBe("ab");
+  });
+
+  it("decorates a struck break as deleted and a live one as a newline", () => {
+    expect(buildAcceptedTextMap(paragraph, 0, kitSchema).decoratedText).toBe("a\nb");
+    const struck = withBreakRecords([{ id: "d", authorID: "bob", operation: "delete", status: "pending" }]);
+    expect(buildAcceptedTextMap(struck, 0, kitSchema).decoratedText).toBe('a<del author="bob">\n</del>b');
+  });
+});
+
+describe("buildAcceptedTextMap on a list", () => {
+  it("reads nothing: its paragraphs are read one by one, each under its own id", () => {
+    const editor = new ServerEditor({
+      extensions: [StarterKit],
+      content: { type: "doc", content: [{ type: "bulletList", content: ["one", "two"].map((text) => ({
+        type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text }] }],
+      })) }] },
+    });
+    const { acceptedText, map } = buildAcceptedTextMap(editor.getState().doc.child(0), 0, editor.getState().schema);
+    expect(acceptedText).toBe("");
+    expect(map).toEqual([]);
   });
 });

@@ -12,9 +12,8 @@
 
 import type { IBaseEditor } from "@scrivr/core";
 import { resolveInlineMarks, describeInlineMark, sameMark, spansToFragment } from "@scrivr/core";
-import type { InlineMark } from "@scrivr/core";
-import { Fragment } from "@scrivr/core/pm";
-import type { EditorState, Mark, NodeType, Node as PmNode, Schema, Transaction } from "@scrivr/core/pm";
+import type { InlineMark, InlineSpan } from "@scrivr/core";
+import type { EditorState, Node as PmNode, Schema, Transaction } from "@scrivr/core/pm";
 import { findLiveNodeById } from "@scrivr/plugins";
 import { rebaseAfterSettle } from "./rebase";
 import { groupsWithin, withAcceptedOffsets, type AcceptedSpan } from "./groupSpans";
@@ -25,22 +24,11 @@ import {
   AI_SUGGESTION_SETTLE,
 } from "./AiSuggestionPlugin";
 import { buildAcceptedTextMap } from "@scrivr/plugins";
-import { isTrackedMark, skipTracking, trackAsSuggestion, trackChangesPluginKey, TrackChangesAction, setAction } from "@scrivr/plugins";
-import {
-  addTrackIdIfDoesntExist,
-  createNewDeleteAttrs,
-  createNewInsertAttrs,
-  createNewPendingAttrs,
-} from "@scrivr/plugins";
-import { applyTrackedDelete } from "@scrivr/plugins";
+import { isTrackedMark, skipTracking, suggestionBlocked, trackAsSuggestion, writeProposal } from "@scrivr/plugins";
 import { acceptedRangeToDocRange } from "@scrivr/plugins";
 
-/**
- * The blocks still in the document, furthest-first so a write cannot move the
- * position of one not yet written. Getting the order wrong is invisible until
- * two blocks settle in one pass.
- */
-function resolveBlocksInReverse(
+/** The blocks still in the document, each with where it is. */
+function resolveBlocks(
   state: EditorState,
   blocks: AiSuggestionBlock[],
 ): Array<{ block: AiSuggestionBlock; found: { node: PmNode; pos: number } }> {
@@ -48,7 +36,6 @@ function resolveBlocksInReverse(
     const found = findLiveNodeById(state.doc, block.nodeId);
     return found ? [{ block, found }] : [];
   });
-  resolved.sort((a, b) => b.found.pos - a.found.pos);
   return resolved;
 }
 
@@ -85,7 +72,7 @@ export function showAiSuggestion(editor: IBaseEditor, suggestion: AiSuggestion |
  * read the current one back from plugin state.
  *
  * mode "direct"  — writes the proposed text directly into the document.
- * mode "tracked" — records changes as tracked insert/delete marks.
+ * mode "tracked" — writes them as suggestions, which track changes records.
  *
  * If `blockId` is provided, only that block's ops are applied.
  * If `groupId` is provided, only ops matching that groupId are applied.
@@ -135,13 +122,7 @@ export function applyAiSuggestion(
 
   const scope = groupId ? new Set([groupId]) : undefined;
   const author = authorOf(ps.suggestion);
-  applyKeepFormatting(editor, affectedBlocks, scope, mode !== "direct", author);
-
-  if (mode === "direct") {
-    _applyDirect(editor, affectedBlocks, scope);
-  } else {
-    _applyTracked(editor, affectedBlocks, scope, author);
-  }
+  applyProposal(editor, affectedBlocks, scope, mode, author);
 
   if (groupId) {
     const wrote = editor.getState().doc !== before;
@@ -149,13 +130,17 @@ export function applyAiSuggestion(
     return wrote;
   }
 
+  // An apply that wrote nothing (say, one tracking would not record) leaves
+  // the whole proposal pending.
+  if (editor.getState().doc === before) return false;
+
   // Everything not accepted stays — the blocks this call did not ask for, and
   // the ones it refused. Clearing those too would lose a proposal the reader
   // never settled.
   const accepted = new Set(affectedBlocks.map((b) => b.nodeId));
   const remaining = ps.suggestion.blocks.filter((b) => !accepted.has(b.nodeId));
   showAiSuggestion(editor, remaining.length > 0 ? { ...ps.suggestion, blocks: remaining } : null);
-  return editor.getState().doc !== before;
+  return true;
 }
 
 /**
@@ -197,9 +182,7 @@ function applyRange(
   const scope = new Set(covered);
   const before = state.doc;
   const author = authorOf(suggestion);
-  applyKeepFormatting(editor, [block], scope, mode !== "direct", author);
-  if (mode === "direct") _applyDirect(editor, [block], scope);
-  else _applyTracked(editor, [block], scope, author);
+  applyProposal(editor, [block], scope, mode, author);
 
   if (editor.getState().doc === before) return false;
 
@@ -284,184 +267,90 @@ function authorOf(suggestion: AiSuggestion): string {
 }
 
 /**
- * Apply the formatting a proposal asks for on the text it keeps.
+ * Write the groups `scope` covers into the document, in one transaction, so an
+ * apply is one undo step and lands whole or not at all.
  *
- * Its own transaction, before any text moves, so every range resolves against
- * the document the suggestion was computed from. Tracked mode dispatches it
- * with explicit suggestion intent — a formatting change has its own tracked representation, and the
- * engine produces it from an ordinary mark step, so a reviewer can reject the
- * formatting exactly as they reject the words. Direct mode skips tracking,
- * which is what direct means.
+ * Formatting on kept runs goes first: a mark step moves nothing, so every range
+ * still resolves against the document the suggestion was computed from.
+ * Tracked mode lets the engine record it all, so a reviewer can reject the
+ * formatting as they reject the words, and writes nothing it would not record.
  *
  * A formatting keep carries its own `groupId`, so accepting one group applies
  * exactly that run's formatting — `applyRunMarks` removes what the proposal
  * omits, and the run is the only text that group spoke about. Accepting a
  * word-swap group touches no formatting, because it is a different group.
  */
-function applyKeepFormatting(
+function applyProposal(
   editor: IBaseEditor,
   blocks: AiSuggestionBlock[],
   scope: GroupScope,
-  tracked: boolean,
+  mode: ApplyAiSuggestionOptions["mode"],
   author: string,
 ): void {
-  if (tracked && !trackChangesPluginKey.getState(editor.getState())) return;
-
   const state = editor.getState();
   const schema = state.schema;
-  // Mark-only writes shift no positions, so the order is immaterial here — it
-  // reads the shared resolve so a future change to either rule reaches this
-  // walker too.
-  const resolved = resolveBlocksInReverse(state, blocks);
-
+  const resolved = resolveBlocks(state, blocks).map(({ block, found }) => ({
+    block,
+    found,
+    map: buildAcceptedTextMap(found.node, found.pos, schema).map,
+  }));
   const tr = state.tr;
-  let touched = false;
-  for (const { block, found } of resolved) {
-    const { map } = buildAcceptedTextMap(found.node, found.pos, schema);
+
+  for (const { block, map } of resolved) {
     for (const { op, offset: acceptedOffset } of withAcceptedOffsets(block.ops)) {
-      if (op.type === "keep" && op.marks && inScope(scope, op.groupId)) {
-        const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset + op.text.length);
-        if (range) {
-          applyRunMarks(tr, schema, range.from, range.to, op.marks);
-          touched = true;
-        }
-      }
+      if (op.type !== "keep" || !op.marks || !inScope(scope, op.groupId)) continue;
+      const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset + op.text.length);
+      if (range) applyRunMarks(tr, schema, range.from, range.to, op.marks);
     }
   }
 
-  if (!touched || !tr.docChanged) return;
-  if (tracked) trackAsSuggestion(tr, author);
-  else skipTracking(tr);
+  // Every map was read from `state.doc`, the document before this transaction's first step.
+  for (const { block, found, map } of resolved) {
+    const ops = scopedOps(block.ops, scope);
+    const contentFor = (from: number, to: number) =>
+      spansToFragment(proposedSpans(ops, from, to), schema, { parentType: found.node.type });
+    writeProposal(tr, map, 0, ops, contentFor, found.pos + 1);
+  }
+
+  if (!tr.docChanged) return;
+  if (mode === "direct") {
+    skipTracking(tr);
+  } else {
+    trackAsSuggestion(tr, author);
+    if (suggestionBlocked(state, tr)) return;
+  }
   editor.applyTransaction(tr);
 }
 
 /**
- * The content an insert op puts in the document — its text, carrying whatever
- * formatting the op proposed. An op made from plain text proposes none, which
- * `spansToFragment` renders as an unmarked run.
+ * The ops an apply writes: those in `scope`. A deletion outside it is text
+ * that stays, so it reads as kept; an insertion outside it is not written.
  */
-/**
- * An op's inserted text for a block of `parentType`. This lane reads a block's
- * text without its line breaks (`buildAcceptedTextMap`), so it writes none: a
- * "\n" is a space, and what it inserts can always be reviewed and taken back.
- */
-function insertedContent(op: AiOp, schema: Schema, parentType: NodeType, extraMarks: readonly Mark[] = []) {
-  const fragment = spansToFragment([{ text: op.text.replace(/\n/g, " "), marks: op.marks ?? [] }], schema, { parentType });
-  if (extraMarks.length === 0) return fragment;
-  const marked: PmNode[] = [];
-  fragment.forEach((child) => {
-    marked.push(extraMarks.reduce((node, mark) => node.mark(mark.addToSet(node.marks)), child));
+function scopedOps(ops: readonly AiOp[], scope: GroupScope): AiOp[] {
+  return ops.flatMap((op): AiOp[] => {
+    if (op.type === "keep" || inScope(scope, op.groupId)) return [op];
+    return op.type === "delete" ? [{ type: "keep", text: op.text }] : [];
   });
-  return Fragment.fromArray(marked);
 }
 
-/** Apply by directly writing the proposed text into the doc (no tracking marks). */
-function _applyDirect(
-  editor: IBaseEditor,
-  blocks: AiSuggestionBlock[],
-  scope: GroupScope,
-): void {
-  const state  = editor.getState();
-  const schema = state.schema;
-
-  const resolved = resolveBlocksInReverse(state, blocks);
-
-  const tr = state.tr;
-
-  for (const { block, found } of resolved) {
-    const { map } = buildAcceptedTextMap(found.node, found.pos, schema);
-
-    // How far this walker's own writes have shifted the doc. Not shareable
-    // with the other walkers: a tracked delete marks text instead of removing
-    // it, so it shifts nothing.
-    let insertedChars = 0;
-
-    for (const { op, offset: acceptedOffset } of withAcceptedOffsets(block.ops)) {
-      const tokenLen = op.text.length;
-      if (op.type === "keep") continue;
-      if (!inScope(scope, op.groupId)) continue;
-
-      if (op.type === "delete") {
-        const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset + tokenLen);
-        if (range) {
-          tr.delete(range.from + insertedChars, range.to + insertedChars);
-          insertedChars -= tokenLen;
-        }
-      } else if (op.type === "insert") {
-        const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset);
-        if (range) {
-          const at = range.from + insertedChars;
-          const content = insertedContent(op, schema, tr.doc.resolve(at).parent.type);
-          tr.insert(at, content);
-          insertedChars += content.size;
-        }
-      }
+/**
+ * The inserted text between proposed offsets `from` and `to`, with the
+ * formatting each insertion proposes. An op made from plain text proposes
+ * none, which `spansToFragment` renders as an unmarked run.
+ */
+function proposedSpans(ops: readonly AiOp[], from: number, to: number): InlineSpan[] {
+  const spans: InlineSpan[] = [];
+  let offset = 0;
+  for (const op of ops) {
+    if (op.type === "delete") continue;
+    const start = Math.max(from, offset);
+    const end = Math.min(to, offset + op.text.length);
+    if (op.type === "insert" && start < end) {
+      spans.push({ text: op.text.slice(start - offset, end - offset), marks: op.marks ?? [] });
     }
+    offset += op.text.length;
   }
-
-  skipTracking(tr);
-  editor.applyTransaction(tr);
-}
-
-/** Apply by recording changes as tracked insert/delete marks. */
-function _applyTracked(
-  editor: IBaseEditor,
-  blocks: AiSuggestionBlock[],
-  scope: GroupScope,
-  authorID: string,
-): void {
-  const state    = editor.getState();
-  const schema   = state.schema;
-  const now      = Date.now();
-
-  const resolved = resolveBlocksInReverse(state, blocks);
-
-  const tr = state.tr;
-
-  for (const { block, found } of resolved) {
-    const { map } = buildAcceptedTextMap(found.node, found.pos, schema);
-
-    // How far this walker's own writes have shifted the doc. Not shareable
-    // with the other walkers: a tracked delete marks text instead of removing
-    // it, so it shifts nothing.
-    let insertedChars = 0;
-
-    for (const { op, offset: acceptedOffset } of withAcceptedOffsets(block.ops)) {
-      const tokenLen = op.text.length;
-      if (op.type === "keep") continue;
-      if (!inScope(scope, op.groupId)) continue;
-
-      const baseAttrs = createNewPendingAttrs(now, authorID);
-
-      if (op.type === "delete") {
-        const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset + tokenLen);
-        if (range) {
-          const dataTracked = addTrackIdIfDoesntExist(createNewDeleteAttrs(baseAttrs)) as Record<string, unknown>;
-          if (op.groupId) dataTracked["groupId"] = op.groupId;
-          applyTrackedDelete(tr, range.from + insertedChars, range.to + insertedChars, dataTracked, schema);
-        }
-      } else if (op.type === "insert") {
-        const range = acceptedRangeToDocRange(map, acceptedOffset, acceptedOffset);
-        if (range) {
-          const insertMarkType = schema.marks.trackedInsert;
-          if (insertMarkType) {
-            const dataTracked = addTrackIdIfDoesntExist(createNewInsertAttrs(baseAttrs)) as Record<string, unknown>;
-            if (op.groupId) dataTracked["groupId"] = op.groupId;
-            const at = range.from + insertedChars;
-            const content = insertedContent(op, schema, tr.doc.resolve(at).parent.type, [
-              insertMarkType.create({ dataTracked }),
-            ]);
-            tr.insert(at, content);
-            insertedChars += content.size;
-          }
-        }
-      }
-    }
-  }
-
-  skipTracking(tr);
-  setAction(tr, TrackChangesAction.refreshChanges, true);
-  editor.applyTransaction(tr);
+  return spans;
 }
 
 /**
