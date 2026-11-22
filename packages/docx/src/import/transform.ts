@@ -177,7 +177,7 @@ function transformBlock(
       lostUnlessProduced(block.type, owner),
     );
   }
-  return fallbackBlock(block, ctx, recorder);
+  return fallbackBlock(block, ctx, handlers, recorder);
 }
 
 function transformParagraph(
@@ -466,6 +466,7 @@ function fallbackParagraph(
 function fallbackBlock(
   block: DocxBlock,
   ctx: DocxImportContext,
+  handlers: ResolvedImportHandlers,
   recorder: DocxReportRecorder,
 ): PmNode | null {
   const hasFallback = block.type === "horizontalRule" || block.type === "pageBreak";
@@ -481,5 +482,24 @@ function fallbackBlock(
     code: "unsupported-block",
     message: `No import handler (and no fallback) for block kind "${block.type}"`,
   });
+  // What the block held is lost with it, so it is counted as dropped inside it.
+  recorder.subtree(
+    () => innerBlocks(block).forEach((inner) => transformBlock(inner, ctx, handlers, recorder)),
+    () => ({ kind: block.type, owner: null }),
+  );
   return null;
+}
+
+/** The blocks a container holds: a table's cells', a list's items', a content control's. */
+function innerBlocks(block: DocxBlock): DocxBlock[] {
+  switch (block.type) {
+    case "table":
+      return block.rows.flatMap((row) => row.cells.flatMap((cell) => cell.content));
+    case "list":
+      return block.items.flatMap((item) => item.content);
+    case "sdt":
+      return block.content;
+    default:
+      return [];
+  }
 }

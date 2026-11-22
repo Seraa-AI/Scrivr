@@ -561,6 +561,18 @@ describe("importDocx — report", () => {
     });
   });
 
+  it("records what a block nothing imports held as dropped inside it", async () => {
+    const cell = (text: string) => `<w:tc><w:p><w:r><w:t>${text}</w:t></w:r></w:p></w:tc>`;
+    const table = `<w:tbl><w:tblGrid><w:gridCol w:w="2000"/><w:gridCol w:w="2000"/></w:tblGrid><w:tr>${cell("a")}${cell("b")}</w:tr></w:tbl>`;
+    const { report } = await importDocx(new ServerEditor({ extensions: [StarterKit] }), await docWithBody(table));
+
+    expect(dropsOf(report).map(({ kind, reason, count }) => [kind, reason, count])).toEqual([
+      ["table", NO_HANDLER, 1],
+      ["text", insideDropped("table"), 2],
+      ["paragraph", insideDropped("table"), 2],
+    ]);
+  });
+
   it("records a header nothing reads as dropped, with a warning", async () => {
     const { report, diagnostics } = await importDocx(new ServerEditor({ extensions: [StarterKit] }), await docWithHeader("HEADER"));
 
