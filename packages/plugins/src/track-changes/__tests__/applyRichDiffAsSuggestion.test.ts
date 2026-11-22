@@ -429,4 +429,14 @@ describe("applyRichDiffAsSuggestion — a call that names one block twice", () =
     expect(ed.getState().doc.child(0).textContent).toBe("teh cat sat");
     expect(textChanges(ed).length).toBeGreaterThan(0);
   });
+
+  it("reports a block it cannot find as not found, not repeated", () => {
+    const ed = editor({ type: "doc", content: [{ type: "paragraph", attrs: { nodeId: "b1" }, content: [{ type: "text", text: "teh cat" }] }] });
+    const result = apply(ed, [
+      { nodeId: "gone", spans: [{ text: "x", marks: [] }] },
+      { nodeId: "gone", spans: [{ text: "y", marks: [] }] },
+    ]);
+    expect(result.notFound).toEqual(["gone"]);
+    expect(result.rejected).toEqual([]);
+  });
 });

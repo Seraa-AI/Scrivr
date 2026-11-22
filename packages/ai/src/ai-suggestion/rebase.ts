@@ -16,13 +16,13 @@
  */
 import type { IBaseEditor, InlineMark } from "@scrivr/core";
 
-import { buildAcceptedTextMap } from "@scrivr/plugins";
+import { buildAcceptedTextMap, acceptedMarksAt } from "@scrivr/plugins";
 
 import { findLiveNodeById } from "@scrivr/plugins";
 import { computeAiSuggestion } from "./computeAiSuggestion";
 import type { AiSuggestion, AiSuggestionBlock } from "./types";
 import type { InlineSpan } from "../schema/edit";
-import { currentMarksAt, sameMarks } from "./marks";
+import { sameMarks } from "./marks";
 
 /**
  * What the agent still wants this block to read as, in the document's terms.
@@ -169,7 +169,7 @@ export function rebaseAfterSettle(
     return others.length > 0 ? { ...suggestion, blocks: others } : null;
   }
 
-  const spans = remainingProposal(block, settledGroupIds, accepted, currentMarksAt(found.node));
+  const spans = remainingProposal(block, settledGroupIds, accepted, acceptedMarksAt(found.node, state.schema));
   const rebuilt = computeAiSuggestion(state, {
     blocks: [{
       nodeId: block.nodeId,

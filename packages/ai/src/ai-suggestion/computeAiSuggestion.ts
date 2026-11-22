@@ -8,13 +8,13 @@
 import type { EditorState, Node as PmNode, Schema } from "@scrivr/core/pm";
 
 import { findLiveNodeById } from "@scrivr/plugins";
-import { bridgeable, buildAcceptedTextMap, diffText, phraseReplacements, plainProposalMarks } from "@scrivr/plugins";
+import { acceptedMarksAt, bridgeable, buildAcceptedTextMap, diffText, namedMoreThanOnce, phraseReplacements, plainProposalMarks } from "@scrivr/plugins";
 import type { PairedDiffOp } from "@scrivr/plugins";
 import { describeInlineMark, resolveInlineMarks, stableStringify, type InlineMark } from "@scrivr/core";
 import type { InlineSpan } from "../schema/edit";
 import { toCoreSpans } from "../ai-toolkit/spans";
 import type { AiSuggestion, AiSuggestionBlock, AiOp } from "./types";
-import { currentMarksAt, sameMarks } from "./marks";
+import { sameMarks } from "./marks";
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -23,8 +23,8 @@ export interface ComputeAiSuggestionOptions {
   blocks: Array<{
     nodeId:        string;
     /**
-     * The proposed wording as plain text. Equivalent to a single `proposedSpans`
-     * run with no marks — a proposal that says nothing about formatting.
+     * The proposed wording as plain text. It says nothing about formatting: new
+     * words take the document's, as typing does. Use `proposedSpans` to set it.
      */
     proposedText?: string;
     /**
@@ -40,6 +40,8 @@ export interface ComputeAiSuggestionOptions {
   }>;
   /** Author identifier for the suggestion, e.g. "AI Assistant". */
   authorID: string;
+  /** Told of each block left out because the call names it more than once. */
+  onWarn?: (message: string) => void;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -92,8 +94,8 @@ function splitByCurrentMarks(op: AiOp, current: InlineMark[][], offset: number):
 
 /**
  * Split an op that consumes proposed text wherever its formatting changes, so
- * every op reads one way. Ops over text already in the document (deletes) and
- * proposals made as plain text pass through untouched.
+ * every op reads one way. Ops over text already in the document (deletes) pass
+ * through untouched.
  */
 function splitByMarks(op: AiOp, marksAt: InlineMark[][], offset: number): AiOp[] {
   if (marksAt.length === 0) return [op];
@@ -144,12 +146,15 @@ export function computeAiSuggestion(
   state: EditorState,
   options: ComputeAiSuggestionOptions,
 ): AiSuggestion | null {
-  const { blocks: inputBlocks } = options;
+  const { blocks: inputBlocks, onWarn } = options;
   const schema = state.schema;
   const resultBlocks: AiSuggestionBlock[] = [];
+  const repeated = namedMoreThanOnce(inputBlocks, state.doc);
+  for (const nodeId of repeated) onWarn?.(`[computeAiSuggestion] nodeId "${nodeId}" is named more than once — left out`);
 
   for (const block of inputBlocks) {
     const { nodeId, summary } = block;
+    if (repeated.includes(nodeId)) continue;
     const found = findLiveNodeById(state.doc, nodeId);
     if (!found || !found.node.isTextblock) continue;
     const proposal = readProposal(block, schema, found.node);
@@ -169,7 +174,7 @@ export function computeAiSuggestion(
 
     // Two cursors: one into the document's accepted text, which deletes and
     // keeps consume, and one into the proposal, which keeps and inserts consume.
-    const current = currentMarksAt(found.node);
+    const current = acceptedMarksAt(found.node, schema);
     let formatGroups = 0;
     let acceptedOffset = 0;
     const ops: AiOp[] = [];

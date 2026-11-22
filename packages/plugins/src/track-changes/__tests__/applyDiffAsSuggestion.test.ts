@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { ServerEditor, StarterKit } from "@scrivr/core";
 // Through the package barrel, as a host imports them.
-import { applyDiffAsSuggestion, applyMultiBlockDiff, findChanges, TrackChanges, TrackChangesStatus } from "../index";
+import { applyDiffAsSuggestion, applyMultiBlockDiff, findChanges, TrackChanges, TrackChangesStatus, type MultiBlockDiffResult } from "../index";
 
 /** "The quick fox" moved to the end as a tracked move; its deleted copy stays first. */
 function movedDown() {
@@ -110,6 +110,16 @@ describe("a call that names one block twice", () => {
     ] },
   });
 
+  it("reports a block it cannot find as missing, not repeated", () => {
+    const editor = twoBlocks();
+    const result: MultiBlockDiffResult = applyMultiBlockDiff(editor.getState(), (tr) => editor.applyTransaction(tr), {
+      blocks: [{ nodeId: "gone", proposedText: "x" }, { nodeId: "gone", proposedText: "y" }, { nodeId: "b2", proposedText: "a dog ran" }],
+      authorID: "ai",
+    });
+    expect(result.rejected).toEqual([]);
+    expect(result.applied).toBe(true);
+  });
+
   it("leaves that block alone and reports it, and still applies the rest", () => {
     const editor = twoBlocks();
     const result = applyMultiBlockDiff(editor.getState(), (tr) => editor.applyTransaction(tr), {
@@ -149,6 +159,18 @@ describe("new words in a plain proposal take formatting as typing does", () => {
   it("an insertion takes the formatting of the text before it", () => {
     expect(accepted([{ type: "text", text: "a " }, { type: "text", text: "b", marks: [{ type: "bold" }] }], "a b c"))
       .toEqual([["a ", []], ["b c", ["bold"]]]);
+  });
+
+  it("an insertion inside a link stays in the link", () => {
+    const link = { type: "link", attrs: { href: "https://example.com" } };
+    expect(accepted([{ type: "text", text: "go " }, { type: "text", text: "big site", marks: [link] }, { type: "text", text: " now" }], "go big new site now"))
+      .toEqual([["go ", []], ["big new site", ["link"]], [" now", []]]);
+  });
+
+  it("an insertion at the start of a line takes the line's formatting", () => {
+    const b = [{ type: "bold" }];
+    expect(accepted([{ type: "text", text: "ab", marks: b }, { type: "hardBreak" }, { type: "text", text: "cd", marks: b }], "ab\nNew cd"))
+      .toEqual([["ab", ["bold"]], ["", []], ["New cd", ["bold"]]]);
   });
 
   it("an insertion after a link does not grow the link", () => {

@@ -165,7 +165,8 @@ describe("diffText", () => {
   });
 
   it("LCS size guard: very long paragraphs fall back to block delete+insert", () => {
-    // ~200 unique words each → 200×200 = 40,000 cells, well above LCS_MAX_CELLS
+    // 150 words and their spaces, ~300 tokens a side, none shared at either end:
+    // ~90,000 cells, well above LCS_MAX_CELLS
     const makeWords = (prefix: string, n: number) =>
       Array.from({ length: n }, (_, i) => `${prefix}${i}`).join(" ");
     const a = makeWords("alpha", 150);

@@ -90,10 +90,9 @@ const LCS_MAX_CELLS = 20_000;
 /**
  * Run the classic LCS diff on two strings using the provided tokeniser.
  *
- * The tokens shared at each end are kept as they are first, so the comparison
- * and its size guard see only what changed: a one-word fix in a long clause is
- * that word, however long the clause. Past the guard, the changed middle is
- * one delete+insert between the kept ends.
+ * Tokens shared at each end are set aside first, so the comparison and its
+ * size guard see only what changed: a one-word fix in a long clause is that
+ * word, however long the clause.
  */
 export function diffText(
   a: string,

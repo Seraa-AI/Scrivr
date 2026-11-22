@@ -335,8 +335,8 @@ function scopedOps(ops: readonly AiOp[], scope: GroupScope): AiOp[] {
 
 /**
  * The inserted text between proposed offsets `from` and `to`, with the
- * formatting each insertion proposes. An op made from plain text proposes
- * none, which `spansToFragment` renders as an unmarked run.
+ * formatting each insertion proposes. An op without marks renders as an
+ * unmarked run.
  */
 function proposedSpans(ops: readonly AiOp[], from: number, to: number): InlineSpan[] {
   const spans: InlineSpan[] = [];

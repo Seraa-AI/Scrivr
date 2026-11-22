@@ -21,8 +21,9 @@
  *   one block do not shift positions of blocks above it in the same transaction.
  *   All changes land in a single transaction → one undo step.
  *
- * Returns { applied, editDensity }:
+ * Returns { applied, editDensity }, and for multiple blocks `rejected`:
  *   applied     — true if the suggestion was dispatched
+ *   rejected    — blocks the call named more than once, left alone
  *   editDensity — fraction of original chars deleted (0–1), weighted by
  *                 source-character count across all blocks.
  *                 Callers can use this as a quality gate:
@@ -31,7 +32,7 @@
  *                   > 0.7 → full rewrite, offer "Accept rewrite" button
  */
 
-import { spansToFragment, type InlineMark, type InlineSpan } from "@scrivr/core";
+import { spansToFragment } from "@scrivr/core";
 import type { Node as PMNode, Schema } from "@scrivr/core/pm";
 import type { EditorState, Transaction } from "@scrivr/core/pm";
 
@@ -40,7 +41,7 @@ import { getBlockInlineTrackedData } from "../helpers";
 import { CHANGE_OPERATION, CHANGE_STATUS } from "../types";
 import { bridgeable, buildAcceptedTextMap } from "./acceptedTextMap";
 import { computeEditDensity, diffText, phraseReplacements } from "./diffText";
-import { plainProposalMarks } from "./plainProposalMarks";
+import { groupToSpans, plainProposalMarks } from "./plainProposalMarks";
 import { writeProposal } from "./writeProposal";
 import { dispatchSuggestion } from "../suggestionBlocked";
 
@@ -155,15 +156,6 @@ export interface MultiBlockDiffOptions {
   authorID: string;
 }
 
-export interface MultiBlockDiffResult extends ApplyDiffResult {
-  /**
-   * nodeIds the call named more than once. Each proposal is the whole block,
-   * so two for one block disagree; that block is left alone, and the rest of
-   * the call still applies.
-   */
-  rejected: string[];
-}
-
 export interface ApplyDiffResult {
   /** true if the suggestion was dispatched. */
   applied: boolean;
@@ -173,6 +165,11 @@ export interface ApplyDiffResult {
    * 0 = no changes (or pure insertion), 1 = everything deleted.
    */
   editDensity: number;
+}
+
+export interface MultiBlockDiffResult extends ApplyDiffResult {
+  /** nodeIds the call named more than once; each is left alone, and the rest still applies. */
+  rejected: string[];
 }
 
 // ── Inner workhorse ───────────────────────────────────────────────────────────
@@ -222,7 +219,7 @@ function applyBlockToTr(
   const parentType  = updatedFound.node.type;
   const marksAt     = plainProposalMarks(ops, updatedFound.node, schema);
   const contentFor  = (from: number, to: number) =>
-    spansToFragment(spansOf(proposedText, marksAt, from, to), schema, { parentType });
+    spansToFragment(groupToSpans(proposedText, marksAt, from, to), schema, { parentType });
 
   const wrote = writeProposal(tr, map, tr.steps.length, ops, contentFor, updatedFound.pos + 1);
   return { applied: wrote || withdrew, editDensity, sourceChars: acceptedText.length };
@@ -236,7 +233,7 @@ function applyBlockToTr(
  *
  * @param state     Current editor state (used for schema + doc).
  * @param dispatch  PM dispatch function. Called with the built transaction.
- * @returns         { applied, editDensity }
+ * @returns         { applied, editDensity, rejected }
  */
 export function applyDiffAsSuggestion(
   state: EditorState,
@@ -273,8 +270,8 @@ export function applyMultiBlockDiff(
   dispatch: (tr: Transaction) => void,
   { blocks, authorID }: MultiBlockDiffOptions,
 ): MultiBlockDiffResult {
-  const rejected = namedMoreThanOnce(blocks);
-  // Resolve nodeIds → drop any blocks whose node is no longer in the doc.
+  const rejected = namedMoreThanOnce(blocks, state.doc);
+  // Drop repeated blocks and those no longer in the doc.
   const resolved = blocks.flatMap(b => {
     if (rejected.includes(b.nodeId)) return [];
     const found = findLiveNodeById(state.doc, b.nodeId);
@@ -306,28 +303,17 @@ export function applyMultiBlockDiff(
   return { applied: dispatchSuggestion(state, tr, authorID, dispatch), editDensity, rejected };
 }
 
-/** `text` between `from` and `to` as runs, split where its formatting changes. */
-function spansOf(text: string, marksAt: readonly InlineMark[][], from: number, to: number): InlineSpan[] {
-  const spans: InlineSpan[] = [];
-  for (let i = from; i < to; i++) {
-    const marks = marksAt[i] ?? [];
-    const last = spans.at(-1);
-    if (last && last.marks === marks) last.text += text[i];
-    else spans.push({ text: text[i]!, marks });
-  }
-  return spans;
-}
-
 /**
- * The nodeIds a call names more than once, each once. Every edit in a call is
- * written against the document as the call found it, so a second edit of the
- * same block would land on text the first already changed.
+ * The blocks of `doc` a call names more than once, each id once. An agent
+ * writes every edit in a call against the document as it found it, so a
+ * second edit of one block would land on text the first already changed.
+ * An id no block has is not one: it is reported missing, as any other is.
  */
-export function namedMoreThanOnce(edits: ReadonlyArray<{ nodeId: string }>): string[] {
+export function namedMoreThanOnce(edits: ReadonlyArray<{ nodeId: string }>, doc: PMNode): string[] {
   const seen = new Set<string>();
   const repeated = new Set<string>();
   for (const { nodeId } of edits) {
-    if (seen.has(nodeId)) repeated.add(nodeId);
+    if (seen.has(nodeId) && findLiveNodeById(doc, nodeId)) repeated.add(nodeId);
     seen.add(nodeId);
   }
   return [...repeated];
