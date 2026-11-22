@@ -1,5 +1,5 @@
 import type { Node as PmNode } from "prosemirror-model";
-import { fieldCaption, fieldChoices, isDatedWhenSigned, type FieldChoice, type FieldControl, type FieldKinds, type FieldValue } from "./fieldKinds";
+import { fieldCaption, fieldChoices, fieldSize, isDatedWhenSigned, type FieldChoice, type FieldControl, type FieldKinds, type FieldValue } from "./fieldKinds";
 import {
   DOCX_TAG_MAX_LENGTH,
   xml,
@@ -75,9 +75,9 @@ const braced = (id: string): string =>
  * reads it as false when absent, against the standard ([MS-OE376] Part 4
  * §6.2.2.29); the GUID is what a Word signature is tied to.
  */
-function signatureLine(node: PmNode, id: string): XmlNode {
-  const width = Number(node.attrs["width"]) * PX_TO_PT;
-  const height = Number(node.attrs["height"]) * PX_TO_PT;
+function signatureLine(node: PmNode, id: string, size: { width: number; height: number }): XmlNode {
+  const width = size.width * PX_TO_PT;
+  const height = size.height * PX_TO_PT;
   const role = node.attrs["role"];
   return xml("w:r", undefined, [
     xml("w:pict", undefined, [
@@ -145,7 +145,7 @@ export const fieldDocx = (kinds: FieldKinds): DocxNodeHandler => (node, _childre
   );
   const checked = node.attrs["checked"] === true;
   const shapes: Record<FieldControl, () => { props: XmlNode[]; content: XmlNode }> = {
-    signatureLine: () => ({ props: [], content: signatureLine(node, id) }),
+    signatureLine: () => ({ props: [], content: signatureLine(node, id, fieldSize(kinds, node)) }),
     checkbox: () => ({ props: [checkbox(checked)], content: glyphRun(checked ? "☒" : "☐") }),
     date: () => ({ props: [xml("w:showingPlcHdr"), dateControl()], content: plainRun(caption) }),
     dropdown: () => ({ props: [xml("w:showingPlcHdr"), dropdown(fieldChoices(node.attrs["options"]))], content: plainRun(caption) }),

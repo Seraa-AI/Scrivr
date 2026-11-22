@@ -1,6 +1,9 @@
 import type { DOMOutputSpec } from "prosemirror-model";
 import type { CellHAlign, CellVAlign, CellVMerge } from "./attrs";
-import { isHAlign, isVAlign, isVMerge, storableFill } from "./attrs";
+import { isVAlign, isVMerge, storableFill } from "./attrs";
+import { isHtmlElement } from "../model/isHtmlElement";
+import { cssLengthToPx, styleOrAttribute } from "../model/cssValues";
+import { elementTextAlign } from "../model/htmlElements";
 
 /**
  * The HTML attribute layer for table nodes — one module owning both directions
@@ -31,7 +34,7 @@ const MAX_COLUMN_SPAN = 64;
 
 /** True for a table cell element — `td` or `th`. */
 export function isCell(el: Element): el is HTMLElement {
-  if (!(el instanceof HTMLElement)) return false;
+  if (!isHtmlElement(el)) return false;
   const tag = el.tagName.toLowerCase();
   return tag === "td" || tag === "th";
 }
@@ -66,29 +69,14 @@ export function readRowSpan(el: Element, rowsLeftInGroup: number): number {
   return span === 0 ? rowsLeftInGroup : Math.min(span, rowsLeftInGroup);
 }
 
-/**
- * Reads a value the style sets, falling back to the presentational attribute.
- * CSS wins over the attribute because that is the order a browser paints them.
- */
-function readStyledValue(el: HTMLElement, styleValue: string, attrName: string): string | null {
-  const styled = styleValue.trim();
-  if (styled !== "") return styled;
-  const attr = el.getAttribute(attrName);
-  const trimmed = attr === null ? "" : attr.trim();
-  return trimmed === "" ? null : trimmed;
-}
-
 /** `text-align` / `align` → the cell's `hAlign`, or null to keep the default. */
 export function readCellHAlign(el: HTMLElement): CellHAlign | null {
-  const value = readStyledValue(el, el.style.textAlign, "align");
-  if (value === null) return null;
-  const lower = value.toLowerCase();
-  return isHAlign(lower) ? lower : null;
+  return elementTextAlign(el);
 }
 
 /** `vertical-align` / `valign` → the cell's `vAlign`, or null to keep the default. */
 export function readCellVAlign(el: HTMLElement): CellVAlign | null {
-  const value = readStyledValue(el, el.style.verticalAlign, "valign");
+  const value = styleOrAttribute(el, el.style.verticalAlign, "valign");
   if (value === null) return null;
   const lower = value.toLowerCase();
   // HTML's vertical centre is "middle"; the model calls it "center".
@@ -126,38 +114,21 @@ export function readCellBackground(el: HTMLElement): string | null {
   if (shorthand !== "" && /url\(/i.test(shorthand)) return null;
 
   const styled = el.style.backgroundColor.trim();
-  const candidate = styled !== "" ? styled : readStyledValue(el, shorthand, "bgcolor");
+  const candidate = styled !== "" ? styled : styleOrAttribute(el, shorthand, "bgcolor");
   return candidate === null ? null : storableFill(candidate);
 }
 
 /**
- * CSS absolute units, in px. Word writes column widths in points; a font-
- * relative unit (`em`, `ch`) is left out because resolving it needs the font
- * the cell will be laid out in, which nobody knows at parse time.
+ * Reads one column's width in CSS px, or null when it is missing or relative.
+ * Word writes column widths in points. A font-relative unit (`em`) stays
+ * unresolved: it needs the font the cell will be laid out in, which nobody
+ * knows at parse time.
  */
-const UNIT_PX: Record<string, number> = {
-  "": 1,
-  px: 1,
-  pt: 96 / 72,
-  pc: 16,
-  in: 96,
-  cm: 96 / 2.54,
-  mm: 96 / 25.4,
-};
-
-/** Reads one column's width in CSS px, or null when it is missing or relative. */
 function readColWidth(col: Element): number | null {
-  const styled = col instanceof HTMLElement ? col.style.width.trim() : "";
+  const styled = isHtmlElement(col) ? col.style.width.trim() : "";
   const raw = styled !== "" ? styled : (col.getAttribute("width") ?? "");
-
-  const measure = /^(\d+(?:\.\d+)?)\s*([a-z]*)$/i.exec(raw.trim());
-  if (!measure) return null;
-  const unit = measure[2]!.toLowerCase();
-  const scale = Object.hasOwn(UNIT_PX, unit) ? UNIT_PX[unit] : undefined;
-  if (scale === undefined) return null;
-
-  const width = Number.parseFloat(measure[1]!) * scale;
-  return Number.isFinite(width) && width > 0 ? width : null;
+  const width = cssLengthToPx(raw);
+  return width !== null && Number.isFinite(width) && width > 0 ? width : null;
 }
 
 /**

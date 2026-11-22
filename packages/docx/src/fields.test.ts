@@ -58,8 +58,8 @@ const contract = {
   ],
 };
 
-async function exported() {
-  const editor = new ServerEditor({ extensions, content: contract });
+async function exported(content: Record<string, unknown> = contract) {
+  const editor = new ServerEditor({ extensions, content });
   const bytes = await exportDocxBytes(editor);
   const document = strFromU8(unzipSync(bytes)["word/document.xml"]!);
   return { editor, bytes, document };
@@ -83,6 +83,13 @@ describe("fields in DOCX", () => {
     expect(document).toMatch(/<o:signatureline [^>]*issignatureline="t"/);
     expect(document).toMatch(/<o:signatureline [^>]*id="\{[0-9A-F-]{36}\}"/);
     expect(document).toMatch(/<o:signatureline [^>]*o:suggestedsigner2="client"/);
+  });
+
+  it("sizes a signature line with no size of its own at its kind's, as the page lays it out", async () => {
+    const unsized = { ...signer("signature", "client"), attrs: { ...signer("signature", "client").attrs, width: 0, height: Number.NaN } };
+    const { document } = await exported({ type: "doc", content: [{ type: "paragraph", content: [unsized] }] });
+
+    expect(document).toContain("width:135pt;height:33pt");
   });
 
   it("gives every content control its own w:id", async () => {

@@ -2,7 +2,9 @@ import { Node as PMNode } from "@scrivr/core/pm";
 import { EditorState, Transaction } from "@scrivr/core/pm";
 import { AttrStep, type Mapping } from "@scrivr/core/pm";
 
-import { NewEmptyAttrs } from "../helpers";
+import { stableStringify } from "@scrivr/core";
+
+import { getBlockInlineTrackedData, isTrackedRecord, NewEmptyAttrs } from "../helpers";
 import { ChangeStep, UpdateNodeAttrsStep } from "../types";
 
 function trackAttrsChangeStep(
@@ -10,10 +12,21 @@ function trackAttrsChangeStep(
   _oldState: EditorState,
   _tr: Transaction,
   newTr: Transaction,
-  _attrs: NewEmptyAttrs,
+  attrs: NewEmptyAttrs,
   currentStepDoc: PMNode,
   replayBridge: Mapping,
 ): ChangeStep[] {
+  if (step.attr === "dataTracked") {
+    // Taking back one's own records is review bookkeeping, as taking off one's
+    // review mark is: it stands, with nothing to record. Another author's
+    // records are theirs to withdraw, so rewriting them is undone.
+    const node = currentStepDoc.nodeAt(step.pos);
+    if (!node || !withdrawsOwnRecords(node, step.value, attrs.authorID)) {
+      const undo = step.invert(currentStepDoc).map(replayBridge);
+      if (undo) newTr.maybeStep(undo);
+    }
+    return [];
+  }
   const newStep = step.invert(currentStepDoc).map(replayBridge);
   if (!newStep) return [];
   const stepResult = newTr.maybeStep(newStep);
@@ -43,6 +56,22 @@ function trackAttrsChangeStep(
   };
 
   return [changeStep];
+}
+
+/**
+ * Whether `records`, written over `node`'s, only drops some of `authorID`'s:
+ * every record left stands exactly as it was. Records are matched whole, since
+ * one read from a saved document may carry no id.
+ */
+function withdrawsOwnRecords(node: PMNode, records: unknown, authorID: string): boolean {
+  const before = getBlockInlineTrackedData(node) ?? [];
+  const dropped = before.map((record) => stableStringify(record));
+  for (const record of (Array.isArray(records) ? records : [records]).filter(isTrackedRecord)) {
+    const at = dropped.indexOf(stableStringify(record));
+    if (at < 0) return false;
+    dropped.splice(at, 1);
+  }
+  return before.every((record) => !dropped.includes(stableStringify(record)) || record.authorID === authorID);
 }
 
 export default trackAttrsChangeStep;

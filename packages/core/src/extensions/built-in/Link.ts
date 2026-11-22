@@ -102,9 +102,6 @@ export const Link = Extension.create({
           {
             tag: "a[href]",
             getAttrs: (dom) => {
-              // dom is typed as `Node | string` from ProseMirror; narrow via
-              // `instanceof Element` so we can call getAttribute without a cast.
-              if (!(dom instanceof Element)) return false;
               // Reject the mark entirely when the href fails the ingestion
               // allow-list. Returning false from getAttrs drops only the
               // mark — the link text remains as plain text rather than

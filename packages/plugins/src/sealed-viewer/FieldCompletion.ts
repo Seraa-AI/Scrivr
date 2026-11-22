@@ -58,13 +58,15 @@ export interface FieldCompletionOptions {
   onFieldRequestError?: (field: SignerFieldDescriptor, error: unknown) => void;
   /**
    * The viewer went to sign while required fields of theirs are still
-   * unanswered (`unansweredBeforeSigning`). The signature waits and focus
-   * goes to the first of them; say why — "Choose payment terms before you
-   * sign". The view checks only this viewer's fields: run
-   * `unansweredBeforeSigning` over the whole role on your server when you
-   * record the signature.
+   * unanswered (`unansweredBeforeSigning`). The signature waits, and the first
+   * of them is opened — a checkbox only focused; say why where the signer
+   * will see it — "You sign last. First: payment terms". The view checks
+   * only this viewer's fields: run `unansweredBeforeSigning` over the whole
+   * role on your server when you record the signature.
    */
   onSignatureBlocked?: (signature: SignerFieldDescriptor, missing: SignerFieldDescriptor[]) => void;
+  /** The tag on a signature that waits, given how many fields come first (never 0). Default: `After 1 field`, `After 2 fields`. */
+  waitingLabel?: (count: number) => string;
   /** Colour of the viewer's own fields. Defaults to their party's colour, as the author saw it. */
   accentColor?: string;
   /**
@@ -87,6 +89,14 @@ export interface SigningFieldDrawing extends FieldDrawing {
   answered: boolean;
   /** Dated when its party signs, never pressed. */
   datedWhenSigned: boolean;
+  /**
+   * How many of this viewer's fields must be answered before this signature
+   * can be signed — what pressing it would wait on, signed already or not.
+   * 0 for any other field, or a signature ready to sign.
+   */
+  fieldsBeforeSigning: number;
+  /** The tag for a signature that waits, worded as the host configured it; empty when it does not wait. */
+  waitingLabel: string;
 }
 
 interface FieldState {
@@ -107,7 +117,8 @@ const byNavigator = new WeakMap<object, FieldState>();
  * into view first. What a host's list of fields, or its "Next field" button,
  * calls. Returns whether it opened: not when this viewer may not complete it,
  * it is already open, or it is a signature still waiting on the viewer's
- * other required fields — focus goes to the first of those instead.
+ * other required fields — the first of those is opened instead (a checkbox
+ * only focused), and this returns `false`.
  */
 export function requestField(editor: IBaseEditor, id: string): boolean {
   return fieldStates.get(editor)?.request(id) ?? false;
@@ -171,6 +182,7 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
 
   onViewReady(editor: IEditor) {
     const { fields, completable, onFieldRequest, onFieldRequestError, onSignatureBlocked, accentColor, paint } = this.options;
+    const waitingLabel = this.options.waitingLabel ?? ((count: number) => `After ${count} field${count === 1 ? "" : "s"}`);
     const kinds = fieldKindsOf(editor);
     const mayComplete = new Set(completable);
     const isDated = (f: SignerFieldDescriptor): boolean => isDatedWhenSigned(kinds, f.kind);
@@ -244,15 +256,16 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
         const field = mine.find((f) => f.id === id);
         if (!field || pending.has(id)) return false;
         if (isSigningKind(kinds, field.kind)) {
-          // Signed last, as on a paper form. The signature waits on what this
-          // viewer still owes, and focus goes to it — never answering it for
-          // them: pressing a checkbox ticks it. Fields someone else in the
-          // role completes are the server's to wait on.
+          // Signed last, as on a paper form: pressing a signature that waits
+          // takes the signer to the first field they owe and opens it — a
+          // checkbox only focused, since ticking it is their consent. Fields
+          // someone else in the role completes are the server's to wait on.
           const owed = unansweredBeforeSigning(mine, fieldValues(editor.getState()), field.role, kinds);
           const [first] = owed;
           if (first) {
             onSignatureBlocked?.(field, owed);
             focusOn(first.id);
+            if (kinds[first.kind]?.control !== "checkbox" && !pending.has(first.id)) ask(first);
             return false;
           }
         }
@@ -315,6 +328,10 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
     });
 
     const offPaint = editor.addOverlayRenderHandler((ctx, pageNumber, _pageConfig, charMap, theme) => {
+      const values = fieldValues(editor.getState());
+      // The rule pressing a signature applies, so the tag and the press always agree.
+      const fieldsBeforeSigning = (field: SignerFieldDescriptor): number =>
+        mayComplete.has(field.id) && isSigningKind(kinds, field.kind) ? unansweredBeforeSigning(mine, values, field.role, kinds).length : 0;
       for (const field of fields) {
         const pos = positionOf(field.id);
         const box = pos === undefined ? undefined : charMap.getObjectRect(pos);
@@ -323,6 +340,8 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
         const drawn = fieldDrawingAt(editor, pos, { box: at, baselineY: box.baseline ?? box.y + box.height, theme });
         if (!drawn) continue;
         const own = mayComplete.has(field.id);
+        const answered = isFieldAnswered(field, drawn.value, kinds);
+        const before = fieldsBeforeSigning(field);
         const signing: SigningFieldDrawing = {
           ...drawn,
           color: (own ? accentColor : undefined) ?? drawn.color,
@@ -331,8 +350,10 @@ export const FieldCompletion = Extension.create<FieldCompletionOptions>({
           active: !isDated(field) && (field.id === hovered || field.id === focused),
           focused: field.id === focused,
           pending: pending.has(field.id),
-          answered: isFieldAnswered(field, drawn.value, kinds),
+          answered,
           datedWhenSigned: isDated(field),
+          fieldsBeforeSigning: before,
+          waitingLabel: before > 0 ? waitingLabel(before) : "",
         };
         if (!paint?.(ctx, signing)) paintField(ctx, signing);
       }
@@ -398,9 +419,11 @@ function paintField(ctx: CanvasRenderingContext2D, f: SigningFieldDrawing): void
     }
   } else if (f.own) {
     paintFieldInk(ctx, box, { control, label: f.label, color: f.color, solid: true, faint: 1, baselineY: f.baselineY });
+    // A signature that must wait says so, muted, rather than inviting a press that cannot sign.
+    if (f.fieldsBeforeSigning > 0) paintBadge(ctx, box, f.waitingLabel, f.theme.imagePlaceholderBorder, f.theme.pageBg);
     // Said once: a label that is already the verb needs no badge repeating it,
     // and a date signed asks nothing of the signer.
-    if (f.verb !== f.label && !f.datedWhenSigned) paintBadge(ctx, box, f.verb, f.color, f.theme.pageBg);
+    else if (f.verb !== f.label && !f.datedWhenSigned) paintBadge(ctx, box, f.verb, f.color, f.theme.pageBg);
   } else {
     paintFieldInk(ctx, box, { control, label: roleName(f.role), color: f.theme.imagePlaceholderBorder, faint: 0.8, baselineY: f.baselineY });
   }

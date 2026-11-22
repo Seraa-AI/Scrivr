@@ -779,9 +779,8 @@ export function cleanPastedHtml(root: HTMLElement): void {
     if (s.verticalAlign === "baseline") s.removeProperty("vertical-align");
     if (s.color === "rgb(0, 0, 0)" || s.color === "#000000")
       s.removeProperty("color");
-    // margin/padding/line-height have no schema equivalent
-    // TODO: add these to the schema
     s.removeProperty("line-height");
+    // A pasted page's margins are its layout, not the author's indent.
     s.removeProperty("margin-top");
     s.removeProperty("margin-bottom");
     s.removeProperty("margin-left");

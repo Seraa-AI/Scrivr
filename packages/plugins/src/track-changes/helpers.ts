@@ -6,7 +6,7 @@ export function genId(): string {
   return crypto.randomUUID();
 }
 
-import { isTrackedMark } from "@scrivr/core";
+import { isTrackedMark, stableStringify } from "@scrivr/core";
 export { isTrackedMark } from "@scrivr/core";
 
 export function isValidTrackableMark(mark: Mark) {
@@ -226,7 +226,11 @@ export function shouldMergeTrackedAttributes(
     left.continuesId === right.continuesId &&
     left.moveId === right.moveId &&
     left.foldingClosed === right.foldingClosed &&
-    JSON.stringify(left.dependsOn ?? []) === JSON.stringify(right.dependsOn ?? [])
+    JSON.stringify(left.dependsOn ?? []) === JSON.stringify(right.dependsOn ?? []) &&
+    // A record restores what it replaced, so two that replaced different marks stay two.
+    stableStringify(left.replaced ?? []) === stableStringify(right.replaced ?? []) &&
+    // A replacement is one act: it never takes in a separate edit, nor another replacement.
+    left.groupId === right.groupId
   );
 }
 
@@ -237,8 +241,7 @@ export function getMergeableMarkTrackedAttrs(
 ) {
   const allAttrs = getTextNodeTrackedMarkData(node, schema);
   if (!allAttrs) return null;
-  // When marks are stacked (multi-author), find the one that matches the
-  // delete attrs being applied — same author, operation, and status.
+  // When marks are stacked (multi-author), the record the new deletion could join.
   const matching = allAttrs.find(a => shouldMergeTrackedAttributes(a, attrs));
   return matching || null;
 }

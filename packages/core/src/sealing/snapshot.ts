@@ -261,3 +261,14 @@ export async function verifySnapshot(content: string, contentHash: string): Prom
 export function hashArtifact(bytes: Uint8Array): Promise<string> {
   return sha256(bytes);
 }
+
+/**
+ * A snapshot's document object, to open in an editor: copied, not cast —
+ * content is untrusted until parsed. Throws when it is not a JSON object;
+ * whether it is a valid document is the editor's to say as it opens it.
+ */
+export function snapshotDocument(content: string): Record<string, unknown> {
+  const parsed: unknown = JSON.parse(content);
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new Error("A snapshot's content is a document object");
+  return Object.fromEntries(Object.entries(parsed));
+}

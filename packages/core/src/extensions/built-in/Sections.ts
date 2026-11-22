@@ -49,7 +49,6 @@ export const Sections = Extension.create({
           {
             tag: "div.scrivr-section-break",
             getAttrs(dom) {
-              if (!(dom instanceof HTMLElement)) return false;
               const raw = dom.getAttribute("data-section-settings");
               return {
                 nodeId: dom.getAttribute("data-node-id") ?? null,

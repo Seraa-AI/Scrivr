@@ -25,7 +25,7 @@ function layoutAt(d: Node, pageHeight: number): DocumentLayout {
   return runPipeline(d, { pageConfig: { ...defaultPageConfig, pageHeight }, fontConfig, fontModifiers: manager.buildFontModifiers(), measurer: createMeasurer() });
 }
 
-/** Blocks not at their page's content top nor right after the block above (with or without the gap). */
+/** Blocks not at their page's content top nor at the gap after the block above. */
 function misplaced(l: DocumentLayout): string[] {
   const out: string[] = [];
   l.pages.forEach((page, pageIndex) => {
@@ -38,7 +38,7 @@ function misplaced(l: DocumentLayout): string[] {
       }
       const end = prev.y + prev.height;
       const gap = collapseMargins(prev.spaceAfter, b.spaceBefore);
-      if (Math.abs(b.y - end) > 0.01 && Math.abs(b.y - end - gap) > 0.01) {
+      if (Math.abs(b.y - end - gap) > 0.01) {
         out.push(`page ${page.pageNumber} block ${i} at ${b.y}, previous ends ${end}`);
       }
     });
@@ -59,15 +59,17 @@ function pageHeightBelow(d: Node, index: number, belowEnd: number): number {
 describe("flow landing", () => {
   it.each([["one line", "T short"], ["several lines", `T ${WORDS}`]])("a first line within half a pixel of fitting is painted on its page, and what follows starts the next page clean (%s)", (_, text) => {
     const d = schema.node("doc", null, [para(`A ${WORDS}`), para(`B ${WORDS}`), para(text), para(`C ${WORDS}`), para(`D ${WORDS}`)]);
-    const lineHeight = layoutAt(d, 5000).pages[0]?.blocks[2]?.lines[0]?.lineHeight ?? 0;
-    const l = layoutAt(d, pageHeightBelow(d, 1, lineHeight - 0.25));
+    const tall = layoutAt(d, 5000).pages[0]?.blocks ?? [];
+    const gap = collapseMargins(tall[1]?.spaceAfter ?? 0, tall[2]?.spaceBefore ?? 0);
+    const lineHeight = tall[2]?.lines[0]?.lineHeight ?? 0;
+    const l = layoutAt(d, pageHeightBelow(d, 1, gap + lineHeight - 0.25));
 
     const page1 = l.pages[0]?.blocks ?? [];
     expect(page1.at(-1)?.node.textContent.startsWith("T")).toBe(true);
     expect(misplaced(l)).toEqual([]);
   });
 
-  it("a gap that reaches the page bottom moves the block to the next page even if its first line would fit without it", () => {
+  it("a gap that reaches the page bottom moves the block to the next page", () => {
     // Small print: a line shorter than the gap between paragraphs.
     const small = schema.node("paragraph", null, [schema.text("Small", [schema.mark("fontSize", { size: 6 })])]);
     const d = schema.node("doc", null, [para(`A ${WORDS}`), small, para(`C ${WORDS}`)]);

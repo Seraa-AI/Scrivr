@@ -1,0 +1,80 @@
+{
+  "name": "@scrivr/html",
+  "version": "1.0.25",
+  "description": "HTML import for Scrivr documents — load a whole document from HTML, in the browser or on the server",
+  "license": "Apache-2.0",
+  "author": "Seraa AI <hello@seraa.ai>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Seraa-AI/Scrivr.git",
+    "directory": "packages/html"
+  },
+  "homepage": "https://github.com/Seraa-AI/Scrivr#readme",
+  "bugs": {
+    "url": "https://github.com/Seraa-AI/Scrivr/issues"
+  },
+  "keywords": [
+    "html",
+    "import",
+    "scrivr",
+    "prosemirror"
+  ],
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "browser": {
+        "import": {
+          "types": "./dist/index.browser.d.ts",
+          "default": "./dist/index.browser.js"
+        },
+        "require": {
+          "types": "./dist/index.browser.d.cts",
+          "default": "./dist/index.browser.cjs"
+        }
+      },
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "dev": "tsup --watch",
+    "build": "tsup",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "happy-dom": "^20.8.4"
+  },
+  "peerDependencies": {
+    "@scrivr/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@scrivr/core": "workspace:*",
+    "@scrivr/docx": "workspace:*",
+    "tsup": "^8.0.0",
+    "typescript": "^5.4.0",
+    "vitest": "^2.1.9"
+  },
+  "browser": {
+    "./dist/index.js": "./dist/index.browser.js",
+    "./dist/index.cjs": "./dist/index.browser.cjs"
+  }
+}

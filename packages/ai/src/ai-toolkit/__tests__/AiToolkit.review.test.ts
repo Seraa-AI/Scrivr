@@ -50,7 +50,8 @@ describe("an agent reads a replacement", () => {
     expect(unit.text).toBe("The fee is due in 45 days.");
     const removed = unit.changes?.find((c) => c.type === "suggestedDelete");
     const added = unit.changes?.find((c) => c.type === "suggestedInsert");
-    expect(removed).toMatchObject({ text: "30", at: 18, length: 0, authorId: "AI Assistant" });
+    // The struck words follow the words typed over them.
+    expect(removed).toMatchObject({ text: "30", at: 20, length: 0, authorId: "AI Assistant" });
     expect(added).toMatchObject({ text: "45", at: 18, length: 2, authorId: "AI Assistant" });
     expect(removed?.id).toBeDefined();
     expect(added?.id).toBeDefined();

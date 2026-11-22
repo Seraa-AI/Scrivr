@@ -1,4 +1,4 @@
-import { EditorState, Selection, Transaction } from "@scrivr/core/pm";
+import { EditorState, Selection, Transaction, type Node as PMNode } from "@scrivr/core/pm";
 import {
   AddMarkStep,
   AddNodeMarkStep,
@@ -10,6 +10,7 @@ import {
   Step,
 } from "@scrivr/core/pm";
 
+import { getAction, TrackChangesAction } from "../actions";
 import { ChangeStep, TrTrackingContext } from "../types";
 import { processChangeSteps } from "./processReplaceStep";
 import { advanceBridge } from "./replayBridge";
@@ -17,7 +18,8 @@ import {
   excludeFromTracking,
   passThroughMeta,
 } from "./transactionProcessing";
-import { createNewPendingAttrs, NewEmptyAttrs } from "../helpers";
+import { createNewPendingAttrs, genId, NewEmptyAttrs } from "../helpers";
+import { alreadyProposedForDeletion, canCancelInsertion, inlineNodesIn, ownReplacementOf } from "../lib/deletionPolicy";
 import { diffChangeSteps } from "../lib/structuralChange";
 import { mergeTrackedMarks } from "../lib/mergeTrackedMarks";
 import { isSetNodeMarkupStep } from "../step-trackers/qualifiers";
@@ -55,6 +57,47 @@ function caretBeforeStepEnd(tr: Transaction, i: number, step: ReplaceStep): numb
 }
 
 /**
+ * The replacement `step` belongs to, as a `groupId`, or none. A step that types
+ * over a selection and records a deletion starts one; text already struck gets
+ * no second record, and the author's own pending insertion is taken back.
+ * Typing right beside, or over, the author's own replacement text continues it,
+ * so a word typed in several strokes stays one act.
+ */
+function replacementGroup(step: ReplaceStep, doc: PMNode, authorID: string): string | undefined {
+  // A step bringing blocks in (an open slice), or across blocks (which
+  // `inlineNodesIn` refuses), also joins or splits them, which is not a word swap.
+  const closedInsert = step.slice.size > 0 && step.slice.openStart === 0 && step.slice.openEnd === 0;
+  const covered = closedInsert ? inlineNodesIn(doc, step.from, step.to) : null;
+  if (!covered) return undefined;
+  const $from = doc.resolve(step.from);
+  if (step.from === step.to) return ownReplacementOf($from.nodeBefore, authorID) ?? ownReplacementOf($from.nodeAfter, authorID);
+  let recordsDeletion = false;
+  let continued: string | undefined;
+  for (const node of covered) {
+    if (alreadyProposedForDeletion(node)) continue;
+    if (canCancelInsertion(node, authorID)) continued ??= ownReplacementOf(node, authorID);
+    else recordsDeletion = true;
+  }
+  return recordsDeletion ? genId() : continued;
+}
+
+/**
+ * The group each step of a named phrase belongs to: the replacement its first
+ * step starts, or one of its own when that step starts none, so words deleted
+ * around an image the phrase keeps stay one act.
+ */
+function groupsOfPhrases(tr: Transaction, authorID: string): Map<Step, string> {
+  const groups = new Map<Step, string>();
+  for (const steps of getAction(tr, TrackChangesAction.phrases) ?? []) {
+    const [lead] = steps;
+    const at = lead ? tr.steps.indexOf(lead) : -1;
+    const group = (lead instanceof ReplaceStep && at >= 0 ? replacementGroup(lead, tr.docs[at]!, authorID) : undefined) ?? genId();
+    for (const step of steps) groups.set(step, group);
+  }
+  return groups;
+}
+
+/**
  * The node a single tracked step would write, when it writes one. Used to ask
  * whether that node can carry a change record at all.
  */
@@ -80,13 +123,14 @@ export function trackTransaction(
   }
 
   const baseAttrs = createNewPendingAttrs(tr.time, authorID);
+  const phraseGroups = groupsOfPhrases(tr, authorID);
 
   for (let i = tr.steps.length - 1; i >= 0; i--) {
     const step = tr.steps[i]!;
     const previousMapping = trContext.replayBridge.slice();
     const replayStart = newTr.mapping.maps.length;
     if (!trContext.composition.folded.has(step)) {
-      trackOneStep(i, step, baseAttrs, tr, oldState, newTr, trContext);
+      trackOneStep(i, step, baseAttrs, tr, oldState, newTr, trContext, phraseGroups);
     }
     trContext.replayBridge = advanceBridge(
       step,
@@ -107,6 +151,7 @@ function trackOneStep(
   oldState: EditorState,
   newTr: Transaction,
   trContext: TrTrackingContext,
+  phraseGroups: ReadonlyMap<Step, string>,
 ) {
   const replayBridge = trContext.replayBridge;
   if (step instanceof ReplaceStep) {
@@ -118,12 +163,19 @@ function trackOneStep(
       return;
     }
 
+    const moveNodeId = trContext.stepsByGroupIDMap.get(step);
+    const moveId = trContext.textMoves.get(step);
+    // A move's two halves already pair through its move id.
+    const partOfMove = !!moveNodeId || !!moveId || !!trContext.pastedMove;
+    const groupId = partOfMove ? undefined : phraseGroups.get(step) ?? replacementGroup(step, tr.docs[i]!, baseAttrs.authorID);
+    const stepAttrs = groupId === undefined ? baseAttrs : { ...baseAttrs, groupId };
+
     const [initialTrackedContent, newSelectionPos] = trackReplaceStep(
       i,
       step,
       oldState,
       newTr,
-      baseAttrs,
+      stepAttrs,
       tr,
       trContext,
     );
@@ -134,13 +186,11 @@ function trackOneStep(
     if (onlyNode && excludeFromTracking(onlyNode)) return;
     trackedContent = diffChangeSteps(trackedContent);
 
-    const moveNodeId = trContext.stepsByGroupIDMap.get(step);
-    const moveId = trContext.textMoves.get(step);
     const recordedFrom = newTr.mapping.maps.length;
     const [, updatedSelectionPos] = processChangeSteps(
       trackedContent,
       newTr,
-      { ...baseAttrs, ...(moveNodeId ? { moveNodeId } : {}), ...(moveId ? { moveId } : {}) },
+      { ...stepAttrs, ...(moveNodeId ? { moveNodeId } : {}), ...(moveId ? { moveId } : {}) },
       oldState.schema,
       trContext.replayedSelection.restamps,
     );
@@ -190,17 +240,17 @@ function trackOneStep(
     // those of the document this iteration's bridge maps from.
     const placed = step.map(replayBridge);
     if (!(placed instanceof AddMarkStep)) return;
-    trackAddMarkStep(placed, baseAttrs, newTr);
+    trackAddMarkStep(step, i, tr, baseAttrs, newTr, replayBridge);
     // Fuse this tracked mark with same-author/same-attrs neighbours so a run
     // built from several edits stays one change (as typing already does).
-    mergeTrackedMarks(placed.from, newTr.doc, newTr, oldState.schema);
-    mergeTrackedMarks(placed.to, newTr.doc, newTr, oldState.schema);
+    mergeTrackedMarks(placed.from, newTr.doc, newTr, oldState.schema, baseAttrs.authorID);
+    mergeTrackedMarks(placed.to, newTr.doc, newTr, oldState.schema, baseAttrs.authorID);
   } else if (step instanceof RemoveMarkStep) {
     const placed = step.map(replayBridge);
     if (!(placed instanceof RemoveMarkStep)) return;
-    trackRemoveMarkStep(step, placed, baseAttrs, newTr, tr.docs[i]!);
-    mergeTrackedMarks(placed.from, newTr.doc, newTr, oldState.schema);
-    mergeTrackedMarks(placed.to, newTr.doc, newTr, oldState.schema);
+    trackRemoveMarkStep(step, i, tr, baseAttrs, newTr, replayBridge);
+    mergeTrackedMarks(placed.from, newTr.doc, newTr, oldState.schema, baseAttrs.authorID);
+    mergeTrackedMarks(placed.to, newTr.doc, newTr, oldState.schema, baseAttrs.authorID);
   } else if (step instanceof RemoveNodeMarkStep) {
     trackRemoveNodeMarkStep(step, baseAttrs, newTr, tr.docs[i]!, replayBridge);
   } else if (step instanceof AddNodeMarkStep) {
