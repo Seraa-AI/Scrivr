@@ -1,6 +1,6 @@
 # DOCX Fidelity RFC — a Word file edited in Scrivr comes back as Word had it
 
-Status: Draft (2026-11-04). Nothing here ships until it is agreed.
+Status: Phase 0 shipped (#249); later phases follow. See What shipped.
 
 ## Goal
 
@@ -471,3 +471,35 @@ Settled on 2026-11-04:
 None. `runPipeline` is exported from `@scrivr/core` (`layout/index.ts`) and
 takes a measurer, so the docx package can lay a document out without an editor
 or a DOM, as `LayoutCoordinator.layoutForExport` already does.
+
+## What shipped
+
+### Phase 0 — the report (#249)
+
+- `importDocx` and `exportDocx` return a `report` beside `diagnostics`:
+  `counts` per kind (kept, dropped, changed) and `entries` for each distinct
+  drop or change, with its reason, `count` and owner. Identical entries
+  merge into one with a `count`, in the order first met, so a property Word
+  sets on every run is one line — not one entry per drop in document order,
+  as §2 first said.
+- The converter records each item it hands a handler, content with no
+  handler (`"no handler"`), and an element the parser cannot read
+  (`"no parser"`). Content inside a lost item is counted as dropped inside it,
+  on both sides: a Word table imported without the table extension reports
+  its paragraphs and text lost. A handler reporting `kept` or `dropped` for
+  the kind it was handed replaces the converter's account.
+- A link or an inline content control counts once however many runs it
+  spans, on both sides.
+- A header or footer nothing reads, or whose part cannot be read, is dropped
+  as `w:hdr` / `w:ftr`, with a warning.
+- Import names content in Word's terms (`b`, `w:customXml`); export in
+  Scrivr's.
+- New public API beyond §2: `IBaseEditor.getFormatContributions()` and
+  `FormatContribution`; the vocabulary `NO_HANDLER`, `NO_PARSER`,
+  `HANDLER_RETURNED_NOTHING`, `WRAPPER_DECLINED`, `OVERRIDES_OWNER`,
+  `insideDropped`, `noSchemaNode`; the `report-unbound` and
+  `report-invalid-count` warnings; `normalizeDrawNumber` in core, shared with
+  the test phase's logs.
+- Fixed on the way: a style id such as `constructor` crashed the import.
+- Not yet: what the parser skips inside a paragraph or run (Phase 1's
+  `trackUnread`), and the report when a conversion throws.
