@@ -373,6 +373,14 @@ function transformAtom(
   );
 }
 
+/**
+ * Marks a wrapping element puts on each run it wraps — a hyperlink, a content
+ * control — are one mark object per wrapper. They count once, as one link or
+ * one control, however many runs carry them; export counts them the same way.
+ */
+const WRAPPER_KINDS: ReadonlySet<string> = new Set(["hyperlink", "sdt"]);
+const countedWrappers = new WeakSet<DocxMark>();
+
 function transformMarks(
   marks: readonly DocxMark[],
   ctx: DocxImportContext,
@@ -385,6 +393,14 @@ function transformMarks(
     // style offered; there is nothing left to draw.
     if (mark.off) continue;
     const handler = entryOf(handlers.marks, mark.kind);
+    if (WRAPPER_KINDS.has(mark.kind)) {
+      if (countedWrappers.has(mark)) {
+        const repeated = handler?.(mark, ctx);
+        if (repeated) out.push(repeated);
+        continue;
+      }
+      countedWrappers.add(mark);
+    }
     if (!handler) {
       // Reserved kinds we don't map yet (like spacing, kern, lang) flood
       // diagnostics noisily, so their warning is silenced. They are still

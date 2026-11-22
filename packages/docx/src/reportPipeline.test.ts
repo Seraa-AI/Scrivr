@@ -14,6 +14,7 @@ import { describe, it, expect } from "vitest";
 import { unzipSync, zipSync, strFromU8, strToU8 } from "fflate";
 import {
   Extension,
+  Field,
   ServerEditor,
   SourcedBlockExtension,
   StarterKit,
@@ -571,6 +572,25 @@ describe("importDocx — report", () => {
       ["text", insideDropped("table"), 2],
       ["paragraph", insideDropped("table"), 2],
     ]);
+  });
+
+  it("counts a link once, however many runs it spans", async () => {
+    const runs = ["one", "two", "three"].map((t) => `<w:r><w:t xml:space="preserve">${t} </w:t></w:r>`).join("");
+    const bytes = await docWithBody(`<w:p><w:hyperlink w:anchor="top">${runs}</w:hyperlink></w:p>`);
+    const { report } = await importDocx(new ServerEditor({ extensions: [StarterKit] }), bytes);
+
+    expect(report.counts["hyperlink"]?.kept).toBe(1);
+    expect(report.counts["text"]?.kept).toBe(4);
+  });
+
+  it("counts a content control nothing carries once, however many runs it holds", async () => {
+    const runs = ["a", "b", "c"].map((t) => `<w:r><w:t>${t}</w:t></w:r>`).join("");
+    const sdt = `<w:p><w:sdt><w:sdtPr><w:tag w:val="mystery"/></w:sdtPr><w:sdtContent>${runs}</w:sdtContent></w:sdt></w:p>`;
+    for (const extensions of [[StarterKit], [StarterKit, Field]]) {
+      const { report } = await importDocx(new ServerEditor({ extensions }), await docWithBody(sdt));
+
+      expect(dropsOf(report).filter((entry) => entry.kind === "sdt").map((entry) => entry.count)).toEqual([1]);
+    }
   });
 
   it("records a header nothing reads as dropped, with a warning", async () => {
