@@ -31,4 +31,5 @@ The built-in extensions report what their DOCX handlers could not carry across, 
   - A paragraph's own `numId` and `ilvl` each win over its style's, and each is inherited through `basedOn` on its own; a paragraph with no style takes the default paragraph style's. `DocxParagraphAttrs.numbering` therefore carries either half alone.
   - A level nothing names is the one `numbering.xml` links to the style.
   - Numbering counts on across the paragraphs between items, and a level restarts under each new item of a shallower one, so sections separated by body text number 1, 2, 3 rather than 1, 1, 1.
-  - Where Word draws no number, nothing is numbered: `numId` 0, a level formatted `none`, and a `numId` the document does not define — that last one reported as a dropped `w:numPr`.
+  - Where Word draws no number, nothing is numbered: `numId` 0, and a `numId` the document does not define, reported as a dropped `w:numPr`. A level formatted `none` is drawn without a number but still counts, so the levels under it restart.
+  - DOCX export gives a list nested under one of another kind its own numbering, so an ordered list under a bullet list restarts at 1 in Word, as on screen.

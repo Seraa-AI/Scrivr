@@ -157,3 +157,42 @@ describe("list import keeps every item's text", () => {
     expect(await textOf(zipSync({ ...files, "word/document.xml": strToU8(document) }))).toBe("ab");
   });
 });
+
+describe("list numbering, as Word counts it", () => {
+  const li = (text: string, nested?: Record<string, unknown>) => ({
+    type: "listItem",
+    content: [{ type: "paragraph", content: [{ type: "text", text }] }, ...(nested ? [nested] : [])],
+  });
+  const ordersOf = (node: { descendants: (f: (n: { type: { name: string }; attrs: Record<string, unknown> }) => void) => void }) => {
+    const orders: unknown[] = [];
+    node.descendants((n) => { if (n.type.name === "orderedList") orders.push(n.attrs["order"]); });
+    return orders;
+  };
+
+  it("restarts an ordered list nested under a bullet list, there and back", async () => {
+    const original = { type: "doc", content: [{ type: "orderedList", content: [
+      li("A", { type: "bulletList", content: [
+        li("b1", { type: "orderedList", content: [li("x"), li("y")] }),
+        li("b2", { type: "orderedList", content: [li("z")] }),
+      ] }),
+    ] }] };
+    const { doc } = await importDocx(new ServerEditor(), await bytesOf(original));
+    expect(ordersOf(doc)).toEqual([1, 1, 1]);
+  });
+
+  it("counts a level Word draws no number for, so the levels under it restart", async () => {
+    const W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
+    const bytes = await bytesOf({ type: "doc", content: [{ type: "orderedList", content: [
+      li("Ch1", { type: "orderedList", content: [li("a"), li("b")] }),
+      li("Ch2", { type: "orderedList", content: [li("c")] }),
+    ] }] });
+    const files = unzipSync(bytes);
+    const numbering = `<w:numbering ${W}><w:abstractNum w:abstractNumId="1">`
+      + `<w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="none"/></w:lvl>`
+      + `<w:lvl w:ilvl="1"><w:start w:val="1"/><w:numFmt w:val="decimal"/></w:lvl></w:abstractNum>`
+      + `<w:num w:numId="1"><w:abstractNumId w:val="1"/></w:num></w:numbering>`;
+    const { doc } = await importDocx(new ServerEditor(), zipSync({ ...files, "word/numbering.xml": strToU8(numbering) }));
+    expect(doc.textContent).toBe("Ch1abCh2c");
+    expect(ordersOf(doc)).toEqual([1, 1]);
+  });
+});

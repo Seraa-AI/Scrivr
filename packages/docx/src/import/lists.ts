@@ -45,7 +45,13 @@ export function reconstructLists(model: DocxImportModel, sources: ListSources): 
   let i = 0;
   while (i < blocks.length) {
     const b = blocks[i]!;
-    if (isListParagraph(b)) {
+    if (isListParagraph(b) && numbering.format(b.attrs.numbering.numId, b.attrs.numbering.ilvl) === "none") {
+      // An item Word draws without a number: a plain paragraph here, but it
+      // still counts, and the levels under it restart.
+      countItem(counts, b.attrs.numbering.numId, b.attrs.numbering.ilvl);
+      out.push(stripNumberingMarker(b));
+      i++;
+    } else if (isListParagraph(b)) {
       // Stop the slice at the first list paragraph whose `numId` differs
       // from this run's, so consecutive bullet + ordered lists become two
       // separate list blocks instead of merging.
@@ -150,9 +156,7 @@ function buildList(
   const listType = numbering.resolve(numId, targetIlvl);
   const format = numbering.format(numId, targetIlvl);
   const levelOffset = targetIlvl - expectedIlvl;
-  const counted = counts.get(numId) ?? [];
-  counts.set(numId, counted);
-  const countedBefore = counted[targetIlvl] ?? 0;
+  const countedBefore = counts.get(numId)?.[targetIlvl] ?? 0;
 
   const items: DocxListItem[] = [];
   let i = 0;
@@ -185,8 +189,7 @@ function buildList(
     }
     // ilvl === targetIlvl — new item.
     items.push({ content: [stripNumberingMarker(b)], ...(levelOffset > 0 ? { levelOffset } : {}) });
-    counted[targetIlvl] = (counted[targetIlvl] ?? 0) + 1;
-    counted.length = targetIlvl + 1;
+    countItem(counts, numId, targetIlvl);
     i++;
   }
 
@@ -206,12 +209,14 @@ function buildList(
  * A paragraph with the numbering Word draws it with, or none. Its own
  * `numId` and `ilvl` each win over its style's — Word's built-in heading
  * numbering lives on the style — and a level neither names is the one
- * `numbering.xml` links to the style. Word draws no number for `numId` 0, a
- * `numId` the document does not define, or a level formatted `none`.
+ * `numbering.xml` links to the style. Word numbers nothing by `numId` 0 or a
+ * `numId` the document does not define.
  */
 function withResolvedNumbering(b: DocxBlock, { numbering, styles, diagnostics }: ListSources): DocxBlock {
   if (b.type !== "paragraph") return b;
-  const styleId = b.attrs.styleId ?? styles.defaultParagraphStyle;
+  // A paragraph naming no style, or one the document lacks, has the default.
+  const named = b.attrs.styleId;
+  const styleId = named !== undefined && styles.raw(named) ? named : styles.defaultParagraphStyle;
   const own = b.attrs.numbering ?? {};
   const fromStyle: { numId?: number; ilvl?: number } = styleId === undefined ? {} : styles.numbering(styleId);
   const numId = own.numId ?? fromStyle.numId;
@@ -221,8 +226,15 @@ function withResolvedNumbering(b: DocxBlock, { numbering, styles, diagnostics }:
     return withoutNumbering(b);
   }
   const ilvl = Math.min(own.ilvl ?? fromStyle.ilvl ?? (styleId === undefined ? undefined : numbering.levelOfStyle(numId, styleId)) ?? 0, 8);
-  if (numbering.format(numId, ilvl) === "none") return withoutNumbering(b);
   return { ...b, attrs: { ...b.attrs, numbering: { numId, ilvl } } };
+}
+
+/** One more item at `ilvl` of `numId`; the levels under it start again. */
+function countItem(counts: ListCounts, numId: number, ilvl: number): void {
+  const counted = counts.get(numId) ?? [];
+  counted[ilvl] = (counted[ilvl] ?? 0) + 1;
+  counted.length = ilvl + 1;
+  counts.set(numId, counted);
 }
 
 function withoutNumbering(b: DocxBlock & { type: "paragraph" }): DocxBlock {
