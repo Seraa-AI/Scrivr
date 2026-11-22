@@ -120,6 +120,8 @@ export interface DocxReportRecorder {
   carried(kind: string): void;
   /** The converter's own account: content nothing handled. Its owner is `null`. */
   unhandled(kind: string, reason: string): void;
+  /** How many of `kind` have been counted so far. */
+  count(kind: string): DocxReportCount;
   /** The report so far, as plain data the caller owns. */
   snapshot(): DocxReport;
 }
@@ -323,6 +325,9 @@ export function createReportRecorder(options: ReportRecorderOptions = {}): DocxR
     },
     unhandled(kind, reason) {
       addEntry("dropped", kind, reason, null);
+    },
+    count(kind) {
+      return { ...countOf(kind) };
     },
     snapshot() {
       // `fromEntries` defines own properties, so even a kind named

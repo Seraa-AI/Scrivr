@@ -934,6 +934,12 @@ describe("importDocx — what each extension says it could not keep", () => {
     expect(report.entries).toContainEqual({ outcome: "dropped", kind: "hyperlink", reason: "no usable target", owner: "link", count: 1 });
   });
 
+  it("drops a link it cannot resolve once, however many runs it spans", async () => {
+    const report = await importOf(`<w:p><w:hyperlink r:id="rIdMissing">${run("")}${run("")}${run("")}</w:hyperlink></w:p>`);
+
+    expect(report.counts["hyperlink"]).toMatchObject({ kept: 0, dropped: 1 });
+  });
+
   it("says why an image it cannot find is missing", async () => {
     const drawing =
       `<w:drawing><wp:inline><wp:extent cx="9525" cy="9525"/><a:graphic><a:graphicData>` +

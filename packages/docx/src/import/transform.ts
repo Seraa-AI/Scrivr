@@ -372,29 +372,54 @@ function transformAtom(
     return null;
   }
   const owner = ownerOf(handlers.owners.inlines, item.type);
-  const wrapperMarks = new Map<DocxMark, PmMark | null>();
   const node = recorder.subtree(
     () => {
       const pmMarks = transformMarks(formatting, ctx, handlers, recorder);
       for (const mark of wrappers) {
-        const wrapperHandler = entryOf(handlers.marks, mark.kind);
-        const pm = wrapperHandler ? recorder.fileUnder(ownerOf(handlers.owners.marks, mark.kind), () => wrapperHandler(mark, ctx)) : null;
-        wrapperMarks.set(mark, pm);
-        if (pm) pmMarks.push(pm);
+        const wrapper = buildWrapper(mark, ctx, handlers, recorder).mark;
+        if (wrapper) pmMarks.push(wrapper);
       }
       return recorder.handle(owner, item.type, () => handler(item, pmMarks, ctx), built);
     },
     (atom) => (atom ? null : { kind: item.type, owner }),
   );
-  for (const [mark, pm] of wrapperMarks) {
+  for (const mark of wrappers) {
     if (!node) unlanded.push({ mark, atom: item.type });
     else if (!countedWrappers.has(mark)) {
       countedWrappers.add(mark);
-      if (entryOf(handlers.marks, mark.kind)) recorder.handle(ownerOf(handlers.owners.marks, mark.kind), mark.kind, () => pm, built);
-      else dropUnhandled(ctx, recorder, mark.kind, NO_HANDLER);
+      const { mark: wrapper, reported } = buildWrapper(mark, ctx, handlers, recorder);
+      if (!entryOf(handlers.marks, mark.kind)) dropUnhandled(ctx, recorder, mark.kind, NO_HANDLER);
+      else if (wrapper || !reported) recorder.handle(ownerOf(handlers.owners.marks, mark.kind), mark.kind, () => wrapper, built);
     }
   }
   return node;
+}
+
+/** What a wrapper's handler built for it, and whether it reported its own outcome. */
+interface BuiltWrapper {
+  mark: PmMark | null;
+  reported: boolean;
+}
+const builtWrappers = new WeakMap<DocxMark, BuiltWrapper>();
+
+/**
+ * A wrapper's handler runs once per wrapper, however many runs carry it, so
+ * what it reports — a link it cannot resolve — is reported once.
+ */
+function buildWrapper(
+  mark: DocxMark,
+  ctx: DocxImportContext,
+  handlers: ResolvedImportHandlers,
+  recorder: DocxReportRecorder,
+): BuiltWrapper {
+  const cached = builtWrappers.get(mark);
+  if (cached) return cached;
+  const handler = entryOf(handlers.marks, mark.kind);
+  const droppedBefore = recorder.count(mark.kind).dropped;
+  const built = handler ? recorder.fileUnder(ownerOf(handlers.owners.marks, mark.kind), () => handler(mark, ctx)) : null;
+  const result = { mark: built, reported: recorder.count(mark.kind).dropped > droppedBefore };
+  builtWrappers.set(mark, result);
+  return result;
 }
 
 /**
@@ -408,6 +433,8 @@ function settleUnlanded(recorder: DocxReportRecorder): void {
   for (const { mark, atom } of unlanded.splice(0)) {
     if (countedWrappers.has(mark)) continue;
     countedWrappers.add(mark);
+    // A wrapper its handler already reported dropped is not lost a second time.
+    if (builtWrappers.get(mark)?.reported) continue;
     recorder.unhandled(mark.kind, insideDropped(atom));
   }
 }
@@ -434,12 +461,22 @@ function transformMarks(
     const handler = entryOf(handlers.marks, mark.kind);
     if (WRAPPER_KINDS.has(mark.kind)) {
       if (countedWrappers.has(mark)) {
-        const owner = ownerOf(handlers.owners.marks, mark.kind);
-        const repeated = handler && recorder.fileUnder(owner, () => handler(mark, ctx));
+        const repeated = builtWrappers.get(mark)?.mark;
         if (repeated) out.push(repeated);
         continue;
       }
       countedWrappers.add(mark);
+      const prebuilt = builtWrappers.get(mark);
+      if (prebuilt) {
+        // Built over an atom that was lost; this run is where it lands.
+        if (prebuilt.mark) {
+          recorder.handle(ownerOf(handlers.owners.marks, mark.kind), mark.kind, () => prebuilt.mark, built);
+          out.push(prebuilt.mark);
+        } else if (!prebuilt.reported) {
+          recorder.handle(ownerOf(handlers.owners.marks, mark.kind), mark.kind, () => null, built);
+        }
+        continue;
+      }
     }
     if (!handler) {
       // A property dropped on purpose raises no warning. It is still counted:
@@ -469,6 +506,8 @@ function transformMarks(
       () => handler(mark, ctx),
       built,
     );
+    // Later runs under the same wrapper reuse this, without asking the handler again.
+    if (WRAPPER_KINDS.has(mark.kind)) builtWrappers.set(mark, { mark: result, reported: true });
     if (result) out.push(result);
   }
   return out;
