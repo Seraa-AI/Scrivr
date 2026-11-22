@@ -1,11 +1,12 @@
 import { Extension } from "../Extension";
+import { writtenDocxColor } from "../../exports/docxColor";
 import type { MarkDecorator, SpanRect, ToolbarItemSpec } from "../types";
 import {
-  cssColorToDocxHex,
   type DocxMarkHandler,
   type DocxMarkTransform,
 } from "../../exports/docx";
 import type { PdfMarkHandler } from "../../exports/pdf";
+import { isCssReset, isCssWideKeyword } from "../../model/cssValues";
 
 interface ColorOptions {
   /** Preset color swatches shown in the toolbar (CSS color strings). */
@@ -39,7 +40,18 @@ export const Color = Extension.create<ColorOptions>({
         parseDOM: [
           {
             style: "color",
-            getAttrs: (value) => ({ color: value }),
+            getAttrs: (value) => (isCssWideKeyword(value) ? false : { color: value }),
+          },
+          // A mark is inherited by the text inside it, so `initial` must remove it.
+          {
+            style: "color",
+            getAttrs: (value) => isCssReset(value) && null,
+            clearMark: (mark) => mark.type.name === "color",
+          },
+          {
+            tag: "font[color]",
+            consuming: false,
+            getAttrs: (node) => ({ color: node.getAttribute("color") }),
           },
         ],
         toDOM: (mark) => [
@@ -96,7 +108,7 @@ export const Color = Extension.create<ColorOptions>({
         ctx.report.dropped(mark.type.name, "no color");
         return props;
       }
-      const hex = cssColorToDocxHex(v);
+      const hex = writtenDocxColor(v, mark.type.name, "color", ctx.report);
       if (hex) return { ...props, color: hex };
       ctx.diagnostics.warn({
         code: "unsupported-color",

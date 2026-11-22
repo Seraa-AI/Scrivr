@@ -3,6 +3,8 @@ import type { Node } from "prosemirror-model";
 import type { PdfNodeHandler } from "../../exports/pdf";
 import { textblockTypeInputRule } from "prosemirror-inputrules";
 import { Extension } from "../Extension";
+import { blockStyleAttrs } from "./blockStyleAttrs";
+import { INDENT_STEP } from "./Indent";
 import type {
   SlashCommandContribution,
   SlashCommandSpec,
@@ -76,7 +78,7 @@ export const Heading = Extension.create<HeadingOptions>({
   addNodes() {
     return {
       heading: {
-        group: "block",
+        group: "block listItemLead",
         content: "inline*",
         attrs: {
           level: { default: 1 },
@@ -91,31 +93,14 @@ export const Heading = Extension.create<HeadingOptions>({
         outlineLevel: headingOutlineLevel,
         parseDOM: this.options.levels.map((level) => ({
           tag: `h${level}`,
-          getAttrs(dom) {
-            const el = dom as HTMLElement;
-            const rawFamily = el.style.fontFamily;
-            const fontFamily = rawFamily
-              ? (rawFamily.replace(/['"]/g, "").split(",")[0] ?? "").trim() ||
-                null
-              : null;
-            const rawMarginLeft = parseFloat(el.style.marginLeft) || 0;
-            const rawTextIndent = parseFloat(el.style.textIndent) || 0;
-            return {
-              level,
-              align: el.style.textAlign || "left",
-              indent: rawMarginLeft > 0 ? Math.round(rawMarginLeft / 24) : 0,
-              textIndent: rawTextIndent > 0 ? rawTextIndent : 0,
-              fontFamily: fontFamily,
-              nodeId: el.getAttribute("data-node-id") ?? null,
-            };
-          },
+          getAttrs: (el) => ({ level, ...blockStyleAttrs(el) }),
         })),
         toDOM: (node) => {
           const styles: string[] = [];
           if (node.attrs.align && node.attrs.align !== "left")
             styles.push(`text-align:${node.attrs.align as string}`);
           if (node.attrs.indent)
-            styles.push(`margin-left:${(node.attrs.indent as number) * 24}px`);
+            styles.push(`margin-left:${(node.attrs.indent as number) * INDENT_STEP}px`);
           if (node.attrs.textIndent)
             styles.push(`text-indent:${node.attrs.textIndent as number}px`);
           if (node.attrs.fontFamily)

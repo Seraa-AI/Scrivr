@@ -102,9 +102,6 @@ export const Link = Extension.create({
           {
             tag: "a[href]",
             getAttrs: (dom) => {
-              // dom is typed as `Node | string` from ProseMirror; narrow via
-              // `instanceof Element` so we can call getAttribute without a cast.
-              if (!(dom instanceof Element)) return false;
               // Reject the mark entirely when the href fails the ingestion
               // allow-list. Returning false from getAttrs drops only the
               // mark — the link text remains as plain text rather than
@@ -250,9 +247,7 @@ export const Link = Extension.create({
     // needs a wrapper as well as a mark handler. Without both, a link reached
     // Word as ordinary text and the export logged an unsupported-mark warning
     // no UI surfaces.
-    const style: DocxMarkHandler = (props, mark, ctx) => {
-      const title = mark.attrs["title"];
-      if (typeof title === "string" && title.length > 0) ctx.report.changed(mark.type.name, "title not written");
+    const style: DocxMarkHandler = (props, _mark, ctx) => {
       return {
         ...props,
         // Word's built-in Hyperlink character style: blue and underlined, and
@@ -264,7 +259,10 @@ export const Link = Extension.create({
       };
     };
 
+    // The wrapper runs once per link, where the style runs once per run.
     const wrap: DocxRunWrapper = (runs, mark, ctx) => {
+      const title = mark.attrs["title"];
+      if (typeof title === "string" && title.length > 0) ctx.report.changed(mark.type.name, "title not written");
       const href = mark.attrs["href"];
       // A link with no usable href is styled text, not a broken relationship:
       // emitting `r:id` for a rel that was never registered produces a file

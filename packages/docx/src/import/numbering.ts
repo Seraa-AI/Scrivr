@@ -8,10 +8,10 @@
  *     ...
  *   </w:abstractNum>
  *
- * For Scrivr's purposes we only need the bullet/ordered distinction (the
- * exporter uses one numId per type). We pick the format from `ilvl=0` and
- * map decimal / lowerLetter / lowerRoman / upperLetter / upperRoman /
- * ordinal-style formats to `"ordered"`; everything else to `"bullet"`.
+ * Each level has its own format (`w:numFmt`): decimal / lowerLetter /
+ * lowerRoman / upperLetter / upperRoman / ordinal-style formats are
+ * `"ordered"`, everything else `"bullet"`. The format itself is kept, so the
+ * list's extension can say when it draws that level differently.
  */
 
 import { parsePart, findChild, findChildren, attr, type OoxmlElement, type ReadTracker } from "./xml";
@@ -19,13 +19,19 @@ import { parsePart, findChild, findChildren, attr, type OoxmlElement, type ReadT
 export type ListType = "bullet" | "ordered";
 
 export interface NumberingResolver {
-  /** Return the list type for a given numId, or `"bullet"` as a safe default. */
-  resolve(numId: number): ListType;
+  /** Word's numbering format at a level (`w:numFmt`), or undefined when the numbering names none. */
+  format(numId: number, ilvl: number): string | undefined;
+  /** The list type at a level, or `"bullet"` as a safe default. */
+  resolve(numId: number, ilvl: number): ListType;
+  /** Whether `numbering.xml` defines `numId`; Word numbers nothing by one it does not. */
+  defines(numId: number): boolean;
+  /** The level whose `w:pStyle` names `styleId` — how Word ties a heading style to a level. */
+  levelOfStyle(numId: number, styleId: string): number | undefined;
   /** The first number of a level: the list's `startOverride`, else its definition's `w:start`, else 1. */
   start(numId: number, ilvl: number): number;
 }
 
-const NONE: NumberingResolver = { resolve: () => "bullet", start: () => 1 };
+const NONE: NumberingResolver = { defines: () => false, format: () => undefined, levelOfStyle: () => undefined, resolve: () => "bullet", start: () => 1 };
 
 /** A whole number in an attribute, or undefined. */
 function intAttr(el: OoxmlElement | undefined, name: string): number | undefined {
@@ -67,16 +73,29 @@ export function readNumberingMap(xml: string | undefined, tracker?: ReadTracker)
     overrideStart.set(id, starts);
   }
 
-  // Build abstractNumId → ilvl=0 numFmt
-  const abstractFmt = new Map<string, string>();
+  // abstractNumId → linked paragraph style → ilvl
+  const abstractStyleLevel = new Map<string, Map<string, number>>();
+  // abstractNumId → ilvl → numFmt
+  const abstractFmt = new Map<string, Map<number, string>>();
   for (const aNum of findChildren(root, "w:abstractNum")) {
     const id = attr(aNum, "w:abstractNumId");
     if (!id) continue;
-    const lvl = findFirstLevel(aNum);
-    if (!lvl) continue;
-    const numFmt = findChild(lvl, "w:numFmt");
-    const fmt = numFmt && attr(numFmt, "w:val");
-    if (fmt) abstractFmt.set(id, fmt);
+    const formats = new Map<number, string>();
+    for (const lvl of findChildren(aNum, "w:lvl")) {
+      const ilvl = intAttr(lvl, "w:ilvl");
+      // A level that names no format is decimal (ECMA-376 §17.9.17).
+      const numFmt = findChild(lvl, "w:numFmt");
+      const fmt = numFmt ? attr(numFmt, "w:val") : "decimal";
+      if (ilvl !== undefined && fmt) formats.set(ilvl, fmt);
+      const pStyle = findChild(lvl, "w:pStyle");
+      const linked = pStyle && attr(pStyle, "w:val");
+      if (ilvl !== undefined && linked) {
+        const levels = abstractStyleLevel.get(id) ?? new Map<string, number>();
+        levels.set(linked, ilvl);
+        abstractStyleLevel.set(id, levels);
+      }
+    }
+    abstractFmt.set(id, formats);
   }
 
   // Build numId → abstractNumId
@@ -89,17 +108,22 @@ export function readNumberingMap(xml: string | undefined, tracker?: ReadTracker)
     if (refVal) numIdToAbstract.set(id, refVal);
   }
 
-  // Compose numId → ListType
-  const cache = new Map<number, ListType>();
+  const format = (numId: number, ilvl: number): string | undefined => {
+    const abstractId = numIdToAbstract.get(String(numId));
+    const formats = abstractId ? abstractFmt.get(abstractId) : undefined;
+    // A level the numbering does not define is drawn as its first level.
+    return formats?.get(ilvl) ?? formats?.get(0);
+  };
   return {
-    resolve(numId) {
-      const cached = cache.get(numId);
-      if (cached) return cached;
+    defines: (numId) => numIdToAbstract.has(String(numId)),
+    format,
+    levelOfStyle(numId, styleId) {
       const abstractId = numIdToAbstract.get(String(numId));
-      const fmt = abstractId ? abstractFmt.get(abstractId) : undefined;
-      const result: ListType = fmt && isOrderedFmt(fmt) ? "ordered" : "bullet";
-      cache.set(numId, result);
-      return result;
+      return abstractId ? abstractStyleLevel.get(abstractId)?.get(styleId) : undefined;
+    },
+    resolve(numId, ilvl) {
+      const fmt = format(numId, ilvl);
+      return fmt && isOrderedFmt(fmt) ? "ordered" : "bullet";
     },
     start(numId, ilvl) {
       const abstractId = numIdToAbstract.get(String(numId));
@@ -108,14 +132,6 @@ export function readNumberingMap(xml: string | undefined, tracker?: ReadTracker)
         ?? 1;
     },
   };
-}
-
-function findFirstLevel(aNum: OoxmlElement): OoxmlElement | undefined {
-  // Pick ilvl=0; if absent, take whichever `<w:lvl>` comes first.
-  for (const lvl of findChildren(aNum, "w:lvl")) {
-    if (attr(lvl, "w:ilvl") === "0") return lvl;
-  }
-  return findChild(aNum, "w:lvl");
 }
 
 const ORDERED_FORMATS = new Set([

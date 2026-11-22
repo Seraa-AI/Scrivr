@@ -55,6 +55,12 @@ export enum TrackChangesStatus {
 
 // ── TrackedAttrs ──────────────────────────────────────────────────────────────
 
+/** A mark as a record keeps it, to put back: its type's name and its attrs. Rejection restores it as agreed formatting, untracked. */
+export type ReplacedMark = {
+  type: string;
+  attrs: Record<string, unknown>;
+};
+
 type InsertDeleteAttrs = {
   id: string;
   authorID: string;
@@ -66,6 +72,12 @@ type InsertDeleteAttrs = {
   updatedAt: number;
   moveNodeId?: string;
   /**
+   * On an added formatting mark: the agreed formatting it replaced — the colour
+   * a recolour took off — which rejecting it puts back. A mark that excludes
+   * another cannot stand beside it, so the old value lives here, not on the text.
+   */
+  replaced?: ReplacedMark[];
+  /**
    * Links the two halves of moved content that is not carried as a block: its
    * deletion where it was and its insertion where it went, as Word's
    * `moveFrom` and `moveTo`. Deciding either decides both.
@@ -74,14 +86,13 @@ type InsertDeleteAttrs = {
   /**
    * True when another author's mark overlaps this exact segment.
    * Drives amber conflict rendering and the conflict popover.
-   * Set by splitRangeForNewMark when a second author touches the same range.
+   * Set by `findChanges` when another author's pending opposing change overlaps this one.
    */
   isConflict?: boolean;
   /**
-   * Links a trackedDelete and its paired trackedInsert into one logical
-   * replacement. Set by applyDiffAsSuggestion for adjacent delete+insert pairs
-   * produced by the LCS diff. UI can use this to accept/reject the replacement
-   * as a single atomic operation.
+   * Shared by the deletion and the insertion of one replacement, so deciding
+   * either half decides both. Set by the engine when an edit types over a
+   * selection, which is how every suggestion lane writes a replacement.
    */
   groupId?: string;
   /**
@@ -230,6 +241,12 @@ export type MarkChange = Change & {
   mark: Mark;
   node: Node;
   text: string;
+  /**
+   * For a suggestion held by other changes — set over it by other authors —
+   * and shown nowhere on the text: the ids of the changes that hold it. It is
+   * decided with them, or alone while they stay pending.
+   */
+  within?: readonly string[];
 };
 
 export type TrackedChange =
@@ -260,6 +277,14 @@ export type RootChange = TrackedChange[];
  */
 export type TrackChangesRenderMode = "all" | "none";
 
+/**
+ * How review shows a replacement — words typed over a selection, or a swap a
+ * suggestion proposes. `"paired"` is one card that decides both halves;
+ * `"split"` is a deletion and an insertion, each decided on its own, as Word
+ * shows them. The pairing is recorded either way, so switching rewrites nothing.
+ */
+export type ReplacementView = "paired" | "split";
+
 export interface TrackChangesOptions {
   debug?: boolean;
   userID: string;
@@ -268,6 +293,8 @@ export interface TrackChangesOptions {
   skipTrsWithMetas?: (PluginKey | string)[];
   initialStatus?: TrackChangesStatus;
   canAcceptReject?: boolean;
+  /** Default `"paired"`. */
+  replacementView?: ReplacementView;
   /**
    * Called with the reason when an edit is stopped because it could not be
    * recorded as a suggestion. The edit is not applied, so tell the person why.
@@ -283,6 +310,16 @@ export type TrackingRefusal =
   | { reason: "duplicate-transform-package" }
   /** A later step writes across the edge of an earlier step's insertion where it can't be split. */
   | { reason: "overlapping-steps" };
+
+/** Why a suggestion would not be recorded if dispatched. */
+export type SuggestionBlock =
+  | TrackingRefusal
+  /** No track-changes plugin is installed to record it. */
+  | { reason: "no-tracking" }
+  /** Snapshots are being viewed, which lets no authored edit through. */
+  | { reason: "viewing-snapshots" }
+  /** It carries a meta that tracking skips — `skipTracking`, history, sync, the host's `skipTrsWithMetas` — so it would land as a direct edit. */
+  | { reason: "untracked" };
 
 /**
  * What tracking did with a gesture. `refused` is the one outcome a host must act

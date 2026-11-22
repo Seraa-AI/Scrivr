@@ -25,7 +25,7 @@ const IGNORED: Readonly<Record<string, string>> = {
   "w:commentRangeEnd": "Known gap: comments are not imported.",
   "w:commentReference": "Known gap: comments are not imported.",
   "w:annotationRef": "Known gap: comments are not imported.",
-  "w:smartTag": "Known gap: the text inside a smart tag is not imported.",
+  "w:smartTag/w:smartTagPr": "A smart tag's recognised type and data; its text is imported.",
   "w:rPr/w:szCs": "The size of complex-script text (Arabic, Hebrew, Thai). Scrivr sizes every run by w:sz.",
   "w:rPr/w:lang": "The proofing language of a run. It changes neither the text nor how it is laid out.",
   "w:rPr/w:noProof": "Turns spell check off for a run. Not formatting.",

@@ -1,13 +1,14 @@
 import type { ReviewDecisions, ReviewOutcome } from "./reviewPlan";
-import { Transaction } from "@scrivr/core/pm";
+import { Transaction, type Step } from "@scrivr/core/pm";
 
-import { StructureAttrs, TrackChangesStatus, TrackingResult } from "./types";
+import { ReplacementView, StructureAttrs, TrackChangesStatus, TrackingResult } from "./types";
 
 export enum TrackChangesAction {
   suggest = "track-changes-suggest",
   skipTrack = "track-changes-skip-tracking",
   setUserID = "track-changes-set-user-id",
   setPluginStatus = "track-changes-set-track-status",
+  setReplacementView = "track-changes-set-replacement-view",
   setChangeStatuses = "track-changes-set-change-statuses",
   reviewResult = "track-changes-review-result",
   trackingResult = "track-changes-tracking-result",
@@ -15,6 +16,8 @@ export enum TrackChangesAction {
   updateMetaNode = "track-changes-update-meta-node",
   structuralChangeAction = "track-changes-structural-change-action",
   indentationAction = "track-changes-indentation-action",
+  /** Steps a writer made for one phrase, recorded as one group. */
+  phrases = "track-changes-phrases",
 }
 
 export type TrackChangesActionParams = {
@@ -22,6 +25,7 @@ export type TrackChangesActionParams = {
   [TrackChangesAction.skipTrack]: boolean;
   [TrackChangesAction.setUserID]: string;
   [TrackChangesAction.setPluginStatus]: TrackChangesStatus;
+  [TrackChangesAction.setReplacementView]: ReplacementView;
   [TrackChangesAction.setChangeStatuses]: ReviewDecisions;
   [TrackChangesAction.reviewResult]: ReviewOutcome;
   [TrackChangesAction.trackingResult]: TrackingResult;
@@ -31,6 +35,7 @@ export type TrackChangesActionParams = {
   [TrackChangesAction.indentationAction]: {
     action: "indent" | "unindent";
   };
+  [TrackChangesAction.phrases]: ReadonlyArray<readonly Step[]>;
 };
 
 /** Returns true if any track-changes action meta is set on the transaction. */

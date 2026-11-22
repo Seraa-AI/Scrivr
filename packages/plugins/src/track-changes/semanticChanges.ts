@@ -12,6 +12,7 @@ import type { Mark, Node as PMNode } from "@scrivr/core/pm";
 
 import { findChanges } from "./findChanges";
 import { getBlockInlineTrackedData, isTrackedRecord, isValidTrackableMark, markRecords } from "./helpers";
+import { marksToRestore, settle, untracked } from "./formatSuggestions";
 import { changeActs } from "./reviewPlan";
 import { CHANGE_OPERATION, CHANGE_STATUS, type TrackedAttrs } from "./types";
 
@@ -177,16 +178,34 @@ const NODE_CHANGES = new Map<string, NodeReading>([
   })],
 ]);
 
-/** A formatting change on text: the marks the text had before it. */
+/** Every pending record on `mark`, and on the suggestions its records hold, at any depth, with the mark it is on. */
+function pendingFormatting(mark: Mark, held = false): { record: TrackedRecord; mark: Mark; held: boolean }[] {
+  return markRecords(mark).filter(isPending).flatMap((record) => [
+    { record, mark, held },
+    ...marksToRestore(record, mark.type.schema).flatMap((inner) => pendingFormatting(inner, true)),
+  ]);
+}
+
+/**
+ * A formatting change on text: the marks the text had before it. A suggestion
+ * held under another author's is listed too — it is still theirs to propose.
+ */
 function formattingChanges(node: PMNode, ctx: UnitCtx): SemanticNodeChange[] {
   const formatting = node.marks.filter((mark) => !isTrackedMark(mark.type.name));
-  // What the text had before any pending formatting change: without the marks
-  // proposed as added. Every change on this text states the same.
-  const before = { marks: formatting.filter((m) => !hasPending(m, CHANGE_OPERATION.insert)).map(describeInlineMark) };
+  // What the text had before any pending formatting change: the agreed
+  // formatting, every suggestion turned down. Every change on this text states the same.
+  const before = { marks: formatting.flatMap((mark) => settle(mark, () => CHANGE_STATUS.rejected)).map(describeInlineMark) };
   return formatting.filter(isValidTrackableMark).flatMap((mark) =>
-    markRecords(mark)
-      .filter((record) => isPending(record) && FORMATTING_OPERATIONS.has(record.operation))
-      .map((record): SemanticNodeChange => ({ change: { ...describe("suggestedAttrs", "", record, ctx), oldAttrs: before }, place: "covers" })),
+    pendingFormatting(mark)
+      .filter(({ record }) => FORMATTING_OPERATIONS.has(record.operation))
+      .map(({ record, mark: on, held }): SemanticNodeChange => ({
+        change: {
+          ...describe("suggestedAttrs", "", record, ctx),
+          oldAttrs: before,
+          ...(held ? { newAttrs: { marks: [describeInlineMark(untracked(on))] } } : {}),
+        },
+        place: "covers",
+      })),
   );
 }
 

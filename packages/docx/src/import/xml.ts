@@ -60,8 +60,7 @@ const trackedElements = new WeakMap<object, { tracker: ReadTracker; target: Ooxm
 
 /**
  * Records which elements of the trees it tracks get read, so an import can
- * report what it never looked at without the parser saying so: the parser
- * walks the tree it is given, and that tree notices.
+ * report what no code looked at.
  *
  * Reading an element's `attrs` or `children` reads it. Reading its `name`
  * only examines it: a proxy cannot tell a name that was matched and acted on
@@ -104,9 +103,7 @@ export class ReadTracker {
   unread(): DocxUnreadElement[] {
     const entries = new Map<string, DocxUnreadElement>();
     const record = (part: string, path: string, outcome: DocxUnreadElement["outcome"]) => {
-      const key = `${part}
-${path}
-${outcome}`;
+      const key = JSON.stringify([part, path, outcome]);
       const entry = entries.get(key);
       if (entry) entry.count += 1;
       else entries.set(key, { part, path, outcome, count: 1 });

@@ -1,9 +1,10 @@
-import { Node as PMNode } from "@scrivr/core/pm";
+import { type Mark, Node as PMNode } from "@scrivr/core/pm";
 import { EditorState } from "@scrivr/core/pm";
 
 import { ChangeSet } from "./ChangeSet";
 import { joinedBlockAt } from "./lib/deleteBreak";
 import { getMarkTrackedData, getNodeTrackedData } from "./helpers";
+import { marksToRestore, pendingRecords } from "./formatSuggestions";
 import {
   CHANGE_OPERATION,
   CHANGE_STATUS,
@@ -85,6 +86,61 @@ const BUILD = new Map<string, ChangeBuilder>([
   [CHANGE_OPERATION.reference, referenceChange],
 ]);
 
+const groupKey = (id: string, within: string | undefined) => (within === undefined ? `${id}|text` : `${id}|held`);
+
+const isMarkPiece = (change: IncompleteChange): change is PartialChange<MarkChange> => change.type === "mark-change";
+const isHeldChange = (change: IncompleteChange) => isMarkPiece(change) && change.within !== undefined;
+
+/**
+ * The changes as a reviewer meets them. A suggestion shown anywhere on the
+ * text is listed where it shows, and its held copies — the same record, decided
+ * by the same id — are not listed again; one held everywhere is listed once,
+ * over all its pieces, naming every change that holds it.
+ */
+function withoutHeldCopies(changes: IncompleteChange[]): IncompleteChange[] {
+  const shown = new Set(changes.filter(c => isMarkPiece(c) && !isHeldChange(c)).map(c => c.id));
+  const held = new Map<string, PartialChange<MarkChange>>();
+  const listed: IncompleteChange[] = [];
+  for (const change of changes) {
+    if (!isMarkPiece(change) || change.within === undefined) {
+      listed.push(change);
+      continue;
+    }
+    if (shown.has(change.id)) continue;
+    const first = held.get(change.id);
+    if (!first) {
+      held.set(change.id, change);
+      listed.push(change);
+      continue;
+    }
+    first.from = Math.min(first.from, change.from);
+    first.to = Math.max(first.to, change.to);
+    first.within = [...new Set([...(first.within ?? []), ...(change.within ?? [])])];
+  }
+  return listed;
+}
+
+/**
+ * Every record on a node's marks, with the mark it is on, and every pending
+ * suggestion those records hold in `replaced`, at any depth, each with the
+ * record that holds it.
+ */
+type MarkRecordAt = { record: Partial<TrackedAttrs>; mark: Mark; within?: string };
+
+function markRecordsIn(node: PMNode): MarkRecordAt[] {
+  const found: MarkRecordAt[] = [];
+  const visit = (mark: Mark, records: readonly Partial<TrackedAttrs>[], within?: string) => {
+    for (const record of records) {
+      found.push({ record, mark, ...(within === undefined ? {} : { within }) });
+      for (const held of marksToRestore(record, mark.type.schema)) {
+        visit(held, pendingRecords(held), record.id);
+      }
+    }
+  };
+  getMarkTrackedData(node).forEach((records, mark) => visit(mark, records));
+  return found;
+}
+
 /**
  * Finds all tracked changes (text marks or node attributes) in the document.
  */
@@ -94,59 +150,62 @@ export function findChanges(state: EditorState): ChangeSet {
   // (e.g. trackedInsert + trackedDelete stacked from different authors).
   const currentMap = new Map<string, { change: PartialNodeTrackedChange; node: PMNode }>();
   // Parallel map for inline mark-based changes (trackedInsert / trackedDelete marks).
-  const markMap = new Map<string, { change: PartialChange<MarkChange>; node: PMNode }>();
+  // Keyed by id and by whether the piece stands on the text or is held, so a
+  // held piece never lends its range or mark to a change that shows.
+  const markMap = new Map<string, { change: PartialChange<MarkChange>; node: PMNode; holders: Set<string> }>();
+  const finished = ({ change, holders }: { change: PartialChange<MarkChange>; holders: Set<string> }) =>
+    holders.size > 0 ? { ...change, within: [...holders] } : change;
 
   state.doc.descendants((node, pos) => {
     // ── Mark grouping ─────────────────────────────────────────────────────────
     // Marks can't cross block boundaries in ProseMirror, so flush all in-flight
     // mark groups when we encounter a block node.
     if (node.isBlock && markMap.size > 0) {
-      markMap.forEach(c => changes.push(c.change));
+      markMap.forEach(c => changes.push(finished(c)));
       markMap.clear();
     }
 
-    const marksWithTrackChanges = getMarkTrackedData(node);
-    if (marksWithTrackChanges.size > 0) {
+    const records = markRecordsIn(node);
+    if (records.length > 0) {
       // Build the set of tracking IDs active in this node.
       const activeMarkIds = new Set<string>();
-      marksWithTrackChanges.forEach(trackAttrs =>
-        trackAttrs.forEach(c => { if (c.id) activeMarkIds.add(c.id); }),
-      );
+      records.forEach(({ record, within }) => { if (record.id) activeMarkIds.add(groupKey(record.id, within)); });
 
       // Flush stale mark groups (IDs that ended before this node).
-      for (const [id, c] of Array.from(markMap.entries())) {
-        if (!activeMarkIds.has(id)) {
-          changes.push(c.change);
-          markMap.delete(id);
+      for (const [key, c] of Array.from(markMap.entries())) {
+        if (!activeMarkIds.has(key)) {
+          changes.push(finished(c));
+          markMap.delete(key);
         }
       }
 
       // Extend existing groups or open new ones.
-      marksWithTrackChanges.forEach((trackAttrs, mark) => {
-        trackAttrs.forEach(c => {
-          const id = c.id;
-          if (!id) return;
-          if (markMap.has(id)) {
-            const existing = markMap.get(id)!;
-            existing.change.to = pos + node.nodeSize;
-            existing.node = node;
-            existing.change.text += node.text ?? "";
-          } else {
-            markMap.set(id, {
-              change: {
-                id,
-                type: "mark-change",
-                from: pos,
-                to: pos + node.nodeSize,
-                dataTracked: { ...c },
-                nodeType: node.type,
-                node,
-                mark,
-                text: node.text ?? "",
-              },
-              node,
-            });
-          }
+      records.forEach(({ record: c, mark, within }) => {
+        const id = c.id;
+        if (!id) return;
+        const key = groupKey(id, within);
+        const existing = markMap.get(key);
+        if (existing) {
+          existing.change.to = pos + node.nodeSize;
+          existing.node = node;
+          existing.change.text += node.text ?? "";
+          if (within !== undefined) existing.holders.add(within);
+          return;
+        }
+        markMap.set(key, {
+          change: {
+            id,
+            type: "mark-change",
+            from: pos,
+            to: pos + node.nodeSize,
+            dataTracked: { ...c },
+            nodeType: node.type,
+            node,
+            mark,
+            text: node.text ?? "",
+          },
+          node,
+          holders: new Set(within === undefined ? [] : [within]),
         });
       });
     }
@@ -202,14 +261,16 @@ export function findChanges(state: EditorState): ChangeSet {
 
   // Flush any remaining open groups.
   currentMap.forEach(c => changes.push(c.change));
-  markMap.forEach(c => changes.push(c.change));
+  markMap.forEach(c => changes.push(finished(c)));
 
   // ── Conflict detection (computed, no mark mutations) ───────────────────────
   // Two pending changes conflict when they overlap in document range AND belong
   // to different authors. This is the authoritative source of isConflict — we
   // set it on the dataTracked copy inside the ChangeSet so the renderer and
   // popover pick it up without any mark fragmentation.
-  const pending = changes.filter(c => c.dataTracked.status === CHANGE_STATUS.pending);
+  const listed = withoutHeldCopies(changes);
+  // A held suggestion is not on the text, so it conflicts with nothing there.
+  const pending = listed.filter(c => c.dataTracked.status === CHANGE_STATUS.pending && !isHeldChange(c));
   for (let i = 0; i < pending.length; i++) {
     for (let j = i + 1; j < pending.length; j++) {
       const a = pending[i]!;
@@ -231,5 +292,5 @@ export function findChanges(state: EditorState): ChangeSet {
     }
   }
 
-  return new ChangeSet(changes);
+  return new ChangeSet(listed);
 }

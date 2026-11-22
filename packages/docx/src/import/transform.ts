@@ -19,7 +19,7 @@
  *
  * Every block, inline and mark this stage meets is recorded in the report as
  * kept or dropped, attributed to the extension whose handler took it — see
- * `../report`. Fallback output is recorded with a `null` owner.
+ * `../report`. Drops by the converter's own fallbacks carry a `null` owner.
  */
 
 import type { Node as PmNode, Mark as PmMark } from "@scrivr/core/pm";
@@ -35,6 +35,7 @@ import type {
   DocxMark,
 } from "@scrivr/core";
 import {
+  NOT_MINE,
   NO_HANDLER,
   entryOf,
   insideDropped,
@@ -118,7 +119,7 @@ function lostUnlessProduced(
 /**
  * Content the converter itself drops: one warning for the diagnostics and one
  * entry for the report, so neither channel can be forgotten at a drop site.
- * A `null` warning records the drop without one, for kinds whose warnings are
+ * Without a warning it records the drop alone, for kinds whose warnings are
  * silenced but which the inventory still counts.
  */
 function dropUnhandled(
@@ -126,7 +127,7 @@ function dropUnhandled(
   recorder: DocxReportRecorder,
   kind: string,
   reason: string,
-  warning: Omit<DocxDiagnostic, "level"> | null,
+  warning?: Omit<DocxDiagnostic, "level">,
 ): void {
   if (warning) ctx.diagnostics.warn(warning);
   recorder.unhandled(kind, reason);
@@ -157,7 +158,7 @@ function transformBlock(
           );
           if (handled) return handled;
         } else {
-          dropUnhandled(ctx, recorder, "sdt", NO_HANDLER, null);
+          dropUnhandled(ctx, recorder, "sdt", NO_HANDLER);
         }
         // Degrade gracefully by returning the unwrapped children.
         return contentNodes;
@@ -178,7 +179,7 @@ function transformBlock(
       lostUnlessProduced(block.type, owner),
     );
   }
-  return fallbackBlock(block, ctx, recorder);
+  return fallbackBlock(block, ctx, handlers, recorder);
 }
 
 function transformParagraph(
@@ -196,20 +197,18 @@ function transformParagraph(
     // The paragraph's style is what its runs inherit. Resolved here rather
     // than in the parser, because a style chain is a document-wide question
     // and the parser reads one element at a time.
-    const content = transformInlines(
-      block.content,
-      ctx,
-      handlers,
-      recorder,
-      ctx.styles.runMarks(styleId),
-    );
+    const styleMarks = ctx.styles.runMarks(styleId);
+    const content = transformInlines(block.content, ctx, handlers, recorder, styleMarks);
+    settleUnlanded(recorder);
     if (!dispatch) return fallbackParagraph(block, content, ctx, recorder);
-    return recorder.handle(
+    const result = recorder.handle(
       dispatch.owner,
       "paragraph",
       () => dispatch.handler(block, content, ctx),
       producedNodes,
     );
+    chargeLeftOut(content, result, styleMarks, dispatch.owner, recorder);
+    return result;
   }, lostUnlessProduced("paragraph", dispatch?.owner ?? null));
 }
 
@@ -252,15 +251,19 @@ function transformInlines(
   for (const item of inlines) {
     if (item.type === "text") {
       if (item.text.length === 0) continue;
-      const marks = transformMarks(layer(inherited, item.marks), ctx, handlers, recorder);
-      out.push(ctx.schema.text(item.text, marks.length > 0 ? marks : undefined));
+      const { marks, sources } = transformMarks(layer(inherited, item.marks), ctx, handlers, recorder);
+      const text = ctx.schema.text(item.text, marks.length > 0 ? marks : undefined);
+      builtInlines.set(text, { sources });
+      out.push(text);
       recorder.carried("text");
     } else if (item.type === "hardBreak") {
       const hb = ctx.schema.nodes["hardBreak"];
       if (hb) {
         // Marked like its run, so a break inside a field stays inside it.
-        const marks = transformMarks(layer(inherited, item.marks), ctx, handlers, recorder);
-        out.push(hb.create(null, null, marks));
+        const { marks, sources } = transformMarks(layer(inherited, item.marks), ctx, handlers, recorder);
+        const hardBreak = hb.create(null, null, marks);
+        builtInlines.set(hardBreak, { sources });
+        out.push(hardBreak);
         recorder.carried("hardBreak");
       } else {
         dropUnhandled(ctx, recorder, "hardBreak", noSchemaNode("hardBreak"), {
@@ -293,22 +296,25 @@ function transformControl(
 ): PmNode[] {
   const handler = entryOf(handlers.inlines, "sdt");
   if (handler) {
-    const marks = transformMarks(layer(inherited, item.marks), ctx, handlers, recorder);
-    // A `null` is "not my tag", not a loss: the content below still lands.
+    const { marks, sources } = transformMarks(layer(inherited, item.marks), ctx, handlers, recorder);
+    // A `null` is "not my tag": the content below still lands.
     const claimed = recorder.handle(
       ownerOf(handlers.owners.inlines, "sdt"),
       "sdt",
       () => handler(item, marks, ctx),
       built,
-      null,
+      NOT_MINE,
     );
-    if (claimed) return [claimed];
+    if (claimed) {
+      builtInlines.set(claimed, { sources, atom: "sdt" });
+      return [claimed];
+    }
   }
 
-  // Each run under the mark records whether the control crossed with it, so
-  // the control itself is recorded here only when no mark can carry it.
+  // The control's mark is counted once, on the first run under it, so the
+  // control itself is recorded here only when no mark can carry it.
   if (!entryOf(handlers.marks, "sdt")) {
-    dropUnhandled(ctx, recorder, "sdt", NO_HANDLER, null);
+    dropUnhandled(ctx, recorder, "sdt", NO_HANDLER);
     // A prompt nobody owns is Word's, not the document's text.
     if (item.placeholder) return [];
     return transformInlines(item.content, ctx, handlers, recorder, layer(inherited, item.marks));
@@ -316,7 +322,7 @@ function transformControl(
   const control: DocxMark[] = [
     { kind: "sdt", attrs: { tag: item.tag, placeholder: item.placeholder } },
   ];
-  if (item.placeholder && transformMarks(control, ctx, handlers, recorder).length === 0) return [];
+  if (item.placeholder && transformMarks(control, ctx, handlers, recorder).marks.length === 0) return [];
   return transformInlines(
     item.content,
     ctx,
@@ -338,6 +344,10 @@ function transformAtom(
   recorder: DocxReportRecorder,
 ): PmNode | null {
   const marks = layer(inherited, item.marks);
+  // A link over the atom is counted where it lands, not here: the atom only
+  // records its outcome when it lands, and otherwise leaves it to the runs.
+  const wrappers = marks.filter((mark) => WRAPPER_KINDS.has(mark.kind) && !mark.off);
+  const formatting = marks.filter((mark) => !WRAPPER_KINDS.has(mark.kind));
   const handler = entryOf(handlers.inlines, item.type);
   if (!handler) {
     dropUnhandled(
@@ -357,21 +367,106 @@ function transformAtom(
           },
     );
     // Its formatting goes with it. Not dispatched: nothing would carry the
-    // marks, and a mark nobody claims would add an `unsupported-mark` that
-    // fails an import under `unsupported: "throw"` for a drop that is not.
-    for (const mark of marks) {
+    // marks, and a mark nobody claims would add an `unsupported-mark`, which
+    // fails an import under `unsupported: "throw"`, though this drop is not fatal.
+    for (const mark of formatting) {
       if (!mark.off) recorder.unhandled(mark.kind, insideDropped(item.type));
     }
+    wrappers.forEach((mark) => unlandedOf(recorder).push({ mark, atom: item.type }));
     return null;
   }
   const owner = ownerOf(handlers.owners.inlines, item.type);
-  return recorder.subtree(
+  let sources: MarkSource[] = [];
+  const node = recorder.subtree(
     () => {
-      const pmMarks = transformMarks(marks, ctx, handlers, recorder);
+      const formattingMarks = transformMarks(formatting, ctx, handlers, recorder);
+      const pmMarks = formattingMarks.marks;
+      sources = formattingMarks.sources;
+      for (const mark of wrappers) {
+        const wrapper = buildWrapper(mark, ctx, handlers, recorder).mark;
+        if (wrapper) {
+          pmMarks.push(wrapper);
+          sources.push({ docx: mark, pm: wrapper });
+        }
+      }
       return recorder.handle(owner, item.type, () => handler(item, pmMarks, ctx), built);
     },
-    (node) => (node ? null : { kind: item.type, owner }),
+    (atom) => (atom ? null : { kind: item.type, owner }),
   );
+  if (node) builtInlines.set(node, { sources, atom: item.type });
+  for (const mark of wrappers) {
+    if (!node) unlandedOf(recorder).push({ mark, atom: item.type });
+    else if (!countedWrappers.has(mark)) {
+      countedWrappers.add(mark);
+      const { mark: wrapper, outcomeRecorded } = builtWrappers.get(mark) ?? { mark: null, outcomeRecorded: false };
+      if (!entryOf(handlers.marks, mark.kind)) dropUnhandled(ctx, recorder, mark.kind, NO_HANDLER);
+      else if (wrapper || !outcomeRecorded) recorder.handle(ownerOf(handlers.owners.marks, mark.kind), mark.kind, () => wrapper, built);
+    }
+  }
+  return node;
+}
+
+/** What a wrapper's handler built for it, and whether its outcome is already in the report. */
+interface BuiltWrapper {
+  mark: PmMark | null;
+  outcomeRecorded: boolean;
+}
+const builtWrappers = new WeakMap<DocxMark, BuiltWrapper>();
+
+/**
+ * A wrapper's handler runs once per wrapper, however many runs carry it, so
+ * what it reports — a link it cannot resolve — is reported once.
+ */
+function buildWrapper(
+  mark: DocxMark,
+  ctx: DocxImportContext,
+  handlers: ResolvedImportHandlers,
+  recorder: DocxReportRecorder,
+): BuiltWrapper {
+  const cached = builtWrappers.get(mark);
+  if (cached) return cached;
+  const handler = entryOf(handlers.marks, mark.kind);
+  const droppedBefore = recorder.count(mark.kind).dropped;
+  const built = handler ? recorder.fileUnder(ownerOf(handlers.owners.marks, mark.kind), () => handler(mark, ctx)) : null;
+  const result = { mark: built, outcomeRecorded: recorder.count(mark.kind).dropped > droppedBefore };
+  builtWrappers.set(mark, result);
+  return result;
+}
+
+/**
+ * Links lost with every atom they covered, waiting for the end of their
+ * paragraph: one that lands on a run there is counted kept, one that never
+ * does is counted dropped once.
+ */
+const unlandedByImport = new WeakMap<DocxReportRecorder, Array<{ mark: DocxMark; atom: string }>>();
+function unlandedOf(recorder: DocxReportRecorder): Array<{ mark: DocxMark; atom: string }> {
+  let list = unlandedByImport.get(recorder);
+  if (!list) unlandedByImport.set(recorder, (list = []));
+  return list;
+}
+
+function settleUnlanded(recorder: DocxReportRecorder): void {
+  for (const { mark, atom } of unlandedOf(recorder).splice(0)) {
+    if (countedWrappers.has(mark)) continue;
+    countedWrappers.add(mark);
+    // A wrapper whose handler already reported it dropped is not lost a second time.
+    if (builtWrappers.get(mark)?.outcomeRecorded) continue;
+    recorder.unhandled(mark.kind, insideDropped(atom));
+  }
+}
+
+/**
+ * Marks a wrapping element puts on each run it wraps — a hyperlink, a content
+ * control — are one mark object per wrapper. They count once where they land,
+ * as one link or one control, however many runs carry them.
+ */
+const WRAPPER_KINDS: ReadonlySet<string> = new Set(["hyperlink", "sdt"]);
+const countedWrappers = new WeakSet<DocxMark>();
+
+/** The marks built for a run, and the Word mark behind each. */
+interface BuiltMarks {
+  marks: PmMark[];
+  sources: MarkSource[];
 }
 
 function transformMarks(
@@ -379,13 +474,37 @@ function transformMarks(
   ctx: DocxImportContext,
   handlers: ResolvedImportHandlers,
   recorder: DocxReportRecorder,
-): PmMark[] {
+): BuiltMarks {
   const out: PmMark[] = [];
+  const sources: MarkSource[] = [];
+  const push = (docx: DocxMark, pm: PmMark) => {
+    out.push(pm);
+    sources.push({ docx, pm });
+  };
   for (const mark of marks) {
     // The run refused this formatting. It has already outranked whatever the
     // style offered; there is nothing left to draw.
     if (mark.off) continue;
     const handler = entryOf(handlers.marks, mark.kind);
+    if (WRAPPER_KINDS.has(mark.kind)) {
+      if (countedWrappers.has(mark)) {
+        const repeated = builtWrappers.get(mark)?.mark;
+        if (repeated) push(mark, repeated);
+        continue;
+      }
+      countedWrappers.add(mark);
+      const prebuilt = builtWrappers.get(mark);
+      if (prebuilt) {
+        // Built over an atom that was lost; this run is where it lands.
+        if (prebuilt.mark) {
+          recorder.handle(ownerOf(handlers.owners.marks, mark.kind), mark.kind, () => prebuilt.mark, built);
+          push(mark, prebuilt.mark);
+        } else if (!prebuilt.outcomeRecorded) {
+          recorder.handle(ownerOf(handlers.owners.marks, mark.kind), mark.kind, () => null, built);
+        }
+        continue;
+      }
+    }
     if (!handler) {
       // A property dropped on purpose raises no warning. It is still counted:
       // the report is the inventory, and a property nobody reads is still a
@@ -396,7 +515,7 @@ function transformMarks(
         mark.kind,
         NO_HANDLER,
         isIgnored("w:rPr", `w:${mark.kind}`)
-          ? null
+          ? undefined
           : {
               code: "unsupported-mark",
               message: `No import handler for OOXML run-property "${mark.kind}"`,
@@ -414,9 +533,102 @@ function transformMarks(
       () => handler(mark, ctx),
       built,
     );
-    if (result) out.push(result);
+    // Later runs under the same wrapper reuse this, without asking the handler again.
+    if (WRAPPER_KINDS.has(mark.kind)) builtWrappers.set(mark, { mark: result, outcomeRecorded: true });
+    if (result) push(mark, result);
   }
-  return out;
+  return { marks: out, sources };
+}
+
+/** The Word mark that built a piece of formatting, so a handler that leaves it out can be charged for it. */
+interface MarkSource {
+  docx: DocxMark;
+  pm: PmMark;
+}
+/**
+ * Each inline node the converter built: the Word marks behind its formatting,
+ * and, for an object an extension built (an image, a field, a content
+ * control), the Word kind it was counted as.
+ */
+const builtInlines = new WeakMap<PmNode, { sources: MarkSource[]; atom?: string }>();
+
+/**
+ * A paragraph handler hands back a node built from `content`. Formatting and
+ * inline objects in `content` that the node does not carry — a code block
+ * keeping only text — were counted kept as they were built, so they move to
+ * dropped under the handler. Formatting is compared by how much text carries
+ * it, which joining or copying text nodes does not change; the paragraph
+ * style's own formatting is what the node stands for, so it is never charged.
+ */
+function chargeLeftOut(
+  content: readonly PmNode[],
+  result: PmNode | PmNode[] | null,
+  styleMarks: readonly DocxMark[],
+  owner: HandlerOwner,
+  recorder: DocxReportRecorder,
+): void {
+  if (!result || !producedNodes(result)) return;
+  // An object is counted by the Word kind it was built from — only where its
+  // node type is one no other inline here has, since a field shown as text is
+  // indistinguishable from the text around it.
+  const atomKinds = new Map<string, string>();
+  const sharedTypes = new Set<string>();
+  for (const node of content) {
+    const atom = builtInlines.get(node)?.atom;
+    if (atom) atomKinds.set(node.type.name, atom);
+    else sharedTypes.add(node.type.name);
+  }
+  for (const type of sharedTypes) atomKinds.delete(type);
+  const weight = (node: PmNode) => (node.isText ? (node.text ?? "").length : 1);
+  const tally = (nodes: readonly PmNode[]) => {
+    const marks = new Map<string, number>();
+    const atoms = new Map<string, number>();
+    const visit = (node: PmNode) => {
+      node.marks.forEach((mark) => marks.set(mark.type.name, (marks.get(mark.type.name) ?? 0) + weight(node)));
+      const atom = atomKinds.get(node.type.name);
+      if (atom) atoms.set(atom, (atoms.get(atom) ?? 0) + 1);
+    };
+    for (const node of nodes) {
+      visit(node);
+      node.descendants((child) => void visit(child));
+    }
+    return { marks, atoms };
+  };
+  const given = tally(content);
+  const kept = tally(Array.isArray(result) ? result : [result]);
+  const fromStyle = new Set(styleMarks);
+  const charged = new Set<DocxMark>();
+  for (const [type, amount] of given.marks) {
+    let missing = amount - (kept.marks.get(type) ?? 0);
+    for (const node of content) {
+      for (const { docx, pm } of builtInlines.get(node)?.sources ?? []) {
+        if (missing <= 0 || pm.type.name !== type) continue;
+        // The style's own formatting accounts for its share of what is missing, uncharged.
+        missing -= weight(node);
+        if (charged.has(docx) || fromStyle.has(docx)) continue;
+        charged.add(docx);
+        recorder.leftOut(docx.kind, owner);
+      }
+    }
+  }
+  for (const [type, count] of given.atoms) {
+    for (let i = count - (kept.atoms.get(type) ?? 0); i > 0; i--) recorder.leftOut(type, owner);
+  }
+  // A line break is kept as a break, or as a newline in a node that holds plain text.
+  const breaks = (nodes: readonly PmNode[]) => {
+    let total = 0;
+    const visit = (node: PmNode) => {
+      if (node.type.name === "hardBreak") total += 1;
+      else if (node.isText) total += (node.text ?? "").split("\n").length - 1;
+    };
+    for (const node of nodes) {
+      visit(node);
+      node.descendants((child) => void visit(child));
+    }
+    return total;
+  };
+  const resultNodes = Array.isArray(result) ? result : [result];
+  for (let i = breaks(content) - breaks(resultNodes); i > 0; i--) recorder.leftOut("hardBreak", owner);
 }
 
 // ── Universal fallbacks ─────────────────────────────────────────────────────
@@ -451,6 +663,7 @@ function fallbackParagraph(
 function fallbackBlock(
   block: DocxBlock,
   ctx: DocxImportContext,
+  handlers: ResolvedImportHandlers,
   recorder: DocxReportRecorder,
 ): PmNode | null {
   const hasFallback = block.type === "horizontalRule" || block.type === "pageBreak";
@@ -466,5 +679,62 @@ function fallbackBlock(
     code: "unsupported-block",
     message: `No import handler (and no fallback) for block kind "${block.type}"`,
   });
+  countLost(innerBlocks(block), insideDropped(block.type), ctx, recorder);
   return null;
+}
+
+/**
+ * What a lost block held, counted as dropped with it. Only counted: a handler
+ * run on content that is then thrown away could still leave something behind
+ * — a field's answer, a resolved image — for content that is not in the
+ * document. It counts what the walk would have: a paragraph's runs under its
+ * style's formatting, no empty text, no content control's prompt.
+ */
+function countLost(
+  blocks: readonly DocxBlock[],
+  reason: string,
+  ctx: DocxImportContext,
+  recorder: DocxReportRecorder,
+): void {
+  const countMarks = (marks: readonly DocxMark[]) => {
+    for (const mark of marks) {
+      if (mark.off || countedWrappers.has(mark)) continue;
+      if (WRAPPER_KINDS.has(mark.kind)) countedWrappers.add(mark);
+      recorder.unhandled(mark.kind, reason);
+    }
+  };
+  const countInlines = (inlines: readonly DocxInline[], inherited: readonly DocxMark[]): void => {
+    for (const inline of inlines) {
+      if (inline.type === "text" && inline.text.length === 0) continue;
+      recorder.unhandled(inline.type, reason);
+      if (inline.type === "sdt") {
+        if (!inline.placeholder) countInlines(inline.content, layer(inherited, inline.marks));
+        continue;
+      }
+      countMarks(layer(inherited, inline.marks));
+    }
+  };
+  for (const block of blocks) {
+    if (block.type === "paragraph") {
+      recorder.unhandled("paragraph", reason);
+      countInlines(block.content, ctx.styles.runMarks(block.attrs.styleId));
+    } else {
+      recorder.unhandled(block.type, reason);
+      countLost(innerBlocks(block), reason, ctx, recorder);
+    }
+  }
+}
+
+/** The blocks a container holds: a table's cells', a list's items', a content control's. */
+function innerBlocks(block: DocxBlock): DocxBlock[] {
+  switch (block.type) {
+    case "table":
+      return block.rows.flatMap((row) => row.cells.flatMap((cell) => cell.content));
+    case "list":
+      return block.items.flatMap((item) => item.content);
+    case "sdt":
+      return block.content;
+    default:
+      return [];
+  }
 }

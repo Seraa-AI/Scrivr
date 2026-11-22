@@ -566,6 +566,7 @@ describe("FieldCompletion — signing last", () => {
     owed: SignerFieldDescriptor[],
     onFieldRequest: (field: SignerFieldDescriptor) => Promise<FieldValue | null>,
     completable = [...owed, signHere].map((f) => f.id),
+    paint?: (field: SigningFieldDrawing) => void,
   ) => {
     const blocked: Array<{ signature: string; missing: string[] }> = [];
     const node = (f: SignerFieldDescriptor) => ({ ...fieldNode(f), attrs: { ...fieldNode(f).attrs, options: f.options } });
@@ -578,6 +579,7 @@ describe("FieldCompletion — signing last", () => {
           completable,
           onFieldRequest,
           onSignatureBlocked: (signature, missing) => blocked.push({ signature: signature.id, missing: missing.map((f) => f.id) }),
+          ...(paint ? { paint: (_ctx: CanvasRenderingContext2D, field: SigningFieldDrawing) => (paint(field), true) } : {}),
         }),
       ],
       content: { type: "doc", content: [{ type: "paragraph", content: [...owed, signHere].map(node) }] },
@@ -587,26 +589,107 @@ describe("FieldCompletion — signing last", () => {
     return { e: editor, blocked };
   };
 
-  it("holds a signature back while the viewer owes a required field, and moves focus to it to answer", async () => {
+  it("holds a signature back while the viewer owes a required field, and opens that field instead", async () => {
     const request = vi.fn(async (field: SignerFieldDescriptor): Promise<FieldValue | null> =>
       field.id === terms.id ? { kind: "choice", id: "net-30" } : signature,
     );
     const { e, blocked } = signingAfter([terms], request);
 
+    // Pressing the signature takes the signer to what they owe: its dialog, scrolled into view.
     expect(requestField(e, signHere.id)).toBe(false);
-    expect(request).not.toHaveBeenCalled();
+    expect(request.mock.calls.map(([field]) => field.id)).toEqual([terms.id]);
     expect(blocked).toEqual([{ signature: signHere.id, missing: [terms.id] }]);
     expect(e.scrolledTo.at(-1)).toEqual({ from: 1, to: 2 });
-
-    // Focus is on the owed field: Tab goes on from it to the signature.
-    expect(moveFieldFocus(e, 1)).toBe(signHere.id);
-    requestField(e, terms.id);
     await flush();
+
+    // Answered, the signature opens.
     expect(requestField(e, signHere.id)).toBe(true);
     await flush();
-
     expect(request.mock.calls.map(([field]) => field.id)).toEqual([terms.id, signHere.id]);
     expect(fieldValues(e.getState())[signHere.id]).toEqual(signature);
+  });
+
+  it("shows a held-back signature as waiting, with how many fields come first", async () => {
+    const drawn: SigningFieldDrawing[] = [];
+    const request = vi.fn(async (): Promise<FieldValue | null> => ({ kind: "choice", id: "net-30" }));
+    const { e } = signingAfter([terms, agree], request, undefined, (field) => drawn.push(field));
+    // The three fields sit side by side at positions 1, 2 and 3 of the first page.
+    const map = new CharacterMap();
+    for (const pos of [1, 2, 3]) map.registerObjectRect({ docPos: pos, x: pos * 200, y: 100, width: 180, height: 44, page: 1, baseline: 144 });
+    const waiting = () => {
+      drawn.length = 0;
+      e.painters.at(-1)?.(recordingContext([]), 1, defaultPageConfig, map, e.getResolvedTheme());
+      return Object.fromEntries(drawn.map((f) => [f.kind, f.fieldsBeforeSigning]));
+    };
+
+    expect(waiting()).toEqual({ dropdown: 0, checkbox: 0, signature: 2 });
+    requestField(e, terms.id);
+    await flush();
+    expect(waiting()["signature"]).toBe(1);
+  });
+
+  it("shows a signature as waiting whenever pressing it would wait — signed already, with a required field since blanked", async () => {
+    const drawn: SigningFieldDrawing[] = [];
+    const request = vi.fn(async (field: SignerFieldDescriptor): Promise<FieldValue | null> =>
+      field.id === terms.id ? { kind: "choice", id: "net-30" } : signature,
+    );
+    const { e } = signingAfter([terms], request, undefined, (field) => drawn.push(field));
+    const map = new CharacterMap();
+    for (const pos of [1, 2]) map.registerObjectRect({ docPos: pos, x: pos * 200, y: 100, width: 180, height: 44, page: 1, baseline: 144 });
+    const waiting = () => {
+      drawn.length = 0;
+      e.painters.at(-1)?.(recordingContext([]), 1, defaultPageConfig, map, e.getResolvedTheme());
+      return drawn.find((f) => f.kind === "signature")?.fieldsBeforeSigning;
+    };
+
+    requestField(e, terms.id);
+    await flush();
+    requestField(e, signHere.id);
+    await flush();
+    expect(waiting()).toBe(0);
+
+    // The choice is withdrawn: the signature stands, but signing again would wait — and says so.
+    setFieldValue(e, terms.id, { kind: "choice", id: "withdrawn" });
+    expect(requestField(e, signHere.id)).toBe(false);
+    expect(waiting()).toBe(1);
+  });
+
+  it("words the waiting tag in the host's language, asked only for a signature that waits", () => {
+    const words: string[] = [];
+    const asked: number[] = [];
+    const drawn: SigningFieldDrawing[] = [];
+    editor = new LaidOutViewer({
+      extensions: [
+        StarterKit,
+        Field,
+        FieldCompletion.configure({
+          fields: [terms, signHere],
+          completable: [terms.id, signHere.id],
+          onFieldRequest: async () => null,
+          waitingLabel: (count) => {
+            asked.push(count);
+            return `Après ${count} champ${count === 1 ? "" : "s"}`;
+          },
+          paint: (_ctx, field) => {
+            drawn.push(field);
+            return false;
+          },
+        }),
+      ],
+      content: { type: "doc", content: [{ type: "paragraph", content: [terms, signHere].map((f) => ({ ...fieldNode(f), attrs: { ...fieldNode(f).attrs, options: f.options } })) }] },
+      sealed: true,
+    });
+    editor.mountView();
+    const map = new CharacterMap();
+    for (const pos of [1, 2]) map.registerObjectRect({ docPos: pos, x: pos * 200, y: 100, width: 180, height: 44, page: 1, baseline: 144 });
+    editor.painters.at(-1)?.(recordingContext(words), 1, defaultPageConfig, map, editor.getResolvedTheme());
+
+    expect(words.some((w) => w.includes("Après 1 champ"))).toBe(true);
+    expect(asked).toEqual([1]);
+    expect(drawn.map((f) => [f.kind, f.fieldsBeforeSigning, f.waitingLabel])).toEqual([
+      [terms.kind, 0, ""],
+      [signHere.kind, 1, "Après 1 champ"],
+    ]);
   });
 
   it("never ticks a required box for the signer on the way to signing", () => {

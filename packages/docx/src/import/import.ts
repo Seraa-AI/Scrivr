@@ -63,6 +63,8 @@ import type { ParserDiagnostics } from "./parser";
 import {
   assignOwned,
   entryOf,
+  NO_HANDLER,
+  PART_UNREADABLE,
   ownedBundles,
   ownerOf,
   reportRecorderOf,
@@ -158,7 +160,9 @@ export async function importDocx(
     const numbering = readNumberingMap(pkg.readText("word/numbering.xml"), tracker);
     // Before the body is transformed: a run's formatting is its style's,
     // layered under whatever the run says directly.
-    ctx.styles = readStyleSheet(pkg.readText("word/styles.xml"), tracker);
+    const styleSheet = readStyleSheet(pkg.readText("word/styles.xml"), tracker);
+    ctx.styles = styleSheet;
+    const listSources = { numbering, styles: styleSheet, diagnostics: parserSink };
 
     // Header/footer support: expose the section references + a part walker so
     // a contribution (HeaderFooter) can reconstruct each part's content
@@ -174,9 +178,11 @@ export async function importDocx(
 
     // One tree per part: a part two section slots share is parsed, and
     // tracked, once.
+    // A part cut short parses as nothing, never fails the import: a header
+    // the walk asks for is then reported unreadable.
     const partTrees = new Map<string, OoxmlElement | null>();
     const partTree = (path: string, xml: string): OoxmlElement | null => {
-      if (!partTrees.has(path)) partTrees.set(path, parsePart(xml, path, tracker));
+      if (!partTrees.has(path)) partTrees.set(path, parsePartOrNull(xml, path, tracker));
       return partTrees.get(path) ?? null;
     };
     if (tracker) {
@@ -184,53 +190,64 @@ export async function importDocx(
       // import never opens, so a part lost whole shows up as unread whether or
       // not an extension walks it.
       for (const rel of rels.list()) {
-        if ((rel.type !== "header" && rel.type !== "footer") || rel.targetMode === "External") continue;
-        const path = resolveOpcTarget("word/document.xml", rel.target);
+        const path = headerFooterPath(rel);
+        if (path === null) continue;
         const xml = pkg.readText(path);
         if (xml !== undefined) partTree(path, xml);
       }
+      // Opened only to list what is in them, so one cut short is a warning.
       for (const path of UNOPENED_CONTENT_PARTS) {
         const xml = pkg.readText(path);
-        if (xml !== undefined) parsePart(xml, path, tracker);
+        if (xml !== undefined && parsePartOrNull(xml, path, tracker) === null) {
+          ctx.diagnostics.warn({ code: "docx-part-unreadable", message: `${path} is not readable XML — what it holds is not listed as unread` });
+        }
       }
     }
 
+    // A header or footer is Word's `w:hdr` or `w:ftr` part. One a walk cannot
+    // read is the walking extension's loss; one nothing walks is nobody's.
+    const partKind = (relId: string): "w:hdr" | "w:ftr" => {
+      const type = rels.get(relId)?.type;
+      if (type === "header") return "w:hdr";
+      if (type === "footer") return "w:ftr";
+      // No header or footer relationship: the slot that referenced it says which.
+      return sectionRefs.footers.some((ref) => ref.relId === relId) ? "w:ftr" : "w:hdr";
+    };
+    const walked = new Set<string>();
+    const skipped = new Set<string>();
+    const skipPart = (relId: string, code: string, message: string): null => {
+      // One part may serve several slots; it is one part lost.
+      if (skipped.has(relId)) return null;
+      skipped.add(relId);
+      ctx.diagnostics.warn({ code, message });
+      ctx.report.dropped(partKind(relId), PART_UNREADABLE);
+      return null;
+    };
     ctx.walkPart = (relId: string): PmNode | null => {
+      walked.add(relId);
       const rel = rels.get(relId);
       if (!rel) {
-        ctx.diagnostics.warn({
-          code: "header-footer-rel",
-          message: `Unresolved header/footer relationship ${relId} — skipped`,
-        });
-        return null;
+        return skipPart(relId, "header-footer-rel", `Unresolved header/footer relationship ${relId} — skipped`);
       }
-      if ((rel.type !== "header" && rel.type !== "footer") || rel.targetMode === "External") {
-        ctx.diagnostics.warn({
-          code: "header-footer-rel-type",
-          message: `Relationship ${relId} is not an internal header/footer part — skipped`,
-        });
-        return null;
+      const path = headerFooterPath(rel);
+      if (path === null) {
+        return skipPart(relId, "header-footer-rel-type", `Relationship ${relId} is not an internal header/footer part — skipped`);
       }
-      // The reference lives in document.xml.rels, so the target resolves
-      // relative to word/document.xml.
-      const path = resolveOpcTarget("word/document.xml", rel.target);
       const partXml = pkg.readText(path);
       if (partXml === undefined) {
-        ctx.diagnostics.warn({
-          code: "header-footer-part-missing",
-          message: `Missing header/footer part ${path} — skipped`,
-        });
-        return null;
+        return skipPart(relId, "header-footer-part-missing", `Missing header/footer part ${path} — skipped`);
       }
       const partRoot = partTree(path, partXml);
-      if (!partRoot) return null;
+      if (!partRoot) {
+        return skipPart(relId, "header-footer-part-unreadable", `Header/footer part ${path} is not XML — skipped`);
+      }
       const expectedRoot = rel.type === "header" ? "w:hdr" : "w:ftr";
       if (partRoot.name !== expectedRoot) {
-        ctx.diagnostics.warn({
-          code: "header-footer-part-type",
-          message: `Relationship ${relId} expected <${expectedRoot}> but found <${partRoot.name}> — skipped`,
-        });
-        return null;
+        return skipPart(
+          relId,
+          "header-footer-part-type",
+          `Relationship ${relId} expected <${expectedRoot}> but found <${partRoot.name}> — skipped`,
+        );
       }
 
       // Relationships are part-scoped: a relId inside header1.xml resolves
@@ -252,10 +269,7 @@ export async function importDocx(
         return entry?.type === "hyperlink" ? entry.target : undefined;
       };
       try {
-        const model = reconstructLists(
-          parseBlockContainer(partRoot, parserSink),
-          numbering,
-        );
+        const model = reconstructLists(parseBlockContainer(partRoot, parserSink), listSources);
         return transformToProseMirror(model, ctx, handlers);
       } finally {
         ctx.media.resolveImage = savedResolveImage;
@@ -264,16 +278,25 @@ export async function importDocx(
     };
 
     for (const { owner, hook } of lifecycleHooks.onBeforeImport) {
-      await recorder.attributeAsync(owner, () => hook(ctx));
+      await recorder.fileUnderAsync(owner, () => hook(ctx));
     }
 
     const rawModel = parseDocumentBody(root, parserSink);
-    const model = reconstructLists(rawModel, numbering);
+    const model = reconstructLists(rawModel, listSources);
     let doc = transformToProseMirror(model, ctx, handlers);
 
     for (const { owner, hook } of lifecycleHooks.onImportComplete) {
       const current = doc;
-      doc = await recorder.attributeAsync(owner, () => hook(current, ctx));
+      doc = await recorder.fileUnderAsync(owner, () => hook(current, ctx));
+    }
+    // One part may serve several slots; it is one part lost.
+    for (const relId of new Set([...sectionRefs.headers, ...sectionRefs.footers].map((ref) => ref.relId))) {
+      if (walked.has(relId)) continue;
+      ctx.diagnostics.warn({
+        code: "header-footer-unread",
+        message: `No extension reads header/footer ${relId} — its content was not imported`,
+      });
+      recorder.unhandled(partKind(relId), NO_HANDLER);
     }
 
     // After the hooks, so a contribution's own blocks are addressable too.
@@ -353,6 +376,25 @@ function isUnsupportedCode(code: string): boolean {
   return UNSUPPORTED_CODES.has(code);
 }
 
+/**
+ * Where a header or footer relationship's part is, or null when it names no
+ * internal header or footer. The reference lives in document.xml.rels, so the
+ * target resolves relative to word/document.xml.
+ */
+function headerFooterPath(rel: { type: string; target: string; targetMode?: string }): string | null {
+  if ((rel.type !== "header" && rel.type !== "footer") || rel.targetMode === "External") return null;
+  return resolveOpcTarget("word/document.xml", rel.target);
+}
+
+/** `parsePart`, with a part that fails to parse read as no part at all. */
+function parsePartOrNull(xml: string, path: string, tracker: ReadTracker | undefined): OoxmlElement | null {
+  try {
+    return parsePart(xml, path, tracker);
+  } catch {
+    return null;
+  }
+}
+
 /** Word content parts the import does not read, tracked so what they hold is reported. */
 const UNOPENED_CONTENT_PARTS = ["word/footnotes.xml", "word/endnotes.xml", "word/comments.xml"];
 
@@ -426,7 +468,7 @@ function layerOver<Args extends unknown[], Result>(
     const earlier = entryOf(registry, key);
     const earlierOwner = ownerOf(owners, key);
     registry[key] = earlier
-      ? (...args: Args) => later(...args) ?? recorder.asOwner(earlierOwner, () => earlier(...args))
+      ? (...args: Args) => later(...args) ?? recorder.answerAs(earlierOwner, () => earlier(...args))
       : later;
     owners[key] = owner;
   }

@@ -47,12 +47,20 @@ describe("review's write boundary", () => {
   });
 
   const invalidAttributes = () => {
+    // prosemirror-model validates on create, so the check is armed only once
+    // the invalid content exists — as content loaded from JSON or a collaborator would be.
+    let armed = false;
+    const validateWeight = (value: unknown) => {
+      if (armed && typeof value !== "number") throw new RangeError(`weight must be a number, got ${typeof value}`);
+    };
     const checked = new Schema({
       nodes: schema.spec.nodes,
-      marks: schema.spec.marks.update("bold", { attrs: { weight: { default: 1, validate: "number" } } }),
+      marks: schema.spec.marks.update("bold", { attrs: { weight: { default: 1, validate: validateWeight } } }),
     });
     const text = checked.text("x", [checked.marks.bold!.create({ weight: "invalid" })]);
-    return checked.node("doc", null, checked.node("paragraph", null, text));
+    const built = checked.node("doc", null, checked.node("paragraph", null, text));
+    armed = true;
+    return built;
   };
 
   it("checks mark writes despite their empty position maps", () => {
@@ -61,13 +69,13 @@ describe("review's write boundary", () => {
     // A concrete mark step still addresses this content even if no such mark
     // is present. Invalid touched content must not pass the boundary.
     tr.step(new RemoveMarkStep(1, 2, state.schema.marks.trackedInsert!.create()));
-    expect(() => checkReviewTransaction(tr)).toThrow();
+    expect(() => checkReviewTransaction(tr)).toThrow(/weight must be a number/);
   });
 
   it("checks attribute writes despite their empty position maps", () => {
     const state = EditorState.create({ doc: invalidAttributes() });
     const tr = state.tr.step(new AttrStep(0, "nodeId", "changed"));
-    expect(() => checkReviewTransaction(tr)).toThrow();
+    expect(() => checkReviewTransaction(tr)).toThrow(/weight must be a number/);
   });
 
   it("maps each write through subsequent edits", () => {

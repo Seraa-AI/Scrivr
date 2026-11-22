@@ -190,17 +190,17 @@ export interface DocxDiagnostic {
  * `type`, a `DocxMark` `kind` such as `"b"`, or, for a top-level element the
  * parser cannot read, its tag (`"w:customXml"`).
  *
- * A handler does not have to call this at all. For each item it hands to a
- * handler — a node, an inline or a mark — the converter records `kept` if the
- * handler returned content and `dropped` if it returned none, unless the
- * handler itself reported `kept` or `dropped` for that kind while it ran, in
- * which case the handler's account stands. When an item is lost, whatever was
- * counted kept inside it is moved to dropped with it — unless its handler
- * reported it kept, as one that writes it somewhere other than its result
- * does. Content with no handler is recorded as dropped with the reason
- * `"no handler"`. So `changed`, drops the converter cannot see, and returning
- * nothing for a value that means "no formatting" (report it `kept`) are what a
- * handler adds.
+ * The converter already records:
+ * - each item it hands a handler (a node, an inline, a mark): kept if the
+ *   handler returned content, dropped if not;
+ * - content with no handler, as dropped with the reason `"no handler"`;
+ * - the content inside a lost item, moved to dropped with it.
+ *
+ * A handler adds what the converter cannot see: a `changed` note, a drop
+ * inside content it did return, and `kept` for something it returns nothing
+ * for but did not lose (a value Word uses to mean "no formatting", or content
+ * it wrote somewhere else). Reporting `kept` or `dropped` for the kind it was
+ * handed replaces the converter's account of that item.
  */
 export interface DocxReporter {
   /**
@@ -210,11 +210,11 @@ export interface DocxReporter {
    */
   kept(kind: string, count?: number): void;
   /**
-   * One `kind` did not make it across, and why. For content inside the item
-   * being handled — an image a code block leaves out — one is also taken off
-   * what was counted kept, and nothing is recorded if none of that kind was
-   * kept there. The import names content as the converter counts it: Word's
-   * kinds (`b`, `image`, `field`), not the editor's.
+   * One `kind` did not make it across, and why. The import names content as
+   * the converter counts it: Word's kinds (`b`, `image`, `field`), not the
+   * editor's. Content a paragraph's handler is handed and leaves out of the
+   * node it returns — a code block keeping only text — the converter finds
+   * and reports itself.
    */
   dropped(kind: string, reason: string): void;
   /**
@@ -262,7 +262,9 @@ export interface DocxReport {
    * across the body, every header and footer the document references,
    * footnotes, endnotes, comments, styles, numbering and settings. A handler
    * can only report what it is handed, so this is where a property no code
-   * looks at shows up.
+   * looks at shows up. It is an inventory of the XML, so it also lists what
+   * `entries` already names as dropped — an element nothing parses, a header
+   * nothing reads — and `ignored` is what the import drops on purpose.
    */
   unread?: DocxUnreadElement[];
 }
@@ -333,13 +335,15 @@ export interface DocxContext {
      * A numbering for these levels. Without `instance`, equal configs share
      * one. With it, each instance (a list) gets its own `numId`, so separate
      * lists restart in Word, over one shared definition; its count starts at
-     * `start` (default 1), written as level 0's `startOverride`.
+     * `start` (default 1), written as the `startOverride` of `level` (default
+     * 0), the level its items sit at.
      */
     getOrCreate(config: {
       type: "bullet" | "ordered" | "task";
       levels: DocxNumberingLevel[];
       instance?: object;
       start?: number;
+      level?: number;
     }): { numId: number };
   };
 
@@ -629,8 +633,12 @@ export interface DocxParagraphAttrs {
   styleId?: string;
   /** From `<w:pPr><w:jc w:val="…"/>`. */
   align?: "left" | "center" | "right" | "justify";
-  /** From `<w:pPr><w:numPr>` — paragraph belongs to a list. */
-  numbering?: { numId: number; ilvl: number };
+  /**
+   * From `<w:pPr><w:numPr>` — paragraph belongs to a list. Either half may be
+   * absent, as in Word: the paragraph style supplies it. `numId` 0 is Word's
+   * "no numbering": the paragraph turns off what its style would number it as.
+   */
+  numbering?: { numId?: number; ilvl?: number };
   /** Word's `<w:pageBreakBefore/>` hint. */
   pageBreakBefore?: boolean;
 }
@@ -678,6 +686,10 @@ export type DocxBlock =
       items: DocxListItem[];
       /** The number an ordered list starts at, when not 1. */
       start?: number;
+      /** Word's nesting level for the list (`w:ilvl`), 0 at the top. */
+      level?: number;
+      /** Word's numbering format at that level (`w:numFmt`): `decimal`, `upperRoman`, `bullet`, … */
+      format?: string;
     }
   | { type: "table"; grid: number[]; rows: DocxTableRow[] }
   | { type: "sdt"; tag: string | null; content: DocxBlock[] };

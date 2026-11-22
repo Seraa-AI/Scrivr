@@ -11,8 +11,11 @@ import {
 } from "../../exports/docx";
 import { semanticImage, type SemanticNodeHandler } from "../../exports/semantic";
 import type { PdfNodeHandler } from "../../exports/pdf";
+import { HTML_BLOCK_TAGS, htmlShows } from "../../model/htmlElements";
 import type { Node as PmNode } from "prosemirror-model";
 import { floats } from "../../layout/AnchoredObjects";
+import { blockStyleAttrs } from "./blockStyleAttrs";
+import { INDENT_STEP } from "./Indent";
 
 /**
  * The single image a paragraph holds with nothing else but whitespace, or null.
@@ -42,16 +45,16 @@ export function alignToJc(align: unknown): string | null {
 }
 
 /**
- * Report the textblock attrs the Paragraph and Heading export handlers do not
- * write yet, so a file that loses them says so. Shared because both nodes
- * carry the same attrs and neither handler writes these.
+ * The textblock attrs neither the Paragraph nor the Heading export writes yet,
+ * reported so a file that loses them says so.
  */
 export function reportUnwrittenTextblockAttrs(node: PmNode, ctx: DocxContext): void {
   const kind = node.type.name;
-  if (typeof node.attrs["indent"] === "number" && node.attrs["indent"] > 0) {
+  if (typeof node.attrs["indent"] === "number" && node.attrs["indent"] !== 0) {
     ctx.report.changed(kind, "indent not written");
   }
-  if (typeof node.attrs["textIndent"] === "number" && node.attrs["textIndent"] > 0) {
+  // A negative first-line indent is a hanging one, just as unwritten.
+  if (typeof node.attrs["textIndent"] === "number" && node.attrs["textIndent"] !== 0) {
     ctx.report.changed(kind, "first-line indent not written");
   }
   if (typeof node.attrs["fontFamily"] === "string" && node.attrs["fontFamily"].length > 0) {
@@ -150,7 +153,7 @@ export const Paragraph = Extension.create({
   addNodes() {
     return {
       paragraph: {
-        group: "block",
+        group: "block listItemLead",
         content: "inline*",
         attrs: {
           align: { default: "left" },
@@ -161,31 +164,16 @@ export const Paragraph = Extension.create({
           dataTracked: { default: [] },
         },
         parseDOM: [
-          {
-            tag: "p",
-            getAttrs(dom) {
-              const el = dom as HTMLElement;
-              const rawFamily = el.style.fontFamily;
-              const fontFamily = rawFamily
-                ? (rawFamily.replace(/['"]/g, "").split(",")[0] ?? "").trim() ||
-                  null
-                : null;
-              const rawMarginLeft = parseFloat(el.style.marginLeft) || 0;
-              const rawTextIndent = parseFloat(el.style.textIndent) || 0;
-              return {
-                align: el.style.textAlign || "left",
-                indent: rawMarginLeft > 0 ? Math.round(rawMarginLeft / 24) : 0,
-                textIndent: rawTextIndent > 0 ? rawTextIndent : 0,
-                fontFamily: fontFamily,
-                nodeId: el.getAttribute("data-node-id") ?? null,
-              };
-            },
-          },
+          { tag: "p", getAttrs: blockStyleAttrs },
+          // A div of inline content is a paragraph; a div holding blocks is a
+          // container, and an empty one a spacer — both read through. Lowest
+          // priority, so every more specific `div` rule is tried first.
+          { tag: "div", priority: 0, getAttrs: (el) => isParagraphDiv(el) && blockStyleAttrs(el) },
         ],
         toDOM: (node) => {
           let style = `text-align:${node.attrs.align as string}`;
           if (node.attrs.indent)
-            style += `;margin-left:${(node.attrs.indent as number) * 24}px`;
+            style += `;margin-left:${(node.attrs.indent as number) * INDENT_STEP}px`;
           if (node.attrs.textIndent)
             style += `;text-indent:${node.attrs.textIndent as number}px`;
           if (node.attrs.fontFamily)
@@ -283,4 +271,11 @@ declare module "@scrivr/core" {
       fontFamily?: string | null;
     };
   }
+}
+
+const BLOCK_SELECTOR = [...HTML_BLOCK_TAGS].join(",");
+
+/** Inline content with something to show and no block anywhere inside. */
+function isParagraphDiv(el: HTMLElement): boolean {
+  return !el.querySelector(BLOCK_SELECTOR) && htmlShows(el);
 }

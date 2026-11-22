@@ -1,8 +1,9 @@
 import type { Mark } from "@scrivr/core/pm";
+import { stableStringify } from "@scrivr/core";
 
 import type { ChangeSet } from "./ChangeSet";
 import { isMoveShadow } from "./helpers";
-import type { TrackedChange } from "./types";
+import type { ReplacementView, TrackedChange } from "./types";
 
 /** What deciding a change does to the document, which settles what it can take with it. */
 export type ChangeEffect = "create" | "delete" | "content" | "placement" | "presentation";
@@ -121,7 +122,8 @@ const markValue = (mark: Mark) =>
 
 /**
  * Neighbouring pieces of one formatting change, which a word-by-word diff
- * stamps under separate ids: same author, same proposal, same value, touching.
+ * stamps under separate ids: same author, same proposal, same value, same
+ * replaced formatting, touching.
  */
 const sameFormattingRun = (a: TrackedChange, b: TrackedChange) =>
   a.type === "mark-change" && b.type === "mark-change" &&
@@ -129,6 +131,10 @@ const sameFormattingRun = (a: TrackedChange, b: TrackedChange) =>
   a.dataTracked.authorID === b.dataTracked.authorID &&
   a.dataTracked.operation === b.dataTracked.operation &&
   markValue(a.mark) === markValue(b.mark) &&
+  // A held piece is not on the text, so it is never a run with one that is.
+  JSON.stringify(a.within ?? []) === JSON.stringify(b.within ?? []) &&
+  // Each restores what it replaced, so pieces that replaced different marks are decided apart.
+  stableStringify(a.dataTracked.replaced ?? []) === stableStringify(b.dataTracked.replaced ?? []) &&
   (a.to === b.from || b.to === a.from);
 
 /** The two halves of one replacement: the words taken out and the words put in. */
@@ -137,6 +143,16 @@ const sameReplacement = (a: TrackedChange, b: TrackedChange) =>
   a.dataTracked.authorID === b.dataTracked.authorID &&
   new Set([a.dataTracked.operation, b.dataTracked.operation]).size === 2 &&
   [a, b].every((c) => c.dataTracked.operation === "insert" || c.dataTracked.operation === "delete");
+
+/**
+ * Pieces of one group with the same operation: one edit in either view — a
+ * word typed over a selection in several strokes, or a phrase written apart
+ * around content it kept.
+ */
+const samePhrase = (a: TrackedChange, b: TrackedChange) =>
+  !!a.dataTracked.groupId && a.dataTracked.groupId === b.dataTracked.groupId &&
+  a.dataTracked.authorID === b.dataTracked.authorID &&
+  a.dataTracked.operation === b.dataTracked.operation;
 
 /** The record pointing back at what a split was split from. */
 const splitReference = (reference: TrackedChange, split: TrackedChange) =>
@@ -147,14 +163,15 @@ const splitReference = (reference: TrackedChange, split: TrackedChange) =>
  * Two records of one act. Whichever a reviewer reaches, they are deciding the
  * act, so the relation holds in both directions.
  */
-const sameAct = (a: TrackedChange, b: TrackedChange) =>
+const sameAct = (a: TrackedChange, b: TrackedChange, view: ReplacementView) =>
   representsCreation(a, b) || representsCreation(b, a) ||
   representsDeletion(a, b) || representsDeletion(b, a) ||
   samePieces(a, b) ||
   pairedMove(a, b) ||
   sameMove(a, b) ||
   sameFormattingRun(a, b) ||
-  sameReplacement(a, b) ||
+  (view === "paired" && sameReplacement(a, b)) ||
+  samePhrase(a, b) ||
   splitReference(a, b) || splitReference(b, a);
 
 /** A record that is secondary within its act: others name the act, this one follows it. */
@@ -176,8 +193,11 @@ export interface ChangeAct {
   records: TrackedChange[];
 }
 
-/** Groups changes into acts. The one answer to "what does one decision cover?" */
-export function changeActs(changes: readonly TrackedChange[]): ChangeAct[] {
+/**
+ * Groups changes into acts. The one answer to "what does one decision cover?"
+ * In the `"split"` view a replacement's deletion and insertion are two acts.
+ */
+export function changeActs(changes: readonly TrackedChange[], view: ReplacementView = "paired"): ChangeAct[] {
   const remaining = new Set(changes);
   const acts: ChangeAct[] = [];
   for (const change of changes) {
@@ -185,13 +205,16 @@ export function changeActs(changes: readonly TrackedChange[]): ChangeAct[] {
     const records = [change];
     for (const record of records) {
       for (const other of remaining) {
-        if (!sameAct(record, other)) continue;
+        if (!sameAct(record, other, view)) continue;
         remaining.delete(other);
         records.push(other);
       }
     }
     const inOrder = changes.filter(c => records.includes(c));
-    acts.push({ primary: inOrder.find(c => !isPartOfAct(c)) ?? inOrder[0]!, records: inOrder });
+    // An act that shows on the text is offered where it shows, never by a piece held under another change.
+    const shown = inOrder.filter(c => c.type !== "mark-change" || c.within === undefined);
+    const candidates = shown.length > 0 ? shown : inOrder;
+    acts.push({ primary: candidates.find(c => !isPartOfAct(c)) ?? candidates[0]!, records: inOrder });
   }
   return acts;
 }
@@ -312,8 +335,15 @@ const placementDependents = (
  * linked record takes the decision of the change it belongs to. Naming a change
  * on either side authorizes deciding it, so it is never reported as a
  * dependent of another change in the same decision.
+ *
+ * It plans from the change set alone, so it cannot see which formatting
+ * suggestions a decision displaces; `planReview` and `planReviewIn` add them.
  */
-export function planChangeReview(changeSet: ChangeSet, decisions: ReviewDecisions): ReviewPlan {
+export function planChangeReview(
+  changeSet: ChangeSet,
+  decisions: ReviewDecisions,
+  view: ReplacementView = "paired",
+): ReviewPlan {
   const changes = changeSet.pending;
   const decisionOf = new Map<string, ReviewDecision>();
   const contradictory = new Set<string>();
@@ -346,7 +376,7 @@ export function planChangeReview(changeSet: ChangeSet, decisions: ReviewDecision
       for (const related of changes) {
         // Representation links, not overlaps: these are the same act recorded
         // in more than one place, so reviewing it covers all of them.
-        if (!sameAct(related, change)) continue;
+        if (!sameAct(related, change, view)) continue;
         if (!decisionOf.has(related.id)) expanded = true;
         decide(related.id, decision);
       }

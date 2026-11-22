@@ -52,6 +52,12 @@ export const NO_PARSER = "no parser";
 /** The reason recorded when a handler took content and gave nothing back. */
 export const HANDLER_RETURNED_NOTHING = "handler returned nothing";
 
+/** The reason for content a paragraph's handler did not keep of what it was handed. */
+export const LEFT_OUT = "left out by its paragraph's handler";
+
+/** The reason for a header or footer part the import could not read; the warning says why. */
+export const PART_UNREADABLE = "part could not be read";
+
 /** The reason recorded when a mark's wrapper handed its run back unwrapped. */
 export const WRAPPER_DECLINED = "wrapper left the run unwrapped";
 
@@ -64,6 +70,9 @@ export function insideDropped(parentKind: string): string {
 export function noSchemaNode(nodeName: string): string {
   return `the schema has no ${nodeName} node`;
 }
+
+/** For `handle`: an empty result means the item is not the handler's, which is no loss. */
+export const NOT_MINE: unique symbol = Symbol("not mine");
 
 /** The item whose content a subtree held, when that item was lost. */
 export interface LostItem {
@@ -79,30 +88,30 @@ export interface DocxReportRecorder {
    * reports is filed under `owner`. If it reported neither `kept` (of at least
    * one) nor `dropped` for `kind` itself, the outcome is recorded from its
    * result: kept when `produced(result)`, otherwise dropped with `ifNothing`.
-   * A `null` `ifNothing` records nothing: the handler declined, and the caller
-   * accounts for the item another way.
+   * `NOT_MINE` records nothing: the handler said the item is not its, and the
+   * caller accounts for it another way.
    */
   handle<T>(
     owner: HandlerOwner,
     kind: string,
     run: () => T,
     produced: (result: T) => boolean,
-    ifNothing?: string | null,
+    ifNothing?: string | typeof NOT_MINE,
   ): T;
   /**
    * Run code `owner` contributed that is not handed one item — a lifecycle
    * hook, or a mark handler whose mark another handler accounts for. Only
    * attributes; it records no outcome of its own.
    */
-  attribute<T>(owner: HandlerOwner, run: () => T): T;
+  fileUnder<T>(owner: HandlerOwner, run: () => T): T;
   /**
    * Run a handler that answers for the one `handle` is running, after it
    * declined: what `run` reports is filed under `owner`, and the item stays
    * the frame's to decide.
    */
-  asOwner<T>(owner: HandlerOwner, run: () => T): T;
-  /** `attribute` for a hook the converter awaits. The frame stays open until it settles. */
-  attributeAsync<T>(owner: HandlerOwner, run: () => T | Promise<T>): Promise<T>;
+  answerAs<T>(owner: HandlerOwner, run: () => T): T;
+  /** `fileUnder` for a hook the converter awaits. The frame stays open until it settles. */
+  fileUnderAsync<T>(owner: HandlerOwner, run: () => T | Promise<T>): Promise<T>;
   /**
    * Run the walk of one item's content together with the item's own handler.
    * When `lost(result)` names the item, everything counted kept inside is
@@ -114,6 +123,10 @@ export interface DocxReportRecorder {
   carried(kind: string): void;
   /** The converter's own account: content nothing handled. Its owner is `null`. */
   unhandled(kind: string, reason: string): void;
+  /** One `kind` counted kept that `owner`'s handler then left out: moved to dropped, as `LEFT_OUT`. */
+  leftOut(kind: string, owner: HandlerOwner): void;
+  /** How many of `kind` have been counted so far. */
+  count(kind: string): DocxReportCount;
   /** The report so far, as plain data the caller owns. */
   snapshot(): DocxReport;
 }
@@ -221,22 +234,6 @@ export function createReportRecorder(options: ReportRecorderOptions = {}): DocxR
       if (count > 0) markDecided(kind, true);
     },
     dropped(kind, reason) {
-      // Content of the item being handled was counted as it was built. A
-      // handler that leaves some of it out — a code block keeping only text —
-      // takes one kept back, so the report never claims what is not in the
-      // output; one already counted dropped where it was built is not dropped
-      // twice. A kind the converter never counts is the handler's own to report.
-      const frame = innermost();
-      const open = subtrees[subtrees.length - 1];
-      const isContentOfItem = frame !== undefined && frame.kind !== null && frame.kind !== kind;
-      if (isContentOfItem && open && counts.has(kind)) {
-        const keptInside = open.kept.get(kind) ?? 0;
-        if (keptInside === 0) return;
-        open.kept.set(kind, keptInside - 1);
-        countOf(kind).kept -= 1;
-        addEntry("dropped", kind, reason, ownerNow());
-        return;
-      }
       addEntry("dropped", kind, reason, ownerNow());
       markDecided(kind, false);
     },
@@ -252,7 +249,7 @@ export function createReportRecorder(options: ReportRecorderOptions = {}): DocxR
       const result = within(frame, run);
       if (!frame.decided) {
         if (produced(result)) addKept(kind, 1);
-        else if (ifNothing !== null) addEntry("dropped", kind, ifNothing, owner);
+        else if (ifNothing !== NOT_MINE) addEntry("dropped", kind, ifNothing, owner);
       } else if (frame.claimedKept) {
         // A handler can keep an item without returning it here — writing it
         // to another part, say — so its enclosing subtree must not move its
@@ -261,10 +258,10 @@ export function createReportRecorder(options: ReportRecorderOptions = {}): DocxR
       }
       return result;
     },
-    attribute(owner, run) {
+    fileUnder(owner, run) {
       return within({ owner, kind: null, decided: false, claimedKept: false }, run);
     },
-    asOwner(owner, run) {
+    answerAs(owner, run) {
       const frame = innermost();
       if (!frame) return run();
       const handedOver = frame.owner;
@@ -275,7 +272,7 @@ export function createReportRecorder(options: ReportRecorderOptions = {}): DocxR
         frame.owner = handedOver;
       }
     },
-    async attributeAsync(owner, run) {
+    async fileUnderAsync(owner, run) {
       // Hooks run one at a time, each awaited before the next, so the stack
       // stays balanced across the await.
       frames.push({ owner, kind: null, decided: false, claimedKept: false });
@@ -298,6 +295,8 @@ export function createReportRecorder(options: ReportRecorderOptions = {}): DocxR
       const item = lost(result);
       if (item && !level.claimedKept.has(item.kind)) {
         for (const [kind, count] of level.kept) {
+          // A kind whose content was all left out already has nothing to move.
+          if (count === 0) continue;
           countOf(kind).kept -= count;
           addEntry("dropped", kind, insideDropped(item.kind), item.owner, count);
         }
@@ -317,6 +316,18 @@ export function createReportRecorder(options: ReportRecorderOptions = {}): DocxR
     },
     unhandled(kind, reason) {
       addEntry("dropped", kind, reason, null);
+    },
+    leftOut(kind, owner) {
+      // Only content counted kept as it was built is left out; never below none.
+      const count = countOf(kind);
+      if (count.kept > 0) count.kept -= 1;
+      const open = subtrees[subtrees.length - 1];
+      const inside = open?.kept.get(kind) ?? 0;
+      if (open && inside > 0) open.kept.set(kind, inside - 1);
+      addEntry("dropped", kind, LEFT_OUT, owner);
+    },
+    count(kind) {
+      return { ...countOf(kind) };
     },
     snapshot() {
       // `fromEntries` defines own properties, so even a kind named

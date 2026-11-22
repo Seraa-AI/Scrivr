@@ -58,8 +58,8 @@ const contract = {
   ],
 };
 
-async function exported() {
-  const editor = new ServerEditor({ extensions, content: contract });
+async function exported(content: Record<string, unknown> = contract) {
+  const editor = new ServerEditor({ extensions, content });
   const bytes = await exportDocxBytes(editor);
   const document = strFromU8(unzipSync(bytes)["word/document.xml"]!);
   return { editor, bytes, document };
@@ -83,6 +83,13 @@ describe("fields in DOCX", () => {
     expect(document).toMatch(/<o:signatureline [^>]*issignatureline="t"/);
     expect(document).toMatch(/<o:signatureline [^>]*id="\{[0-9A-F-]{36}\}"/);
     expect(document).toMatch(/<o:signatureline [^>]*o:suggestedsigner2="client"/);
+  });
+
+  it("sizes a signature line with no size of its own at its kind's, as the page lays it out", async () => {
+    const unsized = { ...signer("signature", "client"), attrs: { ...signer("signature", "client").attrs, width: 0, height: Number.NaN } };
+    const { document } = await exported({ type: "doc", content: [{ type: "paragraph", content: [unsized] }] });
+
+    expect(document).toContain("width:135pt;height:33pt");
   });
 
   it("gives every content control its own w:id", async () => {
@@ -199,6 +206,30 @@ describe("a field filled in Word", () => {
     expect(fieldValues).toEqual({ who: { kind: "text", text: "Alice Example" } });
     expect(doc.textContent).not.toContain("Alice");
     expect(listSignerFields(doc).map((f) => f.id)).toEqual(["who"]);
+  });
+
+  it("answers nothing for a field the import lost with the table around it", async () => {
+    const field = { type: "field", attrs: { nodeId: "who", kind: "name", fill: "signer", role: "client", width: 160, height: 24 } };
+    const editor = new ServerEditor({
+      extensions: [StarterKit.configure({ table: true }), Field],
+      content: {
+        type: "doc",
+        content: [{
+          type: "table",
+          content: [{ type: "tableRow", content: [{ type: "tableCell", content: [{ type: "paragraph", content: [field] }] }] }],
+        }],
+      },
+    });
+    const files = unzipSync(await exportDocxBytes(editor));
+    const document = strFromU8(files["word/document.xml"]!)
+      .replace("<w:showingPlcHdr/>", "")
+      .replace(/(<w:sdtContent>.*?<w:t[^>]*>)[^<]*(<\/w:t>)/s, "$1Alice$2");
+    expect(document).toContain("<w:tbl>");
+    const bytes = zipSync({ ...files, "word/document.xml": strToU8(document) });
+
+    const { doc, fieldValues } = await importDocx(new ServerEditor({ extensions }), bytes);
+    expect(listSignerFields(doc)).toEqual([]);
+    expect(fieldValues).toEqual({});
   });
 
   it("keeps the choice a signer made in a dropdown, by its id", async () => {

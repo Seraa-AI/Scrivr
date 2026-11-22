@@ -54,8 +54,9 @@ const MAX_GRID_SPAN = 64;
 export interface ParserDiagnostics {
   warn(d: Omit<DocxDiagnostic, "level">): void;
   /**
-   * Record a Word element the parser has no reading for. Called for top-level
-   * body elements; what it skips inside a paragraph or run is not seen here.
+   * Record a Word element the parser has no reading for, or could not keep
+   * as written: a top-level body element, a page break inside a content
+   * control. What it skips inside a paragraph or run is not seen here.
    */
   dropped(element: string, reason: string): void;
 }
@@ -374,17 +375,28 @@ function parseParagraphProperties(el: OoxmlElement): DocxParagraphAttrs {
     // poison every downstream comparison.
     const ilvl = ilvlRaw !== undefined ? Number(ilvlRaw) : NaN;
     const numId = numIdRaw !== undefined ? Number(numIdRaw) : NaN;
-    // numId 0 is Word's "no numbering": a paragraph that turns a list off.
-    if (Number.isInteger(ilvl) && Number.isInteger(numId) && numId > 0) {
-      attrs.numbering = { numId, ilvl };
-    }
+    // Each half is kept on its own, since the style supplies a missing one;
+    // numId 0 is Word's "no numbering", kept so it outranks the style's.
+    // Word has nine levels, 0–8; a level outside them is read as the nearest.
+    const numbering = {
+      ...(Number.isInteger(numId) && numId >= 0 ? { numId } : {}),
+      ...(Number.isInteger(ilvl) ? { ilvl: Math.min(Math.max(ilvl, 0), 8) } : {}),
+    };
+    if (numbering.numId !== undefined || numbering.ilvl !== undefined) attrs.numbering = numbering;
   }
 
   return attrs;
 }
 
-function parseParagraphInlines(el: OoxmlElement, diag: ParserDiagnostics): DocxInline[] {
-  const content: DocxInline[] = [];
+/**
+ * What a run yields: inline content, or a page break, which no inline can
+ * hold — a paragraph splits around it, and a content control, which cannot
+ * split, keeps a line break in its place.
+ */
+type RunItem = DocxInline | { type: "pageBreak"; marks: DocxMark[] };
+
+function parseParagraphInlines(el: OoxmlElement, diag: ParserDiagnostics): RunItem[] {
+  const content: RunItem[] = [];
   for (const child of el.children) {
     if (typeof child === "string") continue;
     if (child.name === "w:r") {
@@ -398,18 +410,19 @@ function parseParagraphInlines(el: OoxmlElement, diag: ParserDiagnostics): DocxI
       if (instr !== undefined) content.push({ type: "field", instr, marks: [] });
     } else if (child.name === "w:sdt") {
       content.push(parseInlineSdt(child, diag));
+    } else if (child.name === "w:smartTag") {
+      // A tag Word put on recognised text (a place, a date): the runs inside
+      // are the document's text, and the tag adds nothing the editor shows.
+      content.push(...parseParagraphInlines(child, diag));
     } else if (child.name === "w:hyperlink") {
       // Preserve hyperlink identity by attaching a `link` mark to every
       // inline produced by its inner runs. Stage 2 (Link extension)
       // resolves the relId → URL via `ctx.rels.resolveHyperlink`.
       const linkMark = buildHyperlinkMark(child);
-      for (const inner of child.children) {
-        if (typeof inner === "string") continue;
-        if (inner.name === "w:r") {
-          for (const item of parseRun(inner, diag)) {
-            content.push(addMark(item, linkMark));
-          }
-        }
+      // Everything a link holds — runs, smart tags, content controls, simple
+      // fields — is read as a paragraph's content is, under the link.
+      for (const item of parseParagraphInlines(child, diag)) {
+        content.push(addMark(item, linkMark));
       }
     }
   }
@@ -423,9 +436,9 @@ function parseInlineSdt(el: OoxmlElement, diag: ParserDiagnostics): DocxInline {
   return {
     type: "sdt",
     tag: (tagEl && attr(tagEl, "w:val")) ?? null,
-    placeholder: sdtPr ? findChild(sdtPr, "w:showingPlcHdr") !== undefined : false,
+    placeholder: sdtPr ? hasChild(sdtPr, "w:showingPlcHdr") : false,
     listItems: sdtPr ? sdtListItems(sdtPr) : [],
-    content: contentEl ? parseParagraphInlines(contentEl, diag) : [],
+    content: contentEl ? controlInlines(parseParagraphInlines(contentEl, diag), diag) : [],
     marks: [],
   };
 }
@@ -455,8 +468,17 @@ function buildHyperlinkMark(hyperlink: OoxmlElement): DocxMark {
   return { kind: "hyperlink", attrs };
 }
 
-function addMark(inline: DocxInline, mark: DocxMark): DocxInline {
+function addMark<T extends RunItem>(inline: T, mark: DocxMark): T {
   return { ...inline, marks: [...inline.marks, mark] };
+}
+
+/** A content control's content: a page break inside it becomes a line break, reported. */
+function controlInlines(items: readonly RunItem[], diag: ParserDiagnostics): DocxInline[] {
+  return items.map((item) => {
+    if (item.type !== "pageBreak") return item;
+    diag.dropped("pageBreak", "inside a content control; a line break stands in");
+    return { type: "hardBreak", marks: item.marks };
+  });
 }
 
 /**
@@ -464,25 +486,18 @@ function addMark(inline: DocxInline, mark: DocxMark): DocxInline {
  * emit `{ paragraph-before, pageBreak, paragraph-after, … }`. When no
  * page-break sentinels are present this returns a single-element array.
  *
- * The sentinel is `{ type: "pageBreak" }` masquerading as a DocxInline
- * to keep `parseRun`'s shape simple; we filter / split on it here.
  */
 function splitOnInlinePageBreaks(
   attrs: DocxParagraphAttrs,
-  inlines: DocxInline[],
+  inlines: readonly RunItem[],
 ): DocxBlock[] {
   const splits: DocxInline[][] = [[]];
-  let hasPageBreak = false;
   for (const item of inlines) {
-    if ((item as { type: string }).type === "pageBreak") {
-      splits.push([]);
-      hasPageBreak = true;
-    } else {
-      splits[splits.length - 1]!.push(item);
-    }
+    if (item.type === "pageBreak") splits.push([]);
+    else splits[splits.length - 1]!.push(item);
   }
-  if (!hasPageBreak) {
-    return [{ type: "paragraph", attrs, content: inlines }];
+  if (splits.length === 1) {
+    return [{ type: "paragraph", attrs, content: splits[0]! }];
   }
   const out: DocxBlock[] = [];
   for (let i = 0; i < splits.length; i++) {
@@ -503,14 +518,13 @@ function splitOnInlinePageBreaks(
  * produce multiple `DocxInline` items because text + break + text
  * inside one run becomes three events sharing the same mark stack.
  *
- * Note: `pageBreak` events flow through here as a sentinel shape
- * (`{ type: "pageBreak", marks }`); `parseParagraph` consumes the
- * sentinel and splits the surrounding paragraph.
+ * A page break comes out as a `RunItem` page break, for the paragraph to
+ * split around.
  */
-function parseRun(el: OoxmlElement, diag: ParserDiagnostics): DocxInline[] {
+function parseRun(el: OoxmlElement, diag: ParserDiagnostics): RunItem[] {
   const rPr = findChild(el, "w:rPr");
   const marks: DocxMark[] = rPr ? parseRunProperties(rPr) : [];
-  const out: DocxInline[] = [];
+  const out: RunItem[] = [];
   for (const child of el.children) {
     if (typeof child === "string") continue;
     if (isRunMetadata(child.name)) continue;
@@ -520,8 +534,7 @@ function parseRun(el: OoxmlElement, diag: ParserDiagnostics): DocxInline[] {
     } else if (child.name === "w:br") {
       const breakType = attr(child, "w:type");
       if (breakType === "page") {
-        // Sentinel — paragraph parser splits on this.
-        out.push({ type: "pageBreak", marks } as unknown as DocxInline);
+        out.push({ type: "pageBreak", marks });
       } else {
         out.push({ type: "hardBreak", marks });
       }
@@ -578,7 +591,8 @@ function parseDrawing(
   let wrapMode: DocxImageInline["wrapMode"] | undefined;
   if (hasChild(wrapper, "wp:wrapSquare")) wrapMode = "square";
   else if (hasChild(wrapper, "wp:wrapTopAndBottom")) wrapMode = "top-bottom";
-  else if (findChild(wrapper, "wp:wrapTight")) wrapMode = "square"; // tight → square fallback
+  // tight → square fallback. Left `examined`, not read: its wrap polygon is lost.
+  else if (findChild(wrapper, "wp:wrapTight")) wrapMode = "square";
   else if (hasChild(wrapper, "wp:wrapNone")) wrapMode = behindDoc ? "behind" : "front";
   if (!wrapMode) {
     wrapMode = "square";
@@ -692,9 +706,14 @@ export function parseRunProperties(rPr: OoxmlElement): DocxMark[] {
       // outranks it. Stage 2 resolves it away before making editor marks.
       const cancelled = (kind === "u" && val === "none") || !parseOnOff(val);
       // Once a toggle is on, its val says nothing more — except an underline's,
-      // which names its style (double, dotted, wave) for the handler to keep
-      // or report.
-      const attrs = kind === "u" && !cancelled && val !== undefined ? { val } : {};
+      // which names its style (double, dotted, wave), and its colour, for the
+      // handler to keep or report.
+      const attrs: Record<string, string> = {};
+      if (kind === "u" && !cancelled) {
+        if (val !== undefined) attrs.val = val;
+        const color = attr(child, "w:color");
+        if (color !== undefined) attrs.color = color;
+      }
       marks.push(cancelled ? { kind, attrs: {}, off: true } : { kind, attrs });
       continue;
     }

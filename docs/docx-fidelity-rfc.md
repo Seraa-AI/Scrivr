@@ -1,6 +1,6 @@
 # DOCX Fidelity RFC — a Word file edited in Scrivr comes back as Word had it
 
-Status: Draft (2026-11-04). Nothing here ships until it is agreed.
+Status: Phases 0 (#249) and 1 (#261) shipped; Phase 2 follows. See What shipped.
 
 ## Goal
 
@@ -183,10 +183,9 @@ the largest loss. So import gains an option:
 importDocx(editor, bytes, { trackUnread: true });
 ```
 
-With it on, `parseOoxml` returns its element tree wrapped in a `Proxy` that
-records each read. That covers the helpers (`findChild`, `attr`, …) and the 53
-places where the parser walks `.children` directly, without changing any of
-them. The helpers search the unwrapped tree: the element searched is read, a
+With it on, each part is parsed through `parsePart`, which wraps the element
+tree in a `Proxy` that records each read. That covers the helpers (`findChild`,
+`attr`, …) and the places where the parser walks `.children` directly. The helpers search the unwrapped tree: the element searched is read, a
 hit is examined, and the siblings passed over stay unread. Otherwise
 `findChild(pPr, "w:jc")` would count its sibling `w:spacing` as read.
 
@@ -203,7 +202,7 @@ Each element ends with one of these outcomes:
 |---|---|---|
 | `read` | Its attributes or children were read, or the parser marked it handled | `w:jc`, a run's `w:tab` |
 | `examined` | Its name was seen, but nothing in it was read | `w:pgSz`, `w:pgMar`, `w:noBreakHyphen` |
-| `ignored` | On a reviewed list of properties dropped on purpose | `w:szCs`, `w:proofErr`, `rsid*` |
+| `ignored` | On a reviewed list of properties dropped on purpose | `w:szCs`, `w:proofErr`, `w:rsids` |
 | `unread` | Never looked at — a silent drop | `w:ind`, `w:keepNext`, `w:tabs`, `w:pPrDefault` |
 
 The option is off by default because a proxy on every element costs time on a
@@ -434,8 +433,10 @@ Settled on 2026-11-04:
    kept and dropped (§2).
 2. **The 25 documents are committed** as the base fixtures, with provenance
    (§6). Developers add Word-authored fixtures where a pattern is thin.
-3. **Unread tracking records at the boundary.** The proxy wraps the parsed tree;
-   the parser itself is not changed (§3). Confirmed by a spike.
+3. **Unread tracking records at the boundary.** The proxy wraps the parsed tree.
+   The parser changes only to mark elements it acts on by their presence alone
+   (`markRead`, `hasChild`), since a proxy cannot tell those from ones passed
+   over (§3).
 4. **The Word comparison runs in GitHub CI**, inside `pnpm test`, and is written
    to the job summary (§5).
 5. **A known gap does not fail the build.** It is logged. A regression fails: a
@@ -497,3 +498,90 @@ document out without an editor or a DOM, as `LayoutCoordinator.layoutForExport`
 already does. The Word comparison adds two dev dependencies to `@scrivr/docx`,
 the versions `@scrivr/export-pdf` already uses: `@napi-rs/canvas` for real
 glyph metrics, and `@expo-google-fonts/inter` for the face it pins.
+
+## What shipped
+
+### Phase 0 — the report (#249)
+
+- `importDocx` and `exportDocx` return a `report` beside `diagnostics`:
+  `counts` per kind (kept, dropped, changed) and `entries` for each distinct
+  drop or change, with its reason, `count` and owner. Identical entries
+  merge into one with a `count`, in the order first met, so a property Word
+  sets on every run is one line — not one entry per drop in document order,
+  as §2 first said.
+- The converter records each item it hands a handler, content with no
+  handler (`"no handler"`), and an element the parser cannot read
+  (`"no parser"`). Content inside a lost item is counted as dropped inside it,
+  on both sides: a Word table imported without the table extension reports
+  its paragraphs and text lost. The content of a block nothing imports is
+  only counted; no handler runs on it, so nothing it would have left behind
+  (a field's answer, a resolved image) outlives it. A handler reporting `kept` or `dropped` for
+  the kind it was handed replaces the converter's account.
+- A link or an inline content control counts once however many runs it
+  spans: kept if any run under it lands, dropped once if none does.
+- A header or footer nothing reads, or whose part cannot be read, is dropped
+  as `w:hdr` / `w:ftr`, one per part, with a warning: `NO_HANDLER` and
+  `header-footer-unread` when nothing reads it, `PART_UNREADABLE` and the
+  warning naming why (`header-footer-part-unreadable` among them) when it
+  cannot be read. Only the final section's references are seen.
+- Import names content in Word's terms (`b`, `w:customXml`); export in
+  Scrivr's.
+- New public API beyond §2: `IBaseEditor.getFormatContributions()` and
+  `FormatContribution`; the vocabulary `NO_HANDLER`, `NO_PARSER`,
+  `HANDLER_RETURNED_NOTHING`, `PART_UNREADABLE`, `WRAPPER_DECLINED`, `OVERRIDES_OWNER`,
+  `insideDropped`, `noSchemaNode`; the `report-unbound` and
+  `report-invalid-count` warnings; `normalizeDrawNumber` in core, shared with
+  the test phase's logs.
+- Fixed on the way: a style id such as `constructor` crashed the import.
+- Not yet: the report when a conversion throws.
+
+### Phase 1 — extensions report, and the import lists what it never read (#261)
+
+- The built-in extensions report what their DOCX handlers could not carry:
+  Paragraph, Heading, Image, Color, FontFamily, FontSize, Highlight, Link,
+  Underline, SourcedBlock, List, and Table on export. HardBreak and PageBreak
+  report nothing of their own; the converter's counts cover them. A list's
+  numbering format is read per level (`w:numFmt`), so a bullet level inside a
+  numbered list stays bullets; List reports a format it draws differently
+  from Word's built-in style for that depth (upper roman, "none"), and
+  nothing for Scrivr's own lists, which use that style.
+- A paragraph handler that leaves out formatting or inline objects it was
+  handed — a code block keeping only text — is charged by the converter,
+  which knows which Word mark built each piece of formatting: it moves them
+  from kept to dropped (`LEFT_OUT`), compared by the text that carries them,
+  so "no formatting" values and joined or copied text nodes are not charged,
+  and neither is the paragraph style's own formatting. `report.dropped`
+  keeps one meaning: record a drop.
+- A wrapper's handler (a link, a content control) runs once per wrapper, so
+  a link it cannot resolve is one loss however many runs it spans.
+- A translucent colour, which DOCX cannot carry, is blended onto white and
+  reported wherever it is written: text colour, highlight, cell shading.
+- `importDocx(editor, bytes, { trackUnread: true })` adds `report.unread`:
+  the XML no code read, by part and path, `unread`, `examined` (only its
+  name seen) or `ignored` (on the reviewed list), the top of a skipped
+  subtree only. It covers the body, every header and footer the document
+  references, footnotes, endnotes, comments, styles, numbering and settings.
+  It is an inventory, so it overlaps what `entries` already drops. A part it
+  opens only to list, cut short, is a warning; the option never changes
+  whether an import succeeds. `examined` means "only its name was seen": a
+  name-only element the parser acts on is marked read.
+- One reviewed list (`ignored.ts`) decides what is dropped on purpose, keyed
+  by element or by parent and element (`w:rPr/w:spacing`); several entries
+  are marked known gaps rather than intended drops. The spike's 92 run-level
+  `w:spacing` reads now come out `ignored`, as a known gap.
+- Fixed on the way: a smart tag's text is imported (it was dropped); an
+  underline colour and a hanging indent are reported, not lost silently; a
+  page break inside an inline content control failed the whole import — it
+  is now kept as a line break and reported dropped, and the parser carries
+  page breaks as their own type instead of an `as unknown as` cast; list
+  import no longer drops the paragraphs after one that starts a list deeper
+  than they sit, and a nested list is placed one level below its list, as
+  the editor draws it, so the numbering it is compared against is the drawn
+  one. Numbering a paragraph's style carries — Word's built-in heading
+  numbering — is applied before lists are rebuilt, `numId` and `ilvl` each
+  resolved on its own (paragraph, then style through `basedOn`, then the
+  level `numbering.xml` links to the style). A list counts on across the
+  paragraphs between its items and restarts a level under each new parent;
+  `numId` 0, an undefined `numId` (reported) and a `none` level are drawn
+  unnumbered, as Word draws them.
+
