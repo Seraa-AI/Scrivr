@@ -180,6 +180,34 @@ describe("diffText", () => {
     expect(ops[1]!.text).toBe(b);
   });
 
+  it("a one-word change in a long paragraph is that word, not the paragraph", () => {
+    // 150 words: the whole paragraph is past the size guard, the change is not.
+    const words = Array.from({ length: 150 }, (_, i) => `term${i}`);
+    const a = words.join(" ");
+    const b = words.map((w, i) => (i === 75 ? "clause" : w)).join(" ");
+    const ops = diffText(a, b);
+
+    expect(ops.filter(o => o.type === "delete").map(o => o.text)).toEqual(["term75"]);
+    expect(ops.filter(o => o.type === "insert").map(o => o.text)).toEqual(["clause"]);
+    expect(ops.filter(o => o.type !== "insert").map(o => o.text).join("")).toBe(a);
+    expect(ops.filter(o => o.type !== "delete").map(o => o.text).join("")).toBe(b);
+    const insert = ops.find(o => o.type === "insert");
+    expect(insert?.type === "insert" && insert.proposedOffset).toBe(b.indexOf("clause"));
+  });
+
+  it("a long change past the size guard still keeps the words shared at each end", () => {
+    const makeWords = (prefix: string, n: number) => Array.from({ length: n }, (_, i) => `${prefix}${i}`).join(" ");
+    const a = `Shared start. ${makeWords("alpha", 150)} Shared end.`;
+    const b = `Shared start. ${makeWords("beta", 150)} Shared end.`;
+    const ops = diffText(a, b);
+
+    expect(ops.filter(o => o.type === "delete").map(o => o.text)).toEqual([makeWords("alpha", 150)]);
+    expect(ops.filter(o => o.type === "insert").map(o => o.text)).toEqual([makeWords("beta", 150)]);
+    expect(ops[0]).toEqual({ type: "keep", text: "Shared", proposedOffset: 0 });
+    expect(ops.filter(o => o.type !== "insert").map(o => o.text).join("")).toBe(a);
+    expect(ops.filter(o => o.type !== "delete").map(o => o.text).join("")).toBe(b);
+  });
+
   it("LCS size guard: paragraphs within limit still produce fine-grained diff", () => {
     // 30×30 = 900 cells, well within LCS_MAX_CELLS
     const a = "The quick brown fox jumps over the lazy dog";

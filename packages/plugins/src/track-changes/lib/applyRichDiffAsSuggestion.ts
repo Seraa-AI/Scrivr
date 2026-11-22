@@ -40,7 +40,7 @@ import {
 import { excludes, untracked, type FoundPiece } from "../formatSuggestions";
 import { findLiveNodeById } from "../liveNode";
 import { acceptedRangeToDocRange, bridgeable, buildAcceptedTextMap, collectAccepted, type PosMapEntry } from "./acceptedTextMap";
-import { clearAuthorPendingMarks } from "./applyDiffAsSuggestion";
+import { clearAuthorPendingMarks, namedMoreThanOnce } from "./applyDiffAsSuggestion";
 import { diffText, phraseReplacements } from "./diffText";
 import { writeProposal } from "./writeProposal";
 import { dispatchSuggestion } from "../suggestionBlocked";
@@ -78,8 +78,9 @@ export interface RichDiffResult {
   notFound: string[];
   /**
    * nodeIds whose edit changed nothing: a container (list, table) rather than
-   * a leaf textblock, a block proposed for deletion, or an edit that matched
-   * the block already or asked only for what an agent may not set.
+   * a leaf textblock, a block proposed for deletion, a block the call named
+   * more than once, or an edit that matched the block already or asked only
+   * for what an agent may not set.
    */
   rejected: string[];
 }
@@ -115,8 +116,10 @@ export function applyRichDiffAsSuggestion(
   { edits, authorID, onWarn }: RichDiffOptions,
 ): RichDiffResult {
   const notFound: string[] = [];
-  const rejected: string[] = [];
+  const repeated = namedMoreThanOnce(edits);
+  const rejected: string[] = [...repeated];
   const resolved = edits.flatMap((edit) => {
+    if (repeated.includes(edit.nodeId)) return [];
     const found = findLiveNodeById(state.doc, edit.nodeId);
     if (!found) {
       // Held only by content proposed for deletion: there, but not editable.

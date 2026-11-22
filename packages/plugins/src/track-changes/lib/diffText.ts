@@ -81,18 +81,19 @@ export function tokenise(text: string): string[] {
 // ── LCS diff engine ───────────────────────────────────────────────────────────
 
 /**
- * Safety threshold for the O(n×m) LCS matrix.
- * A 200-token paragraph diffed against another 200-token paragraph = 40,000 cells.
- * Beyond LCS_MAX_CELLS we fall back to a single block delete+insert, which is
- * equivalent to what the user would see after a "simplified view" gate anyway.
+ * Safety threshold for the O(n×m) LCS matrix, applied to the part of the text
+ * that changed. Beyond it that part is one delete+insert, which keeps runtime
+ * bounded when a long stretch is rewritten.
  */
 const LCS_MAX_CELLS = 20_000;
 
 /**
  * Run the classic LCS diff on two strings using the provided tokeniser.
  *
- * Falls back to a single block delete+insert when the token matrix would
- * exceed LCS_MAX_CELLS cells to keep runtime bounded on long paragraphs.
+ * The tokens shared at each end are kept as they are first, so the comparison
+ * and its size guard see only what changed: a one-word fix in a long clause is
+ * that word, however long the clause. Past the guard, the changed middle is
+ * one delete+insert between the kept ends.
  */
 export function diffText(
   a: string,
@@ -110,11 +111,38 @@ export function diffText(
   // identical strings rewrites every character to change none of them.
   if (a === b) return a.length > 0 ? [{ type: "keep", text: a, proposedOffset: 0 }] : [];
 
-  // Fast path: O(n×m) guard — avoids quadratic blowup on long paragraphs.
+  let start = 0;
+  while (start < lenA && start < lenB && tokA[start] === tokB[start]) start++;
+  let end = 0;
+  while (end < lenA - start && end < lenB - start && tokA[lenA - 1 - end] === tokB[lenB - 1 - end]) end++;
+
+  const keep = (tokens: string[]): DiffOp[] => tokens.map((text) => ({ type: "keep", text }));
+  const ops: DiffOp[] = [
+    ...keep(tokA.slice(0, start)),
+    ...changedMiddle(tokA.slice(start, lenA - end), tokB.slice(start, lenB - end)),
+    ...keep(tokA.slice(lenA - end)),
+  ];
+
+  // Stamp each op with where its text sits in the proposal. Done here, in
+  // emission order, because this is the last point at which that order is the
+  // proposal's own.
+  let proposedOffset = 0;
+  for (const op of ops) {
+    if (op.type === "delete") continue;
+    op.proposedOffset = proposedOffset;
+    proposedOffset += op.text.length;
+  }
+  return ops;
+}
+
+/** The LCS diff of the tokens between the shared ends, or one delete+insert past the size guard. */
+function changedMiddle(tokA: string[], tokB: string[]): DiffOp[] {
+  const lenA = tokA.length;
+  const lenB = tokB.length;
   if (lenA * lenB > LCS_MAX_CELLS) {
     const ops: DiffOp[] = [];
-    if (lenA > 0) ops.push({ type: "delete", text: a });
-    if (lenB > 0) ops.push({ type: "insert", text: b, proposedOffset: 0 });
+    if (lenA > 0) ops.push({ type: "delete", text: tokA.join("") });
+    if (lenB > 0) ops.push({ type: "insert", text: tokB.join("") });
     return ops;
   }
 
@@ -149,18 +177,7 @@ export function diffText(
     }
   }
 
-  ops.reverse();
-
-  // Stamp each op with where its text sits in the proposal. Done here, in
-  // emission order, because this is the last point at which that order is the
-  // proposal's own.
-  let proposedOffset = 0;
-  for (const op of ops) {
-    if (op.type === "delete") continue;
-    op.proposedOffset = proposedOffset;
-    proposedOffset += op.text.length;
-  }
-  return ops;
+  return ops.reverse();
 }
 
 // ── Replacement grouping ──────────────────────────────────────────────────────

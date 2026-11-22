@@ -31,7 +31,7 @@
  *                   > 0.7 → full rewrite, offer "Accept rewrite" button
  */
 
-import { spansToFragment } from "@scrivr/core";
+import { spansToFragment, type InlineMark, type InlineSpan } from "@scrivr/core";
 import type { Node as PMNode, Schema } from "@scrivr/core/pm";
 import type { EditorState, Transaction } from "@scrivr/core/pm";
 
@@ -40,6 +40,7 @@ import { getBlockInlineTrackedData } from "../helpers";
 import { CHANGE_OPERATION, CHANGE_STATUS } from "../types";
 import { bridgeable, buildAcceptedTextMap } from "./acceptedTextMap";
 import { computeEditDensity, diffText, phraseReplacements } from "./diffText";
+import { plainProposalMarks } from "./plainProposalMarks";
 import { writeProposal } from "./writeProposal";
 import { dispatchSuggestion } from "../suggestionBlocked";
 
@@ -154,6 +155,15 @@ export interface MultiBlockDiffOptions {
   authorID: string;
 }
 
+export interface MultiBlockDiffResult extends ApplyDiffResult {
+  /**
+   * nodeIds the call named more than once. Each proposal is the whole block,
+   * so two for one block disagree; that block is left alone, and the rest of
+   * the call still applies.
+   */
+  rejected: string[];
+}
+
 export interface ApplyDiffResult {
   /** true if the suggestion was dispatched. */
   applied: boolean;
@@ -210,8 +220,9 @@ function applyBlockToTr(
   const editDensity = computeEditDensity(rawOps);
   const ops         = phraseReplacements(rawOps, (from, to) => bridgeable(tr.doc, map, from, to));
   const parentType  = updatedFound.node.type;
+  const marksAt     = plainProposalMarks(ops, updatedFound.node, schema);
   const contentFor  = (from: number, to: number) =>
-    spansToFragment([{ text: proposedText.slice(from, to), marks: [] }], schema, { parentType });
+    spansToFragment(spansOf(proposedText, marksAt, from, to), schema, { parentType });
 
   const wrote = writeProposal(tr, map, tr.steps.length, ops, contentFor, updatedFound.pos + 1);
   return { applied: wrote || withdrew, editDensity, sourceChars: acceptedText.length };
@@ -261,14 +272,16 @@ export function applyMultiBlockDiff(
   state: EditorState,
   dispatch: (tr: Transaction) => void,
   { blocks, authorID }: MultiBlockDiffOptions,
-): ApplyDiffResult {
+): MultiBlockDiffResult {
+  const rejected = namedMoreThanOnce(blocks);
   // Resolve nodeIds → drop any blocks whose node is no longer in the doc.
   const resolved = blocks.flatMap(b => {
+    if (rejected.includes(b.nodeId)) return [];
     const found = findLiveNodeById(state.doc, b.nodeId);
     return found ? [{ nodeId: b.nodeId, found, proposedText: b.proposedText }] : [];
   });
 
-  if (resolved.length === 0) return { applied: false, editDensity: 0 };
+  if (resolved.length === 0) return { applied: false, editDensity: 0, rejected };
 
   // Reverse doc order — process last block first so upstream positions stay stable.
   resolved.sort((a, b) => b.found.pos - a.found.pos);
@@ -284,11 +297,38 @@ export function applyMultiBlockDiff(
     density.sourceChars += result.sourceChars;
   }
 
-  if (!anyApplied) return { applied: false, editDensity: 0 };
+  if (!anyApplied) return { applied: false, editDensity: 0, rejected };
 
   const editDensity = density.sourceChars > 0
     ? density.weighted / density.sourceChars
     : 0;
 
-  return { applied: dispatchSuggestion(state, tr, authorID, dispatch), editDensity };
+  return { applied: dispatchSuggestion(state, tr, authorID, dispatch), editDensity, rejected };
+}
+
+/** `text` between `from` and `to` as runs, split where its formatting changes. */
+function spansOf(text: string, marksAt: readonly InlineMark[][], from: number, to: number): InlineSpan[] {
+  const spans: InlineSpan[] = [];
+  for (let i = from; i < to; i++) {
+    const marks = marksAt[i] ?? [];
+    const last = spans.at(-1);
+    if (last && last.marks === marks) last.text += text[i];
+    else spans.push({ text: text[i]!, marks });
+  }
+  return spans;
+}
+
+/**
+ * The nodeIds a call names more than once, each once. Every edit in a call is
+ * written against the document as the call found it, so a second edit of the
+ * same block would land on text the first already changed.
+ */
+export function namedMoreThanOnce(edits: ReadonlyArray<{ nodeId: string }>): string[] {
+  const seen = new Set<string>();
+  const repeated = new Set<string>();
+  for (const { nodeId } of edits) {
+    if (seen.has(nodeId)) repeated.add(nodeId);
+    seen.add(nodeId);
+  }
+  return [...repeated];
 }

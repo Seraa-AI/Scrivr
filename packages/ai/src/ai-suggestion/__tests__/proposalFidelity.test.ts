@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { computeAiSuggestion } from "../computeAiSuggestion";
-import { AiTestEditor, doc, markedText, p } from "./helpers";
+import { AiTestEditor, doc, markedText, p, schema } from "./helpers";
 
 describe("a rewrite that also changes formatting", () => {
   it("marks the word the proposal marked, not whichever op came out first", () => {
@@ -52,6 +52,32 @@ describe("a paragraph long enough to trip the diff's size guard", () => {
     editor.apply({ mode: "direct" });
     expect(editor.getState().doc.textContent).toBe(long);
     expect(markedText(editor, "bold")).toBe(long);
+  });
+});
+
+describe("a one-word fix in a long formatted clause, as plain text", () => {
+  it("changes that word alone and keeps the clause's formatting, the new word included", () => {
+    const long = "The parties acknowledge and agree that this clause survives termination. ".repeat(7).trim();
+    const clause = schema.nodes["paragraph"]!.create({ nodeId: "p1" }, schema.text(long, [schema.marks["bold"]!.create()]));
+    const editor = new AiTestEditor(doc(clause));
+    const proposed = long.replace("survives", "outlives");
+    const suggestion = computeAiSuggestion(editor.getState(), {
+      blocks: [{ nodeId: "p1", proposedText: proposed }],
+      authorID: "AI Assistant",
+    })!;
+
+    const ops = suggestion.blocks[0]!.ops;
+    expect(ops.filter((op) => op.type === "delete").map((op) => op.text)).toEqual(["survives"]);
+    const inserts = ops.filter((op) => op.type === "insert");
+    expect(inserts.map((op) => op.text)).toEqual(["outlives"]);
+    expect(inserts[0]!.marks?.map((m) => m.type)).toEqual(["bold"]);
+    // Kept text restates what it reads, so nothing proposes formatting.
+    expect(ops.filter((op) => op.type === "keep").every((op) => op.marks === undefined)).toBe(true);
+
+    editor.showSuggestion(suggestion);
+    editor.apply({ mode: "direct" });
+    expect(editor.getState().doc.textContent).toBe(proposed);
+    expect(markedText(editor, "bold")).toBe(proposed);
   });
 });
 

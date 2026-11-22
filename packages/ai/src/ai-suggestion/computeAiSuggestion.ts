@@ -8,7 +8,7 @@
 import type { EditorState, Node as PmNode, Schema } from "@scrivr/core/pm";
 
 import { findLiveNodeById } from "@scrivr/plugins";
-import { bridgeable, buildAcceptedTextMap, diffText, phraseReplacements } from "@scrivr/plugins";
+import { bridgeable, buildAcceptedTextMap, diffText, phraseReplacements, plainProposalMarks } from "@scrivr/plugins";
 import type { PairedDiffOp } from "@scrivr/plugins";
 import { describeInlineMark, resolveInlineMarks, stableStringify, type InlineMark } from "@scrivr/core";
 import type { InlineSpan } from "../schema/edit";
@@ -53,7 +53,7 @@ function genId(): string {
 function readProposal(block: {
   proposedText?: string;
   proposedSpans?: InlineSpan[];
-}, schema: Schema, node: PmNode): { text: string; marksAt: InlineMark[][] } | null {
+}, schema: Schema, node: PmNode): { text: string; marksAt: InlineMark[][] | null } | null {
   // `proposedSpans` wins only when it says something. An agent emitting `[]`
   // alongside `proposedText` means "I have no runs", not "empty this block".
   if (block.proposedSpans && block.proposedSpans.length > 0) {
@@ -67,8 +67,9 @@ function readProposal(block: {
     return { text, marksAt };
   }
   if (block.proposedText === undefined) return null;
-  // Plain text says nothing about formatting, which is the same as no marks.
-  return { text: block.proposedText, marksAt: [] };
+  // Plain text says nothing about formatting: it takes the document's, as
+  // typing does, once the diff says which words are new.
+  return { text: block.proposedText, marksAt: null };
 }
 
 /**
@@ -164,6 +165,7 @@ export function computeAiSuggestion(
     // same before it is applied as after.
     const rawOps = diffText(acceptedText, proposal.text);
     const paired = phraseReplacements(rawOps, (from, to) => bridgeable(state.doc, map, from, to));
+    const marksAt = proposal.marksAt ?? plainProposalMarks(paired, found.node, schema);
 
     // Two cursors: one into the document's accepted text, which deletes and
     // keeps consume, and one into the proposal, which keeps and inserts consume.
@@ -180,7 +182,7 @@ export function computeAiSuggestion(
       }
       // Where this op sits in the proposal comes from the op itself.
       const proposedOffset = raw.type === "delete" ? 0 : raw.proposedOffset ?? 0;
-      for (const part of splitByMarks(op, proposal.marksAt, proposedOffset)) {
+      for (const part of splitByMarks(op, marksAt, proposedOffset)) {
         if (part.type !== "keep" || !part.marks) {
           ops.push(part);
           if (part.type === "keep") acceptedOffset += part.text.length;

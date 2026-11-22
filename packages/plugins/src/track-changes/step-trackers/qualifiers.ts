@@ -16,7 +16,9 @@ export const isSplitStep = (step: ReplaceStep, doc: PMNode, uiEvent: string) => 
   const { from, to, slice } = step;
 
   // A break leaves exactly two halves; more is content inserted between them.
-  if (from !== to || slice.content.childCount !== 2 || slice.openStart !== slice.openEnd) return false;
+  // It opens at least one block: two closed pieces, such as two runs of
+  // different formatting, are an insertion.
+  if (from !== to || slice.content.childCount !== 2 || slice.openStart !== slice.openEnd || slice.openStart === 0) return false;
   // Pasted paragraphs are new content, not the caret's paragraph carried over.
   if (uiEvent === "paste") return false;
 
