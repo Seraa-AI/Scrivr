@@ -119,8 +119,13 @@ function lastTextblockEnd(doc: PmNode): number {
 // ── Scoring ─────────────────────────────────────────────────────────────────
 
 export interface EditedScores {
-  /** Paragraphs the edits did not touch that kept Word's formatting, of all untouched paragraphs. */
+  /** Paragraphs with text the edits did not touch that kept Word's formatting, of all of them. */
   untouched: [preserved: number, of: number];
+  /**
+   * The same for empty paragraphs, counted apart: a document's many blank
+   * lines would otherwise carry the score while its text lost formatting.
+   */
+  blank: [preserved: number, of: number];
   /**
    * Edits that took the formatting around them, of the three. A document with
    * no word to bold, or no body paragraph to insert after, cannot reach three.
@@ -140,10 +145,12 @@ export function scoreEditedExport(
 ): EditedScores {
   const pairs = alignInOrder(original, exported, (p) => p.text);
   const isBolded = (p: WordParagraph) => bold !== null && p.text === bold.paragraph;
-  let preserved = 0;
+  const hasText = (p: WordParagraph) => p.text.trim().length > 0;
+  const preserved = { text: 0, blank: 0 };
   for (const [o, e] of pairs) {
-    if (!isBolded(original[o]!) && sameFormatting(original[o]!, exported[e]!)) preserved++;
+    if (!isBolded(original[o]!) && sameFormatting(original[o]!, exported[e]!)) preserved[hasText(original[o]!) ? "text" : "blank"]++;
   }
+  const untouched = original.filter((p) => !isBolded(p));
 
   let matching = 0;
   for (const added of [INSERTED_IN_MIDDLE, TYPED_AT_END]) {
@@ -154,7 +161,11 @@ export function scoreEditedExport(
   }
   if (bold !== null && boldKeptTheRest(original, exported, bold)) matching++;
 
-  return { untouched: [preserved, original.filter((p) => !isBolded(p)).length], edits: [matching, 3] };
+  return {
+    untouched: [preserved.text, untouched.filter(hasText).length],
+    blank: [preserved.blank, untouched.filter((p) => !hasText(p)).length],
+    edits: [matching, 3],
+  };
 }
 
 function sameFormatting(a: WordParagraph, b: WordParagraph): boolean {

@@ -599,27 +599,39 @@ glyph metrics, and `@expo-google-fonts/inter` for the face it pins.
 - Six checks over the 25 committed fixtures, inside `pnpm test`: report and
   layout snapshots (`__snapshots__/report`, `__snapshots__/layout`), the round
   trip, the edited export, the Word comparison, and mutation tests that prove
-  each can fail. Scores live in `scores/<check>.json` and are recorded with
-  `UPDATE_FIDELITY_SCORES=1`; the round trip stores its known differences and
+  each can fail. Scores live in `scores/<check>.json` and are recorded from
+  `packages/docx` with `UPDATE_FIDELITY_SCORES=1 npx vitest run
+  src/__tests__/fidelity` (turbo does not pass the variable through
+  `pnpm test`); the round trip stores its known differences and
   fails on a new one or one more of a known one.
 - Layout snapshots use fixed-width glyphs; the Word comparison measures in a
   pinned face (Inter, from a pinned package), so both are the same on Linux CI
   and a laptop.
 - Formatting is compared on what a reader sees — style, alignment, spacing,
-  indent, borders, shading, tabs; bold, italic, underline, strike, caps,
-  size, colour, highlight, the Latin face. A complex-script size, the
+  indent, borders, shading, tabs, keep-with-next and page-break-before; bold,
+  italic, underline, strike, caps, size, colour, highlight, character spacing,
+  raised or lowered text, the Latin face. A complex-script size, the
   paragraph mark's own formatting or a proofing language is no loss to a
   reader, and comparing them held 14 fixtures at zero, where a gate cannot
-  fail. An inserted paragraph is compared with the paragraph it was split
-  from as Scrivr wrote it, so that paragraph's own loss is not charged twice.
+  fail. Paragraphs with text and empty ones are scored apart, so a
+  document's blank lines cannot carry the score while its text loses
+  formatting. An inserted paragraph is compared with the paragraph it was
+  split from as Scrivr wrote it, so that paragraph's own loss is not charged
+  twice.
 - Round-trip differences are recorded per text block, with the blocks it sits
-  in, so a loss in one list item or table cell is its own difference.
+  in, so a loss in one list item or table cell is its own difference; each
+  list and table is also recorded by how many children it holds, so one split
+  in two is a difference.
 - The Word comparison lays each fixture out on the page Word set. Page
   geometry is not a score until import carries the page size.
 - A score that rises fails in CI until it is recorded.
 - The fixture loader skips Word's `~$` lock files.
-- The baseline: untouched paragraphs 453 of 1,927 kept as Word had them;
-  edits 51 of 75; page starts 8 of 29; the same page count 6 of 25; text
+- The baseline: untouched paragraphs with text 232 of 1,370 kept as Word had
+  them, and empty ones 311 of 557; edits 51 of 75; page starts 8 of 29; the same page count 6 of 25; text
   imported in full 21 of 25 and on a page 25 of 25; 5 fixtures with known
   round-trip differences, among them headings that come back bold because
   re-import applies the exported heading style's run formatting as marks.
+  Fifteen fixtures keep no paragraph with text exactly, because export drops
+  paragraph spacing, indents and styles; their text score cannot fall until
+  that is carried, and the report snapshots are what notice a further loss
+  there.

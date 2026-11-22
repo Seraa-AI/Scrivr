@@ -163,10 +163,13 @@ export interface WordParagraph {
  * language never shows on the page, so losing one is no loss to a reader,
  * and comparing it would fail every paragraph that carries one.
  */
-const VISIBLE_PARAGRAPH = new Set(["w:pStyle", "w:jc", "w:spacing", "w:ind", "w:pBdr", "w:shd", "w:tabs"]);
+const VISIBLE_PARAGRAPH = new Set([
+  "w:pStyle", "w:jc", "w:spacing", "w:contextualSpacing", "w:ind", "w:pBdr", "w:shd", "w:tabs",
+  "w:keepNext", "w:keepLines", "w:pageBreakBefore",
+]);
 const VISIBLE_RUN = new Set([
   "w:rStyle", "w:b", "w:i", "w:u", "w:strike", "w:dstrike", "w:caps", "w:smallCaps",
-  "w:sz", "w:color", "w:highlight", "w:shd", "w:rFonts", "w:vertAlign",
+  "w:sz", "w:color", "w:highlight", "w:shd", "w:rFonts", "w:vertAlign", "w:spacing", "w:position",
 ]);
 /** The faces a Latin run is drawn in; the rest of `w:rFonts` is for other scripts or theme lookups. */
 const VISIBLE_FONT_ATTRS = new Set(["w:ascii", "w:hAnsi"]);
@@ -175,7 +178,9 @@ function visible(el: OoxmlElement, names: ReadonlySet<string>): string {
   const children = el.children.flatMap((c) => {
     if (typeof c === "string" || !names.has(c.name)) return [];
     if (c.name !== "w:rFonts") return [c];
-    return [{ ...c, attrs: Object.fromEntries(Object.entries(c.attrs).filter(([name]) => VISIBLE_FONT_ATTRS.has(name))) }];
+    // Faces for other scripts only: nothing a Latin reader sees.
+    const attrs = Object.fromEntries(Object.entries(c.attrs).filter(([name]) => VISIBLE_FONT_ATTRS.has(name)));
+    return Object.keys(attrs).length === 0 ? [] : [{ ...c, attrs }];
   });
   return children.length === 0 ? "" : canonical({ ...el, attrs: {}, children });
 }

@@ -20,10 +20,10 @@ it("keeps what the edits did not touch as Word had it, no worse than recorded", 
     const bold = applyScriptedEdits(editor);
     const exported = await exportDocxBytes(editor);
     const scores = scoreEditedExport(paragraphsOfDocx(fixture.bytes), paragraphsOfDocx(exported), bold);
-    measured[fixture.name] = { untouched: scores.untouched, edits: scores.edits };
-    rows.push([fixture.name, formatScore(scores.untouched), formatScore(scores.edits)]);
+    measured[fixture.name] = { untouched: scores.untouched, blank: scores.blank, edits: scores.edits };
+    rows.push([fixture.name, formatScore(scores.untouched), formatScore(scores.blank), formatScore(scores.edits)]);
   }
-  publishSummary("DOCX edited export", ["fixture", "untouched paragraphs preserved", "edits matching"], rows);
+  publishSummary("DOCX edited export", ["fixture", "untouched paragraphs preserved", "empty paragraphs preserved", "edits matching"], rows);
 
   expect(gate("editedExport", measured)).toEqual([]);
 });

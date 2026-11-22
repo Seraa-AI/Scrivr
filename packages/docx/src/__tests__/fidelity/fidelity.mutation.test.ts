@@ -155,7 +155,7 @@ describe("the edited-document scores notice", () => {
   const original = paragraphsOfDocx(fixture.bytes);
 
   it("one w:spacing removed from one untouched paragraph", () => {
-    const spaced = original.findIndex((p) => p.pPr.includes("<w:spacing"));
+    const spaced = original.findIndex((p) => p.pPr.includes("<w:spacing") && p.text.trim().length > 0);
     expect(spaced).toBeGreaterThanOrEqual(0);
     const perfect = scoreEditedExport(original, original, null);
     expect(perfect.untouched[0]).toBe(perfect.untouched[1]);
@@ -187,21 +187,29 @@ describe("the edited-document scores notice", () => {
 });
 
 describe("the edited-document scores notice, from a real export", () => {
-  // What Scrivr actually writes, not a perfect copy, so the score is off the
-  // floor and a loss on top of it can still lower it.
+  // What Scrivr actually writes, not a perfect copy, of a fixture whose text
+  // keeps its formatting, so the score is off the floor and a loss on top of
+  // it can still lower it.
+  const keeper = FIXTURES.find((f) => f.name.startsWith("04-"));
+  if (!keeper) throw new Error("fixture 04-* is missing from wordTestFiles");
+  const original = paragraphsOfDocx(keeper.bytes);
   let exported: WordParagraph[];
   let scored: number;
   beforeAll(async () => {
-    const { doc } = await importFixture(fixture);
+    const { doc } = await importFixture(keeper);
     exported = paragraphsOfDocx(await exportDocxBytes(editorWith(doc)));
     scored = scoreEditedExport(original, exported, null).untouched[0];
   });
-  const original = paragraphsOfDocx(fixture.bytes);
 
-  it("kept paragraphs exported with an alignment Word did not give them", () => {
+  it("a kept paragraph with text exported with an alignment Word did not give it", () => {
     expect(scored).toBeGreaterThan(0);
-    const realigned = exported.map((p) => (p.pPr.includes("w:jc") ? p : { ...p, pPr: "<w:pPr><w:jc w:val=\"right\"></w:jc></w:pPr>" }));
-    expect(scoreEditedExport(original, realigned, null).untouched[0]).toBeLessThan(scored);
+    const unique = (text: string) => original.filter((o) => o.text === text).length === 1;
+    const kept = exported.findIndex(
+      (p) => p.text.trim().length > 0 && unique(p.text) && !p.pPr.includes("w:jc") && original.some((o) => o.text === p.text && o.pPr === p.pPr),
+    );
+    expect(kept).toBeGreaterThanOrEqual(0);
+    const realigned = exported.map((p, i) => (i === kept ? { ...p, pPr: "<w:pPr><w:jc w:val=\"right\"></w:jc></w:pPr>" } : p));
+    expect(scoreEditedExport(original, realigned, null).untouched[0]).toBe(scored - 1);
   });
 });
 
@@ -214,7 +222,14 @@ describe("the round trip notices", () => {
       ] }] },
     }).getState().doc;
 
-  it("a change inside a list, as the item it is in", () => {
+  it("a list split in two", () => {
+    const item = (text: string) => ({ type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text }] }] });
+    const doc = (lists: unknown[][]) =>
+      new ServerEditor({ content: { type: "doc", content: lists.map((items) => ({ type: "orderedList", content: items })) } }).getState().doc;
+    expect(roundTripDifferences(doc([[item("a"), item("b")]]), doc([[item("a")], [item("b")]]))).not.toEqual([]);
+  });
+
+    it("a change inside a list, as the item it is in", () => {
     const before = list({ type: "text", text: "second" });
     const after = list({ type: "text", text: "second", marks: [{ type: "bold" }] });
     expect(roundTripDifferences(before, after)).toEqual(['changed: bulletList > listItem > paragraph "second"']);

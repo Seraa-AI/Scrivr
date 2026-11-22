@@ -12,7 +12,9 @@ import { alignInOrder } from "./align";
  * text block, and each block with no content such as an image — so a loss in
  * one list item or table cell is its own difference, not hidden in a list or
  * table already known to differ. Each leaf carries the types and attributes
- * of the blocks it sits in, so a change to its list or cell shows on it.
+ * of the blocks it sits in, so a change to its list or cell shows on it; and
+ * each list, table or other container is also an entry of its own, by its
+ * attributes and how many children it holds, so one split in two shows.
  *
  * Leaves are paired in order by their full content, so one that changed does
  * not shift every pair after it. One with no partner is reported by its path
@@ -53,14 +55,19 @@ interface Block {
 function blocksOf(doc: PmNode): Block[] {
   const out: Block[] = [];
   const walk = (node: PmNode, ancestors: readonly PmNode[]): void => {
+    const path = [...ancestors, node].map((n) => n.type.name).join(" > ");
+    const opening = `"${node.textContent.replace(/\s+/g, " ").trim().slice(0, 32)}"`;
     if (node.isTextblock || (node.isBlock && node.childCount === 0)) {
-      const path = [...ancestors, node].map((n) => n.type.name).join(" > ");
       out.push({
         json: JSON.stringify([...ancestors.map((n) => [n.type.name, withoutIds(n.attrs)]), withoutIds(node.toJSON())]),
-        label: `${path} "${node.textContent.replace(/\s+/g, " ").trim().slice(0, 32)}"`,
+        label: `${path} ${opening}`,
       });
       return;
     }
+    out.push({
+      json: JSON.stringify([path, withoutIds(node.attrs), node.childCount]),
+      label: `${path} of ${node.childCount} ${opening}`,
+    });
     node.forEach((child) => walk(child, [...ancestors, node]));
   };
   doc.forEach((node) => walk(node, []));

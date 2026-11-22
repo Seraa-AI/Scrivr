@@ -104,7 +104,7 @@ function settle(check: string, measured: object, verdict: () => Verdict): string
     writeFileSync(join(SCORES_DIR, `${check}.json`), `${JSON.stringify(sorted, null, 2)}\n`);
     return [];
   }
-  return failures(check, verdict(), Boolean(process.env["CI"]));
+  return failures(check, verdict(), process.env["CI"] === "true");
 }
 
 /**
@@ -114,7 +114,8 @@ function settle(check: string, measured: object, verdict: () => Verdict): string
  */
 export function failures(check: string, { regressions, improvements }: Verdict, inCI: boolean): string[] {
   if (improvements.length === 0) return regressions;
-  const message = `${check} improved — run with UPDATE_FIDELITY_SCORES=1 to record:\n  ${improvements.join("\n  ")}`;
+  // Run in the package: turbo does not pass UPDATE_FIDELITY_SCORES through `pnpm test`.
+  const message = `${check} improved — record it from packages/docx with \`UPDATE_FIDELITY_SCORES=1 npx vitest run src/__tests__/fidelity\`:\n  ${improvements.join("\n  ")}`;
   console.info(`[fidelity] ${message}`);
   return inCI ? [...regressions, `unrecorded: ${message}`] : regressions;
 }
