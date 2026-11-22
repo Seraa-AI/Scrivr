@@ -133,6 +133,43 @@ async function docWithBody(body: string): Promise<Uint8Array> {
   return zipSync(entries);
 }
 
+/**
+ * An exported document with a default header reading `text`. `part` replaces
+ * the header part's XML, or `null` leaves the part out of the package.
+ */
+async function docWithHeader(text: string, part?: string | null): Promise<Uint8Array> {
+  const entries = unzipSync(await exportDocxBytes(new ServerEditor({ content: "body" })));
+  const document = strFromU8(entries["word/document.xml"]!);
+  entries["word/document.xml"] = strToU8(
+    document.replace("<w:sectPr>", '<w:sectPr><w:headerReference w:type="default" r:id="rIdHeader1"/>'),
+  );
+  const rels = strFromU8(entries["word/_rels/document.xml.rels"]!);
+  entries["word/_rels/document.xml.rels"] = strToU8(
+    rels.replace(
+      "</Relationships>",
+      '<Relationship Id="rIdHeader1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/></Relationships>',
+    ),
+  );
+  const header = `<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p><w:r><w:t>${text}</w:t></w:r></w:p></w:hdr>`;
+  if (part !== null) entries["word/header1.xml"] = strToU8(part ?? header);
+  return zipSync(entries);
+}
+
+/** Walks every header and footer reference, as a header/footer extension does. */
+const PartReader = Extension.create({
+  name: "partReader",
+  addImports() {
+    return {
+      docx: {
+        onImportComplete(doc, ctx) {
+          for (const { relId } of [...ctx.section.headers, ...ctx.section.footers]) ctx.walkPart(relId);
+          return doc;
+        },
+      },
+    };
+  },
+});
+
 function dropsOf(report: DocxReport): DocxReportEntry[] {
   return report.entries.filter((entry) => entry.outcome === "dropped");
 }
@@ -522,6 +559,30 @@ describe("importDocx — report", () => {
       owner: "fontFamily",
       count: 1,
     });
+  });
+
+  it("records a header nothing reads as dropped, with a warning", async () => {
+    const { report, diagnostics } = await importDocx(new ServerEditor({ extensions: [StarterKit] }), await docWithHeader("HEADER"));
+
+    expect(dropsOf(report)).toEqual([{ outcome: "dropped", kind: "w:hdr", reason: NO_HANDLER, owner: null, count: 1 }]);
+    expect(diagnostics.map((d) => d.code)).toContain("header-footer-unread");
+  });
+
+  it("records a header part it cannot read as dropped, under the extension that asked for it", async () => {
+    const unreadable = [null, "", "<w:ftr/>"];
+    for (const part of unreadable) {
+      const editor = new ServerEditor({ extensions: [StarterKit, PartReader] });
+      const { report } = await importDocx(editor, await docWithHeader("HEADER", part));
+
+      expect(dropsOf(report).map((entry) => [entry.kind, entry.owner])).toEqual([["w:hdr", "partReader"]]);
+    }
+  });
+
+  it("records nothing lost for a header an extension reads", async () => {
+    const editor = new ServerEditor({ extensions: [StarterKit, PartReader] });
+    const { report } = await importDocx(editor, await docWithHeader("HEADER"));
+
+    expect(dropsOf(report)).toEqual([]);
   });
 
   it("imports a paragraph whose style id is a name Object already has", async () => {
