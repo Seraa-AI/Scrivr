@@ -375,11 +375,14 @@ function parseParagraphProperties(el: OoxmlElement): DocxParagraphAttrs {
     // poison every downstream comparison.
     const ilvl = ilvlRaw !== undefined ? Number(ilvlRaw) : NaN;
     const numId = numIdRaw !== undefined ? Number(numIdRaw) : NaN;
+    // Each half is kept on its own, since the style supplies a missing one;
     // numId 0 is Word's "no numbering", kept so it outranks the style's.
     // Word has nine levels, 0–8; a level outside them is read as the nearest.
-    if (Number.isInteger(numId) && numId >= 0) {
-      attrs.numbering = { numId, ilvl: Number.isInteger(ilvl) ? Math.min(Math.max(ilvl, 0), 8) : 0 };
-    }
+    const numbering = {
+      ...(Number.isInteger(numId) && numId >= 0 ? { numId } : {}),
+      ...(Number.isInteger(ilvl) ? { ilvl: Math.min(Math.max(ilvl, 0), 8) } : {}),
+    };
+    if (numbering.numId !== undefined || numbering.ilvl !== undefined) attrs.numbering = numbering;
   }
 
   return attrs;

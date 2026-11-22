@@ -20,6 +20,7 @@ import {
   StarterKit,
   type FormatContribution,
 } from "@scrivr/core";
+import type { Node as PmNode } from "@scrivr/core/pm";
 import {
   HANDLER_RETURNED_NOTHING,
   NO_HANDLER,
@@ -1028,6 +1029,112 @@ describe("importDocx — what each extension says it could not keep", () => {
     const intro = doc.child(0).child(0);
     expect(intro.child(1).type.name).toBe("orderedList");
     expect(intro.child(1).child(0).child(0).textContent).toBe("Scope");
+  });
+
+  describe("numbering a style carries, as Word draws it", () => {
+    const W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
+    const lvl = (ilvl: number, fmt: string, style?: string) =>
+      `<w:lvl w:ilvl="${ilvl}"><w:start w:val="1"/><w:numFmt w:val="${fmt}"/>${style ? `<w:pStyle w:val="${style}"/>` : ""}</w:lvl>`;
+    // numId 1 is the closing list's own; numId 5 is the headings', linked level by level.
+    const numberingXml = `<w:numbering ${W}>`
+      + `<w:abstractNum w:abstractNumId="1">${lvl(0, "decimal")}</w:abstractNum>`
+      + `<w:abstractNum w:abstractNumId="2">${lvl(0, "decimal", "Heading1")}${lvl(1, "decimal", "Heading2")}${lvl(2, "decimal")}${lvl(3, "none", "Heading4")}</w:abstractNum>`
+      + `<w:num w:numId="1"><w:abstractNumId w:val="1"/></w:num><w:num w:numId="5"><w:abstractNumId w:val="2"/></w:num></w:numbering>`;
+    const heading = (level: number, text: string) => ({ type: "heading", attrs: { level }, content: [{ type: "text", text }] });
+    const para = (text: string) => ({ type: "paragraph", content: [{ type: "text", text }] });
+    const closingList = { type: "orderedList", content: [{ type: "listItem", content: [para("closing")] }] };
+    const numPr = (numId?: number, ilvl?: number) =>
+      `<w:numPr>${ilvl === undefined ? "" : `<w:ilvl w:val="${ilvl}"/>`}${numId === undefined ? "" : `<w:numId w:val="${numId}"/>`}</w:numPr>`;
+
+    /** Import `blocks` with `styles` numbering its styles (id → numPr) and `extra` styles and paragraph edits added. */
+    const importNumbered = async (
+      blocks: unknown[],
+      styles: Record<string, string>,
+      edit: { addStyles?: string; document?: (xml: string) => string } = {},
+    ) => {
+      const editor = new ServerEditor();
+      editor.setContent({ type: "doc", content: [...blocks, closingList] });
+      const files = unzipSync(await exportDocxBytes(editor));
+      let stylesXml = strFromU8(files["word/styles.xml"]!);
+      for (const [id, pr] of Object.entries(styles)) {
+        const opening = new RegExp(`(<w:style [^>]*w:styleId="${id}"[^>]*>)`);
+        expect(stylesXml).toMatch(opening);
+        stylesXml = stylesXml.replace(opening, `$1<w:pPr>${pr}</w:pPr>`);
+      }
+      stylesXml = stylesXml.replace("</w:styles>", `${edit.addStyles ?? ""}</w:styles>`);
+      const documentXml = (edit.document ?? ((xml: string) => xml))(strFromU8(files["word/document.xml"]!));
+      return importDocx(new ServerEditor(), zipSync({
+        ...files,
+        "word/styles.xml": strToU8(stylesXml),
+        "word/numbering.xml": strToU8(numberingXml),
+        "word/document.xml": strToU8(documentXml),
+      }));
+    };
+    /** Give the paragraph holding `text` the paragraph properties `pPr`. */
+    const withPPr = (text: string, pPr: string) => (xml: string) =>
+      xml.replace(new RegExp(`<w:p>((?:(?!</w:p>).)*?>${text}<)`, "s"), `<w:p><w:pPr>${pPr}</w:pPr>$1`)
+        .replace(new RegExp(`(<w:pPr>(?:(?!</w:pPr>).)*?)</w:pPr>((?:(?!</w:p>).)*?>${text}<)`, "s"), (m, head: string, rest: string) =>
+          head.includes(pPr) ? m : `${head}${pPr}</w:pPr>${rest}`);
+    /** Each block holding `text`: how many list items it sits in, and its list's first number. */
+    const placeOf = (doc: PmNode, text: string) => {
+      let found: { depth: number; order: unknown } | null = null;
+      doc.descendants((node, pos) => {
+        if (found || !node.isTextblock || node.textContent !== text) return;
+        const $pos = doc.resolve(pos + 1);
+        let depth = 0;
+        let order: unknown = null;
+        for (let d = $pos.depth; d > 0; d--) {
+          const n = $pos.node(d);
+          if (n.type.name === "listItem") depth++;
+          if (order === null && n.type.name === "orderedList") order = n.attrs["order"];
+        }
+        found = { depth, order };
+      });
+      return found;
+    };
+
+    it("counts on across body text, and restarts a level under each new parent", async () => {
+      const { doc } = await importNumbered(
+        [heading(1, "Intro"), para("b1"), heading(1, "Terms"), heading(2, "Scope"), para("b2"), heading(2, "Detail"), heading(1, "End"), heading(2, "Last")],
+        { Heading1: numPr(5), Heading2: numPr(5) },
+      );
+      expect(placeOf(doc, "Intro")).toEqual({ depth: 1, order: 1 });
+      expect(placeOf(doc, "Terms")).toEqual({ depth: 1, order: 2 });
+      expect(placeOf(doc, "Scope")).toEqual({ depth: 2, order: 1 });
+      expect(placeOf(doc, "Detail")).toMatchObject({ order: 2 });
+      expect(placeOf(doc, "End")).toEqual({ depth: 1, order: 3 });
+      expect(placeOf(doc, "Last")).toEqual({ depth: 2, order: 1 });
+      expect(placeOf(doc, "b1")).toEqual({ depth: 0, order: null });
+    });
+
+    it("takes a level the paragraph or a derived style gives, with the numbering from the style", async () => {
+      const { doc } = await importNumbered(
+        [heading(1, "Intro"), heading(1, "Deeper"), para("Deepest")],
+        { Heading1: numPr(5) },
+        {
+          addStyles: `<w:style w:type="paragraph" w:styleId="Sub"><w:basedOn w:val="Heading1"/><w:pPr>${numPr(undefined, 2)}</w:pPr></w:style>`,
+          document: (xml) => withPPr("Deepest", `<w:pStyle w:val="Sub"/>`)(xml.replace(/(<w:pStyle w:val="Heading1"\/>)((?:(?!<\/w:p>).)*?>Deeper<)/s, `$1${numPr(undefined, 1)}$2`)),
+        },
+      );
+      expect(placeOf(doc, "Intro")).toMatchObject({ depth: 1 });
+      expect(placeOf(doc, "Deeper")).toMatchObject({ depth: 2 });
+      expect(placeOf(doc, "Deepest")).toMatchObject({ depth: 3 });
+    });
+
+    it("leaves a heading unnumbered where Word draws no number, and says why when the numbering is missing", async () => {
+      const { doc, report } = await importNumbered(
+        [heading(4, "Outline only"), heading(3, "Dangling")],
+        { Heading4: numPr(5), Heading3: numPr(9, 0) },
+      );
+      expect(placeOf(doc, "Outline only")).toEqual({ depth: 0, order: null });
+      expect(placeOf(doc, "Dangling")).toEqual({ depth: 0, order: null });
+      expect(dropsOf(report).filter((entry) => entry.kind === "w:numPr").map((entry) => entry.count)).toEqual([1]);
+    });
+
+    it("numbers a paragraph with no style of its own through the default paragraph style", async () => {
+      const { doc } = await importNumbered([para("body")], { Normal: numPr(5, 2) });
+      expect(placeOf(doc, "body")).toMatchObject({ depth: 1 });
+    });
   });
 
   it("keeps a heading in a list a numbered heading, there and back", async () => {

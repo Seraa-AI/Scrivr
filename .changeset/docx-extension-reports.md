@@ -27,4 +27,8 @@ The built-in extensions report what their DOCX handlers could not carry across, 
 - A list's numbering format is read for each level, so a bullet level inside a numbered list stays bullets, and List reports a format it draws differently from Word's built-in style for that depth (`"upperRoman" numbering drawn as decimal`). `DocxBlock`'s list gains `level` and `format`.
 - A page break inside an inline content control no longer fails the import: a line break stands in, and the page break is reported dropped.
 - List import keeps every paragraph: a run whose first paragraph sits deeper than the ones after it lost those after it, silently — Scrivr's own export of an item started deeper with a nested list among them. A nested list is placed one level below its list, as the editor draws it.
-- Headings Word numbers through their style — its built-in "1 Heading 1 / 1.1 Heading 2" — import as numbered list items. The numbering is inherited through `basedOn`, a style naming no level takes the level that names the style in `numbering.xml`, and a paragraph's own `numId` 0 turns its style's numbering off.
+- Headings Word numbers through their style — its built-in "1 Heading 1 / 1.1 Heading 2" — import as numbered list items, numbered as Word numbers them:
+  - A paragraph's own `numId` and `ilvl` each win over its style's, and each is inherited through `basedOn` on its own; a paragraph with no style takes the default paragraph style's. `DocxParagraphAttrs.numbering` therefore carries either half alone.
+  - A level nothing names is the one `numbering.xml` links to the style.
+  - Numbering counts on across the paragraphs between items, and a level restarts under each new item of a shallower one, so sections separated by body text number 1, 2, 3 rather than 1, 1, 1.
+  - Where Word draws no number, nothing is numbered: `numId` 0, a level formatted `none`, and a `numId` the document does not define — that last one reported as a dropped `w:numPr`.

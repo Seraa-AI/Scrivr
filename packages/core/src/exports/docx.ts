@@ -632,10 +632,11 @@ export interface DocxParagraphAttrs {
   /** From `<w:pPr><w:jc w:val="…"/>`. */
   align?: "left" | "center" | "right" | "justify";
   /**
-   * From `<w:pPr><w:numPr>` — paragraph belongs to a list. `numId` 0 is Word's
+   * From `<w:pPr><w:numPr>` — paragraph belongs to a list. Either half may be
+   * absent, as in Word: the paragraph style supplies it. `numId` 0 is Word's
    * "no numbering": the paragraph turns off what its style would number it as.
    */
-  numbering?: { numId: number; ilvl: number };
+  numbering?: { numId?: number; ilvl?: number };
   /** Word's `<w:pageBreakBefore/>` hint. */
   pageBreakBefore?: boolean;
 }

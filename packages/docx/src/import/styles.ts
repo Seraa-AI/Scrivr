@@ -27,17 +27,20 @@ export interface DocxStyleSheet {
   raw(styleId: string): OoxmlElement | undefined;
   /**
    * The list numbering a paragraph style puts its paragraphs in — Word's
-   * built-in heading numbering lives here — with the nearest `basedOn`
-   * ancestor that says anything winning. `ilvl` is absent when the style
-   * names no level; `numId` 0 is the style turning numbering off.
+   * built-in heading numbering lives here. `numId` and `ilvl` are each the
+   * nearest `basedOn` ancestor's that names one, and absent when none does;
+   * `numId` 0 is the style turning numbering off.
    */
-  numbering(styleId: string | undefined): { numId: number; ilvl?: number } | null;
+  numbering(styleId: string): { numId?: number; ilvl?: number };
+  /** The paragraph style a paragraph naming none has (`w:default="1"`). */
+  defaultParagraphStyle: string | undefined;
 }
 
 const EMPTY: DocxStyleSheet = {
   runMarks: () => [],
   raw: () => undefined,
-  numbering: () => null,
+  numbering: () => ({}),
+  defaultParagraphStyle: undefined,
 };
 
 export function readStyleSheet(xml: string | undefined, tracker?: ReadTracker): DocxStyleSheet {
@@ -82,25 +85,33 @@ export function readStyleSheet(xml: string | undefined, tracker?: ReadTracker): 
     return marks;
   };
 
-  const numbering = (styleId: string | undefined): { numId: number; ilvl?: number } | null => {
+  const numbering = (styleId: string): { numId?: number; ilvl?: number } => {
+    let numId: number | undefined;
+    let ilvl: number | undefined;
     const seen = new Set<string>();
-    let id = styleId;
-    while (id !== undefined && !seen.has(id)) {
+    let id: string | undefined = styleId;
+    while (id !== undefined && !seen.has(id) && (numId === undefined || ilvl === undefined)) {
       seen.add(id);
       const style = byId.get(id);
-      if (!style) return null;
+      if (!style) break;
       const numPr = findChild(findChild(style, "w:pPr") ?? emptyElement, "w:numPr");
-      const numId = wholeNumber(numPr && findChild(numPr, "w:numId"));
-      if (numId !== undefined) {
-        const ilvl = wholeNumber(numPr && findChild(numPr, "w:ilvl"));
-        return ilvl === undefined ? { numId } : { numId, ilvl };
-      }
+      numId ??= wholeNumber(numPr && findChild(numPr, "w:numId"));
+      ilvl ??= wholeNumber(numPr && findChild(numPr, "w:ilvl"));
       id = attr(findChild(style, "w:basedOn") ?? emptyElement, "w:val");
     }
-    return null;
+    return { ...(numId !== undefined ? { numId } : {}), ...(ilvl !== undefined ? { ilvl } : {}) };
   };
 
-  return { runMarks, raw: (styleId) => byId.get(styleId), numbering };
+  const defaultParagraphStyle = findChildren(root, "w:style").find(
+    (style) => attr(style, "w:type") === "paragraph" && attr(style, "w:default") === "1",
+  );
+
+  return {
+    runMarks,
+    raw: (styleId) => byId.get(styleId),
+    numbering,
+    defaultParagraphStyle: defaultParagraphStyle && attr(defaultParagraphStyle, "w:styleId"),
+  };
 }
 
 /** An element's `w:val` as a whole number of 0 or more, or undefined. */

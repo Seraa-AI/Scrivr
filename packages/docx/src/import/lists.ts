@@ -20,15 +20,28 @@ import type {
   DocxParagraphAttrs,
 } from "@scrivr/core";
 import type { NumberingResolver } from "./numbering";
+import type { ParserDiagnostics } from "./parser";
 import type { DocxStyleSheet } from "./styles";
 
-export function reconstructLists(
-  model: DocxImportModel,
-  numbering: NumberingResolver,
-  styles?: DocxStyleSheet,
-): DocxImportModel {
+/** What `numbering.xml` and the styles mean for list building. */
+export interface ListSources {
+  numbering: NumberingResolver;
+  styles: DocxStyleSheet;
+  diagnostics: ParserDiagnostics;
+}
+
+/**
+ * How far each list has counted, per level: Word counts a `numId` on across
+ * the paragraphs between its items, and restarts a level under each new
+ * item of a shallower one.
+ */
+type ListCounts = Map<number, number[]>;
+
+export function reconstructLists(model: DocxImportModel, sources: ListSources): DocxImportModel {
+  const { numbering } = sources;
+  const counts: ListCounts = new Map();
   const out: DocxBlock[] = [];
-  const blocks = styles ? model.blocks.map((b) => withStyleNumbering(b, styles, numbering)) : model.blocks;
+  const blocks = model.blocks.map((b) => withResolvedNumbering(b, sources));
   let i = 0;
   while (i < blocks.length) {
     const b = blocks[i]!;
@@ -39,7 +52,7 @@ export function reconstructLists(
       const startIlvl = b.attrs.numbering.ilvl;
       const startNumId = b.attrs.numbering.numId;
       const endIdx = findListEnd(blocks, i, startNumId, startIlvl);
-      out.push(...buildLists(blocks.slice(i, endIdx), 0, numbering));
+      out.push(...buildLists(blocks.slice(i, endIdx), 0, numbering, counts));
       i = endIdx;
     } else {
       out.push(b);
@@ -60,7 +73,7 @@ interface ListParagraph {
 }
 
 function isListParagraph(b: DocxBlock): b is ListParagraph {
-  return b.type === "paragraph" && b.attrs.numbering !== undefined && b.attrs.numbering.numId > 0;
+  return b.type === "paragraph" && b.attrs.numbering?.numId !== undefined && b.attrs.numbering.ilvl !== undefined;
 }
 
 function findListEnd(
@@ -107,11 +120,11 @@ function findListEnd(
  * shallower than the list's own level, and the rest start the next one, so
  * no paragraph is left out.
  */
-function buildLists(slice: DocxBlock[], expectedIlvl: number, numbering: NumberingResolver): DocxBlock[] {
+function buildLists(slice: DocxBlock[], expectedIlvl: number, numbering: NumberingResolver, counts: ListCounts): DocxBlock[] {
   const lists: DocxBlock[] = [];
   let start = 0;
   while (start < slice.length) {
-    const built = buildList(slice.slice(start), expectedIlvl, numbering);
+    const built = buildList(slice.slice(start), expectedIlvl, numbering, counts);
     if (!built || built.consumed === 0) {
       // Nothing more makes a list: what is left stays as paragraphs, never lost.
       lists.push(...slice.slice(start).map((b) => (isListParagraph(b) ? stripNumberingMarker(b) : b)));
@@ -127,6 +140,7 @@ function buildList(
   slice: DocxBlock[],
   expectedIlvl: number,
   numbering: NumberingResolver,
+  counts: ListCounts,
 ): { list: DocxBlock; consumed: number } | null {
   // Identify the list at this level by its leading paragraph's numId.
   const first = slice[0];
@@ -136,6 +150,9 @@ function buildList(
   const listType = numbering.resolve(numId, targetIlvl);
   const format = numbering.format(numId, targetIlvl);
   const levelOffset = targetIlvl - expectedIlvl;
+  const counted = counts.get(numId) ?? [];
+  counts.set(numId, counted);
+  const countedBefore = counted[targetIlvl] ?? 0;
 
   const items: DocxListItem[] = [];
   let i = 0;
@@ -163,15 +180,17 @@ function buildList(
       // and exports it, whatever this item's offset.
       // A nested run follows an item at this level: the list's first
       // paragraph sits at its own level, so there always is one.
-      items[items.length - 1]?.content.push(...buildLists(slice.slice(nestedStart, i), expectedIlvl + 1, numbering));
+      items[items.length - 1]?.content.push(...buildLists(slice.slice(nestedStart, i), expectedIlvl + 1, numbering, counts));
       continue;
     }
     // ilvl === targetIlvl — new item.
     items.push({ content: [stripNumberingMarker(b)], ...(levelOffset > 0 ? { levelOffset } : {}) });
+    counted[targetIlvl] = (counted[targetIlvl] ?? 0) + 1;
+    counted.length = targetIlvl + 1;
     i++;
   }
 
-  const start = listType === "ordered" ? numbering.start(numId, targetIlvl) : 1;
+  const start = listType === "ordered" ? numbering.start(numId, targetIlvl) + countedBefore : 1;
   const list: DocxBlock = {
     type: "list",
     listType,
@@ -184,16 +203,33 @@ function buildList(
 }
 
 /**
- * A paragraph its style numbers — Word's built-in heading numbering — given
- * that numbering, unless it says its own (`numId` 0 included, which turns the
- * style's off). A style that names no level is at the level that names it.
+ * A paragraph with the numbering Word draws it with, or none. Its own
+ * `numId` and `ilvl` each win over its style's — Word's built-in heading
+ * numbering lives on the style — and a level neither names is the one
+ * `numbering.xml` links to the style. Word draws no number for `numId` 0, a
+ * `numId` the document does not define, or a level formatted `none`.
  */
-function withStyleNumbering(b: DocxBlock, styles: DocxStyleSheet, numbering: NumberingResolver): DocxBlock {
-  if (b.type !== "paragraph" || b.attrs.numbering !== undefined || b.attrs.styleId === undefined) return b;
-  const fromStyle = styles.numbering(b.attrs.styleId);
-  if (!fromStyle || fromStyle.numId === 0) return b;
-  const ilvl = fromStyle.ilvl ?? numbering.levelOfStyle(fromStyle.numId, b.attrs.styleId) ?? 0;
-  return { ...b, attrs: { ...b.attrs, numbering: { numId: fromStyle.numId, ilvl: Math.min(ilvl, 8) } } };
+function withResolvedNumbering(b: DocxBlock, { numbering, styles, diagnostics }: ListSources): DocxBlock {
+  if (b.type !== "paragraph") return b;
+  const styleId = b.attrs.styleId ?? styles.defaultParagraphStyle;
+  const own = b.attrs.numbering ?? {};
+  const fromStyle: { numId?: number; ilvl?: number } = styleId === undefined ? {} : styles.numbering(styleId);
+  const numId = own.numId ?? fromStyle.numId;
+  if (numId === undefined || numId === 0) return withoutNumbering(b);
+  if (!numbering.defines(numId)) {
+    diagnostics.dropped("w:numPr", "names numbering the document does not define; Word draws no number");
+    return withoutNumbering(b);
+  }
+  const ilvl = Math.min(own.ilvl ?? fromStyle.ilvl ?? (styleId === undefined ? undefined : numbering.levelOfStyle(numId, styleId)) ?? 0, 8);
+  if (numbering.format(numId, ilvl) === "none") return withoutNumbering(b);
+  return { ...b, attrs: { ...b.attrs, numbering: { numId, ilvl } } };
+}
+
+function withoutNumbering(b: DocxBlock & { type: "paragraph" }): DocxBlock {
+  if (b.attrs.numbering === undefined) return b;
+  const attrs: DocxParagraphAttrs = { ...b.attrs };
+  delete attrs.numbering;
+  return { ...b, attrs };
 }
 
 /**

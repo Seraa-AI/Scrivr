@@ -560,7 +560,10 @@ or a DOM, as `LayoutCoordinator.layoutForExport` already does.
   than they sit, and a nested list is placed one level below its list, as
   the editor draws it, so the numbering it is compared against is the drawn
   one. Numbering a paragraph's style carries — Word's built-in heading
-  numbering — is applied before lists are rebuilt: through `basedOn`, at the
-  level `numbering.xml` links to the style when the style names none, and
-  never over the paragraph's own `numPr` (`numId` 0 included).
+  numbering — is applied before lists are rebuilt, `numId` and `ilvl` each
+  resolved on its own (paragraph, then style through `basedOn`, then the
+  level `numbering.xml` links to the style). A list counts on across the
+  paragraphs between its items and restarts a level under each new parent;
+  `numId` 0, an undefined `numId` (reported) and a `none` level are drawn
+  unnumbered, as Word draws them.
 

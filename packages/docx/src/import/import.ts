@@ -162,6 +162,7 @@ export async function importDocx(
     // layered under whatever the run says directly.
     const styleSheet = readStyleSheet(pkg.readText("word/styles.xml"), tracker);
     ctx.styles = styleSheet;
+    const listSources = { numbering, styles: styleSheet, diagnostics: parserSink };
 
     // Header/footer support: expose the section references + a part walker so
     // a contribution (HeaderFooter) can reconstruct each part's content
@@ -268,7 +269,7 @@ export async function importDocx(
         return entry?.type === "hyperlink" ? entry.target : undefined;
       };
       try {
-        const model = reconstructLists(parseBlockContainer(partRoot, parserSink), numbering, styleSheet);
+        const model = reconstructLists(parseBlockContainer(partRoot, parserSink), listSources);
         return transformToProseMirror(model, ctx, handlers);
       } finally {
         ctx.media.resolveImage = savedResolveImage;
@@ -281,7 +282,7 @@ export async function importDocx(
     }
 
     const rawModel = parseDocumentBody(root, parserSink);
-    const model = reconstructLists(rawModel, numbering, styleSheet);
+    const model = reconstructLists(rawModel, listSources);
     let doc = transformToProseMirror(model, ctx, handlers);
 
     for (const { owner, hook } of lifecycleHooks.onImportComplete) {

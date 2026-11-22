@@ -23,13 +23,15 @@ export interface NumberingResolver {
   format(numId: number, ilvl: number): string | undefined;
   /** The list type at a level, or `"bullet"` as a safe default. */
   resolve(numId: number, ilvl: number): ListType;
+  /** Whether `numbering.xml` defines `numId`; Word numbers nothing by one it does not. */
+  defines(numId: number): boolean;
   /** The level whose `w:pStyle` names `styleId` — how Word ties a heading style to a level. */
   levelOfStyle(numId: number, styleId: string): number | undefined;
   /** The first number of a level: the list's `startOverride`, else its definition's `w:start`, else 1. */
   start(numId: number, ilvl: number): number;
 }
 
-const NONE: NumberingResolver = { format: () => undefined, levelOfStyle: () => undefined, resolve: () => "bullet", start: () => 1 };
+const NONE: NumberingResolver = { defines: () => false, format: () => undefined, levelOfStyle: () => undefined, resolve: () => "bullet", start: () => 1 };
 
 /** A whole number in an attribute, or undefined. */
 function intAttr(el: OoxmlElement | undefined, name: string): number | undefined {
@@ -112,6 +114,7 @@ export function readNumberingMap(xml: string | undefined, tracker?: ReadTracker)
     return formats?.get(ilvl) ?? formats?.get(0);
   };
   return {
+    defines: (numId) => numIdToAbstract.has(String(numId)),
     format,
     levelOfStyle(numId, styleId) {
       const abstractId = numIdToAbstract.get(String(numId));
