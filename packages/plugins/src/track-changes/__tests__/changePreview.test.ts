@@ -10,7 +10,7 @@ import { TrackChanges } from "../TrackChanges";
 import { TrackChangesStatus } from "../types";
 import { findChanges } from "../findChanges";
 import { applyRichDiffAsSuggestion } from "../lib/applyRichDiffAsSuggestion";
-import { changeAtCaret, changePreviewText } from "../createChangePopover";
+import { changeAtCaret, changePreviewText, conflictAt } from "../createChangePopover";
 
 function movedAndRewritten() {
   const editor = new ServerEditor({
@@ -117,5 +117,24 @@ describe("the card at the caret, in each replacement view", () => {
     const pending = typedOver();
     expect(changeAtCaret(pending, at(pending, "insert"), "split")?.dataTracked.operation).toBe("insert");
     expect(changeAtCaret(pending, at(pending, "delete"), "split")?.dataTracked.operation).toBe("delete");
+  });
+});
+
+describe("the parties to a conflict, in each replacement view", () => {
+  it("count a replacement as one party paired, and two split", () => {
+    const editor = new ServerEditor({
+      extensions: [StarterKit, TrackChanges.configure({ userID: "u1", initialStatus: TrackChangesStatus.enabled })],
+      content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "The cat sat" }] }] },
+    });
+    editor.applyTransaction(editor.getState().tr.insertText("dog", 5, 8));
+    editor.commands.setTrackChangesUserID("u2");
+    editor.applyTransaction(editor.getState().tr.delete(5, 8));
+    const { pending } = findChanges(editor.getState());
+    const theirs = pending.find((c) => c.dataTracked.authorID === "u2")!;
+    const parties = (view: "paired" | "split") =>
+      conflictAt(pending, theirs, theirs.from + 1, view)?.parties.map((c) => `${c.dataTracked.authorID}:${c.dataTracked.operation}`).sort();
+
+    expect(parties("paired")).toEqual(["u1:insert", "u2:delete"]);
+    expect(parties("split")).toEqual(["u1:delete", "u1:insert", "u2:delete"]);
   });
 });

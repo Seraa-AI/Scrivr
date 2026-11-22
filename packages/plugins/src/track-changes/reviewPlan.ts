@@ -144,7 +144,11 @@ const sameReplacement = (a: TrackedChange, b: TrackedChange) =>
   new Set([a.dataTracked.operation, b.dataTracked.operation]).size === 2 &&
   [a, b].every((c) => c.dataTracked.operation === "insert" || c.dataTracked.operation === "delete");
 
-/** Pieces of one phrase, written apart around content it kept: the same edit, in either view. */
+/**
+ * Pieces of one group with the same operation: one edit in either view — a
+ * word typed over a selection in several strokes, or a phrase written apart
+ * around content it kept.
+ */
 const samePhrase = (a: TrackedChange, b: TrackedChange) =>
   !!a.dataTracked.groupId && a.dataTracked.groupId === b.dataTracked.groupId &&
   a.dataTracked.authorID === b.dataTracked.authorID &&

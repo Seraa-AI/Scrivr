@@ -60,19 +60,18 @@ function trackAttrsChangeStep(
 
 /**
  * Whether `records`, written over `node`'s, only drops some of `authorID`'s:
- * every record left stands exactly as it was.
+ * every record left stands exactly as it was. Records are matched whole, since
+ * one read from a saved document may carry no id.
  */
 function withdrawsOwnRecords(node: PMNode, records: unknown, authorID: string): boolean {
-  const before = new Map((getBlockInlineTrackedData(node) ?? []).map((record) => [record.id, record]));
-  const after = (Array.isArray(records) ? records : [records]).filter(isTrackedRecord);
-  const kept = new Set(after.map((record) => record.id));
-  return (
-    after.every((record) => {
-      const old = record.id === undefined ? undefined : before.get(record.id);
-      return old !== undefined && stableStringify(old) === stableStringify(record);
-    }) &&
-    [...before.values()].every((record) => kept.has(record.id) || record.authorID === authorID)
-  );
+  const before = getBlockInlineTrackedData(node) ?? [];
+  const dropped = before.map((record) => stableStringify(record));
+  for (const record of (Array.isArray(records) ? records : [records]).filter(isTrackedRecord)) {
+    const at = dropped.indexOf(stableStringify(record));
+    if (at < 0) return false;
+    dropped.splice(at, 1);
+  }
+  return before.every((record) => !dropped.includes(stableStringify(record)) || record.authorID === authorID);
 }
 
 export default trackAttrsChangeStep;

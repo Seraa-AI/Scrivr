@@ -331,7 +331,8 @@ Delivery, each PR stacked on the one before:
   `"paired"`.
 - **PR 3 (the lanes):** every lane writes plain edits through `writeProposal`
   and asks `suggestionBlocked` before sending them: the plugin's lanes through
-  `dispatchSuggestion`, the AI lane itself, since it also has a direct mode. Where it differs from the decisions above:
+  `dispatchSuggestion`, and the AI lane asks it itself, since it also has a
+  direct mode. Where it differs from the decisions above:
   - Withdrawal (Decision 3) uses `tr.setNodeAttribute` on `dataTracked`, and
     `trackAttrsChangeStep` lets an author withdraw only their own records;
     rewriting another author's is undone.
@@ -342,7 +343,7 @@ Delivery, each PR stacked on the one before:
     split into one op per run of formatting, is one replacement.
   - A phrase whose deletion is split around an image it keeps is written as
     several steps, named on the transaction (`TrackChangesAction.phrases`), and
-    the engine gives them one replacement.
+    the engine gives them one group, which review reads as one act.
   - Dragging one's own pending words along their paragraph is an insertion in
     the new place, not a move (`withdrawsOwnInsertion`).
   - `suggestedContent` is gone; `setInlineFragmentAsInserted` holds one

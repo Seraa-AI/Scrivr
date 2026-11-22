@@ -64,8 +64,8 @@ function caretBeforeStepEnd(tr: Transaction, i: number, step: ReplaceStep): numb
  * so a word typed in several strokes stays one act.
  */
 function replacementGroup(step: ReplaceStep, doc: PMNode, authorID: string): string | undefined {
-  // A step bringing blocks in (an open slice), or across blocks, also joins or
-  // splits them, which is not a word swap.
+  // A step bringing blocks in (an open slice), or across blocks (which
+  // `inlineNodesIn` refuses), also joins or splits them, which is not a word swap.
   const closedInsert = step.slice.size > 0 && step.slice.openStart === 0 && step.slice.openEnd === 0;
   const covered = closedInsert ? inlineNodesIn(doc, step.from, step.to) : null;
   if (!covered) return undefined;
@@ -86,7 +86,7 @@ function replacementGroup(step: ReplaceStep, doc: PMNode, authorID: string): str
  * step starts, or one of its own when that step starts none, so words deleted
  * around an image the phrase keeps stay one act.
  */
-function phraseReplacementGroups(tr: Transaction, authorID: string): Map<Step, string> {
+function groupsOfPhrases(tr: Transaction, authorID: string): Map<Step, string> {
   const groups = new Map<Step, string>();
   for (const steps of getAction(tr, TrackChangesAction.phrases) ?? []) {
     const [lead] = steps;
@@ -123,7 +123,7 @@ export function trackTransaction(
   }
 
   const baseAttrs = createNewPendingAttrs(tr.time, authorID);
-  const phraseGroups = phraseReplacementGroups(tr, authorID);
+  const phraseGroups = groupsOfPhrases(tr, authorID);
 
   for (let i = tr.steps.length - 1; i >= 0; i--) {
     const step = tr.steps[i]!;

@@ -176,6 +176,19 @@ describe.each(lanes.slice(0, 2))("$name, over a break", ({ apply }) => {
     expect(editor.getState().doc.nodeAt(at)?.attrs["dataTracked"]).toEqual(records);
   });
 
+  it("never erases another author's record on a break, with or without an id", () => {
+    const records = [
+      { authorID: "someone else", operation: "delete", status: "pending" },
+      { authorID: "u1", operation: "delete", status: "pending" },
+    ];
+    for (const order of [records, [...records].reverse()]) {
+      const editor = editorOf([...textOf("one"), { ...hardBreak, attrs: { dataTracked: order } }, ...textOf("two")]);
+      editor.applyTransaction(editor.getState().tr.setNodeAttribute(4, "dataTracked", []));
+
+      expect(editor.getState().doc.nodeAt(4)?.attrs["dataTracked"]).toEqual(order);
+    }
+  });
+
   it("deletes words with an image inside as one act, keeping the image", () => {
     const editor = editorOf([...textOf("a cat"), image, ...textOf("dog sat")]);
     apply(editor, "a sat");
