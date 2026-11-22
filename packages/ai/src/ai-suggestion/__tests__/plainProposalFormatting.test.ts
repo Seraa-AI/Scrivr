@@ -35,8 +35,14 @@ describe("a plain proposal beside another author's pending unformat", () => {
     const editor = new AiTestEditor(doc(schema.nodes["paragraph"]!.create({ nodeId: "p1" }, [
       schema.text("alpha "), schema.text("beta", [bold()]), schema.text(" gamma"),
     ])), "bob");
-    // Bob proposes taking the bold off "beta".
-    editor.applyTransaction(editor.getState().tr.removeMark(7, 11, schema.marks["bold"]!));
+    // Bob proposes taking the bold off "beta", with the editor's own mark type.
+    const state = editor.getState();
+    editor.applyTransaction(state.tr.removeMark(7, 11, state.schema.marks["bold"]!));
+    let unboldProposed = false;
+    editor.getState().doc.nodesBetween(7, 11, (node) => {
+      if (node.marks.some((m) => m.type.name === "bold" && Array.isArray(m.attrs["dataTracked"]) && m.attrs["dataTracked"].length > 0)) unboldProposed = true;
+    });
+    expect(unboldProposed).toBe(true);
 
     const suggestion = computeAiSuggestion(editor.getState(), { blocks: [{ nodeId: "p1", proposedText: "one beta gamma" }], authorID: "AI" });
     expect(formattingGroups(suggestion)).toEqual([]);
