@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import { DOMSerializer } from "prosemirror-model";
 import { ServerEditor } from "../../ServerEditor";
 import { StarterKit } from "../StarterKit";
+import { Heading } from "./Heading";
+import { List } from "./List";
+import { Paragraph } from "./Paragraph";
+import { Document } from "./Document";
 
 const orderedFrom = (order: number) => new ServerEditor({
   extensions: [StarterKit],
@@ -54,5 +58,13 @@ describe("a heading in a list, as Word makes one", () => {
     editor.runCommand("toggleBulletList");
     editor.runCommand("toggleBulletList");
     expect(editor.getState().doc.child(0).type.name).toBe("heading");
+  });
+
+  it("starts a new list item with a paragraph, whatever order the extensions come in", () => {
+    const editor = new ServerEditor({
+      extensions: [Document, Heading, Paragraph, List],
+      content: { type: "doc", content: [{ type: "bulletList", content: [{ type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "ab" }] }] }] }] },
+    });
+    expect(editor.schema.nodes["listItem"]!.contentMatch.defaultType?.name).toBe("paragraph");
   });
 });

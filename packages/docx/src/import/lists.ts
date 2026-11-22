@@ -107,12 +107,16 @@ function findListEnd(
  */
 function buildLists(slice: DocxBlock[], expectedIlvl: number, numbering: NumberingResolver): DocxBlock[] {
   const lists: DocxBlock[] = [];
-  let rest = slice;
-  while (rest.length > 0) {
-    const built = buildList(rest, expectedIlvl, numbering);
-    if (!built) break;
+  let start = 0;
+  while (start < slice.length) {
+    const built = buildList(slice.slice(start), expectedIlvl, numbering);
+    if (!built || built.consumed === 0) {
+      // Nothing more makes a list: what is left stays as paragraphs, never lost.
+      lists.push(...slice.slice(start).map((b) => (isListParagraph(b) ? stripNumberingMarker(b) : b)));
+      break;
+    }
     lists.push(built.list);
-    rest = rest.slice(built.consumed);
+    start += built.consumed;
   }
   return lists;
 }
@@ -155,13 +159,9 @@ function buildList(
       }
       // Nested one level below this list's own level, as the editor draws
       // and exports it, whatever this item's offset.
-      const nested = buildLists(slice.slice(nestedStart, i), expectedIlvl + 1, numbering);
-      if (nested.length > 0 && items.length > 0) {
-        items[items.length - 1]!.content.push(...nested);
-      } else if (nested.length > 0) {
-        // No prior item — open a synthetic one to host the nested list.
-        items.push({ content: nested });
-      }
+      // A nested run follows an item at this level: the list's first
+      // paragraph sits at its own level, so there always is one.
+      items[items.length - 1]?.content.push(...buildLists(slice.slice(nestedStart, i), expectedIlvl + 1, numbering));
       continue;
     }
     // ilvl === targetIlvl — new item.

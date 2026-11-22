@@ -693,7 +693,7 @@ function buildWordList(items: WordListItem[], doc: Document): HTMLElement {
 
     if (item.level > top.level) {
       // A deeper item belongs inside the item above it, which is where HTML
-      // (and our listItem's `paragraph block*` content) puts a sublist.
+      // (and our listItem's leading block, then any blocks) puts a sublist.
       const nested = doc.createElement(item.ordered ? "ol" : "ul");
       (top.list.lastElementChild ?? top.list).appendChild(nested);
       top = { level: item.level, list: nested };

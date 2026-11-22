@@ -149,4 +149,11 @@ describe("list import keeps every item's text", () => {
     expect(doc.child(0).child(0).attrs["levelOffset"]).toBe(2);
     expect(doc.child(1).child(0).attrs["levelOffset"]).toBe(1);
   });
+
+  it("imports a list level Word cannot have, without hanging", async () => {
+    const bytes = await bytesOf({ type: "doc", content: [{ type: "bulletList", content: [item("a"), item("b")] }] });
+    const files = unzipSync(bytes);
+    const document = strFromU8(files["word/document.xml"]!).replace('<w:ilvl w:val="0"/>', '<w:ilvl w:val="-1"/>');
+    expect(await textOf(zipSync({ ...files, "word/document.xml": strToU8(document) }))).toBe("ab");
+  });
 });

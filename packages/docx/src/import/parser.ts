@@ -376,8 +376,9 @@ function parseParagraphProperties(el: OoxmlElement): DocxParagraphAttrs {
     const ilvl = ilvlRaw !== undefined ? Number(ilvlRaw) : NaN;
     const numId = numIdRaw !== undefined ? Number(numIdRaw) : NaN;
     // numId 0 is Word's "no numbering": a paragraph that turns a list off.
+    // Word has nine levels, 0–8; a level outside them is read as the nearest.
     if (Number.isInteger(ilvl) && Number.isInteger(numId) && numId > 0) {
-      attrs.numbering = { numId, ilvl };
+      attrs.numbering = { numId, ilvl: Math.min(Math.max(ilvl, 0), 8) };
     }
   }
 

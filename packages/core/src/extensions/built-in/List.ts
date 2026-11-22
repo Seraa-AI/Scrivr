@@ -287,7 +287,7 @@ const listPdf: PdfNodeHandler = (block, ctx) => ctx.draw.lines(block, ctx);
  * Nodes added:
  *   bulletList  — unordered list container
  *   orderedList — ordered list container (attrs: order)
- *   listItem    — single list item (content: paragraph block*)
+ *   listItem    — single list item (content: (paragraph | listItemLead) block*)
  *
  * Keyboard behaviour (matches Google Docs / Word):
  *   Enter           → split list item (exit list when item is empty)
@@ -341,7 +341,9 @@ export const List = Extension.create({
       listItem: {
         // Its first block is one a list item can lead with — a paragraph, or a
         // heading, which Word numbers as readily — and whatever follows.
-        content: "listItemLead block*",
+        // Paragraph is named first so a new item starts with one, whatever
+        // order the extensions were registered in.
+        content: "(paragraph | listItemLead) block*",
         defining: true,
         attrs: {
           levelOffset: { default: 0 },
