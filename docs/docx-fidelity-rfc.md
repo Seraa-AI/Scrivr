@@ -555,5 +555,9 @@ or a DOM, as `LayoutCoordinator.layoutForExport` already does.
   underline colour and a hanging indent are reported, not lost silently; a
   page break inside an inline content control failed the whole import — it
   is now kept as a line break and reported dropped, and the parser carries
-  page breaks as their own type instead of an `as unknown as` cast.
+  page breaks as their own type instead of an `as unknown as` cast; list
+  import no longer drops the paragraphs after one that starts a list deeper
+  than they sit, and a nested list is placed one level below its list, as
+  the editor draws it, so the numbering it is compared against is the drawn
+  one.
 

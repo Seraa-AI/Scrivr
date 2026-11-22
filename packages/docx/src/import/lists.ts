@@ -37,9 +37,7 @@ export function reconstructLists(
       const startIlvl = b.attrs.numbering.ilvl;
       const startNumId = b.attrs.numbering.numId;
       const endIdx = findListEnd(blocks, i, startNumId, startIlvl);
-      const slice = blocks.slice(i, endIdx);
-      const list = buildList(slice, 0, numbering);
-      if (list) out.push(list);
+      out.push(...buildLists(blocks.slice(i, endIdx), 0, numbering));
       i = endIdx;
     } else {
       out.push(b);
@@ -102,11 +100,28 @@ function findListEnd(
  * further in (`levelOffset`), rather than under empty items. Paragraphs
  * deeper than the list's level are nested inside the previous item.
  */
+/**
+ * Every paragraph of a run, as lists: a list ends where a paragraph sits
+ * shallower than the list's own level, and the rest start the next one, so
+ * no paragraph is left out.
+ */
+function buildLists(slice: DocxBlock[], expectedIlvl: number, numbering: NumberingResolver): DocxBlock[] {
+  const lists: DocxBlock[] = [];
+  let rest = slice;
+  while (rest.length > 0) {
+    const built = buildList(rest, expectedIlvl, numbering);
+    if (!built) break;
+    lists.push(built.list);
+    rest = rest.slice(built.consumed);
+  }
+  return lists;
+}
+
 function buildList(
   slice: DocxBlock[],
   expectedIlvl: number,
   numbering: NumberingResolver,
-): DocxBlock | null {
+): { list: DocxBlock; consumed: number } | null {
   // Identify the list at this level by its leading paragraph's numId.
   const first = slice[0];
   if (!first || !isListParagraph(first)) return null;
@@ -138,12 +153,14 @@ function buildList(
       ) {
         i++;
       }
-      const nested = buildList(slice.slice(nestedStart, i), targetIlvl + 1, numbering);
-      if (nested && items.length > 0) {
-        items[items.length - 1]!.content.push(nested);
-      } else if (nested) {
+      // Nested one level below this list's own level, as the editor draws
+      // and exports it, whatever this item's offset.
+      const nested = buildLists(slice.slice(nestedStart, i), expectedIlvl + 1, numbering);
+      if (nested.length > 0 && items.length > 0) {
+        items[items.length - 1]!.content.push(...nested);
+      } else if (nested.length > 0) {
         // No prior item — open a synthetic one to host the nested list.
-        items.push({ content: [nested] });
+        items.push({ content: nested });
       }
       continue;
     }
@@ -153,7 +170,7 @@ function buildList(
   }
 
   const start = listType === "ordered" ? numbering.start(numId, targetIlvl) : 1;
-  return {
+  const list: DocxBlock = {
     type: "list",
     listType,
     items,
@@ -161,6 +178,7 @@ function buildList(
     ...(format !== undefined ? { format } : {}),
     ...(start !== 1 ? { start } : {}),
   };
+  return { list, consumed: i };
 }
 
 /**

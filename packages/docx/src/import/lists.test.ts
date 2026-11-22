@@ -8,6 +8,7 @@
  */
 
 import { describe, it, expect } from "vitest";
+import { unzipSync, zipSync, strFromU8, strToU8 } from "fflate";
 import { ServerEditor, StarterKit } from "@scrivr/core";
 import { exportDocxBytes } from "../export/export";
 import { importDocx } from "./import";
@@ -94,7 +95,6 @@ describe("list import", () => {
   });
 
   it("reads numId 0, Word's \"no numbering\", as a plain paragraph", async () => {
-    const { unzipSync, zipSync, strFromU8, strToU8 } = await import("fflate");
     const entries = unzipSync(await bytesOf(listDoc));
     const document = strFromU8(entries["word/document.xml"] ?? new Uint8Array());
     const unnumbered = document.replace(/<w:numId w:val="\d+"\/>/g, '<w:numId w:val="0"/>');
@@ -118,5 +118,35 @@ describe("list import", () => {
     await expect(
       importDocx(withoutLists(), await bytesOf(listDoc), { unsupported: "throw" }),
     ).rejects.toThrow(DocxImportError);
+  });
+});
+
+describe("list import keeps every item's text", () => {
+  const item = (text: string, extra: Record<string, unknown> = {}, nested?: Record<string, unknown>) => ({
+    type: "listItem",
+    ...extra,
+    content: [{ type: "paragraph", content: [{ type: "text", text }] }, ...(nested ? [nested] : [])],
+  });
+  const textOf = async (bytes: Uint8Array) => (await importDocx(new ServerEditor(), bytes)).doc.textContent;
+
+  it("keeps the items after a list's first one when it starts deeper than they do", async () => {
+    const bytes = await bytesOf({ type: "doc", content: [{ type: "orderedList", content: [item("first"), item("second"), item("third")] }] });
+    const files = unzipSync(bytes);
+    // Word writes the first paragraph a level deeper than the rest, under the same numbering.
+    const document = strFromU8(files["word/document.xml"]!).replace('<w:ilvl w:val="0"/>', '<w:ilvl w:val="1"/>');
+    expect(await textOf(zipSync({ ...files, "word/document.xml": strToU8(document) }))).toBe("firstsecondthird");
+  });
+
+  it("keeps a nested item under an item that starts deeper, at the depth it was drawn", async () => {
+    const nested = { type: "orderedList", content: [item("n")] };
+    const original = { type: "doc", content: [{ type: "orderedList", content: [item("top", { attrs: { levelOffset: 2 } }, nested)] }] };
+    const bytes = await bytesOf(original);
+    expect(await textOf(bytes)).toBe("topn");
+
+    // Word's paragraphs are flat (level 2, then level 1), so the nesting itself
+    // cannot come back; each item comes back at the depth it was drawn at.
+    const { doc } = await importDocx(new ServerEditor(), bytes);
+    expect(doc.child(0).child(0).attrs["levelOffset"]).toBe(2);
+    expect(doc.child(1).child(0).attrs["levelOffset"]).toBe(1);
   });
 });
