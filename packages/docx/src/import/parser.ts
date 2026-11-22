@@ -398,6 +398,10 @@ function parseParagraphInlines(el: OoxmlElement, diag: ParserDiagnostics): DocxI
       if (instr !== undefined) content.push({ type: "field", instr, marks: [] });
     } else if (child.name === "w:sdt") {
       content.push(parseInlineSdt(child, diag));
+    } else if (child.name === "w:smartTag") {
+      // A tag Word put on recognised text (a place, a date): the runs inside
+      // are the document's text, and the tag adds nothing the editor shows.
+      content.push(...parseParagraphInlines(child, diag));
     } else if (child.name === "w:hyperlink") {
       // Preserve hyperlink identity by attaching a `link` mark to every
       // inline produced by its inner runs. Stage 2 (Link extension)
@@ -423,7 +427,7 @@ function parseInlineSdt(el: OoxmlElement, diag: ParserDiagnostics): DocxInline {
   return {
     type: "sdt",
     tag: (tagEl && attr(tagEl, "w:val")) ?? null,
-    placeholder: sdtPr ? findChild(sdtPr, "w:showingPlcHdr") !== undefined : false,
+    placeholder: sdtPr ? hasChild(sdtPr, "w:showingPlcHdr") : false,
     listItems: sdtPr ? sdtListItems(sdtPr) : [],
     content: contentEl ? parseParagraphInlines(contentEl, diag) : [],
     marks: [],
@@ -578,7 +582,8 @@ function parseDrawing(
   let wrapMode: DocxImageInline["wrapMode"] | undefined;
   if (hasChild(wrapper, "wp:wrapSquare")) wrapMode = "square";
   else if (hasChild(wrapper, "wp:wrapTopAndBottom")) wrapMode = "top-bottom";
-  else if (findChild(wrapper, "wp:wrapTight")) wrapMode = "square"; // tight → square fallback
+  // tight → square fallback. Left `examined`, not read: its wrap polygon is lost.
+  else if (findChild(wrapper, "wp:wrapTight")) wrapMode = "square";
   else if (hasChild(wrapper, "wp:wrapNone")) wrapMode = behindDoc ? "behind" : "front";
   if (!wrapMode) {
     wrapMode = "square";

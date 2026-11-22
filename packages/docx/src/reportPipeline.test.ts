@@ -948,6 +948,13 @@ describe("importDocx — what each extension says it could not keep", () => {
     expect(report.entries).toContainEqual({ outcome: "dropped", kind: "hyperlink", reason: "no usable target", owner: "link", count: 1 });
   });
 
+  it("keeps the text inside a smart tag", async () => {
+    const body = `<w:p><w:r><w:t xml:space="preserve">Call </w:t></w:r><w:smartTag w:uri="urn:x" w:element="place"><w:smartTagPr/><w:r><w:t>Nairobi</w:t></w:r></w:smartTag></w:p>`;
+    const { doc, report } = await importDocx(new ServerEditor({ extensions: [StarterKit] }), await docWithBody(body));
+    expect(doc.textContent).toContain("Call Nairobi");
+    expect(dropsOf(report)).toEqual([]);
+  });
+
   it("counts no loss for shading that sets no fill", async () => {
     const report = await importOf(`<w:p>${run(`<w:shd w:val="nil"/>`)}${run(`<w:shd w:val="clear" w:color="auto"/>`)}</w:p>`);
     expect(dropsOf(report)).toEqual([]);
