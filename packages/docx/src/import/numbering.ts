@@ -83,8 +83,9 @@ export function readNumberingMap(xml: string | undefined, tracker?: ReadTracker)
     const formats = new Map<number, string>();
     for (const lvl of findChildren(aNum, "w:lvl")) {
       const ilvl = intAttr(lvl, "w:ilvl");
+      // A level that names no format is decimal (ECMA-376 §17.9.17).
       const numFmt = findChild(lvl, "w:numFmt");
-      const fmt = numFmt && attr(numFmt, "w:val");
+      const fmt = numFmt ? attr(numFmt, "w:val") : "decimal";
       if (ilvl !== undefined && fmt) formats.set(ilvl, fmt);
       const pStyle = findChild(lvl, "w:pStyle");
       const linked = pStyle && attr(pStyle, "w:val");

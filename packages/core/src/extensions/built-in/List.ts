@@ -528,7 +528,7 @@ export const List = Extension.create({
         let inside: Scope = scope;
         if (kind) {
           const listLevel = nestedListLevel(scope.listLevel);
-          const numId = numIdFor(node, kind, scope.parent, listLevel);
+          const numId = numIdFor(node, kind, scope.parent, Math.min(listLevel, LIST_LEVEL_COUNT - 1));
           inside = { parent: { kind, numId }, listLevel, listNumId: numId };
         } else if (scope.listNumId !== null && scope.listLevel !== null && node.type.name === "listItem") {
           itemMap.set(node, { numId: scope.listNumId, ilvl: itemLevel(node, scope.listLevel) });

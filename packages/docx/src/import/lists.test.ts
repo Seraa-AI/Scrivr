@@ -223,4 +223,26 @@ describe("list numbering, as Word counts it", () => {
     const { doc } = await importDocx(new ServerEditor(), bytes);
     expect(ordersOf(doc)).toEqual([5, 3]);
   });
+
+  it("never points a start at a level Word does not have, however deep the nesting", async () => {
+    let list: Record<string, unknown> = { type: "orderedList", attrs: { order: 4 }, content: [li("bottom")] };
+    for (let depth = 0; depth < 10; depth++) {
+      list = { type: depth % 2 === 0 ? "bulletList" : "orderedList", content: [li(`l${depth}`, list)] };
+    }
+    const numbering = strFromU8(unzipSync(await bytesOf({ type: "doc", content: [list] }))["word/numbering.xml"]!);
+    const levels = [...numbering.matchAll(/<w:lvlOverride w:ilvl="(\d+)"/g)].map((m) => Number(m[1]));
+    expect(Math.max(...levels)).toBeLessThanOrEqual(8);
+  });
+
+  it("numbers a level that names no format as decimal, as Word does", async () => {
+    const W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
+    const bytes = await bytesOf({ type: "doc", content: [{ type: "orderedList", content: [
+      li("H", { type: "orderedList", content: [li("s1"), li("s2")] }),
+    ] }] });
+    const numbering = `<w:numbering ${W}><w:abstractNum w:abstractNumId="1">`
+      + `<w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="none"/></w:lvl><w:lvl w:ilvl="1"><w:start w:val="1"/></w:lvl></w:abstractNum>`
+      + `<w:num w:numId="1"><w:abstractNumId w:val="1"/></w:num></w:numbering>`;
+    const { doc } = await importDocx(new ServerEditor(), zipSync({ ...unzipSync(bytes), "word/numbering.xml": strToU8(numbering) }));
+    expect(doc.content.content.map((n) => n.type.name)).toEqual(["paragraph", "orderedList"]);
+  });
 });
