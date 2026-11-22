@@ -882,6 +882,19 @@ describe("exportDocx — what each extension says it could not write", () => {
     expect(changesBy(exact, "fontSize")).toEqual([]);
   });
 
+  it("names a link's unwritten title once per link, however many runs it spans", async () => {
+    const link = { type: "link", attrs: { href: "https://example.com", title: "Example" } };
+    const report = await exportOf([{
+      type: "paragraph",
+      content: [
+        { type: "text", text: "a", marks: [link] },
+        { type: "text", text: "b", marks: [link, { type: "bold" }] },
+        { type: "text", text: "c", marks: [link, { type: "italic" }] },
+      ],
+    }]);
+    expect(report.counts["link"]).toEqual({ kept: 1, dropped: 0, changed: 1 });
+  });
+
   it("names a table cell background Word is given differently, or not at all", async () => {
     const cell = (background: string) => ({ type: "tableCell", attrs: { background }, content: [{ type: "paragraph" }] });
     const report = await exportOf(
@@ -933,6 +946,28 @@ describe("importDocx — what each extension says it could not keep", () => {
     expect(report.entries).toContainEqual({ outcome: "dropped", kind: "sz", reason: "not a valid size", owner: "fontSize", count: 1 });
     expect(report.entries).toContainEqual({ outcome: "dropped", kind: "rFonts", reason: "theme font not resolved", owner: "fontFamily", count: 1 });
     expect(report.entries).toContainEqual({ outcome: "dropped", kind: "hyperlink", reason: "no usable target", owner: "link", count: 1 });
+  });
+
+  it("counts no loss for shading that sets no fill", async () => {
+    const report = await importOf(`<w:p>${run(`<w:shd w:val="nil"/>`)}${run(`<w:shd w:val="clear" w:color="auto"/>`)}</w:p>`);
+    expect(dropsOf(report)).toEqual([]);
+  });
+
+  it("names no change for a highlight in the editor's own colour", async () => {
+    const editor = new ServerEditor({ extensions: [StarterKit] });
+    editor.setContent({ type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "x", marks: [{ type: "highlight" }] }] }] });
+    const { report } = await importDocx(new ServerEditor({ extensions: [StarterKit] }), await exportDocxBytes(editor));
+    expect(changesBy(report, "highlight")).toEqual([]);
+  });
+
+  it("drops a link it cannot resolve once, though it covers an image", async () => {
+    const editor = new ServerEditor();
+    editor.setContent({ type: "doc", content: [{ type: "paragraph", content: [{ type: "image", attrs: { src: PIXEL } }] }] });
+    const files = unzipSync(await exportDocxBytes(editor));
+    const document = strFromU8(files["word/document.xml"]!).replace(/(<w:r>(?:(?!<w:r>).)*?<w:drawing>.*?<\/w:r>)/s, `<w:hyperlink r:id="rIdMissing">$1</w:hyperlink>`);
+    expect(document).toContain("rIdMissing");
+    const { report } = await importDocx(new ServerEditor(), zipSync({ ...files, "word/document.xml": strToU8(document) }));
+    expect(report.counts["hyperlink"]).toMatchObject({ kept: 0, dropped: 1 });
   });
 
   it("drops a link it cannot resolve once, however many runs it spans", async () => {

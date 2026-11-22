@@ -176,7 +176,9 @@ export const Highlight = Extension.create<HighlightOptions>({
     // (arbitrary background fill). Claim both kinds so the round-trip is
     // exact regardless of which form the source used.
     const multicolor = this.options.multicolor;
-    const solid = (pattern: unknown) => pattern === undefined || pattern === "clear" || pattern === "nil";
+    // What the editor's one highlight colour is written as, so reading it back is no change.
+    const ownFill = cssColorToDocxHex(this.options.color)?.toUpperCase();
+    const isSolidPattern = (pattern: unknown) => pattern === undefined || pattern === "clear" || pattern === "nil";
 
     // A highlight of `none`, or shading with no fill and no pattern, is Word
     // saying "no background": no mark, and nothing lost.
@@ -197,7 +199,7 @@ export const Highlight = Extension.create<HighlightOptions>({
     const fromShading: DocxMarkTransform = (mark, ctx) => {
       const fill = mark.attrs?.["fill"];
       const pattern = mark.attrs?.["val"];
-      if (fill === "auto" && solid(pattern)) {
+      if ((fill === undefined || fill === "auto") && isSolidPattern(pattern)) {
         ctx.report.kept(mark.kind);
         return null;
       }
@@ -205,9 +207,9 @@ export const Highlight = Extension.create<HighlightOptions>({
       if (!t) return null;
       if (typeof fill !== "string" || fill === "auto") return null;
       // A patterned shading — dots, stripes, a percentage — is drawn as its fill alone.
-      if (!solid(pattern)) ctx.report.changed(mark.kind, `pattern "${String(pattern)}" not kept`);
+      if (!isSolidPattern(pattern)) ctx.report.changed(mark.kind, `pattern "${String(pattern)}" not kept`);
       if (multicolor) return t.create({ color: `#${fill}` });
-      ctx.report.changed(mark.kind, SINGLE_COLOR);
+      if (fill.toUpperCase() !== ownFill) ctx.report.changed(mark.kind, SINGLE_COLOR);
       return t.create();
     };
 
