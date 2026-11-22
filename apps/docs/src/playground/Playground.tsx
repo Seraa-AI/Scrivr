@@ -15,6 +15,7 @@ import { useTheme } from "next-themes";
 import type { EditorStateContext } from "@scrivr/react";
 import { PdfExport } from "@scrivr/export-pdf";
 import { DocxExport, DocxImport } from "@scrivr/docx";
+import { HtmlImport } from "@scrivr/html";
 import {
   Collaboration,
   CollaborationCursor,
@@ -145,6 +146,7 @@ const EXTENSIONS =
         PdfExport.configure({ filename: identity.room }),
         DocxExport.configure({ filename: identity.room }),
         DocxImport,
+        HtmlImport,
         TrackChanges.configure({
           userID: identity.userName,
           canAcceptReject: true,
@@ -161,6 +163,7 @@ const EXTENSIONS =
         PdfExport.configure({ filename: "scrivr-demo" }),
         DocxExport.configure({ filename: "scrivr-demo" }),
         DocxImport,
+        HtmlImport,
         TrackChanges.configure({ userID: "demo-user", canAcceptReject: true, onRefused: reportRefusal }),
         CitationHighlight,
         ...(AI_ENABLED ? [AiToolkit] : []),
