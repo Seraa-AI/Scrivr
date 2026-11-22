@@ -96,7 +96,7 @@ take them as a person's edits would. Decision 7 answers the first.
      at all.
    - A replacement shows its new words before the words it strikes, as the
      engine places typing over a selection (`selectionContract.test.ts`). The
-     lanes put the struck words first today; the changeset says so.
+     lanes used to put the struck words first; the changeset says so.
    - The plain, rich and AI lanes share one writer, `writeProposal`, which
      turns a block's phrase ops into these edits.
 
@@ -139,8 +139,9 @@ take them as a person's edits would. Decision 7 answers the first.
      back.
    - It also withdraws the author's pending deletion recorded on an inline node
      (a break or image), which Decision 1 now creates, through
-     `setNodeAttribute` of `dataTracked`. The engine records nothing for that
-     step: rewriting a review record is bookkeeping, not an edit.
+     `setNodeAttribute` of `dataTracked`. Withdrawing one's own records is
+     bookkeeping, and the engine records nothing for it; rewriting another
+     author's is undone.
    - As today, the plain and rich lanes withdraw; the AI lane and
      `insertAsSuggestion` do not.
 
@@ -189,10 +190,10 @@ take them as a person's edits would. Decision 7 answers the first.
      the faster default. Reviewing one person's changes at a time, where
      several have tracked changes, is a later setting of the same kind, in its
      own PR.
-   - A lane phrase whose deletion is split around content the lane did not
-     read — an image inside the deleted words — is written as several steps.
-     `writeProposal` marks those steps as one phrase, and the engine gives
-     them one replacement, so the default view still shows one card.
+   - Recording keeps this true for the lanes: a phrase whose deletion is split
+     around content the lane did not read (an image inside the deleted words)
+     is written as several steps, which `writeProposal` names as one phrase;
+     the engine gives them one group, and review reads them as one act.
 
 ## Public surface
 
@@ -329,8 +330,8 @@ Delivery, each PR stacked on the one before:
   popover and `useTrackChangesPanel` in `@scrivr/react`. The default is
   `"paired"`.
 - **PR 3 (the lanes):** every lane writes plain edits through `writeProposal`
-  and leaves through one door, `dispatchSuggestion`, which asks
-  `suggestionBlocked` first. Where it differs from the decisions above:
+  and asks `suggestionBlocked` before sending them: the plugin's lanes through
+  `dispatchSuggestion`, the AI lane itself, since it also has a direct mode. Where it differs from the decisions above:
   - Withdrawal (Decision 3) uses `tr.setNodeAttribute` on `dataTracked`, and
     `trackAttrsChangeStep` lets an author withdraw only their own records;
     rewriting another author's is undone.

@@ -8,17 +8,17 @@ import type { PairedDiffOp } from "./diffText";
 /**
  * Writes a block's diff — `ops` from `phraseReplacements` — into `tr` as the
  * plain edits a person would make, for the engine to record: the caller tags
- * `tr` with `trackAsSuggestion` and asks `suggestionBlocked` before sending it. `map` is the block's
- * accepted-text map, built on `tr.doc` when `tr` had `mapStep` steps; its
- * positions are mapped through what was written since, as a deletion removes
- * its text.
+ * `tr` with `trackAsSuggestion` and asks `suggestionBlocked` before sending
+ * it. `map` is the block's accepted-text map, built on `tr.doc` when `tr` had
+ * `mapStep` steps; its positions are mapped through what was written since,
+ * as a deletion removes its text.
  *
  * Each phrase (the ops sharing a `groupId`: a deletion, and an insertion in
  * one op or several) starts with one step, the unit the engine pairs as one
- * replacement; a deletion split around content it leaves in place takes more
- * steps, which are named on `tr` as one phrase so they stay one replacement. A deletion takes only the
- * characters the map read: an image or another author's struck text between
- * them is left in place, since the proposal never saw it.
+ * replacement. A deletion takes only the characters the map read: an image or
+ * another author's struck text between them is left in place, since the
+ * proposal never saw it, and the steps around it are named on `tr` as one
+ * phrase.
  *
  * `contentFor(from, to)` builds what the proposal puts in for its text between
  * those offsets. `emptyAt` is where content goes in a block with no accepted
@@ -49,8 +49,8 @@ export function writeProposal(
     let end = i;
     while (op.groupId && ops[end + 1]?.type !== "keep" && ops[end + 1]?.groupId === op.groupId) end++;
     const phrase = ops.slice(i, end + 1);
-    const removed = length(phrase, "delete");
-    const added = length(phrase, "insert");
+    const removed = textLength(phrase, "delete");
+    const added = textLength(phrase, "insert");
     i = end;
 
     const runs = docRuns(map, accepted, accepted + removed);
@@ -78,7 +78,7 @@ export function writeProposal(
   return written;
 }
 
-function length(ops: readonly PairedDiffOp[], type: "delete" | "insert"): number {
+function textLength(ops: readonly PairedDiffOp[], type: "delete" | "insert"): number {
   return ops.reduce((sum, op) => sum + (op.type === type ? op.text.length : 0), 0);
 }
 

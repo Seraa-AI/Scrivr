@@ -95,3 +95,27 @@ describe("the change a popover shows at the caret", () => {
     expect(named(editor, "a")).toBe("tableRow");
   });
 });
+
+describe("the card at the caret, in each replacement view", () => {
+  const typedOver = () => {
+    const editor = new ServerEditor({
+      extensions: [StarterKit, TrackChanges.configure({ userID: "u", initialStatus: TrackChangesStatus.enabled })],
+      content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "The cat sat" }] }] },
+    });
+    editor.applyTransaction(editor.getState().tr.insertText("dog", 5, 8));
+    return findChanges(editor.getState()).pending;
+  };
+  const at = (pending: ReturnType<typeof typedOver>, operation: string) =>
+    pending.find((change) => change.dataTracked.operation === operation)!.from + 1;
+
+  it("is the whole replacement when paired", () => {
+    const pending = typedOver();
+    expect(changeAtCaret(pending, at(pending, "insert"))).toBe(changeAtCaret(pending, at(pending, "delete")));
+  });
+
+  it("is the half under the caret when split", () => {
+    const pending = typedOver();
+    expect(changeAtCaret(pending, at(pending, "insert"), "split")?.dataTracked.operation).toBe("insert");
+    expect(changeAtCaret(pending, at(pending, "delete"), "split")?.dataTracked.operation).toBe("delete");
+  });
+});

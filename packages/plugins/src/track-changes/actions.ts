@@ -16,7 +16,7 @@ export enum TrackChangesAction {
   updateMetaNode = "track-changes-update-meta-node",
   structuralChangeAction = "track-changes-structural-change-action",
   indentationAction = "track-changes-indentation-action",
-  /** Steps a writer made for one phrase, recorded as one replacement. */
+  /** Steps a writer made for one phrase, recorded as one group. */
   phrases = "track-changes-phrases",
 }
 

@@ -57,15 +57,6 @@ function caretBeforeStepEnd(tr: Transaction, i: number, step: ReplaceStep): numb
 }
 
 /**
- * Whether `step` puts inline content in. One bringing blocks in (an open
- * slice) also joins or splits them, which is not a word swap; nor is one
- * across blocks, which `inlineNodesIn` turns away.
- */
-function writesInline(step: ReplaceStep): boolean {
-  return step.slice.size > 0 && step.slice.openStart === 0 && step.slice.openEnd === 0;
-}
-
-/**
  * The replacement `step` belongs to, as a `groupId`, or none. A step that types
  * over a selection and records a deletion starts one; text already struck gets
  * no second record, and the author's own pending insertion is taken back.
@@ -73,7 +64,10 @@ function writesInline(step: ReplaceStep): boolean {
  * so a word typed in several strokes stays one act.
  */
 function replacementGroup(step: ReplaceStep, doc: PMNode, authorID: string): string | undefined {
-  const covered = writesInline(step) ? inlineNodesIn(doc, step.from, step.to) : null;
+  // A step bringing blocks in (an open slice), or across blocks, also joins or
+  // splits them, which is not a word swap.
+  const closedInsert = step.slice.size > 0 && step.slice.openStart === 0 && step.slice.openEnd === 0;
+  const covered = closedInsert ? inlineNodesIn(doc, step.from, step.to) : null;
   if (!covered) return undefined;
   const $from = doc.resolve(step.from);
   if (step.from === step.to) return ownReplacementOf($from.nodeBefore, authorID) ?? ownReplacementOf($from.nodeAfter, authorID);

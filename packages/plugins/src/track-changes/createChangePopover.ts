@@ -426,7 +426,7 @@ export function createChangePopover(
     primaryInfo.isConflict = isConflict;
     // One party per act: a whole-paragraph change is recorded on the node and on
     // its text, and those are one thing to keep or to discard.
-    const parties = changeActs(conflictGroup).map((act) => act.primary);
+    const parties = changeActs(conflictGroup, view).map((act) => act.primary);
     primaryInfo.conflictChanges = isConflict ? parties.map(toInfo) : [];
 
     // Stable key: use groupId when available (so moving across chars within the

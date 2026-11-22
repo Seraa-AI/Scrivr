@@ -5,6 +5,7 @@
 "@scrivr/export-markdown": patch
 "@scrivr/export-pdf": patch
 "@scrivr/export-semantic": patch
+"@scrivr/html": patch
 "@scrivr/plugins": patch
 "@scrivr/react": patch
 ---
