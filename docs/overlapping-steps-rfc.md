@@ -153,7 +153,7 @@ tracked, and Reject all returned the original document.
 
 ## What shipped
 
-- **#257.** Docs and tests, with an empty changeset; no package behaves
+- **#257.** Docs and tests, labelled `no-release`; no package behaves
   differently.
 - `trackedGestures`: six gestures over selected cells, each required to change
   the document and be recorded, and `selectCells`, which restores a cell
