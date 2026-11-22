@@ -240,7 +240,7 @@ export async function importDocx(
     };
 
     for (const { owner, hook } of lifecycleHooks.onBeforeImport) {
-      await recorder.attributeAsync(owner, () => hook(ctx));
+      await recorder.fileUnderAsync(owner, () => hook(ctx));
     }
 
     const rawModel = parseDocumentBody(root, parserSink);
@@ -249,7 +249,7 @@ export async function importDocx(
 
     for (const { owner, hook } of lifecycleHooks.onImportComplete) {
       const current = doc;
-      doc = await recorder.attributeAsync(owner, () => hook(current, ctx));
+      doc = await recorder.fileUnderAsync(owner, () => hook(current, ctx));
     }
     for (const { relId } of [...sectionRefs.headers, ...sectionRefs.footers]) {
       if (walked.has(relId)) continue;
@@ -406,7 +406,7 @@ function layerOver<Args extends unknown[], Result>(
     const earlier = entryOf(registry, key);
     const earlierOwner = ownerOf(owners, key);
     registry[key] = earlier
-      ? (...args: Args) => later(...args) ?? recorder.asOwner(earlierOwner, () => earlier(...args))
+      ? (...args: Args) => later(...args) ?? recorder.answerAs(earlierOwner, () => earlier(...args))
       : later;
     owners[key] = owner;
   }

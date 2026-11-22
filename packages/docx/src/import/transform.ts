@@ -19,7 +19,7 @@
  *
  * Every block, inline and mark this stage meets is recorded in the report as
  * kept or dropped, attributed to the extension whose handler took it — see
- * `../report`. Fallback output is recorded with a `null` owner.
+ * `../report`. Drops by the converter's own fallbacks carry a `null` owner.
  */
 
 import type { Node as PmNode, Mark as PmMark } from "@scrivr/core/pm";
@@ -34,6 +34,7 @@ import type {
   DocxMark,
 } from "@scrivr/core";
 import {
+  DECLINED,
   NO_HANDLER,
   entryOf,
   insideDropped,
@@ -117,7 +118,7 @@ function lostUnlessProduced(
 /**
  * Content the converter itself drops: one warning for the diagnostics and one
  * entry for the report, so neither channel can be forgotten at a drop site.
- * A `null` warning records the drop without one, for kinds whose warnings are
+ * Without a warning it records the drop alone, for kinds whose warnings are
  * silenced but which the inventory still counts.
  */
 function dropUnhandled(
@@ -125,7 +126,7 @@ function dropUnhandled(
   recorder: DocxReportRecorder,
   kind: string,
   reason: string,
-  warning: Omit<DocxDiagnostic, "level"> | null,
+  warning?: Omit<DocxDiagnostic, "level">,
 ): void {
   if (warning) ctx.diagnostics.warn(warning);
   recorder.unhandled(kind, reason);
@@ -156,7 +157,7 @@ function transformBlock(
           );
           if (handled) return handled;
         } else {
-          dropUnhandled(ctx, recorder, "sdt", NO_HANDLER, null);
+          dropUnhandled(ctx, recorder, "sdt", NO_HANDLER);
         }
         // Degrade gracefully by returning the unwrapped children.
         return contentNodes;
@@ -293,13 +294,13 @@ function transformControl(
   const handler = entryOf(handlers.inlines, "sdt");
   if (handler) {
     const marks = transformMarks(layer(inherited, item.marks), ctx, handlers, recorder);
-    // A `null` is "not my tag", not a loss: the content below still lands.
+    // A `null` is "not my tag": the content below still lands.
     const claimed = recorder.handle(
       ownerOf(handlers.owners.inlines, "sdt"),
       "sdt",
       () => handler(item, marks, ctx),
       built,
-      null,
+      DECLINED,
     );
     if (claimed) return [claimed];
   }
@@ -307,7 +308,7 @@ function transformControl(
   // Each run under the mark records whether the control crossed with it, so
   // the control itself is recorded here only when no mark can carry it.
   if (!entryOf(handlers.marks, "sdt")) {
-    dropUnhandled(ctx, recorder, "sdt", NO_HANDLER, null);
+    dropUnhandled(ctx, recorder, "sdt", NO_HANDLER);
     // A prompt nobody owns is Word's, not the document's text.
     if (item.placeholder) return [];
     return transformInlines(item.content, ctx, handlers, recorder, layer(inherited, item.marks));
@@ -356,8 +357,8 @@ function transformAtom(
           },
     );
     // Its formatting goes with it. Not dispatched: nothing would carry the
-    // marks, and a mark nobody claims would add an `unsupported-mark` that
-    // fails an import under `unsupported: "throw"` for a drop that is not.
+    // marks, and a mark nobody claims would add an `unsupported-mark`, which
+    // fails an import under `unsupported: "throw"`, though this drop is not fatal.
     for (const mark of marks) {
       if (!mark.off) recorder.unhandled(mark.kind, insideDropped(item.type));
     }
@@ -412,7 +413,7 @@ function transformMarks(
         mark.kind,
         NO_HANDLER,
         NOISY_RPR_KINDS.has(mark.kind)
-          ? null
+          ? undefined
           : {
               code: "unsupported-mark",
               message: `No import handler for OOXML run-property "${mark.kind}"`,

@@ -190,17 +190,17 @@ export interface DocxDiagnostic {
  * `type`, a `DocxMark` `kind` such as `"b"`, or, for a top-level element the
  * parser cannot read, its tag (`"w:customXml"`).
  *
- * A handler does not have to call this at all. For each item it hands to a
- * handler — a node, an inline or a mark — the converter records `kept` if the
- * handler returned content and `dropped` if it returned none, unless the
- * handler itself reported `kept` or `dropped` for that kind while it ran, in
- * which case the handler's account stands. When an item is lost, whatever was
- * counted kept inside it is moved to dropped with it — unless its handler
- * reported it kept, as one that writes it somewhere other than its result
- * does. Content with no handler is recorded as dropped with the reason
- * `"no handler"`. So `changed`, drops the converter cannot see, and returning
- * nothing for a value that means "no formatting" (report it `kept`) are what a
- * handler adds.
+ * The converter already records:
+ * - each item it hands a handler (a node, an inline, a mark): kept if the
+ *   handler returned content, dropped if not;
+ * - content with no handler, as dropped with the reason `"no handler"`;
+ * - the content inside a lost item, moved to dropped with it.
+ *
+ * A handler adds what the converter cannot see: a `changed` note, a drop
+ * inside content it did return, and `kept` for something it returns nothing
+ * for but did not lose (a value Word uses to mean "no formatting", or content
+ * it wrote somewhere else). Reporting `kept` or `dropped` for the kind it was
+ * handed replaces the converter's account of that item.
  */
 export interface DocxReporter {
   /**

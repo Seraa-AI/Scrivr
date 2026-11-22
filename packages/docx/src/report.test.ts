@@ -135,7 +135,7 @@ describe("report recorder — owners", () => {
 
   it("attributes a hook's calls without recording an outcome for it", () => {
     const recorder = createReportRecorder();
-    recorder.attribute("headerFooter", () => {
+    recorder.fileUnder("headerFooter", () => {
       recorder.reporter.dropped("header", "first-page header has no slot");
     });
     expect(recorder.snapshot()).toEqual({
@@ -154,7 +154,7 @@ describe("report recorder — owners", () => {
 
   it("keeps an awaited hook's frame open across its awaits", async () => {
     const recorder = createReportRecorder();
-    await recorder.attributeAsync("sections", async () => {
+    await recorder.fileUnderAsync("sections", async () => {
       await Promise.resolve();
       recorder.reporter.changed("section", "after an await");
     });
