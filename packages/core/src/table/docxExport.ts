@@ -15,7 +15,8 @@
  * only wrap structure. Word requires every `<w:tc>` to end in a block-level
  * element; our cells always hold paragraphs, so that holds.
  */
-import { compositeColor, parseCssColor, toHex6 } from "../model/cssColor";
+import { parseCssColor } from "../model/cssColor";
+import { writtenDocxColor } from "../exports/docxColor";
 import { cellGridSpan, cellVMerge } from "./attrs";
 import type { Node } from "prosemirror-model";
 import { xml, pxToTwips, type DocxNodeHandler, type DocxReporter, type XmlNode } from "../exports/docx";
@@ -32,16 +33,11 @@ const BORDER_COLOR = "9CA3AF"; // neutral gray, same as the canvas row painter.
 function shadingFill(cell: Node, report: DocxReporter): string | null {
   const written = cell.attrs["background"];
   if (typeof written !== "string" || written.length === 0) return null;
-  const colour = parseCssColor(written);
-  if (!colour) {
+  if (parseCssColor(written) === null) {
     report.changed(cell.type.name, "background not written: not a color");
     return null;
   }
-  if (colour.alpha === 0) return null;
-  // DOCX cell shading has no alpha; these documents use an unshaded white page.
-  if (colour.alpha < 1) report.changed(cell.type.name, "translucent background blended onto white");
-  const opaque = compositeColor(colour, { r: 255, g: 255, b: 255 });
-  return toHex6(opaque).toUpperCase();
+  return writtenDocxColor(written, cell.type.name, "background", report);
 }
 
 /** Single-line borders on every edge so the table reads like the canvas grid. */

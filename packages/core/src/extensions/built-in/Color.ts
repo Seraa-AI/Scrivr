@@ -1,7 +1,7 @@
 import { Extension } from "../Extension";
+import { writtenDocxColor } from "../../exports/docxColor";
 import type { MarkDecorator, SpanRect, ToolbarItemSpec } from "../types";
 import {
-  cssColorToDocxHex,
   type DocxMarkHandler,
   type DocxMarkTransform,
 } from "../../exports/docx";
@@ -108,7 +108,7 @@ export const Color = Extension.create<ColorOptions>({
         ctx.report.dropped(mark.type.name, "no color");
         return props;
       }
-      const hex = cssColorToDocxHex(v);
+      const hex = writtenDocxColor(v, mark.type.name, "color", ctx.report);
       if (hex) return { ...props, color: hex };
       ctx.diagnostics.warn({
         code: "unsupported-color",

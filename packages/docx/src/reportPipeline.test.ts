@@ -900,6 +900,19 @@ describe("exportDocx — what each extension says it could not write", () => {
     expect(report.counts["link"]).toEqual({ kept: 1, dropped: 0, changed: 1 });
   });
 
+  it("names a translucent colour Word is given blended onto white", async () => {
+    const report = await exportOf([{
+      type: "paragraph",
+      content: [
+        { type: "text", text: "a", marks: [{ type: "color", attrs: { color: "rgba(255, 0, 0, 0.5)" } }] },
+        { type: "text", text: "b", marks: [{ type: "highlight", attrs: { color: "rgba(0, 0, 255, 0.5)" } }] },
+        { type: "text", text: "c", marks: [{ type: "color", attrs: { color: "#00ff00" } }] },
+      ],
+    }]);
+    expect(changesBy(report, "color")).toEqual(["color: translucent color blended onto white"]);
+    expect(changesBy(report, "highlight")).toEqual(["highlight: translucent color blended onto white"]);
+  });
+
   it("names a table cell background Word is given differently, or not at all", async () => {
     const cell = (background: string) => ({ type: "tableCell", attrs: { background }, content: [{ type: "paragraph" }] });
     const report = await exportOf(

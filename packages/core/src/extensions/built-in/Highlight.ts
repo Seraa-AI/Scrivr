@@ -1,4 +1,5 @@
 import { toggleMark } from "prosemirror-commands";
+import { writtenDocxColor } from "../../exports/docxColor";
 import { Extension } from "../Extension";
 import { parseCssColor } from "../../model/cssColor";
 import type { MarkDecorator, SpanRect } from "../types";
@@ -143,7 +144,7 @@ export const Highlight = Extension.create<HighlightOptions>({
       const value = typeof raw === "string" && raw.length > 0 ? raw : fallback;
       const named = docxHighlightName(value);
       if (named) return { ...props, highlight: named };
-      const hex = cssColorToDocxHex(value);
+      const hex = writtenDocxColor(value, mark.type.name, "color", ctx.report);
       if (hex) return { ...props, shadingFill: hex };
       // Unparseable — fall back to the canonical yellow so something paints.
       ctx.report.changed(mark.type.name, "unreadable color written as yellow");
