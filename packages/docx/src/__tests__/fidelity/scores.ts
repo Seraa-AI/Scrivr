@@ -5,16 +5,17 @@ import { fileURLToPath } from "node:url";
 /**
  * Stored results, one file per check under `scores/`, in two shapes:
  *
- * - a score table — per fixture, per metric, a fraction or a yes/no — for the
- *   edited export and the Word comparison;
+ * - a score table — per fixture, per metric, a fraction — for the edited
+ *   export and the Word comparison;
  * - known differences — per fixture, a list of labels — for the round trip.
  *
  * A known gap does not fail the build. A score below its stored value, or a
  * difference not on the stored list, is a regression and fails. A score that
- * rises, or a known difference that is gone, passes and is logged: the change
- * that caused it records the new value by running the suite with
- * `UPDATE_FIDELITY_SCORES=1`, and the diff to the stored file is the evidence
- * a reviewer reads.
+ * rises, or a known difference that is gone, is logged, and fails in CI until
+ * the change that caused it records the new value by running the suite with
+ * `UPDATE_FIDELITY_SCORES=1` — otherwise a later change could fall back to the
+ * old value unnoticed. The diff to the stored file is the evidence a reviewer
+ * reads.
  */
 
 const SCORES_DIR = join(dirname(fileURLToPath(import.meta.url)), "scores");
@@ -23,13 +24,13 @@ const UPDATING = process.env["UPDATE_FIDELITY_SCORES"] === "1";
 /** A count out of a total: `[3, 10]` is three of ten. */
 export type Fraction = [number, number];
 
-/** Per fixture, per metric. A yes scores as one of one. */
-export type ScoreTable = Record<string, Record<string, Fraction | boolean>>;
+/** Per fixture, per metric. */
+export type ScoreTable = Record<string, Record<string, Fraction>>;
 
 /** Per fixture, the differences already known. A label can appear more than once. */
 export type KnownDifferences = Record<string, string[]>;
 
-export interface Verdict {
+interface Verdict {
   regressions: string[];
   improvements: string[];
 }
@@ -57,7 +58,7 @@ export function judge(stored: ScoreTable, measured: ScoreTable): Verdict {
   for (const [fixture, metrics] of Object.entries(measured)) {
     for (const [metric, value] of Object.entries(metrics)) {
       const before = stored[fixture]?.[metric];
-      const label = `${fixture} ${metric}: ${show(before)} → ${show(value)}`;
+      const label = `${fixture} ${metric}: ${formatScore(before)} → ${formatScore(value)}`;
       if (before === undefined) regressions.push(`${label} (not recorded)`);
       else if (ratio(value) < ratio(before)) regressions.push(label);
       else if (ratio(value) > ratio(before)) improvements.push(label);
@@ -98,20 +99,27 @@ export function judgeKnown(stored: KnownDifferences, measured: KnownDifferences)
 function settle(check: string, measured: object, verdict: () => Verdict): string[] {
   if (UPDATING) {
     mkdirSync(SCORES_DIR, { recursive: true });
-    const sorted = Object.fromEntries(Object.entries(measured).sort(([a], [b]) => a.localeCompare(b)));
+    // Code-unit order, the order the fixtures load in, on every machine.
+    const sorted = Object.fromEntries(Object.entries(measured).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
     writeFileSync(join(SCORES_DIR, `${check}.json`), `${JSON.stringify(sorted, null, 2)}\n`);
     return [];
   }
-  const { regressions, improvements } = verdict();
-  if (improvements.length > 0) {
-    console.info(
-      `[fidelity] ${check} improved — run with UPDATE_FIDELITY_SCORES=1 to record:\n  ${improvements.join("\n  ")}`,
-    );
-  }
-  return regressions;
+  return failures(check, verdict(), Boolean(process.env["CI"]));
 }
 
-/** A stored file, or nothing when it is missing or malformed — so every result reads as not recorded. */
+/**
+ * What fails a check: every regression, and in CI an improvement nobody
+ * recorded — left in place, a later change could fall back to the old value
+ * and pass. Locally an improvement is only logged, so it can be seen first.
+ */
+export function failures(check: string, { regressions, improvements }: Verdict, inCI: boolean): string[] {
+  if (improvements.length === 0) return regressions;
+  const message = `${check} improved — run with UPDATE_FIDELITY_SCORES=1 to record:\n  ${improvements.join("\n  ")}`;
+  console.info(`[fidelity] ${message}`);
+  return inCI ? [...regressions, `unrecorded: ${message}`] : regressions;
+}
+
+/** A stored file, or nothing when it is missing or has the wrong shape — so every result reads as not recorded. */
 function read<T>(check: string, guard: (value: unknown) => value is T): T | Record<string, never> {
   const file = join(SCORES_DIR, `${check}.json`);
   if (!existsSync(file)) return {};
@@ -137,14 +145,12 @@ export function publishSummary(title: string, header: readonly string[], rows: r
   if (summary) appendFileSync(summary, `${markdown}\n`);
 }
 
-export function show(value: Fraction | boolean | undefined): string {
+export function formatScore(value: Fraction | undefined): string {
   if (value === undefined) return "—";
-  if (typeof value === "boolean") return value ? "yes" : "no";
   return `${value[0]}/${value[1]}`;
 }
 
-function ratio(value: Fraction | boolean): number {
-  if (typeof value === "boolean") return value ? 1 : 0;
+function ratio(value: Fraction): number {
   // Nothing to measure counts as complete, so an empty total can never regress.
   return value[1] === 0 ? 1 : value[0] / value[1];
 }
@@ -162,7 +168,7 @@ function isScoreTable(value: unknown): value is ScoreTable {
       typeof metrics === "object" &&
       metrics !== null &&
       Object.values(metrics).every(
-        (v) => typeof v === "boolean" || (Array.isArray(v) && v.length === 2 && v.every((n) => typeof n === "number")),
+        (v) => Array.isArray(v) && v.length === 2 && v.every((n) => typeof n === "number"),
       ),
   );
 }

@@ -13,7 +13,7 @@ import { fixedWidthMeasurer, layOut, recordLayout, serializeLayout } from "./lay
 describe.each(FIXTURES)("layout — $name", (fixture) => {
   it("matches the recorded layout log", async () => {
     const { doc } = await importFixture(fixture);
-    const ops = recordLayout(layOut(editorWith(doc), doc, fixedWidthMeasurer()));
+    const ops = recordLayout(layOut(editorWith(doc), fixedWidthMeasurer()));
     await expect(serializeLayout(ops)).toMatchFileSnapshot(`__snapshots__/layout/${fixture.name}.jsonl`);
   });
 });

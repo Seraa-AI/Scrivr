@@ -1,6 +1,5 @@
 {
   "01-administrative-f9355274cbfe": {
-    "pageGeometry": false,
     "pageStarts": [
       0,
       1
@@ -15,7 +14,6 @@
     ]
   },
   "02-correspondence-c1c9a16460c1": {
-    "pageGeometry": false,
     "pageStarts": [
       0,
       2
@@ -30,7 +28,6 @@
     ]
   },
   "03-creative-6823d70dd497": {
-    "pageGeometry": false,
     "pageStarts": [
       0,
       4
@@ -45,7 +42,6 @@
     ]
   },
   "04-educational-5ff2cb136228": {
-    "pageGeometry": false,
     "pageStarts": [
       1,
       1
@@ -60,7 +56,6 @@
     ]
   },
   "05-forms-b63ecf363ed1": {
-    "pageGeometry": false,
     "pageStarts": [
       0,
       0
@@ -75,7 +70,6 @@
     ]
   },
   "06-legal-6e1e31883ae7": {
-    "pageGeometry": false,
     "pageStarts": [
       0,
       0
@@ -90,7 +84,6 @@
     ]
   },
   "07-policies-31d60c2ad3a6": {
-    "pageGeometry": false,
     "pageStarts": [
       1,
       4
@@ -105,7 +98,6 @@
     ]
   },
   "08-reference-35e9f3cf201f": {
-    "pageGeometry": false,
     "pageStarts": [
       0,
       0
@@ -120,7 +112,6 @@
     ]
   },
   "09-reports-88319cfd12a0": {
-    "pageGeometry": false,
     "pageStarts": [
       0,
       0
@@ -135,7 +126,6 @@
     ]
   },
   "10-technical-0cd38f008009": {
-    "pageGeometry": false,
     "pageStarts": [
       3,
       6
@@ -150,7 +140,6 @@
     ]
   },
   "11-administrative-995f335b521f": {
-    "pageGeometry": false,
     "pageStarts": [
       0,
       0
@@ -165,7 +154,6 @@
     ]
   },
   "12-correspondence-4b5e3f82537d": {
-    "pageGeometry": false,
     "pageStarts": [
       0,
       1
@@ -180,7 +168,6 @@
     ]
   },
   "13-creative-e32ddad8ec22": {
-    "pageGeometry": false,
     "pageStarts": [
       0,
       1
@@ -195,7 +182,6 @@
     ]
   },
   "14-educational-3f8be22a9ba5": {
-    "pageGeometry": false,
     "pageStarts": [
       0,
       0
@@ -210,7 +196,6 @@
     ]
   },
   "15-forms-c5656e233c4f": {
-    "pageGeometry": false,
     "pageStarts": [
       0,
       0
@@ -225,9 +210,8 @@
     ]
   },
   "16-legal-319db254cfb3": {
-    "pageGeometry": false,
     "pageStarts": [
-      1,
+      0,
       2
     ],
     "textImported": [
@@ -240,7 +224,6 @@
     ]
   },
   "17-policies-099c9111d52e": {
-    "pageGeometry": false,
     "pageStarts": [
       0,
       1
@@ -255,7 +238,6 @@
     ]
   },
   "18-reference-47b10797b682": {
-    "pageGeometry": false,
     "pageStarts": [
       0,
       0
@@ -270,7 +252,6 @@
     ]
   },
   "19-reports-2396c6ea6e69": {
-    "pageGeometry": false,
     "pageStarts": [
       0,
       0
@@ -285,7 +266,6 @@
     ]
   },
   "20-technical-2f0f92beec3b": {
-    "pageGeometry": false,
     "pageStarts": [
       2,
       3
@@ -300,7 +280,6 @@
     ]
   },
   "21-administrative-25509fb85533": {
-    "pageGeometry": false,
     "pageStarts": [
       0,
       1
@@ -315,7 +294,6 @@
     ]
   },
   "22-correspondence-db35f97a98e9": {
-    "pageGeometry": false,
     "pageStarts": [
       0,
       0
@@ -330,7 +308,6 @@
     ]
   },
   "23-creative-85bcf3eb27e4": {
-    "pageGeometry": false,
     "pageStarts": [
       0,
       1
@@ -345,9 +322,8 @@
     ]
   },
   "24-educational-c9fcd355819c": {
-    "pageGeometry": false,
     "pageStarts": [
-      0,
+      1,
       1
     ],
     "textImported": [
@@ -360,7 +336,6 @@
     ]
   },
   "25-forms-f1be83375e8e": {
-    "pageGeometry": false,
     "pageStarts": [
       0,
       0

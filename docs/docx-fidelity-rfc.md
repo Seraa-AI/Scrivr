@@ -1,6 +1,6 @@
 # DOCX Fidelity RFC — a Word file edited in Scrivr comes back as Word had it
 
-Status: Phases 0 (#249) and 1 (#261) shipped; Phase 2 follows. See What shipped.
+Status: Phases 0 (#249), 1 (#261) and 2 (#268) shipped. See What shipped.
 
 ## Goal
 
@@ -46,7 +46,7 @@ legal, technical and others).
 
 | Check | Result | Phase 2 baseline |
 |---|---|---|
-| Same page count as Word | 10 of 25 | 8 of 25 |
+| Same page count as Word | 10 of 25 | 6 of 25 |
 | Pages start where Word's do (Word's saved break positions) | 13 of 30 breaks | 8 of 29 |
 | All text survives import | 21 of 25. One form keeps 2 of 8,464 characters | 21 of 25. The form keeps 0 of 4,232 |
 | All imported text reaches a page | 24 of 25. One letter shows 78% | 25 of 25 |
@@ -57,7 +57,8 @@ The Phase 2 baseline is what the test suite measures and stores, and it differs
 from the first measurement for known reasons. The suite imports with tables on
 (`StarterKit.configure({ table: true })`), which is how an app opening Word
 files would load it. It lays out in one pinned face (Inter) so its scores are
-the same on every machine, which moves page counts and page starts. It counts a
+the same on every machine, on the page size Word set (import does not carry it
+yet), which moves page counts and page starts. It counts a
 text box's text once: Word writes each text box twice, and the first
 measurement read both copies (8,464 = 2 × 4,232). A hard page break that Word
 follows with a rendered break is one page start, not two. And nested-list text
@@ -279,8 +280,8 @@ Numbers go through `normalizeDrawNumber` (three decimals, no negative zero).
 The function moves from the PDF log into `@scrivr/core` and is exported there,
 so the PDF log and this log share one rounding rule.
 
-Snapshots are taken with a **fixed-width measurer**: a `TextMeasurer` whose
-context gives every glyph the same advance. Real font metrics differ between
+Snapshots are taken with a **fixed-width measurer**: one that gives every
+glyph half the font size. Real font metrics differ between
 Linux CI and a laptop (CLAUDE.md, Test Setup), so a baseline built on them would
 move for reasons unrelated to the change under test. With fixed widths, the log
 isolates the decisions layout makes: spacing, page geometry and where blocks
@@ -293,16 +294,20 @@ Today 5 of the 25 differ. Those differences are stored as known, by how often
 each occurs, and a new difference — or one more of a known one — fails.
 
 **The Word comparison.** Real font metrics this time, every family measured in
-one pinned face (Inter) so the scores are the same on every machine. It
-compares Scrivr's layout with §4 and records, per fixture: page starts
-matched, page geometry matched, and text retained.
+one pinned face (Inter) so the scores are the same on every machine, on the
+page Word set, so page starts measure where layout breaks pages rather than
+the page size import does not yet carry. It compares Scrivr's layout with §4
+and records, per fixture: page starts matched, and text retained. Page
+geometry becomes a score when import carries the page size; until then it
+could only compare Word's page with Scrivr's default.
 
 **How results are judged.** All the scores above are stored per fixture. A
 known gap does not fail the build. It is logged,
 and when `GITHUB_STEP_SUMMARY` is set the comparison is also written to the
 GitHub CI job summary, so a reviewer reads it on the PR. A score below its
-stored value is a regression and fails. A score that rises passes, and the
-change updates the stored value. The snapshots (report and layout log) fail on
+stored value is a regression and fails. A score that rises fails in CI until
+the change records it (`UPDATE_FIDELITY_SCORES=1`), so a later change cannot
+fall back to the old value unnoticed. The snapshots (report and layout log) fail on
 any difference, as the PDF log's do; updating one is a reviewed diff.
 
 It all runs inside `pnpm test`, which `ci.yml` already runs, so there is no
@@ -351,16 +356,19 @@ could plausibly cause, and the diff must notice every one:
 - **Report:** an extension stops calling `kept` → its count changes. A node
   loses its handler → a `"no handler"` drop appears. A property moves onto
   `ignored` → its outcome changes.
-- **Unread tracking:** one `w:spacing` read is removed → that element becomes
-  `unread`.
+- **Unread tracking:** one more `w:spacing` left unread → its count changes.
 - **Layout:** one block's `spaceAfter` changes by 1px; one line break moves by
-  one character; the page size changes to A4.
+  one character; the page size changes from A4 to US Letter.
 - **Edited document:** one `w:spacing` is removed from one untouched paragraph
-  in the export → the untouched score drops. The typed paragraph exports with
-  Scrivr's default font → the edit score drops.
+  → the untouched score drops; on a real export, kept paragraphs given an
+  alignment Word did not set → it drops below the export's own score. The
+  typed paragraph exports with Scrivr's default font → the edit score drops.
+- **Round trip:** a change inside a list item is reported as that item.
+- **Gates:** a fraction below its stored value, a metric no longer measured,
+  one more of a known difference, and in CI an improvement nobody recorded.
 
-If a field stops being recorded, the matching mutation test passes when it
-should fail, which shows the field has gone missing.
+Each test asserts the stored form differs, so if a field stops being
+recorded, the matching test fails.
 
 ## 8. Behaviour changes we accept
 
@@ -419,7 +427,7 @@ Each is independently reviewable and shippable.
 |---|---|---|
 | **0** | `report` on both contexts and results; dispatcher entries (owner, `"no handler"`); `normalizeDrawNumber` exported from core | Unit tests for the report; PDF baselines unchanged |
 | **1** | Each built-in extension reports its lane: Paragraph, Heading, HardBreak, PageBreak, Image, Table, List, Link, … ; `trackUnread`; the `ignored` list | Every StarterKit extension with a DOCX handler reports; the spike's outcomes reproduce |
-| **2** | The test phase (§5) over the 25 committed fixtures: edited-document check, report snapshots, layout log, round trip, Word comparison, mutation tests (§7) | Mutation-proven; the comparison reproduces "Where we actually are" |
+| **2** | The test phase (§5) over the 25 committed fixtures: edited-document check, report snapshots, layout log, round trip, Word comparison, mutation tests (§7) | Mutation-proven; the comparison reproduces the Phase 2 baseline column |
 | **3+** | The fixes, one change each, in this order: page size and margins; paragraph spacing and indents; theme fonts; nested-list layout; text boxes | The report and logs change only where the fix intends; the untouched-paragraph score rises |
 
 The fix order follows reach. Page size changes every line of the 14 Letter
@@ -481,9 +489,10 @@ Settled on 2026-11-04:
 - `packages/docx/src/import/ignored.ts` — the reviewed `ignored` list
 
 **Phase 2**
-- `packages/docx/src/__tests__/fidelity/layoutLog.ts`, `wordReference.ts`
-- `packages/docx/src/__tests__/fidelity/editedExport.test.ts` — the scripted
-  edits and the untouched-paragraph check
+- `packages/docx/src/__tests__/fidelity/layoutLog.ts`, `wordReference.ts`,
+  `fixtures.ts`, `align.ts`, `reportLog.ts`, `roundTrip.ts`, `scores.ts`
+- `packages/docx/src/__tests__/fidelity/editedExport.ts` — the scripted edits
+  and the untouched-paragraph check, run by `editedExport.test.ts`
 - `packages/docx/src/__tests__/fidelity/*.baseline.test.ts`,
   `*.mutation.test.ts`, `roundTrip.test.ts`, `wordComparison.test.ts`
 - `packages/docx/src/__tests__/fidelity/scores/` — stored scores per fixture,
@@ -585,3 +594,32 @@ glyph metrics, and `@expo-google-fonts/inter` for the face it pins.
   `numId` 0, an undefined `numId` (reported) and a `none` level are drawn
   unnumbered, as Word draws them.
 
+### Phase 2 — the test phase (#268)
+
+- Six checks over the 25 committed fixtures, inside `pnpm test`: report and
+  layout snapshots (`__snapshots__/report`, `__snapshots__/layout`), the round
+  trip, the edited export, the Word comparison, and mutation tests that prove
+  each can fail. Scores live in `scores/<check>.json` and are recorded with
+  `UPDATE_FIDELITY_SCORES=1`; the round trip stores its known differences and
+  fails on a new one or one more of a known one.
+- Layout snapshots use fixed-width glyphs; the Word comparison measures in a
+  pinned face (Inter, from a pinned package), so both are the same on Linux CI
+  and a laptop.
+- Formatting is compared on what a reader sees — style, alignment, spacing,
+  indent, borders, shading, tabs; bold, italic, underline, strike, caps,
+  size, colour, highlight, the Latin face. A complex-script size, the
+  paragraph mark's own formatting or a proofing language is no loss to a
+  reader, and comparing them held 14 fixtures at zero, where a gate cannot
+  fail. An inserted paragraph is compared with the paragraph it was split
+  from as Scrivr wrote it, so that paragraph's own loss is not charged twice.
+- Round-trip differences are recorded per text block, with the blocks it sits
+  in, so a loss in one list item or table cell is its own difference.
+- The Word comparison lays each fixture out on the page Word set. Page
+  geometry is not a score until import carries the page size.
+- A score that rises fails in CI until it is recorded.
+- The fixture loader skips Word's `~$` lock files.
+- The baseline: untouched paragraphs 453 of 1,927 kept as Word had them;
+  edits 51 of 75; page starts 8 of 29; the same page count 6 of 25; text
+  imported in full 21 of 25 and on a page 25 of 25; 5 fixtures with known
+  round-trip differences, among them headings that come back bold because
+  re-import applies the exported heading style's run formatting as marks.

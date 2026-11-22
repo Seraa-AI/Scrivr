@@ -5,14 +5,17 @@ import type {
   DocxReportEntry,
   DocxUnreadElement,
   LayoutPage,
+  PageConfig,
 } from "@scrivr/core";
-import { exportDocx } from "../../export/export";
+import { ServerEditor } from "@scrivr/core";
+import { exportDocx, exportDocxBytes } from "../../export/export";
 import type { DocxImportResult } from "../../import/import";
 import { FIXTURES, editorWith, importFixture } from "./fixtures";
 import { fixedWidthMeasurer, layOut, recordLayout, serializeLayout } from "./layoutLog";
 import { serializeReports } from "./reportLog";
 import { TYPED_AT_END, scoreEditedExport } from "./editedExport";
-import { judge, judgeKnown } from "./scores";
+import { roundTripDifferences } from "./roundTrip";
+import { failures, judge, judgeKnown, type Fraction } from "./scores";
 import { paragraphsOfDocx, type WordParagraph } from "./wordReference";
 
 /**
@@ -88,7 +91,7 @@ describe("the layout baseline notices", () => {
   let baseline: string;
   beforeAll(async () => {
     const { doc } = await importFixture(fixture);
-    layout = layOut(editorWith(doc), doc, fixedWidthMeasurer());
+    layout = layOut(editorWith(doc), fixedWidthMeasurer());
     baseline = serializeLayout(recordLayout(layout));
   });
 
@@ -125,7 +128,6 @@ describe("the layout baseline notices", () => {
         if (!first || !second) throw new Error("matched a block with fewer than two lines");
         const from = second.spans[textSpanAt(second)];
         const head = from?.kind === "text" ? from.text.charAt(0) : "";
-        // The first character of the second line moves up to the end of the first.
         return {
           ...block,
           lines: [
@@ -143,8 +145,8 @@ describe("the layout baseline notices", () => {
     // Page size is an input to layout, not a field of a laid-out block, so this
     // one lays the document out again rather than perturbing the recorded log.
     const { doc } = await importFixture(fixture);
-    const usLetter = { pageWidth: 816, pageHeight: 1056, margins: { top: 96, right: 96, bottom: 96, left: 96 } };
-    const onLetter = serializeLayout(recordLayout(layOut(editorWith(doc), doc, fixedWidthMeasurer(), usLetter)));
+    const usLetter = { pageWidth: 816, pageHeight: 1056, margins: { top: 96, right: 96, bottom: 96, left: 96 } } satisfies PageConfig;
+    const onLetter = serializeLayout(recordLayout(layOut(editorWith(doc), fixedWidthMeasurer(), usLetter)));
     expect(onLetter).not.toEqual(baseline);
   });
 });
@@ -184,19 +186,57 @@ describe("the edited-document scores notice", () => {
   });
 });
 
+describe("the edited-document scores notice, from a real export", () => {
+  // What Scrivr actually writes, not a perfect copy, so the score is off the
+  // floor and a loss on top of it can still lower it.
+  let exported: WordParagraph[];
+  let scored: number;
+  beforeAll(async () => {
+    const { doc } = await importFixture(fixture);
+    exported = paragraphsOfDocx(await exportDocxBytes(editorWith(doc)));
+    scored = scoreEditedExport(original, exported, null).untouched[0];
+  });
+  const original = paragraphsOfDocx(fixture.bytes);
+
+  it("kept paragraphs exported with an alignment Word did not give them", () => {
+    expect(scored).toBeGreaterThan(0);
+    const realigned = exported.map((p) => (p.pPr.includes("w:jc") ? p : { ...p, pPr: "<w:pPr><w:jc w:val=\"right\"></w:jc></w:pPr>" }));
+    expect(scoreEditedExport(original, realigned, null).untouched[0]).toBeLessThan(scored);
+  });
+});
+
+describe("the round trip notices", () => {
+  const list = (second: Record<string, unknown>) =>
+    new ServerEditor({
+      content: { type: "doc", content: [{ type: "bulletList", content: [
+        { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "first" }] }] },
+        { type: "listItem", content: [{ type: "paragraph", content: [second] }] },
+      ] }] },
+    }).getState().doc;
+
+  it("a change inside a list, as the item it is in", () => {
+    const before = list({ type: "text", text: "second" });
+    const after = list({ type: "text", text: "second", marks: [{ type: "bold" }] });
+    expect(roundTripDifferences(before, after)).toEqual(['changed: bulletList > listItem > paragraph "second"']);
+  });
+});
+
 describe("the score gates fail on a regression", () => {
   it("a fraction below its stored value", () => {
-    const stored = { fixture: { untouched: [3, 10] satisfies [number, number] } };
+    const stored = { fixture: { untouched: [3, 10] satisfies Fraction } };
     expect(judge(stored, { fixture: { untouched: [2, 10] } }).regressions).toHaveLength(1);
     expect(judge(stored, { fixture: { untouched: [3, 10] } }).regressions).toEqual([]);
   });
 
-  it("a yes that became a no", () => {
-    expect(judge({ fixture: { pageGeometry: true } }, { fixture: { pageGeometry: false } }).regressions).toHaveLength(1);
-  });
-
   it("a stored metric the run no longer measures", () => {
     expect(judge({ fixture: { untouched: [3, 10] } }, { fixture: {} }).regressions).toHaveLength(1);
+  });
+
+  it("an improvement nobody recorded, in CI only", () => {
+    const verdict = judge({ fixture: { untouched: [3, 10] } }, { fixture: { untouched: [4, 10] } });
+    expect(verdict.regressions).toEqual([]);
+    expect(failures("check", verdict, true)).toHaveLength(1);
+    expect(failures("check", verdict, false)).toEqual([]);
   });
 
   it("one more of a known round-trip difference", () => {

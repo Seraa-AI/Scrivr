@@ -3,7 +3,7 @@ import { exportDocxBytes } from "../../export/export";
 import { FIXTURES, importFixture } from "./fixtures";
 import { ScriptedEditor, applyScriptedEdits, scoreEditedExport } from "./editedExport";
 import { paragraphsOfDocx } from "./wordReference";
-import { gate, publishSummary, show, type ScoreTable } from "./scores";
+import { gate, publishSummary, formatScore, type ScoreTable } from "./scores";
 
 /**
  * Edit each fixture the way a user would, export it, and count what the edits
@@ -21,7 +21,7 @@ it("keeps what the edits did not touch as Word had it, no worse than recorded", 
     const exported = await exportDocxBytes(editor);
     const scores = scoreEditedExport(paragraphsOfDocx(fixture.bytes), paragraphsOfDocx(exported), bold);
     measured[fixture.name] = { untouched: scores.untouched, edits: scores.edits };
-    rows.push([fixture.name, show(scores.untouched), show(scores.edits)]);
+    rows.push([fixture.name, formatScore(scores.untouched), formatScore(scores.edits)]);
   }
   publishSummary("DOCX edited export", ["fixture", "untouched paragraphs preserved", "edits matching"], rows);
 

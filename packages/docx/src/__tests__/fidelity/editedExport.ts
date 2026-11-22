@@ -148,9 +148,9 @@ export function scoreEditedExport(
   let matching = 0;
   for (const added of [INSERTED_IN_MIDDLE, TYPED_AT_END]) {
     const at = exported.findIndex((p) => p.text === added);
-    // The paragraph it was split from is the one before it, and that one is Word's.
-    const source = at > 0 ? pairs.find(([, e]) => e === at - 1) : undefined;
-    if (source && formatOf(exported[at]!) === formatOf(original[source[0]]!)) matching++;
+    // It takes the format of the paragraph it was split from, the one before
+    // it — as Scrivr wrote that one, so a loss there is not charged twice.
+    if (at > 0 && formatOf(exported[at]!) === formatOf(exported[at - 1]!)) matching++;
   }
   if (bold !== null && boldKeptTheRest(original, exported, bold)) matching++;
 
@@ -182,11 +182,13 @@ function boldKeptTheRest(original: readonly WordParagraph[], exported: readonly 
   return canonicalWithout(after.rPr, BOLD) === canonicalWithout(before.rPr, BOLD);
 }
 
-const BOLD = new Set(["w:b", "w:bCs"]);
+const BOLD = new Set(["w:b"]);
 
+/** `<w:b/>` and `<w:b w:val="1"/>` are bold; `<w:b w:val="0"/>` turns it off. */
 function isBold(rPr: string): boolean {
   const el = parseOoxml(rPr);
-  return el !== null && findChild(el, "w:b") !== undefined;
+  const b = el && findChild(el, "w:b");
+  return b !== undefined && b !== null && !["0", "false", "off"].includes(b.attrs["w:val"] ?? "");
 }
 
 function canonicalWithout(rPr: string, names: ReadonlySet<string>): string {

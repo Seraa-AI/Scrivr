@@ -12,8 +12,9 @@ import { findChild, parseOoxml, textContent, type OoxmlElement } from "../../imp
  * formatting of every paragraph. Those are exact for what they cover.
  *
  * A text box is written twice: once in `mc:Choice` and again, as VML, in
- * `mc:Fallback`. Every reader here takes the first and skips the second, so a
- * text box's text is counted once.
+ * `mc:Fallback`. Text and paragraphs are read from the first and never the
+ * second, so a text box counts once; page starts skip text boxes altogether,
+ * since they sit outside the flow of pages.
  */
 
 export interface WordPageSetup {
@@ -78,8 +79,11 @@ function pageSetup(body: OoxmlElement): WordPageSetup | null {
   };
 }
 
-/** Characters that take no space on the page: whitespace, and layout's zero-width caret sentinel. */
-const BLANK = /[\s​]+/g;
+/** Layout's zero-width caret sentinel: an empty line's only character. */
+export const CARET_SENTINEL = "\u200b";
+
+/** Characters that take no space on the page: whitespace, and the caret sentinel. */
+const BLANK = new RegExp(`[\\s${CARET_SENTINEL}]+`, "g");
 
 /**
  * The text a page starts with, in a form both sides can be compared in: blank
@@ -147,10 +151,33 @@ export interface Segment {
 export interface WordParagraph {
   /** Its text as Scrivr's `textContent` reads it: a `w:tab` is a tab character. */
   text: string;
-  /** The paragraph's properties in a canonical form, `""` when it has none. */
+  /** The paragraph's visible properties in a canonical form, `""` when it has none. */
   pPr: string;
-  /** Its text by run properties, adjacent runs with the same properties joined. */
+  /** Its text by visible run properties, adjacent runs with the same ones joined. */
   segments: Segment[];
+}
+
+/**
+ * The properties a reader can see. Formatting is compared on these alone: a
+ * complex-script size, the paragraph mark's own formatting or a proofing
+ * language never shows on the page, so losing one is no loss to a reader,
+ * and comparing it would fail every paragraph that carries one.
+ */
+const VISIBLE_PARAGRAPH = new Set(["w:pStyle", "w:jc", "w:spacing", "w:ind", "w:pBdr", "w:shd", "w:tabs"]);
+const VISIBLE_RUN = new Set([
+  "w:rStyle", "w:b", "w:i", "w:u", "w:strike", "w:dstrike", "w:caps", "w:smallCaps",
+  "w:sz", "w:color", "w:highlight", "w:shd", "w:rFonts", "w:vertAlign",
+]);
+/** The faces a Latin run is drawn in; the rest of `w:rFonts` is for other scripts or theme lookups. */
+const VISIBLE_FONT_ATTRS = new Set(["w:ascii", "w:hAnsi"]);
+
+function visible(el: OoxmlElement, names: ReadonlySet<string>): string {
+  const children = el.children.flatMap((c) => {
+    if (typeof c === "string" || !names.has(c.name)) return [];
+    if (c.name !== "w:rFonts") return [c];
+    return [{ ...c, attrs: Object.fromEntries(Object.entries(c.attrs).filter(([name]) => VISIBLE_FONT_ATTRS.has(name))) }];
+  });
+  return children.length === 0 ? "" : canonical({ ...el, attrs: {}, children });
 }
 
 /**
@@ -190,14 +217,14 @@ function paragraph(p: OoxmlElement): WordParagraph {
         else if (c.name === "w:tab") text += "\t";
       }
       if (text.length === 0) continue;
-      const props = rPr ? canonical(rPr) : "";
+      const props = rPr ? visible(rPr, VISIBLE_RUN) : "";
       const last = segments.at(-1);
       if (last && last.rPr === props) last.text += text;
       else segments.push({ text, rPr: props });
     }
   };
   walk(p);
-  return { text: segments.map((s) => s.text).join(""), pPr: pPr ? canonical(pPr) : "", segments };
+  return { text: segments.map((s) => s.text).join(""), pPr: pPr ? visible(pPr, VISIBLE_PARAGRAPH) : "", segments };
 }
 
 /** Attributes that change with every save and say nothing about formatting: every `w:rsid*`, and Word 2010's paragraph ids. */
@@ -223,7 +250,8 @@ export function canonical(el: OoxmlElement): string {
 }
 
 /**
- * What is not part of a paragraph's own text: shapes and text boxes (read as
- * paragraphs of their own), and text Word keeps but does not show.
+ * What is not part of a paragraph's own text: shapes and text boxes (which
+ * `paragraphsOf` reads as paragraphs of their own), and text Word keeps but
+ * does not show.
  */
 const OUTSIDE_THE_FLOW = new Set(["mc:AlternateContent", "w:drawing", "w:pict", "w:object", "w:delText", "w:instrText"]);

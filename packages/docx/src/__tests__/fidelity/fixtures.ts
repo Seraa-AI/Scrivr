@@ -23,7 +23,8 @@ export interface WordFixture {
 }
 
 export const FIXTURES: readonly WordFixture[] = readdirSync(FIXTURE_DIR)
-  .filter((file) => file.endsWith(".docx"))
+  // Word's lock file for an open document (`~$…docx`) is not a fixture.
+  .filter((file) => file.endsWith(".docx") && !file.startsWith("~$"))
   .sort()
   .map((file) => ({
     name: file.slice(0, -".docx".length),

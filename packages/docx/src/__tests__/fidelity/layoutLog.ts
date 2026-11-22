@@ -13,6 +13,7 @@ import {
   type TextMeasurerLike,
 } from "@scrivr/core";
 import type { Node as PmNode } from "@scrivr/core/pm";
+import { CARET_SENTINEL } from "./wordReference";
 
 /**
  * What Scrivr put on each page, as data.
@@ -43,24 +44,18 @@ export type LayoutOp =
       lines: string[];
     };
 
-/** How much of each line the log keeps. */
 const LINE_PREFIX = 16;
 
 /**
- * Lay `doc` out the way the editor would: its block styles, font modifiers and
- * inline registry, on `pageConfig`.
+ * Lay the editor's document out the way the editor would — its block styles,
+ * font modifiers and inline registry — on `pageConfig`. The body only: a
+ * server editor has no header or footer to draw.
  *
- * Import does not yet carry a document's page size and margins, so every
- * caller lays out on the default page. When import does carry them, callers
- * must pass the imported page here, or the page-geometry score cannot move.
+ * Import does not yet carry a document's page size and margins, so the editor
+ * itself would lay it out on the default page.
  */
-export function layOut(
-  editor: BaseEditor,
-  doc: PmNode,
-  measurer: TextMeasurerLike,
-  pageConfig: PageConfig = defaultPageConfig,
-): DocumentLayout {
-  return runPipeline(doc, {
+export function layOut(editor: BaseEditor, measurer: TextMeasurerLike, pageConfig: PageConfig = defaultPageConfig): DocumentLayout {
+  return runPipeline(editor.getState().doc, {
     pageConfig,
     measurer,
     fontConfig: editor.getBlockStyles(),
@@ -131,7 +126,7 @@ export function pageTexts(layout: DocumentLayout): string[] {
   return layout.pages.map((page) => {
     const lines: string[] = [];
     for (const { block } of blocksIn(page.blocks)) for (const line of block.lines) lines.push(lineText(line));
-    return lines.join("\n").replace(/​/g, "");
+    return lines.join("\n").replaceAll(CARET_SENTINEL, "");
   });
 }
 
