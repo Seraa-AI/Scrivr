@@ -25,11 +25,19 @@ export interface DocxStyleSheet {
    * knowing which rows band — so the extension that owns them reads them here.
    */
   raw(styleId: string): OoxmlElement | undefined;
+  /**
+   * The list numbering a paragraph style puts its paragraphs in — Word's
+   * built-in heading numbering lives here — with the nearest `basedOn`
+   * ancestor that says anything winning. `ilvl` is absent when the style
+   * names no level; `numId` 0 is the style turning numbering off.
+   */
+  numbering(styleId: string | undefined): { numId: number; ilvl?: number } | null;
 }
 
 const EMPTY: DocxStyleSheet = {
   runMarks: () => [],
   raw: () => undefined,
+  numbering: () => null,
 };
 
 export function readStyleSheet(xml: string | undefined, tracker?: ReadTracker): DocxStyleSheet {
@@ -74,7 +82,31 @@ export function readStyleSheet(xml: string | undefined, tracker?: ReadTracker): 
     return marks;
   };
 
-  return { runMarks, raw: (styleId) => byId.get(styleId) };
+  const numbering = (styleId: string | undefined): { numId: number; ilvl?: number } | null => {
+    const seen = new Set<string>();
+    let id = styleId;
+    while (id !== undefined && !seen.has(id)) {
+      seen.add(id);
+      const style = byId.get(id);
+      if (!style) return null;
+      const numPr = findChild(findChild(style, "w:pPr") ?? emptyElement, "w:numPr");
+      const numId = wholeNumber(numPr && findChild(numPr, "w:numId"));
+      if (numId !== undefined) {
+        const ilvl = wholeNumber(numPr && findChild(numPr, "w:ilvl"));
+        return ilvl === undefined ? { numId } : { numId, ilvl };
+      }
+      id = attr(findChild(style, "w:basedOn") ?? emptyElement, "w:val");
+    }
+    return null;
+  };
+
+  return { runMarks, raw: (styleId) => byId.get(styleId), numbering };
+}
+
+/** An element's `w:val` as a whole number of 0 or more, or undefined. */
+function wholeNumber(el: OoxmlElement | undefined): number | undefined {
+  const value = el ? Number(attr(el, "w:val")) : NaN;
+  return Number.isInteger(value) && value >= 0 ? value : undefined;
 }
 
 /** `<w:docDefaults><w:rPrDefault><w:rPr>` — what every style starts from. */

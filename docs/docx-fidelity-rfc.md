@@ -559,5 +559,8 @@ or a DOM, as `LayoutCoordinator.layoutForExport` already does.
   import no longer drops the paragraphs after one that starts a list deeper
   than they sit, and a nested list is placed one level below its list, as
   the editor draws it, so the numbering it is compared against is the drawn
-  one.
+  one. Numbering a paragraph's style carries — Word's built-in heading
+  numbering — is applied before lists are rebuilt: through `basedOn`, at the
+  level `numbering.xml` links to the style when the style names none, and
+  never over the paragraph's own `numPr` (`numId` 0 included).
 

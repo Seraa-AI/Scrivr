@@ -987,6 +987,49 @@ describe("importDocx — what each extension says it could not keep", () => {
     expect(doc.textContent).toContain("Visit Nairobi");
   });
 
+  it("numbers headings Word numbers through their style, and not one that turns it off", async () => {
+    const editor = new ServerEditor();
+    const heading = (level: number, text: string) => ({ type: "heading", attrs: { level }, content: [{ type: "text", text }] });
+    editor.setContent({ type: "doc", content: [
+      heading(1, "Intro"),
+      heading(2, "Scope"),
+      heading(1, "Terms"),
+      heading(1, "Unnumbered"),
+      { type: "orderedList", content: [{ type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "x" }] }] }] },
+    ] });
+    const files = unzipSync(await exportDocxBytes(editor));
+    // Word's built-in heading numbering: the numbering sits on the styles, and
+    // each level names the style it numbers. Heading 2 gives no level of its own.
+    const styles = strFromU8(files["word/styles.xml"]!)
+      .replace(/(<w:style [^>]*w:styleId="Heading1"[^>]*>)/, `$1<w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr>`)
+      .replace(/(<w:style [^>]*w:styleId="Heading2"[^>]*>)/, `$1<w:pPr><w:numPr><w:numId w:val="1"/></w:numPr></w:pPr>`);
+    const numbering = strFromU8(files["word/numbering.xml"]!)
+      .replace(/(<w:lvl w:ilvl="1">)/, `$1<w:pStyle w:val="Heading2"/>`);
+    // The last heading turns its style's numbering off.
+    const document = strFromU8(files["word/document.xml"]!).replace(
+      /(<w:pStyle w:val="Heading1"\/>)((?:(?!<w:pStyle).)*?Unnumbered)/s,
+      `$1<w:numPr><w:ilvl w:val="0"/><w:numId w:val="0"/></w:numPr>$2`,
+    );
+    expect(styles).toContain('w:styleId="Heading2"');
+    const { doc } = await importDocx(new ServerEditor(), zipSync({
+      ...files,
+      "word/styles.xml": strToU8(styles),
+      "word/numbering.xml": strToU8(numbering),
+      "word/document.xml": strToU8(document),
+    }));
+
+    const placed: string[] = [];
+    doc.descendants((node, _pos, parent) => {
+      if (node.type.name !== "heading") return;
+      placed.push(`${node.textContent}:${parent?.type.name}`);
+    });
+    expect(placed).toEqual(["Intro:listItem", "Scope:listItem", "Terms:listItem", "Unnumbered:doc"]);
+    // Scope, a Heading 2, sits a level below Intro.
+    const intro = doc.child(0).child(0);
+    expect(intro.child(1).type.name).toBe("orderedList");
+    expect(intro.child(1).child(0).child(0).textContent).toBe("Scope");
+  });
+
   it("keeps a heading in a list a numbered heading, there and back", async () => {
     const editor = new ServerEditor();
     editor.setContent({ type: "doc", content: [{ type: "orderedList", content: [

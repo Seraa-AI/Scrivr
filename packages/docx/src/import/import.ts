@@ -160,7 +160,8 @@ export async function importDocx(
     const numbering = readNumberingMap(pkg.readText("word/numbering.xml"), tracker);
     // Before the body is transformed: a run's formatting is its style's,
     // layered under whatever the run says directly.
-    ctx.styles = readStyleSheet(pkg.readText("word/styles.xml"), tracker);
+    const styleSheet = readStyleSheet(pkg.readText("word/styles.xml"), tracker);
+    ctx.styles = styleSheet;
 
     // Header/footer support: expose the section references + a part walker so
     // a contribution (HeaderFooter) can reconstruct each part's content
@@ -267,10 +268,7 @@ export async function importDocx(
         return entry?.type === "hyperlink" ? entry.target : undefined;
       };
       try {
-        const model = reconstructLists(
-          parseBlockContainer(partRoot, parserSink),
-          numbering,
-        );
+        const model = reconstructLists(parseBlockContainer(partRoot, parserSink), numbering, styleSheet);
         return transformToProseMirror(model, ctx, handlers);
       } finally {
         ctx.media.resolveImage = savedResolveImage;
@@ -283,7 +281,7 @@ export async function importDocx(
     }
 
     const rawModel = parseDocumentBody(root, parserSink);
-    const model = reconstructLists(rawModel, numbering);
+    const model = reconstructLists(rawModel, numbering, styleSheet);
     let doc = transformToProseMirror(model, ctx, handlers);
 
     for (const { owner, hook } of lifecycleHooks.onImportComplete) {

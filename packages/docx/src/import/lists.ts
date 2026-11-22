@@ -20,13 +20,15 @@ import type {
   DocxParagraphAttrs,
 } from "@scrivr/core";
 import type { NumberingResolver } from "./numbering";
+import type { DocxStyleSheet } from "./styles";
 
 export function reconstructLists(
   model: DocxImportModel,
   numbering: NumberingResolver,
+  styles?: DocxStyleSheet,
 ): DocxImportModel {
   const out: DocxBlock[] = [];
-  const blocks = model.blocks;
+  const blocks = styles ? model.blocks.map((b) => withStyleNumbering(b, styles, numbering)) : model.blocks;
   let i = 0;
   while (i < blocks.length) {
     const b = blocks[i]!;
@@ -58,7 +60,7 @@ interface ListParagraph {
 }
 
 function isListParagraph(b: DocxBlock): b is ListParagraph {
-  return b.type === "paragraph" && b.attrs.numbering !== undefined;
+  return b.type === "paragraph" && b.attrs.numbering !== undefined && b.attrs.numbering.numId > 0;
 }
 
 function findListEnd(
@@ -179,6 +181,19 @@ function buildList(
     ...(start !== 1 ? { start } : {}),
   };
   return { list, consumed: i };
+}
+
+/**
+ * A paragraph its style numbers — Word's built-in heading numbering — given
+ * that numbering, unless it says its own (`numId` 0 included, which turns the
+ * style's off). A style that names no level is at the level that names it.
+ */
+function withStyleNumbering(b: DocxBlock, styles: DocxStyleSheet, numbering: NumberingResolver): DocxBlock {
+  if (b.type !== "paragraph" || b.attrs.numbering !== undefined || b.attrs.styleId === undefined) return b;
+  const fromStyle = styles.numbering(b.attrs.styleId);
+  if (!fromStyle || fromStyle.numId === 0) return b;
+  const ilvl = fromStyle.ilvl ?? numbering.levelOfStyle(fromStyle.numId, b.attrs.styleId) ?? 0;
+  return { ...b, attrs: { ...b.attrs, numbering: { numId: fromStyle.numId, ilvl: Math.min(ilvl, 8) } } };
 }
 
 /**

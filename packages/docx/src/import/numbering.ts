@@ -23,11 +23,13 @@ export interface NumberingResolver {
   format(numId: number, ilvl: number): string | undefined;
   /** The list type at a level, or `"bullet"` as a safe default. */
   resolve(numId: number, ilvl: number): ListType;
+  /** The level whose `w:pStyle` names `styleId` — how Word ties a heading style to a level. */
+  levelOfStyle(numId: number, styleId: string): number | undefined;
   /** The first number of a level: the list's `startOverride`, else its definition's `w:start`, else 1. */
   start(numId: number, ilvl: number): number;
 }
 
-const NONE: NumberingResolver = { format: () => undefined, resolve: () => "bullet", start: () => 1 };
+const NONE: NumberingResolver = { format: () => undefined, levelOfStyle: () => undefined, resolve: () => "bullet", start: () => 1 };
 
 /** A whole number in an attribute, or undefined. */
 function intAttr(el: OoxmlElement | undefined, name: string): number | undefined {
@@ -69,6 +71,8 @@ export function readNumberingMap(xml: string | undefined, tracker?: ReadTracker)
     overrideStart.set(id, starts);
   }
 
+  // abstractNumId → linked paragraph style → ilvl
+  const abstractStyleLevel = new Map<string, Map<string, number>>();
   // abstractNumId → ilvl → numFmt
   const abstractFmt = new Map<string, Map<number, string>>();
   for (const aNum of findChildren(root, "w:abstractNum")) {
@@ -80,6 +84,13 @@ export function readNumberingMap(xml: string | undefined, tracker?: ReadTracker)
       const numFmt = findChild(lvl, "w:numFmt");
       const fmt = numFmt && attr(numFmt, "w:val");
       if (ilvl !== undefined && fmt) formats.set(ilvl, fmt);
+      const pStyle = findChild(lvl, "w:pStyle");
+      const linked = pStyle && attr(pStyle, "w:val");
+      if (ilvl !== undefined && linked) {
+        const levels = abstractStyleLevel.get(id) ?? new Map<string, number>();
+        levels.set(linked, ilvl);
+        abstractStyleLevel.set(id, levels);
+      }
     }
     abstractFmt.set(id, formats);
   }
@@ -102,6 +113,10 @@ export function readNumberingMap(xml: string | undefined, tracker?: ReadTracker)
   };
   return {
     format,
+    levelOfStyle(numId, styleId) {
+      const abstractId = numIdToAbstract.get(String(numId));
+      return abstractId ? abstractStyleLevel.get(abstractId)?.get(styleId) : undefined;
+    },
     resolve(numId, ilvl) {
       const fmt = format(numId, ilvl);
       return fmt && isOrderedFmt(fmt) ? "ordered" : "bullet";
