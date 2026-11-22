@@ -51,6 +51,8 @@ export const NO_PARSER = "no parser";
 
 /** The reason recorded when a handler took content and gave nothing back. */
 export const HANDLER_RETURNED_NOTHING = "handler returned nothing";
+/** The reason for a header or footer part the import could not read; the warning says why. */
+export const PART_UNREADABLE = "part could not be read";
 
 /** The reason recorded when a mark's wrapper handed its run back unwrapped. */
 export const WRAPPER_DECLINED = "wrapper left the run unwrapped";
@@ -65,8 +67,8 @@ export function noSchemaNode(nodeName: string): string {
   return `the schema has no ${nodeName} node`;
 }
 
-/** For `handle`: an empty result means the handler declined the item, which is no loss. */
-export const DECLINED: unique symbol = Symbol("declined");
+/** For `handle`: an empty result means the item is not the handler's, which is no loss. */
+export const NOT_MINE: unique symbol = Symbol("not mine");
 
 /** The item whose content a subtree held, when that item was lost. */
 export interface LostItem {
@@ -82,7 +84,7 @@ export interface DocxReportRecorder {
    * reports is filed under `owner`. If it reported neither `kept` (of at least
    * one) nor `dropped` for `kind` itself, the outcome is recorded from its
    * result: kept when `produced(result)`, otherwise dropped with `ifNothing`.
-   * `DECLINED` records nothing: the handler said the item is not its, and the
+   * `NOT_MINE` records nothing: the handler said the item is not its, and the
    * caller accounts for it another way.
    */
   handle<T>(
@@ -90,7 +92,7 @@ export interface DocxReportRecorder {
     kind: string,
     run: () => T,
     produced: (result: T) => boolean,
-    ifNothing?: string | typeof DECLINED,
+    ifNothing?: string | typeof NOT_MINE,
   ): T;
   /**
    * Run code `owner` contributed that is not handed one item — a lifecycle
@@ -239,7 +241,7 @@ export function createReportRecorder(options: ReportRecorderOptions = {}): DocxR
       const result = within(frame, run);
       if (!frame.decided) {
         if (produced(result)) addKept(kind, 1);
-        else if (ifNothing !== DECLINED) addEntry("dropped", kind, ifNothing, owner);
+        else if (ifNothing !== NOT_MINE) addEntry("dropped", kind, ifNothing, owner);
       } else if (frame.claimedKept) {
         // A handler can keep an item without returning it here — writing it
         // to another part, say — so its enclosing subtree must not move its

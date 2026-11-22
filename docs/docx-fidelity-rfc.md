@@ -486,17 +486,20 @@ or a DOM, as `LayoutCoordinator.layoutForExport` already does.
   handler (`"no handler"`), and an element the parser cannot read
   (`"no parser"`). Content inside a lost item is counted as dropped inside it,
   on both sides: a Word table imported without the table extension reports
-  its paragraphs and text lost. A handler reporting `kept` or `dropped` for
+  its paragraphs and text lost. That content is only counted; no handler runs
+  on it, so nothing it would have left behind (a field's answer, a resolved
+  image) outlives it. A handler reporting `kept` or `dropped` for
   the kind it was handed replaces the converter's account.
-- A link or an inline content control counts once however many runs it
-  spans, on both sides.
+- A link or an inline content control counts once where it lands, however
+  many runs it spans.
 - A header or footer nothing reads, or whose part cannot be read, is dropped
-  as `w:hdr` / `w:ftr`, with a warning.
+  as `w:hdr` / `w:ftr` (`PART_UNREADABLE` for the latter), one per part, with
+  a warning. Only the final section's references are seen.
 - Import names content in Word's terms (`b`, `w:customXml`); export in
   Scrivr's.
 - New public API beyond §2: `IBaseEditor.getFormatContributions()` and
   `FormatContribution`; the vocabulary `NO_HANDLER`, `NO_PARSER`,
-  `HANDLER_RETURNED_NOTHING`, `WRAPPER_DECLINED`, `OVERRIDES_OWNER`,
+  `HANDLER_RETURNED_NOTHING`, `PART_UNREADABLE`, `WRAPPER_DECLINED`, `OVERRIDES_OWNER`,
   `insideDropped`, `noSchemaNode`; the `report-unbound` and
   `report-invalid-count` warnings; `normalizeDrawNumber` in core, shared with
   the test phase's logs.

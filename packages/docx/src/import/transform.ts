@@ -34,7 +34,7 @@ import type {
   DocxMark,
 } from "@scrivr/core";
 import {
-  DECLINED,
+  NOT_MINE,
   NO_HANDLER,
   entryOf,
   insideDropped,
@@ -300,13 +300,13 @@ function transformControl(
       "sdt",
       () => handler(item, marks, ctx),
       built,
-      DECLINED,
+      NOT_MINE,
     );
     if (claimed) return [claimed];
   }
 
-  // Each run under the mark records whether the control crossed with it, so
-  // the control itself is recorded here only when no mark can carry it.
+  // The control's mark is counted once, on the first run under it, so the
+  // control itself is recorded here only when no mark can carry it.
   if (!entryOf(handlers.marks, "sdt")) {
     dropUnhandled(ctx, recorder, "sdt", NO_HANDLER);
     // A prompt nobody owns is Word's, not the document's text.
@@ -365,19 +365,24 @@ function transformAtom(
     return null;
   }
   const owner = ownerOf(handlers.owners.inlines, item.type);
-  return recorder.subtree(
+  const uncountedWrappers = marks.filter((mark) => WRAPPER_KINDS.has(mark.kind) && !countedWrappers.has(mark));
+  const node = recorder.subtree(
     () => {
       const pmMarks = transformMarks(marks, ctx, handlers, recorder);
       return recorder.handle(owner, item.type, () => handler(item, pmMarks, ctx), built);
     },
-    (node) => (node ? null : { kind: item.type, owner }),
+    (built) => (built ? null : { kind: item.type, owner }),
   );
+  // A link counts once where it lands: an atom that was lost recorded it as
+  // dropped with itself, and leaves it to count again on the runs that land.
+  if (!node) uncountedWrappers.forEach((mark) => countedWrappers.delete(mark));
+  return node;
 }
 
 /**
  * Marks a wrapping element puts on each run it wraps — a hyperlink, a content
- * control — are one mark object per wrapper. They count once, as one link or
- * one control, however many runs carry them; export counts them the same way.
+ * control — are one mark object per wrapper. They count once where they land,
+ * as one link or one control, however many runs carry them.
  */
 const WRAPPER_KINDS: ReadonlySet<string> = new Set(["hyperlink", "sdt"]);
 const countedWrappers = new WeakSet<DocxMark>();
@@ -396,7 +401,8 @@ function transformMarks(
     const handler = entryOf(handlers.marks, mark.kind);
     if (WRAPPER_KINDS.has(mark.kind)) {
       if (countedWrappers.has(mark)) {
-        const repeated = handler?.(mark, ctx);
+        const owner = ownerOf(handlers.owners.marks, mark.kind);
+        const repeated = handler && recorder.fileUnder(owner, () => handler(mark, ctx));
         if (repeated) out.push(repeated);
         continue;
       }
@@ -499,12 +505,34 @@ function fallbackBlock(
     code: "unsupported-block",
     message: `No import handler (and no fallback) for block kind "${block.type}"`,
   });
-  // What the block held is lost with it, so it is counted as dropped inside it.
-  recorder.subtree(
-    () => innerBlocks(block).forEach((inner) => transformBlock(inner, ctx, handlers, recorder)),
-    () => ({ kind: block.type, owner: null }),
-  );
+  countLost(innerBlocks(block), insideDropped(block.type), recorder);
   return null;
+}
+
+/**
+ * What a lost block held, counted as dropped with it. Only counted: a handler
+ * run on content that is then thrown away could still leave something behind
+ * — a field's answer, a warning — for content that is not in the document.
+ */
+function countLost(blocks: readonly DocxBlock[], reason: string, recorder: DocxReportRecorder): void {
+  const countInline = (inline: DocxInline): void => {
+    recorder.unhandled(inline.type, reason);
+    for (const mark of inline.marks) {
+      if (mark.off || (WRAPPER_KINDS.has(mark.kind) && countedWrappers.has(mark))) continue;
+      if (WRAPPER_KINDS.has(mark.kind)) countedWrappers.add(mark);
+      recorder.unhandled(mark.kind, reason);
+    }
+    if (inline.type === "sdt") inline.content.forEach(countInline);
+  };
+  for (const block of blocks) {
+    if (block.type === "paragraph") {
+      recorder.unhandled("paragraph", reason);
+      block.content.forEach(countInline);
+    } else {
+      recorder.unhandled(block.type, reason);
+      countLost(innerBlocks(block), reason, recorder);
+    }
+  }
 }
 
 /** The blocks a container holds: a table's cells', a list's items', a content control's. */

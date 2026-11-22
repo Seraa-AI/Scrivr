@@ -64,6 +64,7 @@ import {
   assignOwned,
   entryOf,
   NO_HANDLER,
+  PART_UNREADABLE,
   ownedBundles,
   ownerOf,
   reportRecorderOf,
@@ -173,11 +174,14 @@ export async function importDocx(
     ctx.walkBlocks = createBlockWalker(ctx, handlers);
     // A header or footer is Word's `w:hdr` or `w:ftr` part. One a walk cannot
     // read is the walking extension's loss; one nothing walks is nobody's.
-    const partKind = (relId: string) => (sectionRefs.footers.some((ref) => ref.relId === relId) ? "w:ftr" : "w:hdr");
+    const partKind = (relId: string) => {
+      const type = rels.get(relId)?.type ?? (sectionRefs.footers.some((ref) => ref.relId === relId) ? "footer" : "header");
+      return type === "footer" ? "w:ftr" : "w:hdr";
+    };
     const walked = new Set<string>();
     const skipPart = (relId: string, code: string, message: string): null => {
       ctx.diagnostics.warn({ code, message });
-      ctx.report.dropped(partKind(relId), message);
+      ctx.report.dropped(partKind(relId), PART_UNREADABLE);
       return null;
     };
     ctx.walkPart = (relId: string): PmNode | null => {
@@ -251,7 +255,8 @@ export async function importDocx(
       const current = doc;
       doc = await recorder.fileUnderAsync(owner, () => hook(current, ctx));
     }
-    for (const { relId } of [...sectionRefs.headers, ...sectionRefs.footers]) {
+    // One part may serve several slots; it is one part lost.
+    for (const relId of new Set([...sectionRefs.headers, ...sectionRefs.footers].map((ref) => ref.relId))) {
       if (walked.has(relId)) continue;
       ctx.diagnostics.warn({
         code: "header-footer-unread",
