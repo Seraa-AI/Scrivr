@@ -152,37 +152,36 @@ export function updateChangeAttrs(
     );
   } else if (isMarkChange(change)) {
     if (change.mark && change.from && change.to) {
-      // The mark as this transaction left it: an earlier update in it may have
-      // stamped another record on the same mark, which the change still reads stale.
-      const current = tr.doc.nodeAt(change.from)?.marks.find(m => m.type === change.mark.type) ?? change.mark;
-      const markDataTracked: DataTrackedAttrs[] = Array.isArray(current.attrs.dataTracked)
-        ? current.attrs.dataTracked
-        : [];
-      // The record by its id: several on one mark can share an operation, and
-      // records stored without their timestamps all share a missing createdAt.
+      // The record by its id: several on one mark can share an operation.
       const isThisRecord = (dt: DataTrackedAttrs) =>
-        change.dataTracked.id
-          ? dt.id === change.dataTracked.id && dt.operation === change.dataTracked.operation
-          : dt.createdAt === change.dataTracked.createdAt && dt.operation === change.dataTracked.operation;
-      const newDT = markDataTracked?.map(dt => {
-        if (isThisRecord(dt)) {
-          return {
-            ...dt,
-            ...trackedAttrs,
-          };
-        }
-        return dt;
-      });
-      const newMark = current.type.create({
-        ...current.attrs,
-        dataTracked: newDT,
-      });
+        dt.id === change.dataTracked.id && dt.operation === change.dataTracked.operation;
+      const type = change.mark.type;
+      const rewrite = (mark: Mark) => {
+        const records: DataTrackedAttrs[] = Array.isArray(mark.attrs.dataTracked) ? mark.attrs.dataTracked : [];
+        if (!records.some(isThisRecord)) return null;
+        return type.create({ ...mark.attrs, dataTracked: records.map(dt => (isThisRecord(dt) ? { ...dt, ...trackedAttrs } : dt)) });
+      };
       if (change.nodeType.isInline) {
-        tr.removeMark(change.from, change.to, current);
-        tr.addMark(change.from, change.to, newMark);
+        // Text by text, as this transaction has left it: another record on the
+        // same mark may cover only part of the range, and must stay on its part.
+        const pieces: Array<{ from: number; to: number; mark: Mark }> = [];
+        tr.doc.nodesBetween(change.from, change.to, (node, pos) => {
+          const mark = node.isInline ? node.marks.find(m => m.type === type) : undefined;
+          if (mark) pieces.push({ from: Math.max(pos, change.from), to: Math.min(pos + node.nodeSize, change.to), mark });
+        });
+        for (const piece of pieces) {
+          const updated = rewrite(piece.mark);
+          if (!updated) continue;
+          tr.removeMark(piece.from, piece.to, piece.mark);
+          tr.addMark(piece.from, piece.to, updated);
+        }
       } else {
-        tr.removeNodeMark(change.from, current);
-        tr.addNodeMark(change.from, newMark);
+        const current = tr.doc.nodeAt(change.from)?.marks.find(m => m.type === type) ?? change.mark;
+        const updated = rewrite(current);
+        if (updated) {
+          tr.removeNodeMark(change.from, current);
+          tr.addNodeMark(change.from, updated);
+        }
       }
     } else {
       console.warn(

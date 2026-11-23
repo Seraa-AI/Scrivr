@@ -62,4 +62,57 @@ describe("repairing stored records", () => {
     editAtEnd(editor);
     expect(findChanges(editor.getState()).hasIncompleteAttrs).toBe(false);
   });
+
+  describe("records on one mark covering different text", () => {
+    const stamped = { createdAt: 1, updatedAt: 1, statusUpdateAt: 0, reviewedByID: null };
+    const record = (id: string, authorID: string, extra: Record<string, unknown> = {}) => ({ id, authorID, operation: "insert", status: "pending", ...extra });
+    const bold = (text: string, records: unknown[]) => ({ type: "text", text, marks: [{ type: "bold", attrs: { dataTracked: records } }] });
+    /** The ids of the bold records on each character of the first paragraph. */
+    const boldIdsByChar = (editor: ServerEditor) => {
+      const out: string[] = [];
+      editor.getState().doc.child(0).forEach((node) => {
+        const ids = (node.marks.find((m) => m.type.name === "bold")?.attrs["dataTracked"] ?? []).map((r: { id: string }) => r.id).sort().join("+");
+        for (const _ of node.text ?? "") out.push(ids);
+      });
+      return out;
+    };
+
+    it("keeps another author's record on part of the text when one record is stamped", () => {
+      const editor = editorAs("carol", [{ type: "paragraph", attrs: { nodeId: "a" }, content: [
+        bold("a", [record("A", "alice")]),
+        bold("b", [record("A", "alice"), record("B", "bob", stamped)]),
+        bold("c", [record("A", "alice")]),
+        { type: "text", text: " tail" },
+      ] }]);
+      editAtEnd(editor);
+      expect(boldIdsByChar(editor).slice(0, 3)).toEqual(["A", "A+B", "A"]);
+    });
+
+    it("re-ids a record split around another, without spreading it over the gap", () => {
+      const editor = editorAs("carol", [{ type: "paragraph", attrs: { nodeId: "a" }, content: [
+        bold("a", [record("A", "alice"), record("B", "bob", stamped)]),
+        bold("b", [record("B", "bob", stamped)]),
+        bold("c", [record("A", "alice"), record("B", "bob", stamped)]),
+        { type: "text", text: " tail" },
+      ] }]);
+      editAtEnd(editor);
+      const [a, b, c] = boldIdsByChar(editor);
+      expect(b).toBe("B");
+      expect(a).toContain("B");
+      expect(c).toContain("B");
+      expect(a).not.toBe(c);
+    });
+  });
+
+  it("does not store a conflict it only computed", () => {
+    const pending = (id: string, authorID: string, operation: string) => ({ dataTracked: { id, authorID, operation, status: "pending" } });
+    const editor = editorAs("carol", [{ type: "paragraph", attrs: { nodeId: "a" }, content: [
+      { type: "text", text: "both", marks: [{ type: "trackedInsert", attrs: pending("i1", "alice", "insert") }, { type: "trackedDelete", attrs: pending("d1", "bob", "delete") }] },
+      { type: "text", text: " tail" },
+    ] }]);
+    editAtEnd(editor);
+    const stored: unknown[] = [];
+    editor.getState().doc.descendants((node) => { for (const mark of node.marks) stored.push(mark.attrs["dataTracked"]); });
+    expect(JSON.stringify(stored)).not.toContain("isConflict");
+  });
 });

@@ -3,7 +3,6 @@ import { Transaction } from "@scrivr/core/pm";
 
 import { ChangeSet } from "../ChangeSet";
 import { updateChangeAttrs } from "../engine/updateAttributes";
-import { genId } from "../helpers";
 import { CHANGE_STATUS } from "../types";
 
 /** A split piece's id: derived, so every client repairing the same document agrees. */
@@ -33,7 +32,6 @@ export function fixInconsistentChanges(
     const piece = !!id && claimed.has(id);
     const newAttrs = {
       ...(piece && { id: pieceId(id, c.from), continuesId: c.dataTracked.continuesId ?? id }),
-      ...(!id && { id: genId() }),
       ...(!authorID && { authorID: currentUserID }),
       ...(!reviewedByID && { reviewedByID: null }),
       ...(!status && { status: CHANGE_STATUS.pending }),
@@ -42,7 +40,7 @@ export function fixInconsistentChanges(
       ...(!statusUpdateAt && { statusUpdateAt: 0 }),
     };
     if (Object.keys(newAttrs).length > 0) {
-      updateChangeAttrs(newTr, c, { ...c.dataTracked, ...newAttrs }, schema);
+      updateChangeAttrs(newTr, c, { ...storedRecord(c.dataTracked), ...newAttrs }, schema);
       changed = true;
     }
     const claimedId = newAttrs.id ?? id;
@@ -56,7 +54,7 @@ export function fixInconsistentChanges(
     if (c.type === "mark-change" && "within" in c && c.within !== undefined) return;
     const { createdAt, updatedAt, statusUpdateAt, reviewedByID } = c.dataTracked;
     updateChangeAttrs(newTr, c, {
-      ...c.dataTracked,
+      ...storedRecord(c.dataTracked),
       ...(!createdAt && { createdAt: Date.now() }),
       ...(!updatedAt && { updatedAt: Date.now() }),
       ...(!statusUpdateAt && { statusUpdateAt: 0 }),
@@ -66,4 +64,14 @@ export function fixInconsistentChanges(
   });
 
   return changed;
+}
+
+/**
+ * A change's record as the document stores it: without `isConflict`, which
+ * the change set works out from the records around it each time it reads
+ * them, so storing it would keep a conflict flagged after it is resolved.
+ */
+function storedRecord<T extends { isConflict?: boolean }>(record: T): Omit<T, "isConflict"> {
+  const { isConflict: _computed, ...stored } = record;
+  return stored;
 }
