@@ -113,6 +113,9 @@ export { DefaultContent, type DefaultContentOptions } from "./built-in/DefaultCo
 
 export type {
   ExtensionConfig,
+  ExtendConfig,
+  ExtendHookContext,
+  ExtensionHookName,
   ExtensionContext,
   ScrivrNodeSpec,
   PasteTransform,

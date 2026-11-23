@@ -1317,6 +1317,35 @@ export interface ExtensionConfig<Options = object> {
   addInputHandlers?(this: Phase1Context<Options>): Record<string, InputHandler>;
 }
 
+/** An `ExtensionConfig` hook: everything but its identity and settings. */
+export type ExtensionHookName = Exclude<keyof ExtensionConfig, "name" | "defaultOptions" | "keymapPriority">;
+
+/**
+ * `this` inside a hook given to `extend`: the hook's usual context, plus
+ * `parent` — the original extension's hook, called with the same context and
+ * arguments, or `undefined` when the original declares none.
+ */
+export type ExtendHookContext<Context, Args extends unknown[], Result> = Context & {
+  readonly parent: ((...args: Args) => Result) | undefined;
+};
+
+type ExtendHook<Hook> = Hook extends (this: infer Context, ...args: infer Args) => infer Result
+  ? (this: ExtendHookContext<Context, Args, Result>, ...args: Args) => Result
+  : never;
+
+/**
+ * What `Extension.extend` takes: any part of an `ExtensionConfig`. A hook
+ * declared here replaces the original's and can reach it through
+ * `this.parent`; one left out stays the original's.
+ */
+export type ExtendConfig<Options = object> = {
+  name?: string;
+  defaultOptions?: Partial<Options>;
+  keymapPriority?: number;
+} & {
+  [K in ExtensionHookName]?: ExtendHook<NonNullable<ExtensionConfig<Options>[K]>>;
+};
+
 // ── Resolved extension (internal — produced by Extension.resolve()) ───────────
 
 export interface ResolvedExtension {

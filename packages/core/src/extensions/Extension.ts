@@ -1,7 +1,10 @@
 import type { Schema } from "prosemirror-model";
 import { KeymapPriority } from "./types";
 import type {
+  ExtendConfig,
+  ExtendHookContext,
   ExtensionConfig,
+  ExtensionHookName,
   ExtensionContext,
   InitialDocContext,
   Phase1Context,
@@ -21,14 +24,17 @@ import type {
  *
  *   // Configure before use
  *   new Editor({ extensions: [Bold.configure({ shortcut: false })] });
+ *
+ *   // Customise it: a new extension built on Bold's hooks
+ *   const MyBold = Bold.extend({ addKeymap() { return { ...this.parent?.(), "Mod-Shift-b": cmd }; } });
  */
 export class Extension<Options extends object = object> {
   readonly name: string;
   readonly options: Options;
 
-  private readonly config: ExtensionConfig<Options>;
+  private readonly config: StoredConfig<Options>;
 
-  private constructor(config: ExtensionConfig<Options>, options: Options) {
+  private constructor(config: StoredConfig<Options>, options: Options) {
     this.name = config.name;
     this.options = options;
     this.config = config;
@@ -41,6 +47,10 @@ export class Extension<Options extends object = object> {
   static create<Opts extends object = object>(
     config: ExtensionConfig<Opts>
   ): Extension<Opts> {
+    return Extension.fromConfig(config);
+  }
+
+  private static fromConfig<Opts extends object>(config: StoredConfig<Opts>): Extension<Opts> {
     return new Extension<Opts>(config, (config.defaultOptions ?? {}) as Opts);
   }
 
@@ -52,6 +62,73 @@ export class Extension<Options extends object = object> {
    */
   configure(options?: Partial<Options>): Extension<Options> {
     return new Extension(this.config, { ...this.options, ...options });
+  }
+
+  /**
+   * Returns a new extension built on this one. A hook in `overrides` replaces
+   * this extension's, which it can still call as `this.parent` — to change
+   * its result or add to it. Hooks left out stay this extension's. Options
+   * are this extension's current ones with `overrides.defaultOptions` over
+   * them, so a configured extension extends as configured; the new options
+   * must keep the original's, since its hooks still read them.
+   *
+   * @example
+   * Heading.extend({
+   *   addNodes() {
+   *     const { heading, ...rest } = this.parent?.() ?? {};
+   *     return { ...rest, heading: { ...heading, attrs: { ...heading?.attrs, anchor: { default: null } } } };
+   *   },
+   * })
+   */
+  extend<NewOptions extends Options = Options>(overrides: ExtendConfig<NewOptions>): Extension<NewOptions> {
+    const base = this.config;
+    const hooks: HookTable<NewOptions> = {
+    addExtensions: layer(base.addExtensions, overrides.addExtensions),
+    addNodes: layer(base.addNodes, overrides.addNodes),
+    addMarks: layer(base.addMarks, overrides.addMarks),
+    addDocAttrs: layer(base.addDocAttrs, overrides.addDocAttrs),
+    addPageChrome: layer(base.addPageChrome, overrides.addPageChrome),
+    addPageConfig: layer(base.addPageConfig, overrides.addPageConfig),
+    addSurfaceOwner: layer(base.addSurfaceOwner, overrides.addSurfaceOwner),
+    addExports: layer(base.addExports, overrides.addExports),
+    addImports: layer(base.addImports, overrides.addImports),
+    addCloneHandlers: layer(base.addCloneHandlers, overrides.addCloneHandlers),
+    addProseMirrorPlugins: layer(base.addProseMirrorPlugins, overrides.addProseMirrorPlugins),
+    addInitialDoc: layer(base.addInitialDoc, overrides.addInitialDoc),
+    addKeymap: layer(base.addKeymap, overrides.addKeymap),
+    addCommands: layer(base.addCommands, overrides.addCommands),
+    addLayoutHandlers: layer(base.addLayoutHandlers, overrides.addLayoutHandlers),
+    addInlineHandlers: layer(base.addInlineHandlers, overrides.addInlineHandlers),
+    addMarkerPainters: layer(base.addMarkerPainters, overrides.addMarkerPainters),
+    addBlockStyles: layer(base.addBlockStyles, overrides.addBlockStyles),
+    addMarkDecorators: layer(base.addMarkDecorators, overrides.addMarkDecorators),
+    addFontModifiers: layer(base.addFontModifiers, overrides.addFontModifiers),
+    addToolbarItems: layer(base.addToolbarItems, overrides.addToolbarItems),
+    addSlashCommands: layer(base.addSlashCommands, overrides.addSlashCommands),
+    addNodeActions: layer(base.addNodeActions, overrides.addNodeActions),
+    addSelectionBehavior: layer(base.addSelectionBehavior, overrides.addSelectionBehavior),
+    addHitTester: layer(base.addHitTester, overrides.addHitTester),
+    addHoverResolvers: layer(base.addHoverResolvers, overrides.addHoverResolvers),
+    addSelectionGesture: layer(base.addSelectionGesture, overrides.addSelectionGesture),
+    addPasteTransforms: layer(base.addPasteTransforms, overrides.addPasteTransforms),
+    addPasteHtmlTransforms: layer(base.addPasteHtmlTransforms, overrides.addPasteHtmlTransforms),
+    addCopyHtmlTransforms: layer(base.addCopyHtmlTransforms, overrides.addCopyHtmlTransforms),
+    addPasteFiles: layer(base.addPasteFiles, overrides.addPasteFiles),
+    addInputRules: layer(base.addInputRules, overrides.addInputRules),
+    addMarkdownParserTokens: layer(base.addMarkdownParserTokens, overrides.addMarkdownParserTokens),
+    addMarkdownSerializerRules: layer(base.addMarkdownSerializerRules, overrides.addMarkdownSerializerRules),
+    addInputHandlers: layer(base.addInputHandlers, overrides.addInputHandlers),
+    onEditorReady: layer(base.onEditorReady, overrides.onEditorReady),
+    onViewReady: layer(base.onViewReady, overrides.onViewReady),
+    };
+    const defaultOptions: Partial<NewOptions> = { ...this.options, ...overrides.defaultOptions };
+    const keymapPriority = overrides.keymapPriority ?? base.keymapPriority;
+    return Extension.fromConfig<NewOptions>({
+      ...hooks,
+      name: overrides.name ?? base.name,
+      defaultOptions,
+      ...(keymapPriority !== undefined ? { keymapPriority } : {}),
+    });
   }
 
   /**
@@ -164,4 +241,22 @@ export class Extension<Options extends object = object> {
         : {}),
     };
   }
+}
+
+type HookTable<Options> = { [K in ExtensionHookName]: ExtensionConfig<Options>[K] | undefined };
+
+/** A config as an extension holds it: an extended one names every hook, declared or not. */
+type StoredConfig<Options> = Pick<ExtensionConfig<Options>, "name" | "defaultOptions" | "keymapPriority"> &
+  Partial<HookTable<Options>>;
+
+/** `override` in place of `base`, with `base` reachable as `this.parent`. */
+function layer<Context, Args extends unknown[], Result>(
+  base: ((this: Context, ...args: Args) => Result) | undefined,
+  override: ((this: ExtendHookContext<Context, Args, Result>, ...args: Args) => Result) | undefined,
+): ((this: Context, ...args: Args) => Result) | undefined {
+  if (!override) return base;
+  return function (this: Context, ...args: Args): Result {
+    const parent = base && ((...parentArgs: Args) => base.apply(this, parentArgs));
+    return override.apply({ ...this, parent }, args);
+  };
 }
