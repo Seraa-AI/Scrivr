@@ -860,6 +860,8 @@ including the NEW pieces in D7, D8 and D12.
   omits `markdown` when `changes` is non-empty (`walkSemantic`). Today that
   means deletions only. With insertions reported, it covers any pending change.
   The alternative mixes CriticMarkup into it. Called out in the changeset.
+  Superseded by agent-review-views D9 (2026-11-23): such a unit keeps its
+  markdown, rendered from the proposed view.
 - **An agent's review is attributed to the host user.** `reviewedByID` is the
   plugin's `userID`, not the agent's. `AiToolkit.reviewChanges` stays a thin
   pass-through, and the host decides whether agents may review at all

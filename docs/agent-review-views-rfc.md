@@ -185,6 +185,38 @@ it is accepted.
   *Recommended.* NEW field on the suggestion block.
 - **D8: Structural previews wait for the projection substrate** and never
   write to the live document. *Recommended.*
+- **D9: A unit with pending changes keeps its markdown, rendered from the
+  proposed view** (decided 2026-11-23, Seraa's ask S1). Until now the walker
+  dropped `markdown` whenever a unit had `changes`. Serializing the live
+  blocks would mix deleted text with inserted text, so an agent read a line
+  with a pending change without its bold, italics or links, and a host
+  rebuilt tables and headings itself.
+  - **The rendered document:** the markdown comes from the document with every
+    pending proposal accepted, by the engine's own Accept on a copy. This is
+    the original view's Reject-all run the other way, so the two stay one
+    rule.
+  - **One copy per call:** each unit's blocks are found in that copy by id,
+    and rendered through the unit's own node handler, so a table that
+    declines GFM for merged cells still does.
+  - **Only the unit's own words:** a unit gets markdown only where none of its
+    blocks is proposed for deletion, and the copy holds every one of them
+    reading as the unit does: the same `text` and the same inline objects,
+    such as images. Otherwise it gets none. That covers:
+    - a block proposed for deletion;
+    - a move's old place, which shares its id with the new one;
+    - a block a pending deletion joins to the next;
+    - a block with no stored id.
+  - **What stays the same:** `text`, `spans` and `changes` are unchanged, so
+    the changes still say what is proposed and where. The markdown only reads
+    as the proposal would.
+  - **New contribution hook:** `proposedDocument`, beside `documentIn`. It
+    supplies that copy and nothing else. It is separate because the proposed
+    view's text is still read from the live document, where its changes can
+    be placed.
+  - **Alternatives rejected:**
+    - CriticMarkup in the markdown: a second redline format beside `changes`.
+    - Markdown rebuilt from `spans`: a second serializer, which loses
+      structure such as tables and list markers.
 
 ## Phases
 
@@ -223,6 +255,23 @@ Columns, also on plan 155's later list, is its own RFC
   refused, inside the generic `rejected`. This phase names the reasons apart:
   `alreadyProposed` for a delete's target, `anchorProposedForDeletion` for an
   anchor. One existing test moved its anchors from `rejected` to the new list.
+
+### D9: markdown of the proposed view (2026-11-23)
+
+- A unit with pending changes keeps `markdown`, rendered from the document
+  Track Changes' `proposedDocument` supplies: its own Accept of every pending
+  change on a copy, sharing one function with the original view's Reject.
+- The walker builds that copy once per call, and only when a unit with
+  changes asks for it.
+- A unit's blocks are found in the copy and must read as it does, with the
+  same text and inline objects, and none may be proposed for deletion. So a
+  deletion, a move's old place (even an image or a rule, which have no text) or
+  a pending join never gives a unit another unit's words or images. The unit's node handler renders them, so a table with
+  merged cells still has none.
+- Without a contribution that supplies the document, or if supplying it fails,
+  a unit with changes has none, as before. Markdown is a convenience, so a
+  fault there does not fail the export.
+- The unit hash does not cover `markdown`, so no pinned hash goes stale.
 
 ### Next release cycle (decided 2026-11-10)
 

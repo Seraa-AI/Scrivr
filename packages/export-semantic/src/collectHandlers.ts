@@ -20,9 +20,12 @@ export interface ResolvedHandlers {
   markRemovers: Array<(mark: PmMark) => boolean>;
   /** Every contributed `documentIn`; the first to answer for a view supplies its document. */
   documentsIn: DocumentIn[];
+  /** Every contributed `proposedDocument`; the first to answer supplies it. */
+  proposedDocuments: ProposedDocument[];
 }
 
 type DocumentIn = NonNullable<SemanticHandlers["documentIn"]>;
+type ProposedDocument = NonNullable<SemanticHandlers["proposedDocument"]>;
 
 /**
  * Read the `semantic` contribution structurally, WITHOUT depending on the
@@ -41,7 +44,8 @@ function semanticOf(contrib: ExportContributionMap): SemanticHandlers | undefine
     ("nodes" in value || "marks" in value || ("isRemoved" in value && typeof value.isRemoved === "function") ||
       ("nodeChanges" in value && typeof value.nodeChanges === "function") ||
       ("isMarkRemoved" in value && typeof value.isMarkRemoved === "function") ||
-      ("documentIn" in value && typeof value.documentIn === "function"))) {
+      ("documentIn" in value && typeof value.documentIn === "function") ||
+      ("proposedDocument" in value && typeof value.proposedDocument === "function"))) {
     return value as SemanticHandlers; // single guarded cast after typeof/in checks
   }
   return undefined;
@@ -62,6 +66,7 @@ export function collectHandlers(
   const nodeChangers: NodeChanges[] = [];
   const markRemovers: Array<(mark: PmMark) => boolean> = [];
   const documentsIn: DocumentIn[] = [];
+  const proposedDocuments: ProposedDocument[] = [];
 
   for (const contrib of editor.getExportContributions()) {
     const semantic = semanticOf(contrib);
@@ -72,6 +77,7 @@ export function collectHandlers(
     if (semantic.nodeChanges) nodeChangers.push(semantic.nodeChanges);
     if (semantic.isMarkRemoved) markRemovers.push(semantic.isMarkRemoved);
     if (semantic.documentIn) documentsIn.push(semantic.documentIn);
+    if (semantic.proposedDocument) proposedDocuments.push(semantic.proposedDocument);
   }
 
   if (overrides) {
@@ -81,7 +87,8 @@ export function collectHandlers(
     if (overrides.nodeChanges) nodeChangers.push(overrides.nodeChanges);
     if (overrides.isMarkRemoved) markRemovers.push(overrides.isMarkRemoved);
     if (overrides.documentIn) documentsIn.unshift(overrides.documentIn);
+    if (overrides.proposedDocument) proposedDocuments.unshift(overrides.proposedDocument);
   }
 
-  return { nodes, marks, removers, nodeChangers, markRemovers, documentsIn };
+  return { nodes, marks, removers, nodeChangers, markRemovers, documentsIn, proposedDocuments };
 }

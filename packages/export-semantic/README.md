@@ -211,7 +211,7 @@ toSemanticUnits(editor, {
 
 ## Formatting: styling & inline marks
 
-Markdown is a *lossy*, non-canonical view — it can't express alignment, indent, color, highlight, font, or review overlays safely. Treat `markdown` as a convenience only. When review `changes` are present, `markdown` is omitted so consumers do not accidentally mix proposed text with raw redline rendering.
+Markdown is a *lossy*, non-canonical view: it can't express alignment, indent, color, highlight, font or review overlays safely. Treat `markdown` as a convenience only. When a unit has review `changes`, its `markdown` reads as the proposal would, with every change accepted, while `changes` still says what is proposed. A contribution supplies that document through `proposedDocument`; Track Changes does. A unit gets this `markdown` only where that document holds its blocks reading as the unit does, with the same text and inline objects, and none of them proposed for deletion. So it never carries another unit's words or images, for example after a pending move or join. Without a supplier, the unit has no `markdown` rather than redlines.
 
 - **`attrs`** — the block's own styling markdown can't carry (`align`, `indent`, `textIndent`, `fontFamily`, list start, …). Only non-default values; identity/level bookkeeping (`nodeId`, `dataTracked`, `level`) is removed. For a grouped heading+lede unit these are the anchor (heading) block's attrs.
 - **`spans`** — the inline runs of the unit's text, each with its formatting marks and their attrs. It reconstructs the text exactly — `spans.map(s => s.text).join("") === text` — so a downstream agent knows precisely which text is bold, red, a link, etc., and can suggest edits that preserve formatting.

@@ -1,5 +1,5 @@
 import type { Node as PmNode } from "@scrivr/core/pm";
-import { outlineLevelOf, outlineTitleOf, type SemanticChange, type SemanticHeading, type SemanticNodeResult, type SemanticPart, type SemanticTextView, type SemanticUnit, type UnitCtx } from "@scrivr/core";
+import { breakOf, outlineLevelOf, outlineTitleOf, type SemanticChange, type SemanticHeading, type SemanticNodeResult, type SemanticPart, type SemanticTextView, type SemanticUnit, type UnitCtx } from "@scrivr/core";
 import type { ResolvedHandlers } from "./collectHandlers";
 import { groupBlocks } from "./grouping";
 import { resolveNodeId, type BlockEntry } from "./id";
@@ -48,6 +48,7 @@ export function walkSemantic(
   const units: SemanticUnit[] = [];
   const stack: { level: number; title: string }[] = [];
   let order = 0;
+  const proposed = proposedBlocksOnce(doc, handlers, view);
 
   // What the proposed view leaves out of a title: what the lane reports
   // removed, and a text run its mark handlers drop (a tracked deletion).
@@ -134,8 +135,10 @@ export function walkSemantic(
     if (spans.map((s) => s.text).join("") === text && spans.some((s) => s.marks.length > 0)) {
       unit.spans = spans;
     }
-    const markdown = result.markdown ?? ctx.toMarkdown(nodes);
-    if (changes.length === 0 && markdown.length > 0) unit.markdown = markdown;
+    const markdown = changes.length === 0
+      ? result.markdown ?? ctx.toMarkdown(nodes)
+      : proposedMarkdown(nodes, nodeIds, text, proposed(), handlers, ctx);
+    if (markdown.length > 0) unit.markdown = markdown;
     if (result.cells !== undefined) unit.cells = result.cells;
     if (result.image !== undefined) unit.image = result.image;
     // A grouped unit is gone only when every block in it is.
@@ -149,6 +152,78 @@ export function walkSemantic(
   }
 
   return units;
+}
+
+/**
+ * A getter for the blocks of the proposed document — every pending change
+ * accepted — by id, built on the first call only, so a call with no changes
+ * never builds it. Null when the view is not the proposed one, no contribution
+ * supplies that document, or supplying it fails: markdown is a convenience, so
+ * it is left out rather than the whole export failing.
+ */
+function proposedBlocksOnce(doc: PmNode, handlers: ResolvedHandlers, view: SemanticTextView): () => Map<string, PmNode> | null {
+  let blocks: Map<string, PmNode> | null | undefined;
+  return () => {
+    if (blocks !== undefined) return blocks;
+    blocks = null;
+    if (view !== "proposed") return blocks;
+    for (const supply of handlers.proposedDocuments) {
+      let accepted: PmNode | null;
+      try {
+        accepted = supply(doc);
+      } catch {
+        return blocks;
+      }
+      if (!accepted) continue;
+      const byId = new Map<string, PmNode>();
+      accepted.forEach((node) => {
+        const id = node.attrs["nodeId"];
+        if (typeof id === "string" && id.length > 0) byId.set(id, node);
+      });
+      blocks = byId;
+      break;
+    }
+    return blocks;
+  };
+}
+
+/**
+ * A unit with changes as markdown: its blocks as the proposal leaves them,
+ * through the same node handler, so one that declines markdown (a table with
+ * merged cells) still does. Only where none of the unit's blocks is proposed
+ * for deletion — a move's old place shares its id with the new one — and the
+ * proposed document holds every one of them, reading as the unit does: the
+ * same text and the same inline objects. So not for a block a pending deletion
+ * joins to the next, or one with no stored id, and a unit never carries
+ * another unit's words or images. Without the proposed document there is
+ * none, rather than the live blocks' redlines.
+ */
+function proposedMarkdown(
+  live: readonly PmNode[],
+  nodeIds: readonly string[],
+  text: string,
+  blocks: Map<string, PmNode> | null,
+  handlers: ResolvedHandlers,
+  ctx: UnitCtx,
+): string {
+  if (!blocks || live.some((node) => ctx.isRemoved(node))) return "";
+  const nodes = nodeIds.map((id) => blocks.get(id));
+  if (!nodes.every((node): node is PmNode => node !== undefined)) return "";
+  if (ctx.toText(nodes) !== text) return "";
+  if (inlineObjects(nodes, () => true) !== inlineObjects(live, (node) => !ctx.isRemoved(node))) return "";
+  const handled = handlers.nodes[nodes[0]!.type.name]?.(nodes[0]!, ctx);
+  return handled?.markdown ?? ctx.toMarkdown(nodes);
+}
+
+/** How many inline objects (images, fields) `nodes` hold that `counts` keeps; a line break reads as text. */
+function inlineObjects(nodes: readonly PmNode[], counts: (node: PmNode) => boolean): number {
+  let objects = 0;
+  for (const node of nodes) {
+    node.descendants((child) => {
+      if (child.isInline && child.isLeaf && !child.isText && breakOf(child.type) !== "line" && counts(child)) objects++;
+    });
+  }
+  return objects;
 }
 
 /** Location label for a positional container level in a part breadcrumb. */

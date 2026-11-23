@@ -149,8 +149,10 @@ export interface SemanticUnit {
    */
   parts?: SemanticPart[];
   /** Structure-preserving markdown. Simple tables → GFM. Convenience only — a
-   * lossy, non-canonical projection; omitted when review `changes` are present
-   * to avoid mixing proposed text with raw redline rendering. */
+   * lossy, non-canonical projection. With review `changes`, it reads as the
+   * proposal would — every change accepted — and only where the proposed
+   * document holds the unit's blocks reading exactly as its `text`; it is
+   * omitted otherwise, rather than mix in redlines or another unit's words. */
   markdown?: string;
   /** Structured rows/cells with spans — emitted for tables GFM can't encode. */
   cells?: TableCells;
@@ -410,6 +412,15 @@ export interface SemanticHandlers {
    * the document their own Reject of every pending proposal leaves.
    */
   documentIn?: (doc: PmNode, view: SemanticTextView) => PmNode | null;
+  /**
+   * The document with every pending proposal accepted, or null when none is
+   * pending. A unit with changes renders its `markdown` from it, so the
+   * markdown reads as the proposal would; its text and changes still come from
+   * the live document, where the changes can be placed. The unit's node
+   * handler renders the proposed blocks with the live document's `UnitCtx`,
+   * so a handler should read only the node it is given.
+   */
+  proposedDocument?: (doc: PmNode) => PmNode | null;
 }
 
 // ── Producer context ─────────────────────────────────────────────────────────
