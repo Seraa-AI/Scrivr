@@ -36,12 +36,11 @@ export default defineConfig({
       '@scrivr/react/styles.css': resolve(__dirname, '../../packages/react/src/styles.css'),
       '@scrivr/core/pm': resolve(__dirname, '../../packages/core/src/pm.ts'),
       '@scrivr/core': resolve(__dirname, '../../packages/core/src/index.ts'),
-      ...Object.fromEntries(
-        ['collaboration', 'track-changes', 'citation-highlight', 'header-footer', 'sealed-viewer'].map((entry) => [
-          `@scrivr/plugins/${entry}`,
-          resolve(__dirname, `../../packages/plugins/src/${entry}/index.ts`),
-        ]),
-      ),
+      '@scrivr/plugins/collaboration': resolve(__dirname, '../../packages/plugins/src/collaboration/index.ts'),
+      '@scrivr/plugins/track-changes': resolve(__dirname, '../../packages/plugins/src/track-changes/index.ts'),
+      '@scrivr/plugins/citation-highlight': resolve(__dirname, '../../packages/plugins/src/citation-highlight/index.ts'),
+      '@scrivr/plugins/header-footer': resolve(__dirname, '../../packages/plugins/src/header-footer/index.ts'),
+      '@scrivr/plugins/sealed-viewer': resolve(__dirname, '../../packages/plugins/src/sealed-viewer/index.ts'),
       '@scrivr/plugins': resolve(__dirname, '../../packages/plugins/src/index.ts'),
       '@scrivr/export-pdf': resolve(__dirname, '../../packages/export-pdf/src/index.ts'),
       '@scrivr/export-markdown': resolve(__dirname, '../../packages/export-markdown/src/index.ts'),

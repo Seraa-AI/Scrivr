@@ -132,13 +132,13 @@ describe("two suggestions by one author", () => {
     expect(ofOperation(editor, "A").map((c) => c.id).sort()).toEqual(idsOfA);
   });
 
-  it("clearAuthorPendingMarks withdraws only the writer it is given", () => {
+  it("clearAuthorPendingMarks withdraws only the suggestion it is given", () => {
     const editor = editorOf([para("p", "alpha")]);
     as(editor, "A", (tr) => tr.insertText(" one", at(editor, "alpha") + 5));
     as(editor, "B", (tr) => tr.insertText(" two", at(editor, "one") + 3));
-    const writer: Owner = { authorID: "ai", operationId: "A" };
+    const suggestionA: Owner = { authorID: "ai", operationId: "A" };
     const tr = editor.getState().tr;
-    clearAuthorPendingMarks(tr, 0, tr.doc.content.size, writer, editor.getState().schema);
+    clearAuthorPendingMarks(tr, 0, tr.doc.content.size, suggestionA, editor.getState().schema);
     editor.applyTransaction(tr);
 
     expect(editor.getState().doc.textContent).toBe("alpha two");

@@ -5,7 +5,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 
-// vi.mock is hoisted above module code, so each factory throws on its own.
+// A throwing factory stands in for a peer that is not installed.
 vi.mock("yjs", () => { throw new Error("yjs is not installed"); });
 vi.mock("y-prosemirror", () => { throw new Error("y-prosemirror is not installed"); });
 vi.mock("@hocuspocus/provider", () => { throw new Error("@hocuspocus/provider is not installed"); });

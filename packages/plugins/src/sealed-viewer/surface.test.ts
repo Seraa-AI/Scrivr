@@ -1,6 +1,6 @@
 // Imported through the package's entries on purpose: these are what a signing
 // host and its collaboration server build on, and `tsc` fails here the moment
-// one stops being exported. The room's revision lives in the collaboration entry.
+// one stops being exported.
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import {

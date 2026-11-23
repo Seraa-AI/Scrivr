@@ -5,7 +5,7 @@ React bindings for the Scrivr canvas document editor.
 ## Installation
 
 ```bash
-pnpm add @scrivr/core @scrivr/react
+pnpm add @scrivr/core @scrivr/react @scrivr/plugins @scrivr/ai
 ```
 
 ## Quick Start

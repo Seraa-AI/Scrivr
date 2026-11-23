@@ -25,7 +25,7 @@ Scrivr is an open-source, canvas-rendered document editor framework. Unlike trad
 ## Quick Start
 
 ```bash
-pnpm add @scrivr/core @scrivr/react
+pnpm add @scrivr/core @scrivr/react @scrivr/plugins @scrivr/ai
 ```
 
 ```tsx

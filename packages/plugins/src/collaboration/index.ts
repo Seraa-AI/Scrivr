@@ -1,5 +1,5 @@
-export { Collaboration } from "./Collaboration";
-export { CollaborationCursor } from "./CollaborationCursor";
+export { Collaboration, type CollaborationOptions } from "./Collaboration";
+export { CollaborationCursor, type CollaborationCursorOptions } from "./CollaborationCursor";
 export { collaborationRegistry } from "./collaborationState";
 export type { CollabState } from "./collaborationState";
 export { seedDocAttrs, readDocAttrs } from "./docAttrs";

@@ -6,8 +6,8 @@
  */
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
-// Through the package barrel: this pair exists to be imported by a consuming
-// application, so a name dropped from `index.ts` fails here rather than there.
+// Through the collaboration entry: a consuming app imports this pair from
+// there, so a name dropped from its `index.ts` fails here first.
 import {
   DOC_ATTRS_MAP_NAME,
   isDocAttrEnvelope,

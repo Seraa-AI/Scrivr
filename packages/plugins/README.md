@@ -1,6 +1,6 @@
 # @scrivr/plugins
 
-Optional extensions for Scrivr — real-time collaboration, AI Toolkit, AI Suggestions, and Track Changes.
+Optional extensions for Scrivr — Track Changes, headers and footers, citation highlighting, the sealed viewer, and real-time collaboration. The AI Toolkit lives in `@scrivr/ai`.
 
 ## Installation
 

@@ -23,7 +23,7 @@ import { DOC_ATTRS_MAP_NAME, type DocAttrEnvelope } from "./YBinding";
 import { collaborationRegistry } from "./collaborationState";
 import { watchRevision, type RevisionCallbacks } from "./watchRevision";
 
-interface CollaborationOptions extends RevisionCallbacks {
+export interface CollaborationOptions extends RevisionCallbacks {
   /** WebSocket URL of the HocusPocus server. Default: "ws://localhost:1234" */
   url?: string;
   /** Document / room name — all clients with the same name share the document. */
