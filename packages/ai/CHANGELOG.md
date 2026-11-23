@@ -1,5 +1,89 @@
 # @scrivr/ai
 
+## 1.0.26
+
+### Patch Changes
+
+- ad87403: A small AI edit in a long paragraph is that edit, its new words keep the text's formatting, and a call that names a paragraph twice no longer garbles it.
+
+  - **`diffText` sets the words shared at each end aside first** (#254). The comparison and its size guard then see only the part that changed. Before, past 20,000 comparison cells a paragraph was deleted and written out again, even for a one-word fix, and its formatting was lost. When the changed part itself is past the guard, it alone becomes one deletion and one insertion.
+  - **New words in a plain-text proposal take formatting as typing does in Word, and kept text proposes none.**
+    - A replaced word takes the formatting of the text it replaces.
+    - An insertion takes the formatting of the text before it, or after it at the start of a paragraph or a line.
+    - A mark that does not grow at its edge, such as a link, carries only into the inside of a run that has it.
+    - This applies to `applyDiffAsSuggestion`, `applyMultiBlockDiff`, `computeAiSuggestion`'s `proposedText`, and an `AiToolkit` rich edit given as text without `spans`, which before proposed removing every mark on the kept text.
+    - Proposals given as formatted runs are unchanged.
+    - Exported for hosts that diff on their own: `plainProposalMarks`, `plainTextSpans` and `acceptedMarksAt`, the one reader of each accepted character's formatting.
+  - **Formatting is read the same way everywhere a proposal is compared.** It counts a line break and leaves out a mark another author proposed removing. Before, a proposal over a paragraph with a line break, or beside a pending unformat, showed formatting changes nobody had proposed. Rebasing a partly applied suggestion was off by one after a line break.
+  - **A paragraph named more than once in one call is left alone and reported** (#282).
+    - `applyMultiBlockDiff` returns it in a new `rejected` list (`MultiBlockDiffResult`), and `applyRichDiffAsSuggestion` in its existing one.
+    - `computeAiSuggestion` leaves it out and tells a new `onWarn` option.
+    - An id no block has is not counted as repeated: `applyRichDiffAsSuggestion` reports it in `notFound`, and `applyMultiBlockDiff` and `computeAiSuggestion` skip it.
+    - The rest of the call still applies. `namedMoreThanOnce` is exported.
+  - **Suggesting mode no longer crashes on an insertion of exactly two runs mid-paragraph**, such as a bold word followed by plain text. It was misread as a paragraph break.
+
+- a8694d5: Every suggestion lane is now recorded by the track-changes engine. `applyDiffAsSuggestion`, `applyMultiBlockDiff`, `applyRichDiffAsSuggestion`, the AI suggestion's tracked apply and `insertAsSuggestion` write plain edits under `trackAsSuggestion`, as a person typing in suggesting mode would, so a suggestion from any of them is recorded and reviewed the same way.
+
+  **`@scrivr/plugins`**
+
+  **Breaking:** `buildAcceptedTextMap` and `acceptedTextMapFor` now read a line break as `"\n"`, as the semantic export shows it. For a block with a break, `acceptedText`, `decoratedText` and the offsets in `map` change. A host that builds `proposedText` from a view without breaks would now propose deleting every break, so it should build it from `acceptedText`.
+
+  - A lane can now propose a line break, or its removal, from a `"\n"` in the proposed text.
+  - A replacement shows its new words before the words it strikes, as typing over a selection does. The lanes used to show the struck words first.
+  - A deletion takes only the text the lane read. An image, or another author's struck text, inside a deleted range is left as it is, and the words around it stay one replacement.
+  - An insertion is one change, whatever formatting or breaks it holds, so reviewing any part of it decides all of it. This holds for anyone: a formatted paste typed in suggesting mode is one change too.
+  - A lane writes nothing that would not be recorded: without the TrackChanges extension, while snapshots are viewed, when tracking refuses the edit, or when the transaction carries a meta tracking skips. It reports `applied: false`, or `false` from `insertAsSuggestion`.
+  - `applyRichDiffAsSuggestion` no longer lists `rejected` bottom to top. It lists blocks the call named more than once first, then blocks it could not edit (held only by text proposed for deletion, or not a text block), then edits it could not apply, each in the order given. An id no block has is in `notFound`.
+  - `insertAsSuggestion` over a range spanning two blocks proposes joining them, as typing over that selection does; it used to strike and insert.
+  - New: `suggestionBlocked(state, tr)` says why a suggestion would not be recorded, as a `SuggestionBlock` (`no-tracking`, `viewing-snapshots`, `untracked`, or a tracking refusal); `writeProposal` writes a block's diff as plain edits. The plugin state carries the host's `skipTrsWithMetas`.
+  - Moving words you inserted yourself, still pending, along their paragraph in one edit (a drag) is now your insertion in its new place, not a move: nothing was there before to move from. The same keeps a lane that restates its proposal from recording its line breaks as moved.
+  - `clearAuthorPendingMarks` also withdraws the writer's own pending deletion of a break or image. Withdrawing one's own review records on a node records no change, as taking off one's review mark records none; rewriting another writer's records is undone. The writer is the author, and the suggestion when an `operationId` names one.
+
+  **`@scrivr/ai`**
+
+  - `applyAiSuggestion` writes its formatting and its words in one transaction, so an apply is one undo step, recorded by the engine in tracked mode.
+  - A phrase whose new words carry different formatting is one change, its new words before the struck ones.
+  - An apply that would not be recorded writes nothing, returns `false`, and leaves the suggestion pending.
+
+- 03281da: A host can name the suggestion a tracked change came from. Pass an `operationId`, such as a review row's id, when writing a suggestion. It is stored on every change that suggestion writes (`dataTracked.operationId`) and shown on each change in the semantic export (`SemanticChange.operationId`). So the document itself can say which suggestion a change belongs to, even when a host's own record of it is lost.
+
+  - **Where it's accepted:**
+    - `trackAsSuggestion(tr, authorID, { operationId })`;
+    - `applyAiSuggestion`;
+    - `applyDiffAsSuggestion`, `applyMultiBlockDiff` and `applyRichDiffAsSuggestion`;
+    - the `insertAsSuggestion` command, as its fifth argument;
+    - `AiToolkit.applyRichEdit` and `applySemanticEdits` (new `AgentEditOptions` type), covering text, structural and image-layout changes.
+  - **Own work is the same author and the same suggestion.** One agent's two suggestions never touch each other's changes. A later suggestion:
+
+    - never fuses with an earlier one's change, and never joins its replacement or act;
+    - never folds into a block the earlier one created;
+    - never takes back its insertion or split;
+    - never replaces its formatting;
+    - never withdraws its changes when a lane rewrites the block.
+
+    So deciding one suggestion never decides another, and each keeps exactly the changes it wrote. Two suggestions that oppose each other are a conflict, as between two authors. So rejecting one is refused while the other's change sits on it, until both are decided. Re-applying the same suggestion still replaces its own changes. Changes written with no operation id keep the author-only rule.
+
+  - **Breaking:** `clearAuthorPendingMarks` takes the writer, not an author id string, as its fourth argument: replace `clearAuthorPendingMarks(tr, from, to, "alice", schema)` with `clearAuthorPendingMarks(tr, from, to, { authorID: "alice" }, schema)`. The `Owner` type (`{ authorID, operationId? }`) is exported.
+  - **Types:** `SuggestionIntent` (`{ authorID, operationId? }`) is exported; `trackAsSuggestion`'s options take its `operationId`.
+  - **While pending:** a change keeps its operation id until it is decided, including when other changes from the same suggestion are decided first.
+
+- Updated dependencies [ad87403]
+- Updated dependencies [7c8da5f]
+- Updated dependencies [ff75a67]
+- Updated dependencies [7c8da5f]
+- Updated dependencies [f7a8c9e]
+- Updated dependencies [7c8da5f]
+- Updated dependencies [de92dc4]
+- Updated dependencies [8321786]
+- Updated dependencies [a04c9c1]
+- Updated dependencies [6b66310]
+- Updated dependencies [92a41b7]
+- Updated dependencies [a8694d5]
+- Updated dependencies [03281da]
+  - @scrivr/plugins@1.0.26
+  - @scrivr/core@1.0.26
+  - @scrivr/export-semantic@1.0.26
+
 ## 1.0.25
 
 ### Patch Changes

@@ -1,5 +1,51 @@
 # @scrivr/react
 
+## 1.0.26
+
+### Patch Changes
+
+- a04c9c1: A word typed over a selection in suggesting mode is now one change, as Google Docs shows it. The deleted words and the typed words share a `groupId`, so the popover shows one card and deciding either half decides both.
+
+  New: the reader picks how a replacement is reviewed. `TrackChanges.configure({ replacementView })` sets the initial view and the `setReplacementView(view)` command switches it. `"paired"` (the default) is one card for the replacement. `"split"` shows the deletion and the insertion as two cards, each decided on its own, as Word does. The pairing is recorded either way, so switching never rewrites the document. `changeActs` and `planChangeReview` take the view, the change popover and `useTrackChangesPanel` (`@scrivr/react/track-changes`) follow it, and the plugin state carries `replacementView`.
+
+  - Text the same writer types right beside the replacement's typed words, or retypes inside them, joins it. The same writer means the same author and, when a host names one, the same suggestion (`operationId`).
+  - Any other edit beside it, earlier or later, stays its own change, and so does another replacement, even side by side.
+  - Typing over text already struck, or over the writer's own pending insertion, starts no replacement: there is no new deletion to pair.
+  - Pasting paragraphs over a selection, or typing over one that spans paragraphs, is not paired: it also splits or joins paragraphs.
+  - Moved text is not paired; a move already pairs its two halves.
+
+- 6b66310: `@scrivr/plugins` and `@scrivr/react` import without the packages they list as optional. Before, both loaded `yjs`, `y-prosemirror` and `@hocuspocus/provider`, and `@scrivr/react` also loaded `@scrivr/plugins` and `@scrivr/ai`. So an app without collaboration, track changes or AI crashed on import unless it installed them all.
+
+  - **Each plugin has its own entry:** `@scrivr/plugins/collaboration`, `/track-changes`, `/header-footer`, `/citation-highlight` and `/sealed-viewer`. Within each of ESM and CommonJS, entries share one copy of each module, so a plugin key from the root and from its own entry are the same key.
+  - **Breaking:** collaboration is no longer exported from the root. Import `Collaboration`, `CollaborationCursor`, the revision and sealing helpers (`stampSeal`, `snapshotFromYDoc`, `watchRevision` and the rest) and their types from `@scrivr/plugins/collaboration`. The root still exports every other plugin.
+  - **Breaking:** `@scrivr/react` no longer re-exports `Collaboration` and `CollaborationCursor`. Import them from `@scrivr/plugins/collaboration`.
+  - **Breaking:** `@scrivr/react`'s root needs only `@scrivr/core`. Its components built on the optional packages have their own entries:
+
+    - `@scrivr/react/track-changes`, which needs `@scrivr/plugins`: `TrackChangesPopover`, `TrackChangesPanel`, `useTrackChangesPopover`, `useTrackChangesPanel`, `useReviewAction`, `ReviewRefusalNotice`, `describeSuggestionRefusal` and their types;
+    - `@scrivr/react/header-footer`, which needs `@scrivr/plugins`: `HeaderFooterRibbon`, `useHeaderFooterRibbon` and their types;
+    - `@scrivr/react/ai`, which needs `@scrivr/ai`: `AiSuggestionCardsPanel`, `useAiSuggestionCards`, `AiSuggestionPopover`, `useAiSuggestionPopover`, `useBlockMarkerOverlay` and their types.
+
+    Import them from there instead of `@scrivr/react`.
+
+  - `Collaboration`'s and `CollaborationCursor`'s option types are exported, as `CollaborationOptions` and `CollaborationCursorOptions`.
+
+- Updated dependencies [ad87403]
+- Updated dependencies [7c8da5f]
+- Updated dependencies [ff75a67]
+- Updated dependencies [7c8da5f]
+- Updated dependencies [f7a8c9e]
+- Updated dependencies [7c8da5f]
+- Updated dependencies [de92dc4]
+- Updated dependencies [8321786]
+- Updated dependencies [a04c9c1]
+- Updated dependencies [6b66310]
+- Updated dependencies [92a41b7]
+- Updated dependencies [a8694d5]
+- Updated dependencies [03281da]
+  - @scrivr/plugins@1.0.26
+  - @scrivr/ai@1.0.26
+  - @scrivr/core@1.0.26
+
 ## 1.0.25
 
 ### Patch Changes

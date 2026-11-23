@@ -1,6 +1,6 @@
 {
   "name": "@scrivr/html",
-  "version": "1.0.25",
+  "version": "1.0.26",
   "description": "HTML import for Scrivr documents — load a whole document from HTML, in the browser or on the server",
   "license": "Apache-2.0",
   "author": "Seraa AI <hello@seraa.ai>",
