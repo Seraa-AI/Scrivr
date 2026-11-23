@@ -15,6 +15,7 @@ import { describe, it, expect } from "vitest";
 import { ServerEditor, StarterKit } from "@scrivr/core";
 import { toSemanticUnits } from "@scrivr/export-semantic";
 import { TrackChanges } from "../TrackChanges";
+import { TrackChangesStatus } from "../types";
 
 describe("TrackChanges — semantic mark seam", () => {
   it("excludes suggested-deletion text and keeps inserted text", () => {
@@ -42,7 +43,6 @@ describe("TrackChanges — semantic mark seam", () => {
       { type: "suggestedInsert", text: "inserted ", at: 5, length: 9 },
       { type: "suggestedDelete", text: "deleted ", at: 14, length: 0 },
     ]);
-    expect(units[0]!.markdown).toBeUndefined();
   });
 
   it("keeps tracked marks out of formatting spans", () => {
@@ -226,5 +226,51 @@ describe("TrackChanges — semantic mark seam", () => {
     expect(toSemanticUnits(editor)[0]!.changes).toEqual([
       { type: "suggestedDelete", text: "deleted", at: 5, length: 0 },
     ]);
+  });
+});
+
+describe("a unit with pending changes keeps markdown of the proposed view", () => {
+  const suggesting = (content: unknown[]) => new ServerEditor({
+    extensions: [StarterKit, TrackChanges.configure({ userID: "alice", initialStatus: TrackChangesStatus.enabled })],
+    content: { type: "doc", content },
+  });
+  const para = (nodeId: string, content: unknown[]) => ({ type: "paragraph", attrs: { nodeId }, content });
+
+  it("reads as the proposal would, its formatting kept", () => {
+    const editor = suggesting([para("p1", [
+      { type: "text", text: "keep " }, { type: "text", text: "this", marks: [{ type: "bold" }] }, { type: "text", text: " word" },
+    ])]);
+    editor.applyTransaction(editor.getState().tr.insertText("new ", 6));
+    const word = editor.getState().doc.textContent.indexOf("word") + 1;
+    editor.applyTransaction(editor.getState().tr.delete(word, word + 4));
+
+    const unit = toSemanticUnits(editor)[0]!;
+    expect(unit.changes?.length).toBeGreaterThan(0);
+    expect(unit.markdown).toBe("keep new **this** ");
+  });
+
+  it("keeps a heading's markdown", () => {
+    const editor = suggesting([{ type: "heading", attrs: { nodeId: "h1", level: 2 }, content: [{ type: "text", text: "Scope" }] }]);
+    editor.applyTransaction(editor.getState().tr.insertText(" and terms", 6));
+
+    expect(toSemanticUnits(editor)[0]!.markdown).toBe("## Scope and terms");
+  });
+
+  it("has none for a block proposed for deletion", () => {
+    const editor = suggesting([para("p1", [{ type: "text", text: "stays" }]), para("p2", [{ type: "text", text: "goes" }])]);
+    const second = editor.getState().doc.child(0).nodeSize;
+    editor.applyTransaction(editor.getState().tr.delete(second, second + editor.getState().doc.child(1).nodeSize));
+
+    const units = toSemanticUnits(editor);
+    const gone = units.find((unit) => unit.id === "p2");
+    expect(gone?.proposedForDeletion).toBe(true);
+    expect(gone?.markdown).toBeUndefined();
+  });
+
+  it("leaves the original view as it reads", () => {
+    const editor = suggesting([para("p1", [{ type: "text", text: "keep this" }])]);
+    editor.applyTransaction(editor.getState().tr.insertText(" new", 10));
+
+    expect(toSemanticUnits(editor, { view: "original" })[0]!.markdown).toBe("keep this");
   });
 });

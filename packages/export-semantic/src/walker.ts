@@ -48,6 +48,7 @@ export function walkSemantic(
   const units: SemanticUnit[] = [];
   const stack: { level: number; title: string }[] = [];
   let order = 0;
+  const proposed = proposedBlocks(doc, handlers, view);
 
   // What the proposed view leaves out of a title: what the lane reports
   // removed, and a text run its mark handlers drop (a tracked deletion).
@@ -134,8 +135,8 @@ export function walkSemantic(
     if (spans.map((s) => s.text).join("") === text && spans.some((s) => s.marks.length > 0)) {
       unit.spans = spans;
     }
-    const markdown = result.markdown ?? ctx.toMarkdown(nodes);
-    if (changes.length === 0 && markdown.length > 0) unit.markdown = markdown;
+    const markdown = changes.length === 0 ? result.markdown ?? ctx.toMarkdown(nodes) : proposedMarkdown(nodeIds, proposed, ctx);
+    if (markdown.length > 0) unit.markdown = markdown;
     if (result.cells !== undefined) unit.cells = result.cells;
     if (result.image !== undefined) unit.image = result.image;
     // A grouped unit is gone only when every block in it is.
@@ -149,6 +150,44 @@ export function walkSemantic(
   }
 
   return units;
+}
+
+/**
+ * The blocks of the proposed document — every pending change accepted — by
+ * id, built once and only when a unit asks: null when the view is not the
+ * proposed one, or no contribution can supply that document.
+ */
+function proposedBlocks(doc: PmNode, handlers: ResolvedHandlers, view: SemanticTextView): () => Map<string, PmNode> | null {
+  let blocks: Map<string, PmNode> | null | undefined;
+  return () => {
+    if (blocks !== undefined) return blocks;
+    blocks = null;
+    if (view !== "proposed") return blocks;
+    for (const supply of handlers.proposedDocuments) {
+      const accepted = supply(doc);
+      if (!accepted) continue;
+      const byId = new Map<string, PmNode>();
+      accepted.forEach((node) => {
+        const id = node.attrs["nodeId"];
+        if (typeof id === "string" && id.length > 0) byId.set(id, node);
+      });
+      blocks = byId;
+      break;
+    }
+    return blocks;
+  };
+}
+
+/**
+ * A unit with changes as markdown: its blocks as the proposal leaves them. A
+ * block proposed for deletion has none; without the proposed document there is
+ * no markdown, rather than the live blocks' redlines.
+ */
+function proposedMarkdown(nodeIds: readonly string[], proposed: () => Map<string, PmNode> | null, ctx: UnitCtx): string {
+  const blocks = proposed();
+  if (!blocks) return "";
+  const nodes = nodeIds.flatMap((id) => blocks.get(id) ?? []);
+  return nodes.length > 0 ? ctx.toMarkdown(nodes) : "";
 }
 
 /** Location label for a positional container level in a part breadcrumb. */
