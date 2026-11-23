@@ -37,6 +37,11 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      # An app compiles against @scrivr/react's built declarations, not its
+      # source, so check one the way an app would.
+      - name: Typecheck an app using @scrivr/react
+        run: pnpm --filter @scrivr/react typecheck:consumer
+
       - name: Test
         run: pnpm test
 
@@ -48,10 +53,12 @@ jobs:
       - name: Build docs app
         run: pnpm turbo run build --filter=@scrivr/docs...
 
-      # @scrivr/react supports React 18 and 19 but develops on 19. Rerun its
-      # tests on 18 so the lower end of the peer range stays checked. Last,
-      # because it swaps the workspace's React for every step after it.
-      - name: Test @scrivr/react on React 18
+      # @scrivr/react supports React 18 and 19 but develops on 19. Check the
+      # same build against React 18 and its types, so React 18 stays covered.
+      # Last, because it rewrites @scrivr/react's package.json and the lockfile.
+      - name: Check @scrivr/react on React 18
         run: |
-          pnpm --filter @scrivr/react add -D react@^18.3.1 react-dom@^18.3.1
+          pnpm --filter @scrivr/react add -D react@^18.3.1 react-dom@^18.3.1 @types/react@^18.3.28 @types/react-dom@^18.3.7
+          pnpm --filter @scrivr/react typecheck:consumer
+          pnpm --filter @scrivr/react typecheck
           pnpm --filter @scrivr/react test

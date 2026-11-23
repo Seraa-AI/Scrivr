@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { computePosition, flip, offset, shift } from "@floating-ui/dom";
 import type { Placement } from "@floating-ui/dom";
+import type { ElementRef } from "../utils/elementRef";
 
 export interface FloatingPositionOptions {
   placement?: Placement;
@@ -14,7 +15,7 @@ export function useFloatingPosition<T extends HTMLElement>(
   deps: ReadonlyArray<unknown> = [],
   options: FloatingPositionOptions = {},
 ) {
-  const ref = useRef<T>(null);
+  const ref: ElementRef<T> = useRef<T>(null);
   const [position, setPosition] = useState<{ x: number; y: number } | null>(
     null,
   );
