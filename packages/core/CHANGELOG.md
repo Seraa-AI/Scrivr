@@ -1,5 +1,120 @@
 # @scrivr/core
 
+## 1.0.26
+
+### Patch Changes
+
+- 7c8da5f: The built-in extensions report what their DOCX handlers could not carry across, so a report names the loss and the extension behind it.
+
+  - **Export.**
+    - Paragraph and Heading report an indent, a first-line or hanging indent, or a font they do not write.
+    - Image reports alt text, a stacking order and an inline image's vertical alignment it does not write. It drops an image with no src (`"no src"`) or whose bytes could not be read (`"image bytes unavailable"`).
+    - Color drops a colour DOCX cannot express (`"not a color DOCX can write"`) and a mark with no colour.
+    - FontFamily drops a mark naming no font. FontSize notes a size that Word's half points round, and drops a mark with no size.
+    - Highlight notes an unreadable colour written as yellow. Link notes a title it does not write, once per link.
+    - Color and Highlight note a translucent colour blended onto white, since DOCX has no alpha — though not the highlight's own colour, which the canvas draws the same way.
+    - Table notes a cell background it blends onto white because it is translucent, or does not write because it is not a colour.
+    - SourcedBlock notes a source link too long for Word's 255-character tag.
+  - **Import.**
+    - Underline notes a style other than single (`"double" underline imported as single`) and an underline colour it does not keep; the parser now keeps an underline's `w:val` and `w:color` so it can.
+    - FontSize notes a size rounded to a whole pixel and drops one that is not a size.
+    - Highlight notes a colour it cannot keep when the editor has one highlight colour (not its own colour, so a round trip notes nothing), and a shading pattern drawn as its fill alone. Shading with no fill (or `auto`) and a clear pattern is no background, kept.
+    - FontFamily notes a run that names several faces, of which the editor keeps one (`"one font kept of several named"`). It drops a theme font as `"theme font not resolved"` and an `rFonts` with no Latin face as `"no Latin font named"`.
+    - Link drops a hyperlink with no usable target as `"no usable target"`, or `"the schema has no link mark"` — once per link, however many runs it spans.
+    - Image drops one it cannot find as `"image part not found"`, one with no reference as `"no image reference"`, or `"media option is drop"` under that option.
+    - A paragraph handler that leaves out formatting or inline objects it was handed — a code block keeping only text — has them moved from kept to dropped by the converter, as `LEFT_OUT` (exported). Formatting that carried nothing ("no formatting" values) and the paragraph style's own formatting are not charged.
+  - A smart tag's text is imported; it was dropped.
+  - A list's numbering format is read for each level, so a bullet level inside a numbered list stays bullets, and List reports a format it draws differently from Word's built-in style for that depth (`"upperRoman" numbering drawn as decimal`). `DocxBlock`'s list gains `level` and `format`.
+  - A page break inside an inline content control no longer fails the import: a line break stands in, and the page break is reported dropped.
+  - List import keeps every paragraph: a run whose first paragraph sits deeper than the ones after it lost those after it, silently — Scrivr's own export of an item started deeper with a nested list among them. A nested list is placed one level below its list, as the editor draws it.
+  - Headings Word numbers through their style — its built-in "1 Heading 1 / 1.1 Heading 2" — import as numbered list items, numbered as Word numbers them:
+    - A paragraph's own `numId` and `ilvl` each win over its style's, and each is inherited through `basedOn` on its own; a paragraph with no style takes the default paragraph style's. `DocxParagraphAttrs.numbering` therefore carries either half alone.
+    - A level nothing names is the one `numbering.xml` links to the style.
+    - Numbering counts on across the paragraphs between items, and a level restarts under each new item of a shallower one, so sections separated by body text number 1, 2, 3 rather than 1, 1, 1.
+    - Where Word draws no number, nothing is numbered: `numId` 0, and a `numId` the document does not define, reported as a dropped `w:numPr`. A level formatted `none` is drawn without a number but still counts, so the levels under it restart.
+    - DOCX export gives a list nested under one of another kind its own numbering, starting at the list's own first number at the level its items sit at, so an ordered list under a bullet list restarts in Word as on screen, and its `order` comes back on import. `ctx.numbering.getOrCreate` takes the `level` its `start` applies to.
+
+- ff75a67: `importDocx` and `exportDocx` now return a `report` next to `diagnostics`: what the conversion kept, dropped and changed, so an app can tell a user what their file lost.
+
+  - **`report.counts`** has a total for each kind of content (`paragraph`, `hardBreak`, `image`, and on import Word's run properties such as `b`). **`report.entries`** lists each distinct drop and change with its reason, its `count`, and its `owner`. The owner is the extension that recorded it, `"overrides"` for a handler passed in the call, or `null` when nothing handled the content. Identical drops share one entry, so a property Word sets on every run is one line, not thousands. Existing result fields are unchanged.
+  - **The converter records outcomes, even when a handler says nothing.** Each item handed to a handler counts as kept when the handler returns content, and dropped (`"handler returned nothing"`) when it returns nothing. Content with no handler is dropped with `"no handler"`. A top-level Word element the parser cannot read is dropped with `"no parser"`. When an item is lost, everything inside it is counted as dropped with it, so the report never claims text that is not in the output: a Word table imported without the table extension reports its paragraphs and text lost, not just one table. The content of a block nothing imports is only counted, so no handler runs on content that is thrown away. A link, or an inline content control, counts once however many runs it spans: kept if any run under it lands, dropped once if none does. A header or footer nothing reads, or whose part cannot be read, is dropped as `w:hdr` / `w:ftr` with a warning, one per part; two warning codes are new, `header-footer-unread` and `header-footer-part-unreadable`. Elements the parser skips inside a paragraph or run are not counted in `report.entries`; `importDocx(..., { trackUnread: true })` lists them in `report.unread`.
+  - **`@scrivr/docx` exports the report's vocabulary**: `NO_HANDLER`, `NO_PARSER`, `HANDLER_RETURNED_NOTHING`, `PART_UNREADABLE`, `WRAPPER_DECLINED`, `OVERRIDES_OWNER`, `insideDropped(kind)` and `noSchemaNode(name)`, so an app matches entries on these rather than on copied strings.
+  - **`DocxContext` and `DocxImportContext` gain a required `report`** (`kept`, `dropped`, `changed`). A handler uses it to add what the converter cannot see, such as `changed("paragraph", "spacing ignored")`. When a handler reports `kept` or `dropped` for the kind it was handed, its account replaces the converter's, and an item it reports kept keeps its content even when it returns nothing. A `kept` count that is not a whole number is ignored with a `report-invalid-count` warning, rather than failing the conversion. A context built by hand must now provide `report`. A context the converter did not make itself — a copy of one, say — gets a `report-unbound` warning, because the converter cannot collect its report.
+  - **Word's "no formatting" values are counted as kept.** `w:color="auto"`, `w:highlight="none"`, shading with no fill (or `auto`) and no pattern, or a clear one, and a `w:rFonts` carrying only a script hint build no mark and lose nothing, so the Color, Highlight and FontFamily import handlers report them kept. A theme font (`w:asciiTheme`) is still dropped, because it is not resolved yet.
+  - **A paragraph style named after a built-in object property no longer breaks an import.** A style id such as `constructor` or `toString` used to resolve to `Object`'s own method and crash the import with `node.forEach is not a function`. Every handler lookup on both sides now reads only the handlers that were registered.
+  - **`IBaseEditor.getFormatContributions()`** returns each extension's export and import contributions together with the extension's name. It is new on the interface, so a hand-written `IBaseEditor` implementation must add it. `getExportContributions()` and `getImportContributions()` are unchanged.
+  - `@scrivr/docx` exports the `WalkerHandlers`, `WalkerHandlerOwners` and `HandlerOwner` types that `walkDocument` takes.
+  - The report's types are exported: `DocxReport`, `DocxReportCount`, `DocxReportEntry` and `DocxReporter` (from `@scrivr/core`, re-exported by `@scrivr/docx`), and `FormatContribution` (`@scrivr/core`), what `getFormatContributions()` returns.
+  - **`normalizeDrawNumber`** is exported from `@scrivr/core`. It rounds to three decimals and turns `-0` into `0`. It is the rule Scrivr's PDF and DOCX snapshot tests use, exported so other snapshot logs can share it.
+
+- 7c8da5f: `importDocx` can report the Word XML it never read, and stops warning about properties it drops on purpose.
+
+  - **`importDocx(editor, bytes, { trackUnread: true })`** adds `report.unread`: what the import did not read in the body, every header and footer the document references (whether or not an extension walks them), footnotes, endnotes, comments, styles, numbering and settings. Each entry is a `DocxUnreadElement` with its `part`, its `path` from the part's root (`w:document/w:body/w:p/w:pPr/w:ind`), an `outcome` and a `count`:
+
+    - `unread`: never looked at.
+    - `examined`: its name was seen, but nothing in it was read. An element whose name is all it says, such as `<w:noBreakHyphen/>`, is examined unless the import handles it.
+    - `ignored`: dropped on purpose, on the import's reviewed list.
+
+    Only the top of a skipped subtree is listed. It is an inventory of the XML, so it also lists what `report.entries` already drops. Off by default, because every element is watched while it is on; with it off, the report has no `unread`. The imported document, and whether the import succeeds, are the same either way: a part opened only to list it that is cut short is a `docx-part-unreadable` warning, and a header or footer that cannot be parsed is reported unreadable rather than failing the import.
+
+  - **One reviewed list decides what is dropped on purpose**, each entry with its reason. A run property on it raises no `unsupported-mark` warning, a body element on it is skipped without an `unsupported-docx-element` warning, and the page-break and rule detectors look past it. It adds `w:szCs` (the size of complex-script text), the largest source of noise. Bookmarks and comment ranges are on it as known gaps; `w:spacing`, `w:position`, `w:vertAlign` and `w:w` are marked as known gaps rather than intended drops. Dropped run properties are still counted in `report.counts`.
+  - `@scrivr/core` and `@scrivr/docx` export the `DocxUnreadElement` type.
+
+- f7a8c9e: Extensions can be extended. `extension.extend(overrides)` returns a new extension: a hook you declare replaces the original's, and can call it as `this.parent` to change or add to its result. Hooks you leave out stay the original's.
+
+  - **Options:** they carry over and merge, and `configure` still applies afterwards.
+  - **Names:** `name` renames the extension. Keys its hooks write literally stay the same, and a key built from `this.name` follows the new name.
+  - **Chaining:** each layer's `parent` is the one below it.
+  - **New types:** `ExtendConfig`, `ExtendHookContext`, `ExtensionHookName` and `Phase1Context` (the context most hooks run in) are exported.
+
+- 7c8da5f: A heading can be a list item, as in Word: the bullet and numbered-list commands on a heading make it a list item that stays a heading, where before they silently did nothing. A list item may now start with any block in the `listItemLead` content group, which Paragraph and Heading join; DOCX export numbers a heading in a list and import brings it back as one. A new list item still starts with a paragraph, whatever order the extensions are registered in.
+- de92dc4: New `@scrivr/html` package: `importHtml(editor, html)` loads a whole document from HTML, in the browser or on the server, and resolves to `{ doc, diagnostics }` (`const { doc, diagnostics } = await importHtml(editor, html)`). Its types are exported: `HtmlImportResult`, `HtmlImportDiagnostic`, `HtmlDiagnosticCode` and `ImportHtml`. Browser bundlers resolve an entry that uses the page's `DOMParser`; Node resolves one that uses happy-dom, so happy-dom never reaches a browser bundle. `HtmlImport` adds an `importHtmlFromFile` command and toolbar item, like `DocxImport`.
+
+  - Blocks keep the `data-node-id` the HTML gives them; a repeated id goes to the first block that carries it.
+  - `<style>` rules apply (type, `#id`, `.class`, compounds and comma lists) with the browser's precedence, `!important` included. Styles inherit as in CSS: the page's text styles reach the text without overriding what an element states or sets by default — its `align`, `<font>`'s attributes, a link's colour, a heading's size — and a block's alignment reaches the blocks and loose text inside it.
+  - One bad piece never fails the import. `diagnostics` reports the style properties, elements and selectors the HTML used that the document could not carry, counted, judged by what the schema's own parse rules take — a shorthand longhand by longhand, a value by whether a rule accepts it.
+
+  `@scrivr/core`:
+
+  - `applyImportedDocument` moves here so both importers share it (`@scrivr/docx` still exports it), as does `pickFile(accept)`, the file picker both import extensions use.
+  - Parse rules no longer use `instanceof Element` / `HTMLElement`, which threw on a server. `isHtmlElement`, a shape check for any DOM, `HTML_BLOCK_TAGS`, `HTML_IGNORED_TAGS`, `isHtmlBlock`, `htmlAlign`, `htmlShows` (whether HTML puts anything on the page), `isReadableTextAlign` and the `TextAlign` type are exported.
+  - Paste and import read more of what HTML says: CSS lengths in any unit for font size (`1.5em` was 1.5px) and, on import, for indents; `text-align: start/end` (stored raw before); `<font color face size>`; a `<div>` of inline content (a field included) as a paragraph with its alignment, while a div that shows nothing adds nothing; `color`/`font-size`/`font-family: initial` reset an inherited colour, size or family, `font-weight`/`font-style: normal` undo bold or italic, on the tag itself or around it (Google Docs' `<b style="font-weight:normal">` wrapper adds no bold), weights up to 1000 count, `align` on a paragraph, heading or div applies with HTML's values (`middle` centres) while `text-align` takes CSS's (`-webkit-center` centres) and, as in a browser, beats `align` only with a value it can read (`inherit` included), a CSS-wide keyword is no longer stored as a colour, size or family, and a font size of zero or less is dropped. On import, a span's visible background is a highlight — paste still cleans a source page's backgrounds away.
+
+- 92a41b7: A semantic unit with pending review changes keeps its `markdown`, which reads as the proposal would. Before, it was dropped, so an agent read a line with a pending change without its bold, italics or links.
+
+  - The markdown is rendered from the document with every pending change accepted. Track Changes supplies that document through a new `semantic` contribution hook, `proposedDocument`, using the engine's own Accept on a copy, as the original view uses its Reject.
+  - `text`, `spans` and `changes` are unchanged, so the changes still say what is proposed and where.
+  - A unit gets this markdown only where the accepted document holds its blocks reading as the unit does, with the same text and inline objects, rendered through its own node handler. None of its blocks may be proposed for deletion. So it never carries another unit's words or images. It has none in these cases:
+    - a block proposed for deletion;
+    - a move's old place;
+    - a block a pending deletion joins to the next;
+    - a block with no stored id;
+    - a table with merged cells, as before.
+  - Without a contribution that supplies the accepted document, or if supplying it fails, a unit with changes has no markdown, rather than redlines. The export never fails because of it.
+  - The unit hash does not cover `markdown`, so pinned hashes stay valid.
+
+- 03281da: A host can name the suggestion a tracked change came from. Pass an `operationId`, such as a review row's id, when writing a suggestion. It is stored on every change that suggestion writes (`dataTracked.operationId`) and shown on each change in the semantic export (`SemanticChange.operationId`). So the document itself can say which suggestion a change belongs to, even when a host's own record of it is lost.
+
+  - **Where it's accepted:**
+    - `trackAsSuggestion(tr, authorID, { operationId })`;
+    - `applyAiSuggestion`;
+    - `applyDiffAsSuggestion`, `applyMultiBlockDiff` and `applyRichDiffAsSuggestion`;
+    - the `insertAsSuggestion` command, as its fifth argument;
+    - `AiToolkit.applyRichEdit` and `applySemanticEdits` (new `AgentEditOptions` type), covering text, structural and image-layout changes.
+  - **Own work is the same author and the same suggestion.** One agent's two suggestions never touch each other's changes. A later suggestion:
+
+    - never fuses with an earlier one's change, and never joins its replacement or act;
+    - never folds into a block the earlier one created;
+    - never takes back its insertion or split;
+    - never replaces its formatting;
+    - never withdraws its changes when a lane rewrites the block.
+
+    So deciding one suggestion never decides another, and each keeps exactly the changes it wrote. Two suggestions that oppose each other are a conflict, as between two authors. So rejecting one is refused while the other's change sits on it, until both are decided. Re-applying the same suggestion still replaces its own changes. Changes written with no operation id keep the author-only rule.
+
+  - **Breaking:** `clearAuthorPendingMarks` takes the writer, not an author id string, as its fourth argument: replace `clearAuthorPendingMarks(tr, from, to, "alice", schema)` with `clearAuthorPendingMarks(tr, from, to, { authorID: "alice" }, schema)`. The `Owner` type (`{ authorID, operationId? }`) is exported.
+  - **Types:** `SuggestionIntent` (`{ authorID, operationId? }`) is exported; `trackAsSuggestion`'s options take its `operationId`.
+  - **While pending:** a change keeps its operation id until it is decided, including when other changes from the same suggestion are decided first.
+
 ## 1.0.25
 
 ### Patch Changes

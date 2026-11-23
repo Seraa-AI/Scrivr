@@ -1,5 +1,19 @@
 # @scrivr/export-pdf
 
+## 1.0.26
+
+### Patch Changes
+
+- Updated dependencies [7c8da5f]
+- Updated dependencies [ff75a67]
+- Updated dependencies [7c8da5f]
+- Updated dependencies [f7a8c9e]
+- Updated dependencies [7c8da5f]
+- Updated dependencies [de92dc4]
+- Updated dependencies [92a41b7]
+- Updated dependencies [03281da]
+  - @scrivr/core@1.0.26
+
 ## 1.0.25
 
 ### Patch Changes
