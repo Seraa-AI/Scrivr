@@ -416,7 +416,9 @@ export interface SemanticHandlers {
    * The document with every pending proposal accepted, or null when none is
    * pending. A unit with changes renders its `markdown` from it, so the
    * markdown reads as the proposal would; its text and changes still come from
-   * the live document, where the changes can be placed.
+   * the live document, where the changes can be placed. The unit's node
+   * handler renders the proposed blocks with the live document's `UnitCtx`,
+   * so a handler should read only the node it is given.
    */
   proposedDocument?: (doc: PmNode) => PmNode | null;
 }

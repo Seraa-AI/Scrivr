@@ -198,9 +198,10 @@ it is accepted.
   - **One copy per call:** each unit's blocks are found in that copy by id,
     and rendered through the unit's own node handler, so a table that
     declines GFM for merged cells still does.
-  - **Only the unit's own words:** a unit gets markdown only where the copy
-    holds every one of its blocks, reading exactly as its `text`. Otherwise it
-    gets none. That covers:
+  - **Only the unit's own words:** a unit gets markdown only where none of its
+    blocks is proposed for deletion, and the copy holds every one of them
+    reading as the unit does: the same `text` and the same inline objects,
+    such as images. Otherwise it gets none. That covers:
     - a block proposed for deletion;
     - a move's old place, which shares its id with the new one;
     - a block a pending deletion joins to the next;
@@ -262,9 +263,10 @@ Columns, also on plan 155's later list, is its own RFC
   change on a copy, sharing one function with the original view's Reject.
 - The walker builds that copy once per call, and only when a unit with
   changes asks for it.
-- A unit's blocks are found in the copy and must read exactly as its `text`,
-  so a deletion, a move's old place or a pending join never gives a unit
-  another unit's words. The unit's node handler renders them, so a table with
+- A unit's blocks are found in the copy and must read as it does, with the
+  same text and inline objects, and none may be proposed for deletion. So a
+  deletion, a move's old place (even an image or a rule, which have no text) or
+  a pending join never gives a unit another unit's words or images. The unit's node handler renders them, so a table with
   merged cells still has none.
 - Without a contribution that supplies the document, or if supplying it fails,
   a unit with changes has none, as before. Markdown is a convenience, so a

@@ -1,5 +1,5 @@
 import type { Node as PmNode } from "@scrivr/core/pm";
-import { outlineLevelOf, outlineTitleOf, type SemanticChange, type SemanticHeading, type SemanticNodeResult, type SemanticPart, type SemanticTextView, type SemanticUnit, type UnitCtx } from "@scrivr/core";
+import { breakOf, outlineLevelOf, outlineTitleOf, type SemanticChange, type SemanticHeading, type SemanticNodeResult, type SemanticPart, type SemanticTextView, type SemanticUnit, type UnitCtx } from "@scrivr/core";
 import type { ResolvedHandlers } from "./collectHandlers";
 import { groupBlocks } from "./grouping";
 import { resolveNodeId, type BlockEntry } from "./id";
@@ -137,7 +137,7 @@ export function walkSemantic(
     }
     const markdown = changes.length === 0
       ? result.markdown ?? ctx.toMarkdown(nodes)
-      : proposedMarkdown(nodeIds, text, proposed(), handlers, ctx);
+      : proposedMarkdown(nodes, nodeIds, text, proposed(), handlers, ctx);
     if (markdown.length > 0) unit.markdown = markdown;
     if (result.cells !== undefined) unit.cells = result.cells;
     if (result.image !== undefined) unit.image = result.image;
@@ -190,25 +190,40 @@ function proposedBlocksOnce(doc: PmNode, handlers: ResolvedHandlers, view: Seman
 /**
  * A unit with changes as markdown: its blocks as the proposal leaves them,
  * through the same node handler, so one that declines markdown (a table with
- * merged cells) still does. Only where the proposed document holds every one of
- * the unit's blocks and they read exactly as its text — not for a block
- * proposed for deletion, a move's old place, a block a pending deletion joins
- * to the next, or one with no stored id — so a unit never carries another
- * unit's words. Without the proposed document there is none, rather than the
- * live blocks' redlines.
+ * merged cells) still does. Only where none of the unit's blocks is proposed
+ * for deletion — a move's old place shares its id with the new one — and the
+ * proposed document holds every one of them, reading as the unit does: the
+ * same text and the same inline objects. So not for a block a pending deletion
+ * joins to the next, or one with no stored id, and a unit never carries
+ * another unit's words or images. Without the proposed document there is
+ * none, rather than the live blocks' redlines.
  */
 function proposedMarkdown(
+  live: readonly PmNode[],
   nodeIds: readonly string[],
   text: string,
   blocks: Map<string, PmNode> | null,
   handlers: ResolvedHandlers,
   ctx: UnitCtx,
 ): string {
-  if (!blocks) return "";
+  if (!blocks || live.some((node) => ctx.isRemoved(node))) return "";
   const nodes = nodeIds.map((id) => blocks.get(id));
-  if (!nodes.every((node): node is PmNode => node !== undefined) || ctx.toText(nodes) !== text) return "";
+  if (!nodes.every((node): node is PmNode => node !== undefined)) return "";
+  if (ctx.toText(nodes) !== text) return "";
+  if (inlineObjects(nodes, () => true) !== inlineObjects(live, (node) => !ctx.isRemoved(node))) return "";
   const handled = handlers.nodes[nodes[0]!.type.name]?.(nodes[0]!, ctx);
   return handled?.markdown ?? ctx.toMarkdown(nodes);
+}
+
+/** How many inline objects (images, fields) `nodes` hold that `counts` keeps; a line break reads as text. */
+function inlineObjects(nodes: readonly PmNode[], counts: (node: PmNode) => boolean): number {
+  let objects = 0;
+  for (const node of nodes) {
+    node.descendants((child) => {
+      if (child.isInline && child.isLeaf && !child.isText && breakOf(child.type) !== "line" && counts(child)) objects++;
+    });
+  }
+  return objects;
 }
 
 /** Location label for a positional container level in a part breadcrumb. */

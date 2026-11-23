@@ -313,6 +313,32 @@ describe("a unit with pending changes keeps markdown of the proposed view", () =
     expect(toSemanticUnits(editor).filter((unit) => unit.markdown?.includes("cond"))).toEqual([]);
   });
 
+  it.each([
+    ["an image paragraph", { type: "paragraph", attrs: { nodeId: "m1" }, content: [{ type: "image", attrs: { src: "https://example.com/a.png", width: 10, height: 10 } }] }],
+    ["a horizontal rule", { type: "horizontalRule", attrs: { nodeId: "m1" } }],
+  ])("has none for the old place of %s with no text, when a move is pending", (_, moved) => {
+    const editor = suggesting([moved, para("p2", [{ type: "text", text: "second" }])]);
+    const first = editor.getState().doc.child(0);
+    const tr = editor.getState().tr.delete(0, first.nodeSize);
+    editor.applyTransaction(tr.insert(tr.doc.content.size, first));
+
+    const sources = toSemanticUnits(editor).filter((unit) => unit.proposedForDeletion);
+    expect(sources.length).toBeGreaterThan(0);
+    expect(sources.every((unit) => unit.markdown === undefined)).toBe(true);
+  });
+
+  it("does not take an image paragraph's image when a join to it is pending", () => {
+    const editor = suggesting([
+      para("p1", [{ type: "text", text: "aaa" }]),
+      para("pi", [{ type: "image", attrs: { src: "https://example.com/a.png", width: 10, height: 10 } }]),
+    ]);
+    const boundary = editor.getState().doc.child(0).nodeSize;
+    editor.applyTransaction(editor.getState().tr.delete(boundary - 1, boundary + 1));
+
+    const p1 = toSemanticUnits(editor).find((unit) => unit.id === "p1");
+    expect(p1?.markdown ?? "").not.toContain("example.com");
+  });
+
   it("leaves the original view as it reads", () => {
     const editor = suggesting([para("p1", [{ type: "text", text: "keep this" }])]);
     editor.applyTransaction(editor.getState().tr.insertText(" new", 10));

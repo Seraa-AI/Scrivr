@@ -8,7 +8,7 @@ A semantic unit with pending review changes keeps its `markdown`, which reads as
 
 - The markdown is rendered from the document with every pending change accepted. Track Changes supplies that document through a new `semantic` contribution hook, `proposedDocument`, using the engine's own Accept on a copy, as the original view uses its Reject.
 - `text`, `spans` and `changes` are unchanged, so the changes still say what is proposed and where.
-- A unit gets this markdown only where the accepted document holds its blocks reading exactly as its `text`, rendered through its own node handler. So it never carries another unit's words. It has none in these cases:
+- A unit gets this markdown only where the accepted document holds its blocks reading as the unit does, with the same text and inline objects, rendered through its own node handler. None of its blocks may be proposed for deletion. So it never carries another unit's words or images. It has none in these cases:
   - a block proposed for deletion;
   - a move's old place;
   - a block a pending deletion joins to the next;
