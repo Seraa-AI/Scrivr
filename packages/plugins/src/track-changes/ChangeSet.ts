@@ -1,3 +1,4 @@
+import { sameOwner } from "./helpers";
 import {
   CHANGE_OPERATION,
   CHANGE_STATUS,
@@ -55,7 +56,7 @@ export class ChangeSet {
       if (
         currentNodeChange &&
         (c.from >= currentNodeChange.to ||
-          c.dataTracked.authorID !== currentNodeChange.dataTracked.authorID)
+          !sameOwner(c.dataTracked, currentNodeChange.dataTracked))
       ) {
         rootNodes.push(currentNodeChange);
         currentNodeChange = undefined;
@@ -185,7 +186,7 @@ export class ChangeSet {
       if (
         root?.type === "node-change" &&
         change.from < root.to &&
-        change.dataTracked.authorID === root.dataTracked.authorID
+        sameOwner(change.dataTracked, root.dataTracked)
       ) {
         root.children.push(change);
         return { index: i, root };

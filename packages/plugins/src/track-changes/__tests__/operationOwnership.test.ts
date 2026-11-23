@@ -110,4 +110,25 @@ describe("two suggestions by one author", () => {
     expect(pending(editor).length).toBeGreaterThan(0);
     expect(pending(editor).every((c) => c.dataTracked.operationId === "row-7")).toBe(true);
   });
+
+  it("B deleting A's pending insertion is a conflict, as between two authors", () => {
+    const editor = editorOf([para("p", "alpha")]);
+    as(editor, "A", (tr) => tr.insertText(" gamma", at(editor, "alpha") + 5));
+    as(editor, "B", (tr) => tr.delete(at(editor, "gamma"), at(editor, "gamma") + 5));
+
+    const flagged = (operationId: string) => ofOperation(editor, operationId).some((c) => c.dataTracked.isConflict === true);
+    expect(flagged("A")).toBe(true);
+    expect(flagged("B")).toBe(true);
+  });
+
+  it("B's edit never renames A's changes", () => {
+    const editor = editorOf([para("p", "ab")]);
+    as(editor, "A", (tr) => tr.insertText("X", 2));
+    as(editor, "B", (tr) => tr.insertText("Q", at(editor, "X") + 1));
+    as(editor, "A", (tr) => tr.insertText("Y", at(editor, "Q") + 1));
+    const idsOfA = ofOperation(editor, "A").map((c) => c.id).sort();
+    as(editor, "B", (tr) => tr.delete(at(editor, "Q"), at(editor, "Q") + 1));
+
+    expect(ofOperation(editor, "A").map((c) => c.id).sort()).toEqual(idsOfA);
+  });
 });

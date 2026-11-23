@@ -19,5 +19,5 @@ A host can name the suggestion a tracked change came from. Pass an `operationId`
   - never replaces its formatting;
   - never withdraws its changes when a lane rewrites the block.
 
-  So deciding one suggestion never decides another, and each keeps exactly the changes it wrote. Re-applying the same suggestion still replaces its own changes. Changes written with no operation id keep the author-only rule.
+  So deciding one suggestion never decides another, and each keeps exactly the changes it wrote. Two suggestions that oppose each other are a conflict, as between two authors. So rejecting one is refused while the other's change sits on it, until both are decided. Re-applying the same suggestion still replaces its own changes. Changes written with no operation id keep the author-only rule.
 - **While pending:** a change keeps its operation id until it is decided, including when other changes from the same suggestion are decided first.
