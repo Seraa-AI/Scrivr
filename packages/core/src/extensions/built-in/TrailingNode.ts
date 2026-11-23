@@ -42,8 +42,8 @@ export const TrailingNode = Extension.create({
             if (added === null) return null;
             const pos = tr.mapping.map(added);
             // Someone who puts the caret in the line makes it theirs. A caret an
-            // edit moves there does not, since the edit is what made it unneeded,
-            // and nor does a selection that only runs into it, like Select All.
+            // edit moves there does not, since the edit is what made it unneeded.
+            // Nor does a selection that only runs into it, like Select All.
             const claimed = !tr.docChanged && tr.selection.from > pos;
             return isAdded(tr.doc, pos) && !claimed ? pos : null;
           },

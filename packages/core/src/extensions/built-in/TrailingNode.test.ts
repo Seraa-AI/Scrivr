@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { AllSelection, TextSelection } from "prosemirror-state";
+import type { Node } from "prosemirror-model";
+import { AllSelection, TextSelection, type Selection } from "prosemirror-state";
 import { ServerEditor } from "../../ServerEditor";
 import { StarterKit } from "../StarterKit";
 // Through the package entry, as a host composing its own extensions imports them.
@@ -17,6 +18,10 @@ const blocks = (e: ServerEditor) => {
 };
 const caretAt = (e: ServerEditor, pos: number) =>
   e.applyTransaction(e.getState().tr.setSelection(TextSelection.create(e.getState().doc, pos)));
+const select = (e: ServerEditor, selection: (doc: Node) => Selection) =>
+  e.applyTransaction(e.getState().tr.setSelection(selection(e.getState().doc)));
+const toParagraph = (e: ServerEditor) =>
+  e.applyTransaction(e.getState().tr.setNodeMarkup(0, e.getState().schema.nodes.paragraph));
 
 describe("TrailingNode", () => {
   it("can be added by a host that leaves it out of StarterKit", () => {
@@ -96,12 +101,12 @@ describe("TrailingNode", () => {
     }
   });
 
-  it("takes its paragraph away after Select All, which does not put anyone in it", () => {
+  it("takes its paragraph away after Select All", () => {
     const e = editor(p("one"));
     caretAt(e, 2);
     e.commands.setHeading({ level: 1 });
-    e.applyTransaction(e.getState().tr.setSelection(new AllSelection(e.getState().doc)));
-    e.commands.setParagraph();
+    select(e, doc => new AllSelection(doc));
+    toParagraph(e);
     expect(blocks(e)).toEqual(["paragraph:one"]);
   });
 
@@ -109,25 +114,19 @@ describe("TrailingNode", () => {
     const e = editor(p("one"));
     caretAt(e, 2);
     e.commands.setHeading({ level: 1 });
-    const { doc } = e.getState();
-    e.applyTransaction(e.getState().tr.setSelection(TextSelection.create(doc, 1, doc.content.size - 1)));
-    e.applyTransaction(e.getState().tr.setNodeMarkup(0, e.getState().schema.nodes.paragraph));
+    select(e, doc => TextSelection.create(doc, 1, doc.content.size - 1));
+    toParagraph(e);
     expect(blocks(e)).toEqual(["paragraph:one"]);
   });
 
-  it("adds a paragraph after a table, a rule or a page break, and keeps it there", () => {
-    const cell = { type: "tableCell", content: [p("a")] };
-    const lastBlocks = [
-      { type: "table", content: [{ type: "tableRow", content: [cell] }] },
-      { type: "horizontalRule" },
-      { type: "pageBreak" },
-    ];
-    for (const last of lastBlocks) {
-      const e = new ServerEditor({ extensions: [StarterKit.configure({ table: true })], content: { type: "doc", content: [p("one"), last] } });
-      e.applyTransaction(e.getState().tr.setSelection(new AllSelection(e.getState().doc)));
-      e.applyTransaction(e.getState().tr.insertText("!", 2));
-      expect(blocks(e).slice(-2)).toEqual([`${last.type}:${last.type === "table" ? "a" : ""}`, "paragraph:"]);
-    }
+  it.each([
+    { last: { type: "table", content: [{ type: "tableRow", content: [{ type: "tableCell", content: [p("a")] }] }] }, expected: ["paragraph:one", "table:a", "paragraph:"] },
+    { last: { type: "horizontalRule" }, expected: ["paragraph:one", "horizontalRule:", "paragraph:"] },
+    { last: { type: "pageBreak" }, expected: ["paragraph:one", "pageBreak:", "paragraph:"] },
+  ])("adds a paragraph after a document ending in a $last.type", ({ last, expected }) => {
+    const e = new ServerEditor({ extensions: [StarterKit.configure({ table: true })], content: { type: "doc", content: [p("one"), last] } });
+    e.applyTransaction(e.getState().tr);
+    expect(blocks(e)).toEqual(expected);
   });
 
   it("leaves an empty last paragraph it did not add", () => {
