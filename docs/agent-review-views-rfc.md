@@ -283,6 +283,11 @@ Columns, also on plan 155's later list, is its own RFC
   status). The two views, review and act grouping read the same pending
   changes from the moment the document is loaded. The next edit still fills
   in the timestamps.
+- That repair now touches only the record it repairs:
+  - a block record with no operation is dropped alone;
+  - two records on one mark keep their own ids;
+  - a split's reference record is stamped too, so the repair does not run on
+    every edit.
 
 ### Next release cycle (decided 2026-11-10)
 

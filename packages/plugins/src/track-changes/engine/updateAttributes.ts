@@ -85,12 +85,20 @@ export function updateChangeAttrs(
     (change.type === "node-change" || change.type === "node-attr-change") &&
     !operation
   ) {
+    // A record that says no operation cannot be decided: it is dropped, and
+    // only it — the block's other records are other changes.
+    const others = (getBlockInlineTrackedData(node) || []).filter(t => t.id !== change.id);
     tr.setNodeMarkup(
       change.from,
       undefined,
-      { ...node.attrs, dataTracked: null },
+      { ...node.attrs, dataTracked: others.length === 0 ? null : others },
       node.marks,
     );
+  } else if (change.type === "reference-change") {
+    // A reference is decided with the split it points at, never on its own;
+    // all it takes here is the bookkeeping on its record.
+    const records = (getBlockInlineTrackedData(node) || []).map(t => (t.id === change.id ? { ...t, ...trackedAttrs } : t));
+    tr.setNodeMarkup(change.from, undefined, { ...node.attrs, dataTracked: records }, node.marks);
   } else if (
     change.type === "node-change" ||
     change.type === "node-attr-change"
@@ -144,14 +152,20 @@ export function updateChangeAttrs(
     );
   } else if (isMarkChange(change)) {
     if (change.mark && change.from && change.to) {
-      const markDataTracked: DataTrackedAttrs[] = Array.isArray(change.mark.attrs.dataTracked)
-        ? change.mark.attrs.dataTracked
+      // The mark as this transaction left it: an earlier update in it may have
+      // stamped another record on the same mark, which the change still reads stale.
+      const current = tr.doc.nodeAt(change.from)?.marks.find(m => m.type === change.mark.type) ?? change.mark;
+      const markDataTracked: DataTrackedAttrs[] = Array.isArray(current.attrs.dataTracked)
+        ? current.attrs.dataTracked
         : [];
+      // The record by its id: several on one mark can share an operation, and
+      // records stored without their timestamps all share a missing createdAt.
+      const isThisRecord = (dt: DataTrackedAttrs) =>
+        change.dataTracked.id
+          ? dt.id === change.dataTracked.id && dt.operation === change.dataTracked.operation
+          : dt.createdAt === change.dataTracked.createdAt && dt.operation === change.dataTracked.operation;
       const newDT = markDataTracked?.map(dt => {
-        if (
-          dt.createdAt === change.dataTracked.createdAt &&
-          dt.operation === change.dataTracked.operation
-        ) {
+        if (isThisRecord(dt)) {
           return {
             ...dt,
             ...trackedAttrs,
@@ -159,15 +173,15 @@ export function updateChangeAttrs(
         }
         return dt;
       });
-      const newMark = change.mark.type.create({
-        ...change.mark.attrs,
+      const newMark = current.type.create({
+        ...current.attrs,
         dataTracked: newDT,
       });
       if (change.nodeType.isInline) {
-        tr.removeMark(change.from, change.to, change.mark);
+        tr.removeMark(change.from, change.to, current);
         tr.addMark(change.from, change.to, newMark);
       } else {
-        tr.removeNodeMark(change.from, change.mark);
+        tr.removeNodeMark(change.from, current);
         tr.addNodeMark(change.from, newMark);
       }
     } else {
