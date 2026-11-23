@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { AllSelection, TextSelection } from "prosemirror-state";
+import { AllSelection, EditorState, TextSelection } from "prosemirror-state";
 import { ServerEditor } from "../../ServerEditor";
 import { StarterKit } from "../StarterKit";
 import { CellSelection } from "../../table/cellSelection";
+import { ExtensionManager } from "../ExtensionManager";
 // Through the package entry: a host types its own level variable with it.
 import type { HeadingLevel } from "../../index";
 
@@ -151,6 +152,46 @@ describe("toggleHeading over several blocks", () => {
     expect(blocks(e)).toEqual(["h1", "h1", "paragraph"]);
   });
 
+  it("toggles an empty document's heading on and off without growing it", () => {
+    const e = editorOf({ type: "paragraph" });
+    const toggleAll = () => {
+      e.applyTransaction(e.getState().tr.setSelection(new AllSelection(e.getState().doc)));
+      e.commands.toggleHeading({ level: 2 });
+    };
+
+    toggleAll();
+    expect(blocks(e)).toEqual(["h2", "paragraph"]);
+    toggleAll();
+    expect(blocks(e)).toEqual(["paragraph", "paragraph"]);
+    toggleAll();
+    expect(blocks(e)).toEqual(["h2", "paragraph"]);
+  });
+
+  it("still sets a heading on empty table cells and empty lines inside the selection", () => {
+    const cell = (block: object) => ({ type: "tableCell", content: [block] });
+    const e = editorOf({ type: "table", content: [{ type: "tableRow", content: [cell(p("a")), cell({ type: "paragraph" }), cell(p("c"))] }] }, p("after"));
+    const cells: number[] = [];
+    e.getState().doc.descendants((node, pos) => {
+      if (node.type.name === "tableCell") cells.push(pos);
+    });
+    const first = cells[0];
+    const last = cells[cells.length - 1];
+    if (first === undefined || last === undefined) throw new Error("expected cells");
+    const { doc } = e.getState();
+    e.applyTransaction(e.getState().tr.setSelection(new CellSelection(doc.resolve(first), doc.resolve(last))));
+
+    e.commands.setHeading({ level: 2 });
+    expect(blocks(e)).toEqual(["h2", "h2", "h2", "paragraph"]);
+  });
+
+  it("keeps a block's alignment and id when its level changes, and reports nothing to do at the same level", () => {
+    const e = editorWith({ type: "heading", attrs: { level: 2, align: "right", nodeId: "keep" }, content: [{ type: "text", text: "one" }] });
+    expect(e.commands.setHeading({ level: 2 })).toBe(false);
+    e.commands.setHeading({ level: 3 });
+    const node = e.getState().doc.firstChild;
+    expect([node?.attrs["level"], node?.attrs["align"], node?.attrs["nodeId"]]).toEqual([3, "right", "keep"]);
+  });
+
   it("reads a level stored as text as that level", () => {
     const e = editorOf({ type: "heading", attrs: { level: "2" }, content: [{ type: "text", text: "one" }] }, p("two"));
     e.applyTransaction(e.getState().tr.setSelection(TextSelection.create(e.getState().doc, 2)));
@@ -172,6 +213,23 @@ describe("toggleHeading over several blocks", () => {
 
     expect(e.commands.toggleHeading({ level: 2 })).toBe(true);
     expect(blocks(e)).toEqual(["paragraph", "paragraph", "paragraph"]);
+  });
+});
+
+describe("heading shortcuts", () => {
+  it("apply the same rule as setHeading, leaving the document's empty last paragraph alone", () => {
+    const manager = new ExtensionManager([StarterKit]);
+    const doc = manager.schema.nodeFromJSON({ type: "doc", content: [h(2, "a"), h(2, "b"), { type: "paragraph" }] });
+    const state = EditorState.create({ doc, selection: new AllSelection(doc) });
+    let next = state;
+    const pressed = manager.buildKeymap()["Mod-Alt-1"]?.(state, (tr) => {
+      next = state.apply(tr);
+    });
+
+    expect(pressed).toBe(true);
+    const types: string[] = [];
+    next.doc.forEach((node) => types.push(node.type.name === "heading" ? `h${String(node.attrs["level"])}` : node.type.name));
+    expect(types).toEqual(["h1", "h1", "paragraph"]);
   });
 });
 

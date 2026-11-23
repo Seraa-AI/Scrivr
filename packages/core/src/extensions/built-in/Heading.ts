@@ -1,6 +1,5 @@
-import { setBlockType } from "prosemirror-commands";
-import type { Node, NodeType } from "prosemirror-model";
-import type { Command, EditorState, Transaction } from "prosemirror-state";
+import type { Attrs, Node, NodeType } from "prosemirror-model";
+import type { Command, EditorState } from "prosemirror-state";
 import type { PdfNodeHandler } from "../../exports/pdf";
 import { textblockTypeInputRule } from "prosemirror-inputrules";
 import { Extension } from "../Extension";
@@ -117,13 +116,11 @@ export const Heading = Extension.create<HeadingOptions>({
   },
 
   addKeymap() {
-    const km: Record<string, ReturnType<typeof setBlockType>> = {};
+    const km: Record<string, Command> = {};
     for (const level of this.options.levels) {
-      km[`Mod-Alt-${level}`] = setBlockType(this.schema.nodes["heading"]!, {
-        level,
-      });
+      km[`Mod-Alt-${level}`] = setTextblock(this.schema.nodes["heading"]!, { level });
     }
-    km["Mod-Alt-0"] = setBlockType(this.schema.nodes["paragraph"]!);
+    km["Mod-Alt-0"] = setTextblock(this.schema.nodes["paragraph"]!, {});
     return km;
   },
 
@@ -131,28 +128,19 @@ export const Heading = Extension.create<HeadingOptions>({
     const heading = this.schema.nodes["heading"]!;
     const paragraph = this.schema.nodes["paragraph"]!;
     const { levels } = this.options;
-    const setHeadingOn = (state: EditorState, level: HeadingLevel, dispatch?: (tr: Transaction) => void) => {
-      const tr = state.tr;
-      for (const { from, to } of headingSpans(state)) {
-        tr.setBlockType(tr.mapping.map(from), tr.mapping.map(to), heading, { level });
-      }
-      if (!tr.docChanged) return false;
-      dispatch?.(tr.scrollIntoView());
-      return true;
-    };
     return {
       setHeading: (attrs: unknown): Command => (state, dispatch) => {
         const level = configuredLevel(attrs, levels);
-        return level !== null && setHeadingOn(state, level, dispatch);
+        return level !== null && setTextblock(heading, { level })(state, dispatch);
       },
       toggleHeading: (attrs: unknown): Command => (state, dispatch) => {
         const level = configuredLevel(attrs, levels);
         if (level === null) return false;
         return everyBlockIsHeading(state, heading, level)
-          ? setBlockType(paragraph)(state, dispatch)
-          : setHeadingOn(state, level, dispatch);
+          ? setTextblock(paragraph, {})(state, dispatch)
+          : setTextblock(heading, { level })(state, dispatch);
       },
-      setParagraph: (): Command => setBlockType(paragraph),
+      setParagraph: (): Command => setTextblock(paragraph, {}),
     };
   },
 
@@ -342,34 +330,41 @@ function configuredLevel(attrs: unknown, levels: readonly HeadingLevel[]): Headi
 }
 
 /**
- * The stretches of the selection a heading is set on: each range, from its
- * first textblock with text to its last. Empty blocks at either end are left
- * alone, unless nothing selected has text: Select All takes in the empty
- * paragraph TrailingNode keeps after a closing heading, and turning that into a
- * heading would make TrailingNode add another, one more for every press.
+ * Turns the selected textblocks into `type` with `attrs`, keeping what else
+ * they carry that `type` has too: alignment, indent, id.
  */
-function headingSpans(state: EditorState): { from: number; to: number }[] {
-  const spans: { from: number; to: number }[] = [];
-  for (const { $from, $to } of state.selection.ranges) {
-    let from = -1;
-    let to = -1;
-    state.doc.nodesBetween($from.pos, $to.pos, (node, pos) => {
-      if (!node.isTextblock) return true;
-      if (node.content.size > 0) {
-        if (from < 0) from = pos + 1;
-        to = pos + 1;
-      }
-      return false;
-    });
-    if (from >= 0) spans.push({ from, to });
-  }
-  if (spans.length > 0) return spans;
-  return state.selection.ranges.map(({ $from, $to }) => ({ from: $from.pos, to: $to.pos }));
+function setTextblock(type: NodeType, attrs: Attrs): Command {
+  return (state, dispatch) => {
+    const tr = state.tr;
+    for (const { from, to } of headingSpans(state)) {
+      tr.setBlockType(tr.mapping.map(from), tr.mapping.map(to), type, (node) => ({ ...node.attrs, ...attrs }));
+    }
+    if (!tr.docChanged) return false;
+    dispatch?.(tr.scrollIntoView());
+    return true;
+  };
 }
 
 /**
- * Whether every textblock in the heading's stretches already is a heading of
- * `level`. One that is not means a toggle sets the heading on all of them, as
+ * The selected ranges, less the empty paragraph a document ends in when a
+ * range covers more than it. Select All takes in the one TrailingNode keeps
+ * after a closing heading, and restyling it would make TrailingNode add
+ * another, one more for every press.
+ */
+function headingSpans(state: EditorState): { from: number; to: number }[] {
+  const { doc } = state;
+  const last = doc.lastChild;
+  const lastStart = doc.content.size - (last?.nodeSize ?? 0);
+  const endsEmpty = last !== null && last.type.name === "paragraph" && last.content.size === 0;
+  return state.selection.ranges.map(({ $from, $to }) => ({
+    from: $from.pos,
+    to: endsEmpty && $from.pos < lastStart && $to.pos > lastStart ? lastStart : $to.pos,
+  }));
+}
+
+/**
+ * Whether every textblock the heading commands would change already is a
+ * heading of `level`. One that is not means a toggle sets the heading on all of them, as
  * Word does when a style meets a mixed selection.
  */
 function everyBlockIsHeading(state: EditorState, heading: NodeType, level: HeadingLevel): boolean {
