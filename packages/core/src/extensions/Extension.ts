@@ -71,11 +71,12 @@ export class Extension<Options extends object = object> {
    * its result or add to it. Hooks left out stay this extension's. Options
    * are this extension's current ones with `overrides.defaultOptions` over
    * them, so a configured extension extends as configured; the new options
-   * must keep the original's, since its hooks still read them. They may add
-   * options but not narrow one: an inherited value is not re-checked.
+   * must keep the original's, since its hooks still read them. Don't narrow
+   * an inherited option's type: the compiler allows it, but the inherited
+   * value is not re-checked.
    *
-   * Only the extension's identity changes with `name`: the nodes, marks and
-   * commands its hooks contribute keep their keys.
+   * `name` renames the extension. Keys its hooks write literally stay the
+   * same; a key built from `this.name` follows the new name.
    *
    * @example
    * Heading.extend({

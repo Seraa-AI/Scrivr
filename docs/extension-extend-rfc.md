@@ -26,7 +26,7 @@
   - The new extension starts from the original's current options, so a configured extension extends as configured.
   - `overrides.defaultOptions` merges over them, and `configure` applies after, as for any extension.
   - The new options type must extend the original's, because the original's hooks still read them.
-- **Name and keymap priority** carry over unless `overrides` names them. A new name renames only the extension: the keys its hooks contribute stay the same.
+- **Name and keymap priority** carry over unless `overrides` names them. A new name renames the extension. Keys its hooks write literally stay the same, and a key built from `this.name` follows the new name.
 - **Lifecycle hooks:** an `onEditorReady` or `onViewReady` override returns the parent's cleanup, or combines it with its own.
 - **Replacing a StarterKit child:** turn it off in `StarterKit.configure` and list the extended one. Otherwise both register the same node or mark, and the later one wins with a warning.
 - **Replacing Paragraph:** it must be replaced in place, by mapping `this.parent()` in `StarterKit.extend({ addExtensions })`. The first block type registered is the one an empty document starts with. Bundles extend like any extension.

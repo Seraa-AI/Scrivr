@@ -145,6 +145,9 @@ new Editor({
 - **Replacing Paragraph:** do it in place, because order matters there. The first block type registered is the one an empty document starts with, and StarterKit lists Paragraph first:
 
   ```typescript
+  import { Paragraph, StarterKit } from "@scrivr/core";
+
+  const MyParagraph = Paragraph.extend({ /* your overrides */ });
   const Kit = StarterKit.extend({
     addExtensions() {
       return (this.parent?.() ?? []).map((child) => (child.name === "paragraph" ? MyParagraph : child));
@@ -153,8 +156,8 @@ new Editor({
   ```
 - **Lifecycle hooks:** an `onEditorReady` or `onViewReady` override should `return this.parent?.(editor)`, or combine it with its own cleanup. Otherwise the original's cleanup never runs on `destroy()`.
 - **No original hook:** `this.parent` is `undefined` when the original doesn't declare that hook. Writing `this.parent?.()` handles both cases.
-- **Options:** the extended extension starts from the original's current options, so a configured extension extends as configured. `defaultOptions` merges over them, and `configure` still works afterwards. New options must keep the original's, because its hooks still read them. You can add options, but not narrow the type of an inherited one.
-- **Name:** `name` changes only the extension's own name, the one `findExtension` answers to. The nodes, marks and commands its hooks contribute keep their keys. To run beside the original, also override the hooks whose keys would clash.
+- **Options:** the extended extension starts from the original's current options, so a configured extension extends as configured. `defaultOptions` merges over them, and `configure` still works afterwards. New options must keep the original's, because its hooks still read them. Don't narrow the type of an inherited option: the compiler allows it, but the inherited value isn't re-checked.
+- **Name:** `name` renames the extension, which is the name `findExtension` answers to. Keys a hook writes literally, as every built-in does, stay the same. A key built from `this.name` follows the new name. To run a built-in's copy beside the original, also override the hooks whose keys would clash.
 - **Chaining:** `extend` can be chained, and each layer's `parent` is the one below it.
 - **Bundles:** a bundle extends the same way. `StarterKit.extend({ addExtensions() { return [...(this.parent?.() ?? []), MyExtension]; } })` adds a child to it.
 

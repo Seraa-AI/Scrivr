@@ -5,6 +5,7 @@
  * host customises a built-in it finds limiting.
  */
 import { describe, expect, it } from "vitest";
+import type { DOMOutputSpec } from "prosemirror-model";
 import { Bold, Extension, Heading, Paragraph, ServerEditor, StarterKit, type ExtendConfig, type Phase1Context } from "../index";
 
 const doc = { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "hello" }] }] };
@@ -100,9 +101,6 @@ describe("Extension.extend", () => {
 
   it("extends a bundle: StarterKit with one more child", () => {
     const Stamp = Extension.create({ name: "stamp", addMarks() { return { stamp: { toDOM: () => ["span", 0] } }; } });
-    // The context most hooks run in is public, so a host can type a hook it writes apart.
-    const context: Phase1Context | null = null;
-    expect(context).toBeNull();
     const withStamp: ExtendConfig = { addExtensions() { return [...(this.parent?.() ?? []), Stamp]; } };
     const editor = new ServerEditor({ extensions: [StarterKit.extend(withStamp)], content: doc });
 
@@ -120,14 +118,37 @@ describe("Extension.extend", () => {
   });
 
   it("replaces a StarterKit child in place, so Paragraph stays the default block", () => {
-    const MyParagraph = Paragraph.extend({});
-    const Kit = StarterKit.extend({
-      addExtensions() {
-        return (this.parent?.() ?? []).map((child) => (child.name === "paragraph" ? MyParagraph : child));
+    const MyParagraph = Paragraph.extend({
+      addNodes() {
+        const { paragraph, ...rest } = this.parent?.() ?? {};
+        return { ...rest, paragraph: { ...paragraph, attrs: { ...paragraph?.attrs, tone: { default: null } } } };
       },
     });
-    const editor = new ServerEditor({ extensions: [Kit], content: doc });
+    const defaultBlock = (editor: ServerEditor) => editor.getState().schema.topNodeType.contentMatch.defaultType?.name;
+    const inPlace = new ServerEditor({
+      extensions: [StarterKit.extend({
+        addExtensions() {
+          return (this.parent?.() ?? []).map((child) => (child.name === "paragraph" ? MyParagraph : child));
+        },
+      })],
+      content: doc,
+    });
+    const listedAfter = new ServerEditor({ extensions: [StarterKit.configure({ paragraph: false }), MyParagraph], content: doc });
 
-    expect(editor.getState().schema.topNodeType.contentMatch.defaultType?.name).toBe("paragraph");
+    expect(inPlace.getState().schema.nodes["paragraph"]!.spec.attrs).toHaveProperty("tone");
+    expect(defaultBlock(inPlace)).toBe("paragraph");
+    expect(defaultBlock(listedAfter)).not.toBe("paragraph");
+  });
+
+  it("a renamed extension's keys built from this.name follow the name", () => {
+    // Typed apart, as a host writing a hook outside a config would.
+    function selfNamed(this: Phase1Context) {
+      return { [this.name]: { content: "inline*", group: "block", toDOM: (): DOMOutputSpec => ["div", 0] } };
+    }
+    const Box = Extension.create({ name: "box", addNodes: selfNamed });
+    const schema = new ServerEditor({ extensions: [StarterKit, Box.extend({ name: "crate" })], content: doc }).getState().schema;
+
+    expect(schema.nodes["crate"]).toBeDefined();
+    expect(schema.nodes["box"]).toBeUndefined();
   });
 });

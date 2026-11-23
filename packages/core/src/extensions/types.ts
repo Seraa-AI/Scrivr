@@ -1339,7 +1339,7 @@ type ExtendHook<Hook> = Hook extends (this: infer Context, ...args: infer Args) 
  * `this.parent`; one left out stays the original's.
  */
 export type ExtendConfig<Options = object> = {
-  /** The extended extension's own name. The keys its hooks contribute are unchanged. */
+  /** The extended extension's name. Keys its hooks write literally stay; one built from `this.name` follows it. */
   name?: string;
   /** Merged over the extended extension's current, configured options. */
   defaultOptions?: Partial<Options>;
