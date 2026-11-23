@@ -47,3 +47,11 @@ jobs:
       # the post-merge Deploy Docs job would say so. Build it here instead.
       - name: Build docs app
         run: pnpm turbo run build --filter=@scrivr/docs...
+
+      # @scrivr/react supports React 18 and 19 but develops on 19. Rerun its
+      # tests on 18 so the lower end of the peer range stays checked. Last,
+      # because it swaps the workspace's React for every step after it.
+      - name: Test @scrivr/react on React 18
+        run: |
+          pnpm --filter @scrivr/react add -D react@^18.3.1 react-dom@^18.3.1
+          pnpm --filter @scrivr/react test
