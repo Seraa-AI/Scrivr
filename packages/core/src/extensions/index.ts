@@ -113,6 +113,9 @@ export { DefaultContent, type DefaultContentOptions } from "./built-in/DefaultCo
 
 export type {
   ExtensionConfig,
+  ExtendConfig,
+  ExtendHookContext,
+  ExtensionHookName,
   ExtensionContext,
   ScrivrNodeSpec,
   PasteTransform,
@@ -121,6 +124,7 @@ export type {
   PasteFileHandler,
   PasteFileSpec,
   InitialDocContext,
+  Phase1Context,
   IBaseEditor,
   IEditor,
   ResolvedExtension,

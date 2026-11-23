@@ -114,6 +114,55 @@ export function registerHighlightPainter(editor) {
 
 ---
 
+## Customising a built-in extension
+
+When a built-in does almost what you need, `extend` makes a new extension from it without copying it. A hook you declare replaces the original's. `this.parent` calls the original's hook with the same context and arguments, so you can change its result or add to it. Any hook you leave out stays the original's.
+
+```typescript
+import { Bold, Editor, Heading, StarterKit } from "@scrivr/core";
+
+// One more attribute on the heading node; everything else stays Heading's.
+const AnchoredHeading = Heading.extend({
+  addNodes() {
+    const { heading, ...rest } = this.parent?.() ?? {};
+    return { ...rest, heading: { ...heading, attrs: { ...heading?.attrs, anchor: { default: null } } } };
+  },
+});
+
+// Keep Bold's commands and add one.
+const MyBold = Bold.extend({
+  addCommands() {
+    return { ...this.parent?.(), toggleStrong: () => (state, dispatch) => true };
+  },
+});
+
+new Editor({
+  extensions: [StarterKit.configure({ heading: false, bold: false }), AnchoredHeading, MyBold],
+});
+```
+
+- **Replacing a built-in that StarterKit includes:** turn it off in `StarterKit.configure` and list your extended one, as above. Otherwise both register the same node or mark, and the later one wins with a warning.
+- **Replacing Paragraph:** do it in place, because order matters there. The first block type registered is the one an empty document starts with, and StarterKit lists Paragraph first:
+
+  ```typescript
+  import { Paragraph, StarterKit } from "@scrivr/core";
+
+  const MyParagraph = Paragraph.extend({ /* your overrides */ });
+  const Kit = StarterKit.extend({
+    addExtensions() {
+      return (this.parent?.() ?? []).map((child) => (child.name === "paragraph" ? MyParagraph : child));
+    },
+  });
+  ```
+- **Lifecycle hooks:** an `onEditorReady` or `onViewReady` override should `return this.parent?.(editor)`, or combine it with its own cleanup. Otherwise the original's cleanup never runs on `destroy()`.
+- **No original hook:** `this.parent` is `undefined` when the original doesn't declare that hook. Writing `this.parent?.()` handles both cases.
+- **Options:** the extended extension starts from the original's current options, so a configured extension extends as configured. `defaultOptions` merges over them, and `configure` still works afterwards. New options must keep the original's, because its hooks still read them. Don't narrow the type of an inherited option: the compiler allows it, but the inherited value isn't re-checked.
+- **Name:** `name` renames the extension, which is the name `findExtension` answers to. Keys a hook writes literally, as every built-in does, stay the same. A key built from `this.name` follows the new name. To run a built-in's copy beside the original, also override the hooks whose keys would clash.
+- **Chaining:** `extend` can be chained, and each layer's `parent` is the one below it.
+- **Bundles:** a bundle extends the same way. `StarterKit.extend({ addExtensions() { return [...(this.parent?.() ?? []), MyExtension]; } })` adds a child to it.
+
+---
+
 ## The Complexity Of Canvas
 
 Writing extensions in Scrivr is more mathematically demanding than other editors. If you want to render a complex React component (e.g., an interactive Kanban board table) inside the document flow, Scrivr allows you to use `OverlayRenderer` to project absolute-positioned widgets over the Canvas. See the Coordinate System documentation for `getViewportRect`!
