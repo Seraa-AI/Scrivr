@@ -65,3 +65,29 @@ describe("the original view", () => {
     expect(editor.getState().doc).toBe(before);
   });
 });
+
+describe("a record missing its bookkeeping fields", () => {
+  // As a host's stored or converted document may carry it: who and what, but
+  // not when it was made or reviewed. Loading it writes nothing, so it is read
+  // as it is.
+  const record = (id: string, operation: "insert" | "delete") => ({ dataTracked: { id, authorID: "bob", operation, status: "pending" } });
+  const incomplete = () => new ServerEditor({
+    extensions: [StarterKit, TrackChanges.configure({ userID: "u2", initialStatus: TrackChangesStatus.enabled })],
+    content: { type: "doc", content: [{ type: "paragraph", attrs: { nodeId: "a" }, content: [
+      { type: "text", text: "keep " },
+      { type: "text", text: "added ", marks: [{ type: "trackedInsert", attrs: record("i1", "insert") }] },
+      { type: "text", text: "removed ", marks: [{ type: "trackedDelete", attrs: record("d1", "delete") }] },
+      { type: "text", text: "end" },
+    ] }] },
+  });
+
+  it("is undone by the original view, as the proposed view applies it", () => {
+    const editor = incomplete();
+    expect(read(editor)[0]?.text).toBe("keep added end");
+    expect(read(editor, "original")[0]?.text).toBe("keep removed end");
+  });
+
+  it("reads in the proposed view's markdown as applied", () => {
+    expect(read(incomplete())[0]?.markdown).toBe("keep added end");
+  });
+});
