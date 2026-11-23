@@ -11,10 +11,10 @@ import { GhostText, ghostTextPluginKey } from "./GhostText";
 import { AiCaret, aiCaretPluginKey } from "./AiCaret";
 import { findLiveNodeById, isShadowNode, moveShadowRanges, originalDocument, reviewChanges, trackAsSuggestion } from "@scrivr/plugins";
 import { aiToolkitRegistry } from "./aiToolkitRegistry";
-import { applyRichDiffAsSuggestion, buildAcceptedTextMap, type RichBlockEdit } from "@scrivr/plugins";
+import { applyRichDiffAsSuggestion, buildAcceptedTextMap, plainTextSpans, type RichBlockEdit } from "@scrivr/plugins";
 
 export { unitRichHash };
-import type { Node as PmNode, Schema } from "@scrivr/core/pm";
+import type { EditorState, Node as PmNode, Schema } from "@scrivr/core/pm";
 import type { Command } from "@scrivr/core/pm";
 import { AiSuggestion as AiSuggestionExtension, type AiSuggestionOptions } from "../ai-suggestion/AiSuggestion";
 import { computeAiSuggestion } from "../ai-suggestion/computeAiSuggestion";
@@ -292,12 +292,22 @@ function sourceHashOf(item: SemanticUnit): string | undefined {
   return readStringField(item, "expectedContentHash") ?? readStringField(item, "richHash");
 }
 
-function editForPart(part: SemanticPart): RichBlockEdit {
+function editForPart(part: SemanticPart, state: EditorState): RichBlockEdit {
   return {
     nodeId: part.nodeId,
-    spans: part.spans ?? [{ text: part.text, marks: [] }],
+    spans: part.spans ?? wordsAsSpans(state, part.nodeId, part.text),
     ...(part.attrs ? { attrs: part.attrs } : {}),
   };
+}
+
+/**
+ * An edit given only as words: the block's new wording, formatted as typing
+ * would format it, so kept text reads as it did and new words take what they
+ * replace — not one unformatted run that proposes removing every mark.
+ */
+function wordsAsSpans(state: EditorState, nodeId: string, text: string) {
+  const found = findLiveNodeById(state.doc, nodeId);
+  return found ? plainTextSpans(state.doc, found, text, state.schema) : [{ text, marks: [] }];
 }
 
 function readStringField(item: unknown, key: string): string | undefined {
@@ -649,18 +659,16 @@ export class AiToolkitAPI {
               rejected.push(part.nodeId);
               continue;
             }
-            resolved.push(editForPart(part));
+            resolved.push(editForPart(part, this.editor.getState()));
             changed.push(part.nodeId);
           }
           continue;
         }
 
         changed.push(nodeId);
-        // A plain-text edit has no `spans`; synthesize one unformatted run so
-        // the inline diff still sees the new text.
         resolved.push({
           nodeId,
-          spans: item.spans ?? [{ text: item.text, marks: [] }],
+          spans: item.spans ?? wordsAsSpans(this.editor.getState(), nodeId, item.text),
           ...(item.attrs ? { attrs: item.attrs } : {}),
           expectedContentHash: sourceHash ?? unitRichHash(currentUnit),
         });

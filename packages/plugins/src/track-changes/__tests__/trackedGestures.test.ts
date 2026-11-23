@@ -412,6 +412,10 @@ const scenarios: Scenario[] = [
   { name: "three lines mid-line", doc: hello, gesture: e => { sel(e, 3); pasteOpen(e, ["FOO", "MID", "BAR"]); } },
   { name: "two lines over a selection", doc: hello, gesture: e => { sel(e, 3, 8); pasteOpen(e, ["FOO", "BAR"]); } },
   { name: "one line mid-line", doc: hello, gesture: e => { sel(e, 3); pasteOpen(e, ["FOO"]); } },
+  // Two runs of different formatting are two pieces, the shape of a paragraph
+  // break; written mid-line they are an insertion, not a split
+  { name: "insert two runs of different formatting mid-line", doc: [p("an idea")], mustChange: true,
+    gesture: e => tr(e, (t, s) => t.insert(4, [s.schema.text("very", [s.schema.marks["bold"]!.create()]), s.schema.text(" good ")])) },
   // Selected cells are emptied and the first one written in one transaction,
   // so a change to CellSelection.replace could make the write straddle what it inserted
   { name: "type over selected cells", doc: [table("aa", "bb")], mustChange: true, gesture: e => { selectCells(e, 0, 1); tr(e, t => t.insertText("Q")); } },

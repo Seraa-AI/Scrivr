@@ -411,3 +411,32 @@ describe("applyRichDiffAsSuggestion — leaf-only guard", () => {
     expect(res.rejected).toEqual([]);
   });
 });
+
+describe("applyRichDiffAsSuggestion — a call that names one block twice", () => {
+  it("leaves that block alone and reports it, and still applies the rest", () => {
+    const ed = editor({ type: "doc", content: [
+      { type: "paragraph", attrs: { nodeId: "b1" }, content: [{ type: "text", text: "teh cat sat" }] },
+      { type: "paragraph", attrs: { nodeId: "b2" }, content: [{ type: "text", text: "a dgo ran" }] },
+    ] });
+    const result = apply(ed, [
+      { nodeId: "b1", spans: [{ text: "the cat sat", marks: [] }] },
+      { nodeId: "b2", spans: [{ text: "a dog ran", marks: [] }] },
+      { nodeId: "b1", spans: [{ text: "teh dog sat", marks: [] }] },
+    ]);
+
+    expect(result.applied).toBe(true);
+    expect(result.rejected).toEqual(["b1"]);
+    expect(ed.getState().doc.child(0).textContent).toBe("teh cat sat");
+    expect(textChanges(ed).length).toBeGreaterThan(0);
+  });
+
+  it("reports a block it cannot find as not found, not repeated", () => {
+    const ed = editor({ type: "doc", content: [{ type: "paragraph", attrs: { nodeId: "b1" }, content: [{ type: "text", text: "teh cat" }] }] });
+    const result = apply(ed, [
+      { nodeId: "gone", spans: [{ text: "x", marks: [] }] },
+      { nodeId: "gone", spans: [{ text: "y", marks: [] }] },
+    ]);
+    expect(result.notFound).toEqual(["gone"]);
+    expect(result.rejected).toEqual([]);
+  });
+});

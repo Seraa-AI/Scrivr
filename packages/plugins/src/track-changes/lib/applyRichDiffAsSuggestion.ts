@@ -40,8 +40,9 @@ import {
 import { excludes, untracked, type FoundPiece } from "../formatSuggestions";
 import { findLiveNodeById } from "../liveNode";
 import { acceptedRangeToDocRange, bridgeable, buildAcceptedTextMap, collectAccepted, type PosMapEntry } from "./acceptedTextMap";
-import { clearAuthorPendingMarks } from "./applyDiffAsSuggestion";
+import { clearAuthorPendingMarks, namedMoreThanOnce } from "./applyDiffAsSuggestion";
 import { diffText, phraseReplacements } from "./diffText";
+import { groupToSpans } from "./plainProposalMarks";
 import { writeProposal } from "./writeProposal";
 import { dispatchSuggestion } from "../suggestionBlocked";
 
@@ -78,8 +79,9 @@ export interface RichDiffResult {
   notFound: string[];
   /**
    * nodeIds whose edit changed nothing: a container (list, table) rather than
-   * a leaf textblock, a block proposed for deletion, or an edit that matched
-   * the block already or asked only for what an agent may not set.
+   * a leaf textblock, a block proposed for deletion, a block the call named
+   * more than once, or an edit that matched the block already or asked only
+   * for what an agent may not set.
    */
   rejected: string[];
 }
@@ -116,7 +118,12 @@ export function applyRichDiffAsSuggestion(
 ): RichDiffResult {
   const notFound: string[] = [];
   const rejected: string[] = [];
-  const resolved = edits.flatMap((edit) => {
+  const repeated = namedMoreThanOnce(edits, state.doc);
+  rejected.push(...repeated);
+  const resolved = edits.flatMap((edit, index) => {
+    if (repeated.includes(edit.nodeId)) return [];
+    // A missing block named twice is reported missing once.
+    if (edits.findIndex((other) => other.nodeId === edit.nodeId) !== index) return [];
     const found = findLiveNodeById(state.doc, edit.nodeId);
     if (!found) {
       // Held only by content proposed for deletion: there, but not editable.
@@ -400,26 +407,3 @@ function expandSpans(spans: InlineSpan[]): { text: string; charMarks: InlineMark
   return { text, charMarks };
 }
 
-/**
- * Group a proposed-text slice back into `InlineSpan`s for `spansToFragment`,
- * merging runs of identical marks. A newline stays: inside one block it is a
- * line break, never a block boundary.
- */
-function groupToSpans(
-  text: string,
-  charMarks: InlineMark[][],
-  start: number,
-  end: number,
-): InlineSpan[] {
-  const spans: InlineSpan[] = [];
-  let i = start;
-  while (i < end) {
-    const marks = charMarks[i] ?? [];
-    const signature = markSignature(marks, []);
-    let j = i + 1;
-    while (j < end && markSignature(charMarks[j] ?? [], []) === signature) j++;
-    spans.push({ text: text.slice(i, j), marks });
-    i = j;
-  }
-  return spans;
-}

@@ -1,38 +1,11 @@
 /**
- * How formatting is read off a document and compared against a proposal.
+ * How formatting read off a document is compared against a proposal.
  *
- * Shared because two lanes depend on the *same* answers: computing a suggestion
- * asks what a run currently reads as so it can tell a real change from a
- * restatement, and rebasing a suggestion asks the same question so the parts
- * nobody proposed anything about survive untouched. Two copies of an
- * offset-alignment rule drift, and the drift is invisible until a proposal
- * lands on the wrong characters.
+ * Reading it is `acceptedMarksAt`'s, in @scrivr/plugins: the one reader every
+ * lane indexes by, so computing a suggestion and rebasing one ask the same
+ * question of the same offsets.
  */
-import { describeInlineMark, type InlineMark } from "@scrivr/core";
-import { isTrackedMark } from "@scrivr/plugins";
-import type { Node as PmNode } from "@scrivr/core/pm";
-
-import { stableStringify } from "@scrivr/core";
-
-/**
- * The formatting each character of a block's accepted text carries.
- *
- * Indexed to match the accepted text — so tracked-deleted text is skipped here
- * exactly as it is there, because every offset in this lane is an index into
- * that text and counting it would misalign all of them.
- */
-export function currentMarksAt(node: PmNode): InlineMark[][] {
-  const marks: InlineMark[][] = [];
-  node.descendants((child) => {
-    if (!child.isText || !child.text) return;
-    if (child.marks.some((mark) => mark.type.name === "trackedDelete")) return;
-    const described = child.marks
-      .filter((mark) => !isTrackedMark(mark.type.name))
-      .map(describeInlineMark);
-    for (let i = 0; i < child.text.length; i++) marks.push(described);
-  });
-  return marks;
-}
+import { stableStringify, type InlineMark } from "@scrivr/core";
 
 function markKey(mark: InlineMark): string {
   return stableStringify([mark.type, mark.attrs ?? {}]);

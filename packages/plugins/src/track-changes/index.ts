@@ -1,6 +1,6 @@
 export { TrackChanges } from "./TrackChanges";
-export { applyDiffAsSuggestion, applyMultiBlockDiff } from "./lib/applyDiffAsSuggestion";
-export type { ApplyDiffOptions, MultiBlockDiffOptions, ApplyDiffResult } from "./lib/applyDiffAsSuggestion";
+export { applyDiffAsSuggestion, applyMultiBlockDiff, namedMoreThanOnce } from "./lib/applyDiffAsSuggestion";
+export type { ApplyDiffOptions, MultiBlockDiffOptions, ApplyDiffResult, MultiBlockDiffResult } from "./lib/applyDiffAsSuggestion";
 export { buildParagraphContexts } from "./lib/buildParagraphContexts";
 export type { ParagraphContext } from "./lib/buildParagraphContexts";
 export { diffText, pairReplacements, phraseReplacements } from "./lib/diffText";
@@ -14,6 +14,7 @@ export {
   acceptedTextMapFor,
 } from "./lib/acceptedTextMap";
 export type { PosMapEntry, AcceptedTextMapResult } from "./lib/acceptedTextMap";
+export { acceptedMarksAt, plainProposalMarks, plainTextSpans } from "./lib/plainProposalMarks";
 // Record writers and builders, kept for hosts that build records by hand. No
 // lane uses them: every lane writes plain edits and the engine records them.
 export { splitRangeForNewMark, applyTrackedDelete, applyTrackedInsert } from "./lib/splitRangeForNewMark";

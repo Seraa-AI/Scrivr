@@ -54,3 +54,24 @@ describe("a hard break in a rich edit", () => {
     expect(editor.getState().doc.toJSON()).toEqual(before);
   });
 });
+
+describe("a text-only rich edit", () => {
+  it("keeps the paragraph's formatting, its new words included", () => {
+    const editor = new ServerEditor({
+      extensions: [StarterKit, TrackChanges.configure({ userID: "u1", initialStatus: TrackChangesStatus.enabled, canAcceptReject: true }), AiToolkit],
+      content: { type: "doc", content: [{ type: "paragraph", attrs: { nodeId: "p1" }, content: [
+        { type: "text", text: "the quick fox", marks: [{ type: "bold" }] },
+      ] }] },
+    });
+    const ai = getAiToolkit(editor)!;
+    const { spans: _spans, ...unit } = ai.getRichBlocks()[0]!;
+    expect(ai.applyRichEdit([{ ...unit, text: "the slow fox" }]).applied).toBe(true);
+
+    const pending = trackChangesPluginKey.getState(editor.getState())!.changeSet.pending;
+    expect(pending.some((change) => change.type === "mark-change")).toBe(false);
+    editor.commands.setChangeStatuses("accepted", pending.map((change) => change.id));
+    const runs: Array<[string, string[]]> = [];
+    editor.getState().doc.child(0).forEach((child) => runs.push([child.text ?? "", child.marks.map((m) => m.type.name)]));
+    expect(runs).toEqual([["the slow fox", ["bold"]]]);
+  });
+});
