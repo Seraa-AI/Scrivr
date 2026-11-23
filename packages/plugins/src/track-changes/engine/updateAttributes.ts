@@ -85,12 +85,20 @@ export function updateChangeAttrs(
     (change.type === "node-change" || change.type === "node-attr-change") &&
     !operation
   ) {
+    // A record that says no operation cannot be decided: it is dropped, and
+    // only it — the block's other records are other changes.
+    const others = (getBlockInlineTrackedData(node) || []).filter(t => t.id !== change.id);
     tr.setNodeMarkup(
       change.from,
       undefined,
-      { ...node.attrs, dataTracked: null },
+      { ...node.attrs, dataTracked: others.length === 0 ? null : others },
       node.marks,
     );
+  } else if (change.type === "reference-change") {
+    // A reference is decided with the split it points at, never on its own;
+    // all it takes here is the bookkeeping on its record.
+    const records = (getBlockInlineTrackedData(node) || []).map(t => (t.id === change.id ? { ...t, ...trackedAttrs } : t));
+    tr.setNodeMarkup(change.from, undefined, { ...node.attrs, dataTracked: records }, node.marks);
   } else if (
     change.type === "node-change" ||
     change.type === "node-attr-change"
@@ -144,31 +152,36 @@ export function updateChangeAttrs(
     );
   } else if (isMarkChange(change)) {
     if (change.mark && change.from && change.to) {
-      const markDataTracked: DataTrackedAttrs[] = Array.isArray(change.mark.attrs.dataTracked)
-        ? change.mark.attrs.dataTracked
-        : [];
-      const newDT = markDataTracked?.map(dt => {
-        if (
-          dt.createdAt === change.dataTracked.createdAt &&
-          dt.operation === change.dataTracked.operation
-        ) {
-          return {
-            ...dt,
-            ...trackedAttrs,
-          };
-        }
-        return dt;
-      });
-      const newMark = change.mark.type.create({
-        ...change.mark.attrs,
-        dataTracked: newDT,
-      });
+      // The record by its id: several on one mark can share an operation.
+      const isThisRecord = (dt: DataTrackedAttrs) =>
+        dt.id === change.dataTracked.id && dt.operation === change.dataTracked.operation;
+      const type = change.mark.type;
+      const rewrite = (mark: Mark) => {
+        const records: DataTrackedAttrs[] = Array.isArray(mark.attrs.dataTracked) ? mark.attrs.dataTracked : [];
+        if (!records.some(isThisRecord)) return null;
+        return type.create({ ...mark.attrs, dataTracked: records.map(dt => (isThisRecord(dt) ? { ...dt, ...trackedAttrs } : dt)) });
+      };
       if (change.nodeType.isInline) {
-        tr.removeMark(change.from, change.to, change.mark);
-        tr.addMark(change.from, change.to, newMark);
+        // Text by text, as this transaction has left it: another record on the
+        // same mark may cover only part of the range, and must stay on its part.
+        const pieces: Array<{ from: number; to: number; mark: Mark }> = [];
+        tr.doc.nodesBetween(change.from, change.to, (node, pos) => {
+          const mark = node.isInline ? node.marks.find(m => m.type === type) : undefined;
+          if (mark) pieces.push({ from: Math.max(pos, change.from), to: Math.min(pos + node.nodeSize, change.to), mark });
+        });
+        for (const piece of pieces) {
+          const updated = rewrite(piece.mark);
+          if (!updated) continue;
+          tr.removeMark(piece.from, piece.to, piece.mark);
+          tr.addMark(piece.from, piece.to, updated);
+        }
       } else {
-        tr.removeNodeMark(change.from, change.mark);
-        tr.addNodeMark(change.from, newMark);
+        const current = tr.doc.nodeAt(change.from)?.marks.find(m => m.type === type) ?? change.mark;
+        const updated = rewrite(current);
+        if (updated) {
+          tr.removeNodeMark(change.from, current);
+          tr.addNodeMark(change.from, updated);
+        }
       }
     } else {
       console.warn(

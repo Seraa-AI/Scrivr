@@ -32,11 +32,21 @@ type ChangeBuilder = (
   doc: PMNode,
 ) => PartialNodeTrackedChange;
 
+/**
+ * A record as this read sees it. `isConflict` is worked out below from the
+ * changes around it, on every read; a value a writer stored with the record is
+ * left out, or a resolved conflict would stay flagged.
+ */
+function asRead<T extends { isConflict?: boolean }>(record: T): Omit<T, "isConflict"> {
+  const { isConflict: _stored, ...read } = record;
+  return read;
+}
+
 const changeBase = (node: PMNode, pos: number, id: string, dataTracked: Partial<TrackedAttrs>) => ({
   id,
   from: pos,
   to: pos + node.nodeSize,
-  dataTracked: { ...dataTracked },
+  dataTracked: asRead(dataTracked),
 });
 
 const textChange: ChangeBuilder = (node, pos, id, dataTracked) => ({
@@ -198,7 +208,7 @@ export function findChanges(state: EditorState): ChangeSet {
             type: "mark-change",
             from: pos,
             to: pos + node.nodeSize,
-            dataTracked: { ...c },
+            dataTracked: asRead(c),
             nodeType: node.type,
             node,
             mark,

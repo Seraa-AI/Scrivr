@@ -3,7 +3,6 @@ import { Transaction } from "@scrivr/core/pm";
 
 import { ChangeSet } from "../ChangeSet";
 import { updateChangeAttrs } from "../engine/updateAttributes";
-import { genId } from "../helpers";
 import { CHANGE_STATUS } from "../types";
 
 /** A split piece's id: derived, so every client repairing the same document agrees. */
@@ -33,7 +32,6 @@ export function fixInconsistentChanges(
     const piece = !!id && claimed.has(id);
     const newAttrs = {
       ...(piece && { id: pieceId(id, c.from), continuesId: c.dataTracked.continuesId ?? id }),
-      ...(!id && { id: genId() }),
       ...(!authorID && { authorID: currentUserID }),
       ...(!reviewedByID && { reviewedByID: null }),
       ...(!status && { status: CHANGE_STATUS.pending }),
@@ -47,6 +45,22 @@ export function fixInconsistentChanges(
     }
     const claimedId = newAttrs.id ?? id;
     if (claimedId) claimed.add(claimedId);
+  });
+
+  // A change the set already counts keeps its id; only its bookkeeping is filled.
+  changeSet.unstampedChanges.forEach(c => {
+    // A held suggestion is in its holder's record, not on the text: writing it would put it
+    // there. It is stamped when it returns to the text, once its holder is decided.
+    if (c.type === "mark-change" && "within" in c && c.within !== undefined) return;
+    const { createdAt, updatedAt, statusUpdateAt, reviewedByID } = c.dataTracked;
+    updateChangeAttrs(newTr, c, {
+      ...c.dataTracked,
+      ...(!createdAt && { createdAt: Date.now() }),
+      ...(!updatedAt && { updatedAt: Date.now() }),
+      ...(!statusUpdateAt && { statusUpdateAt: 0 }),
+      ...(reviewedByID === undefined && { reviewedByID: null }),
+    }, schema);
+    changed = true;
   });
 
   return changed;

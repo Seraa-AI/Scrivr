@@ -273,6 +273,22 @@ Columns, also on plan 155's later list, is its own RFC
   fault there does not fail the export.
 - The unit hash does not cover `markdown`, so no pinned hash goes stale.
 
+### Records without their timestamps (2026-11-23, Seraa's ask S3)
+
+- A tracked change whose record lacks `createdAt` or `updatedAt`, as a stored
+  or converted document may carry it, was left out of the change set until
+  the next edit repaired it. So the proposed view applied it from its marks
+  while the original view, which undoes what is pending, kept it.
+- The change set now counts a record by its identity (id, author, operation,
+  status). The two views, review and act grouping read the same pending
+  changes from the moment the document is loaded. The next edit still fills
+  in the timestamps.
+- That repair now touches only the record it repairs:
+  - a block record with no operation is dropped alone;
+  - two records on one mark keep their own ids;
+  - a split's reference record is stamped too, so the repair does not run on
+    every edit.
+
 ### Next release cycle (decided 2026-11-10)
 
 Kept out of this release so it is not held:
