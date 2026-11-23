@@ -36,6 +36,12 @@ export default defineConfig({
       '@scrivr/react/styles.css': resolve(__dirname, '../../packages/react/src/styles.css'),
       '@scrivr/core/pm': resolve(__dirname, '../../packages/core/src/pm.ts'),
       '@scrivr/core': resolve(__dirname, '../../packages/core/src/index.ts'),
+      ...Object.fromEntries(
+        ['collaboration', 'track-changes', 'citation-highlight', 'header-footer', 'sealed-viewer'].map((entry) => [
+          `@scrivr/plugins/${entry}`,
+          resolve(__dirname, `../../packages/plugins/src/${entry}/index.ts`),
+        ]),
+      ),
       '@scrivr/plugins': resolve(__dirname, '../../packages/plugins/src/index.ts'),
       '@scrivr/export-pdf': resolve(__dirname, '../../packages/export-pdf/src/index.ts'),
       '@scrivr/export-markdown': resolve(__dirname, '../../packages/export-markdown/src/index.ts'),

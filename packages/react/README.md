@@ -100,8 +100,13 @@ For convenience the following are re-exported so you don't need to import `@scri
 import {
   StarterKit, Pagination, defaultPageConfig,
   DEFAULT_FONT_FAMILY, FontFamily, Link,
-  Collaboration, CollaborationCursor,
 } from '@scrivr/react';
+```
+
+Collaboration is imported from its own entry, so an app without it never loads Yjs:
+
+```ts
+import { Collaboration, CollaborationCursor } from '@scrivr/plugins/collaboration';
 ```
 
 ## License

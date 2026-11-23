@@ -89,4 +89,3 @@ export type {
   FontResolution,
   FontShortfall,
 } from "@scrivr/core";
-export { Collaboration, CollaborationCursor } from "@scrivr/plugins";

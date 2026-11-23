@@ -19,13 +19,15 @@ pnpm add yjs y-prosemirror @hocuspocus/provider
 
 ## Plugins
 
+Each plugin has its own entry (`@scrivr/plugins/track-changes`, `/header-footer`, `/citation-highlight`, `/sealed-viewer`, `/collaboration`). The root exports every plugin except collaboration, the only one that needs `yjs`, `y-prosemirror` and `@hocuspocus/provider`.
+
 ### Collaboration
 
 Real-time collaborative editing via [Yjs](https://yjs.dev) and [HocusPocus](https://hocuspocus.dev).
 
 ```ts
 import { Editor } from '@scrivr/core';
-import { Collaboration, CollaborationCursor } from '@scrivr/plugins';
+import { Collaboration, CollaborationCursor } from '@scrivr/plugins/collaboration';
 import { HocuspocusProvider } from '@hocuspocus/provider';
 import * as Y from 'yjs';
 

@@ -16,9 +16,8 @@ import type { EditorStateContext } from "@scrivr/react";
 import { PdfExport } from "@scrivr/export-pdf";
 import { DocxExport, DocxImport } from "@scrivr/docx";
 import { HtmlImport } from "@scrivr/html";
+import { Collaboration, CollaborationCursor } from "@scrivr/plugins/collaboration";
 import {
-  Collaboration,
-  CollaborationCursor,
   TrackChanges,
   HeaderFooter,
   CitationHighlight,

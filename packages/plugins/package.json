@@ -36,6 +36,56 @@
         "types": "./dist/index.d.cts",
         "default": "./dist/index.cjs"
       }
+    },
+    "./collaboration": {
+      "import": {
+        "types": "./dist/collaboration.d.ts",
+        "default": "./dist/collaboration.js"
+      },
+      "require": {
+        "types": "./dist/collaboration.d.cts",
+        "default": "./dist/collaboration.cjs"
+      }
+    },
+    "./track-changes": {
+      "import": {
+        "types": "./dist/track-changes.d.ts",
+        "default": "./dist/track-changes.js"
+      },
+      "require": {
+        "types": "./dist/track-changes.d.cts",
+        "default": "./dist/track-changes.cjs"
+      }
+    },
+    "./citation-highlight": {
+      "import": {
+        "types": "./dist/citation-highlight.d.ts",
+        "default": "./dist/citation-highlight.js"
+      },
+      "require": {
+        "types": "./dist/citation-highlight.d.cts",
+        "default": "./dist/citation-highlight.cjs"
+      }
+    },
+    "./header-footer": {
+      "import": {
+        "types": "./dist/header-footer.d.ts",
+        "default": "./dist/header-footer.js"
+      },
+      "require": {
+        "types": "./dist/header-footer.d.cts",
+        "default": "./dist/header-footer.cjs"
+      }
+    },
+    "./sealed-viewer": {
+      "import": {
+        "types": "./dist/sealed-viewer.d.ts",
+        "default": "./dist/sealed-viewer.js"
+      },
+      "require": {
+        "types": "./dist/sealed-viewer.d.cts",
+        "default": "./dist/sealed-viewer.cjs"
+      }
     }
   },
   "files": [

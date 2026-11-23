@@ -4,7 +4,7 @@
 "@scrivr/docx": patch
 ---
 
-New `@scrivr/html` package: `importHtml(editor, html)` loads a whole document from HTML, in the browser or on the server, and returns `{ doc, diagnostics }`. Browser bundlers resolve an entry that uses the page's `DOMParser`; Node resolves one that uses happy-dom, so happy-dom never reaches a browser bundle. `HtmlImport` adds an `importHtmlFromFile` command and toolbar item, like `DocxImport`.
+New `@scrivr/html` package: `importHtml(editor, html)` loads a whole document from HTML, in the browser or on the server, and resolves to `{ doc, diagnostics }` (`const { doc, diagnostics } = await importHtml(editor, html)`). Its types are exported: `HtmlImportResult`, `HtmlImportDiagnostic`, `HtmlDiagnosticCode` and `ImportHtml`. Browser bundlers resolve an entry that uses the page's `DOMParser`; Node resolves one that uses happy-dom, so happy-dom never reaches a browser bundle. `HtmlImport` adds an `importHtmlFromFile` command and toolbar item, like `DocxImport`.
 
 - Blocks keep the `data-node-id` the HTML gives them; a repeated id goes to the first block that carries it.
 - `<style>` rules apply (type, `#id`, `.class`, compounds and comma lists) with the browser's precedence, `!important` included. Styles inherit as in CSS: the page's text styles reach the text without overriding what an element states or sets by default — its `align`, `<font>`'s attributes, a link's colour, a heading's size — and a block's alignment reaches the blocks and loose text inside it.

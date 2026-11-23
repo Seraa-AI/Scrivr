@@ -19,7 +19,7 @@ import { Collaboration } from "./Collaboration";
 import { collaborationRegistry } from "./collaborationState";
 // Through the barrel: `CollabState["binding"]` is how a host names the binding,
 // so a typecheck fails here if that path stops resolving.
-import type { CollabState } from "../index";
+import type { CollabState } from "./index";
 
 describe("Collaboration — headless (ServerEditor)", () => {
   it("wires the Y binding + provider on onEditorReady, with no view", () => {

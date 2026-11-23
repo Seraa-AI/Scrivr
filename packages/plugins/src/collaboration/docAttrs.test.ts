@@ -14,7 +14,7 @@ import {
   readDocAttrs,
   seedDocAttrs,
   type DocAttrEnvelope,
-} from "../index";
+} from "./index";
 
 const DECLARED = ["headerFooter", "finalSection"] as const;
 const room = () => new Y.Doc();
