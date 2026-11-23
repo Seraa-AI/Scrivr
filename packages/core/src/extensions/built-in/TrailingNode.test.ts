@@ -7,6 +7,7 @@ import { StarterKit } from "../StarterKit";
 // Through the package entry, as a host composing its own extensions imports them.
 import { NORMALIZATION_META, TrailingNode, Typography } from "../../index";
 
+const h1 = (text: string) => ({ type: "heading", attrs: { level: 1 }, content: [{ type: "text", text }] });
 const p = (text = "") => ({ type: "paragraph", content: text ? [{ type: "text", text }] : undefined });
 
 function editor(...content: object[]) {
@@ -141,6 +142,27 @@ describe("TrailingNode", () => {
     expect(blocks(e)).toEqual(["heading:one", "paragraph:"]);
     toParagraph(e);
     expect(blocks(e)).toEqual(["paragraph:one"]);
+  });
+
+  it("leaves a line it did not add alone through an undo of something else", () => {
+    const e = editor(h1("one"), p());
+    caretAt(e, 2);
+    e.applyTransaction(closeHistory(e.getState().tr.insertText("X", 2)));
+    e.commands.undo();
+    expect(blocks(e)).toEqual(["heading:one", "paragraph:"]);
+    toParagraph(e);
+    expect(blocks(e)).toEqual(["paragraph:one", "paragraph:"]);
+  });
+
+  it("leaves a line someone typed in alone after undoing the typing", () => {
+    const e = editor(p("one"));
+    caretAt(e, 2);
+    e.commands.setHeading({ level: 1 });
+    e.applyTransaction(closeHistory(e.getState().tr.insertText("x", e.getState().doc.content.size - 1)));
+    e.commands.undo();
+    expect(blocks(e)).toEqual(["heading:one", "paragraph:"]);
+    toParagraph(e);
+    expect(blocks(e)).toEqual(["paragraph:one", "paragraph:"]);
   });
 
   it.each([

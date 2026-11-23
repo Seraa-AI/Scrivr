@@ -17,7 +17,7 @@ const addedKey = new PluginKey<number | null>("trailingNode");
  * or put the caret in it. An empty last paragraph it did not add is left alone,
  * and so is one a collaborator's sync has rewritten, since sync replaces the
  * whole document and the paragraph can no longer be told apart. An undo or
- * redo that leaves an empty paragraph after a last block that is not one
+ * redo that brings back an empty paragraph after a last block that is not one
  * hands that line back to this plugin, since it is the line it would add.
  *
  * Uses appendTransaction so it runs after every transaction (including Y.js
@@ -40,6 +40,16 @@ export const TrailingNode = Extension.create({
       return previous !== null && previous.type !== paragraph && isAdded(doc, pos) ? pos : null;
     };
 
+    /**
+     * Whether the block at `pos` was already the document's last before `tr`.
+     * Mapped from its start leaning left, so an undone attribute change, which
+     * rewrites the block in place, still follows it.
+     */
+    const wasLastBlock = (tr: Transaction, pos: number): boolean => {
+      const before = tr.before.lastChild;
+      return before !== null && tr.mapping.map(tr.before.content.size - before.nodeSize, -1) === pos;
+    };
+
     return [
       new Plugin({
         key: addedKey,
@@ -48,7 +58,8 @@ export const TrailingNode = Extension.create({
           apply(tr, added) {
             const own = tr.getMeta(addedKey);
             if (own !== undefined) return own;
-            if (isHistoryTransaction(tr)) return trailingLine(tr.doc);
+            const line = trailingLine(tr.doc);
+            if (line !== null && isHistoryTransaction(tr) && !wasLastBlock(tr, line)) return line;
             if (added === null) return null;
             const pos = tr.mapping.map(added);
             // Someone who puts the caret in the line makes it theirs. A caret an
