@@ -87,7 +87,7 @@ class EditorStateManager {
 // ── useScrivrState ────────────────────────────────────────────────────────────
 
 /**
- * useScrivrState — subscribe to editor state with fine-grained re-render control.
+ * useEditorState — subscribe to editor state with fine-grained re-render control.
  *
  * Uses useSyncExternalStore with a versioned snapshot (adapted from TipTap):
  *   1. EditorStateManager wraps editor.subscribe() and tracks a version counter.
@@ -102,14 +102,14 @@ class EditorStateManager {
  *
  * @example
  * // Re-renders only when bold toggles
- * const isBold = useScrivrState({
+ * const isBold = useEditorState({
  *   editor,
  *   selector: (ctx) => ctx.editor.isActive('bold'),
  * })
  *
  * @example
  * // Object selector — re-renders only when one of these actually changes
- * const state = useScrivrState({
+ * const state = useEditorState({
  *   editor,
  *   selector: (ctx) => ({
  *     isBold: ctx.editor.isActive('bold'),
@@ -176,7 +176,7 @@ export function useScrivrState<T>(
 // ── deepEqual ────────────────────────────────────────────────────────────────
 
 /**
- * Recursive deep equality. Used as the default equalityFn in useScrivrState.
+ * Recursive deep equality. Used as the default equalityFn in useEditorState.
  *
  * Handles:
  *   - Primitives (Object.is)

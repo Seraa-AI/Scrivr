@@ -92,8 +92,8 @@ function Toolbar({ editor }: { editor: ReturnType<typeof useScrivrEditor> }) {
       <button onClick={() => editor?.commands.toggleItalic()} style={{ fontStyle: isItalic ? 'italic' : 'normal' }}>
         I
       </button>
-      <button onClick={() => editor?.commands.setHeading1()}>H1</button>
-      <button onClick={() => editor?.commands.setHeading2()}>H2</button>
+      <button onClick={() => editor?.commands.setHeading({ level: 1 })}>H1</button>
+      <button onClick={() => editor?.commands.setHeading({ level: 2 })}>H2</button>
       <button onClick={() => editor?.commands.toggleBulletList()}>• List</button>
       <button onClick={() => editor?.commands.undo()}>↩ Undo</button>
       <button onClick={() => editor?.commands.redo()}>↪ Redo</button>
