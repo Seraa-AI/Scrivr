@@ -141,7 +141,7 @@ Subscribe to updates to drive a reactive page indicator:
 
 ```tsx
 function PageIndicator({ editor }: { editor: Editor }) {
-  const page = useScrivrState({
+  const page = useEditorState({
     editor,
     selector: ({ editor }) => editor?.cursorPage ?? 1,
   });

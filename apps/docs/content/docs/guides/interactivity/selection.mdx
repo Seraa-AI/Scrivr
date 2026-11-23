@@ -135,12 +135,12 @@ editor.moveRight(true);
 
 ## Subscribing to selection changes
 
-Use `editor.subscribe()` to react to every state change, or `useScrivrState` in React
+Use `editor.subscribe()` to react to every state change, or `useEditorState` in React
 to subscribe to a specific slice without unnecessary re-renders:
 
 ```tsx
 // React — only re-renders when bold state changes
-const isBold = useScrivrState({
+const isBold = useEditorState({
   editor,
   selector: ({ editor }) => editor?.isActive('bold') ?? false,
 });

@@ -1,6 +1,6 @@
 ---
 title: "@scrivr/react"
-description: React bindings for Scrivr — useScrivrEditor hook, Scrivr component, and useScrivrState selector hook.
+description: React bindings for Scrivr — useScrivrEditor hook, Scrivr component, and useEditorState selector hook.
 ---
 
 `@scrivr/react` is a thin React adapter over `@scrivr/core`. It provides a hook to create and manage
@@ -92,15 +92,15 @@ import { Scrivr } from '@scrivr/react';
 
 ---
 
-## useScrivrState
+## useEditorState
 
-`useScrivrState` subscribes to a specific slice of editor state. The component only re-renders when
+`useEditorState` subscribes to a specific slice of editor state. The component only re-renders when
 the selected value changes — not on every keypress.
 
 ```tsx
-import { useScrivrState } from '@scrivr/react';
+import { useEditorState } from '@scrivr/react';
 
-const isBold = useScrivrState({
+const isBold = useEditorState({
   editor,
   selector: ({ editor }) => editor?.isActive('bold') ?? false,
 });
@@ -110,12 +110,12 @@ Use this to build toolbars that stay in sync with cursor position:
 
 ```tsx
 export function Toolbar({ editor }: { editor: Editor | null }) {
-  const isBold = useScrivrState({
+  const isBold = useEditorState({
     editor,
     selector: ({ editor }) => editor?.isActive('bold') ?? false,
   });
 
-  const isItalic = useScrivrState({
+  const isItalic = useEditorState({
     editor,
     selector: ({ editor }) => editor?.isActive('italic') ?? false,
   });
@@ -208,7 +208,7 @@ The root needs only `@scrivr/core`. Components built on the optional packages ha
 import {
   useScrivrEditor,
   Scrivr,
-  useScrivrState,
+  useEditorState,
   BubbleMenu,
   StarterKit,
 } from '@scrivr/react';
@@ -223,12 +223,12 @@ export function MyEditor() {
     },
   });
 
-  const isBold = useScrivrState({
+  const isBold = useEditorState({
     editor,
     selector: ({ editor }) => editor?.isActive('bold') ?? false,
   });
 
-  const isItalic = useScrivrState({
+  const isItalic = useEditorState({
     editor,
     selector: ({ editor }) => editor?.isActive('italic') ?? false,
   });
