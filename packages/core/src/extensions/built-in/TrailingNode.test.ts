@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { TextSelection } from "prosemirror-state";
+import { AllSelection, TextSelection } from "prosemirror-state";
 import { ServerEditor } from "../../ServerEditor";
 import { StarterKit } from "../StarterKit";
 // Through the package entry, as a host composing its own extensions imports them.
@@ -93,6 +93,40 @@ describe("TrailingNode", () => {
       const appended = transactions.slice(1).filter(tr => tr.docChanged);
       expect(appended.length).toBeGreaterThan(0);
       expect(appended.every(tr => tr.getMeta(NORMALIZATION_META))).toBe(true);
+    }
+  });
+
+  it("takes its paragraph away after Select All, which does not put anyone in it", () => {
+    const e = editor(p("one"));
+    caretAt(e, 2);
+    e.commands.setHeading({ level: 1 });
+    e.applyTransaction(e.getState().tr.setSelection(new AllSelection(e.getState().doc)));
+    e.commands.setParagraph();
+    expect(blocks(e)).toEqual(["paragraph:one"]);
+  });
+
+  it("takes its paragraph away after a selection that only runs into it", () => {
+    const e = editor(p("one"));
+    caretAt(e, 2);
+    e.commands.setHeading({ level: 1 });
+    const { doc } = e.getState();
+    e.applyTransaction(e.getState().tr.setSelection(TextSelection.create(doc, 1, doc.content.size - 1)));
+    e.applyTransaction(e.getState().tr.setNodeMarkup(0, e.getState().schema.nodes.paragraph));
+    expect(blocks(e)).toEqual(["paragraph:one"]);
+  });
+
+  it("adds a paragraph after a table, a rule or a page break, and keeps it there", () => {
+    const cell = { type: "tableCell", content: [p("a")] };
+    const lastBlocks = [
+      { type: "table", content: [{ type: "tableRow", content: [cell] }] },
+      { type: "horizontalRule" },
+      { type: "pageBreak" },
+    ];
+    for (const last of lastBlocks) {
+      const e = new ServerEditor({ extensions: [StarterKit.configure({ table: true })], content: { type: "doc", content: [p("one"), last] } });
+      e.applyTransaction(e.getState().tr.setSelection(new AllSelection(e.getState().doc)));
+      e.applyTransaction(e.getState().tr.insertText("!", 2));
+      expect(blocks(e).slice(-2)).toEqual([`${last.type}:${last.type === "table" ? "a" : ""}`, "paragraph:"]);
     }
   });
 
