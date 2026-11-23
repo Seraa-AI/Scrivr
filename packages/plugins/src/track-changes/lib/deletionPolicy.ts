@@ -1,5 +1,5 @@
 import type { Node } from "@scrivr/core/pm";
-import { getBlockInlineTrackedData, markRecords } from "../helpers";
+import { getBlockInlineTrackedData, markRecords, ownedBy, type Owner } from "../helpers";
 import { CHANGE_OPERATION, CHANGE_STATUS, type TrackedAttrs } from "../types";
 
 /** Read all records, including stacked inline and formatting changes. */
@@ -53,11 +53,11 @@ export function inlineNodesIn(doc: Node, from: number, to: number): Node[] | nul
   return nodes;
 }
 
-/** The `groupId` of the replacement `authorID`'s pending insertion on `node` belongs to, if any. */
-export function ownReplacementOf(node: Node | null | undefined, authorID: string): string | undefined {
+/** The `groupId` of the replacement `owner`'s pending insertion on `node` belongs to, if any. */
+export function ownReplacementOf(node: Node | null | undefined, owner: Owner): string | undefined {
   if (!node) return undefined;
   return contentInsertions(node).find(record =>
-    record.authorID === authorID && record.status === CHANGE_STATUS.pending &&
+    ownedBy(record, owner) && record.status === CHANGE_STATUS.pending &&
     record.operation === CHANGE_OPERATION.insert && record.groupId !== undefined,
   )?.groupId;
 }
@@ -67,14 +67,14 @@ export function ownReplacementOf(node: Node | null | undefined, authorID: string
  * pending work it would erase. Shared by text and structural writers; storage
  * shape and mark ordering must not change the authorship rule.
  */
-export function canCancelInsertion(node: Node, authorID: string): boolean {
+export function canCancelInsertion(node: Node, owner: Owner): boolean {
   const ownInsertion = contentInsertions(node).some(record =>
-    !record.foldingClosed && record.authorID === authorID && record.status === CHANGE_STATUS.pending &&
+    !record.foldingClosed && ownedBy(record, owner) && record.status === CHANGE_STATUS.pending &&
     (record.operation === CHANGE_OPERATION.insert || record.operation === CHANGE_OPERATION.wrap_with_node),
   );
   if (!ownInsertion) return false;
   const foreignPending = (current: Node) => records(current).some(record =>
-    record.status === CHANGE_STATUS.pending && record.authorID !== authorID,
+    record.status === CHANGE_STATUS.pending && !ownedBy(record, owner),
   );
   if (foreignPending(node)) return false;
   let hasForeignWork = false;

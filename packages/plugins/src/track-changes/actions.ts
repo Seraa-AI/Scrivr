@@ -67,7 +67,6 @@ export const skipTracking = (tr: Transaction) =>
 export const isIndentationAction = (action: ReturnType<typeof getAction>) =>
   action === "indent" || action === "unindent";
 
-/** Explicit proposal intent is independent of automatic tracking of user edits. */
 /** Who a suggestion is from, and the host's name for it. */
 export interface SuggestionIntent {
   authorID: string;
@@ -75,10 +74,12 @@ export interface SuggestionIntent {
   operationId?: string;
 }
 
-export function trackAsSuggestion(tr: Transaction, authorID: string, options: { operationId?: string } = {}): Transaction {
+/** Explicit proposal intent is independent of automatic tracking of user edits. */
+export function trackAsSuggestion(tr: Transaction, authorID: string, options: Pick<SuggestionIntent, "operationId"> = {}): Transaction {
   return setAction(tr, TrackChangesAction.suggest, {
     authorID,
-    ...(options.operationId !== undefined ? { operationId: options.operationId } : {}),
+    // An empty name names nothing.
+    ...(options.operationId ? { operationId: options.operationId } : {}),
   });
 }
 

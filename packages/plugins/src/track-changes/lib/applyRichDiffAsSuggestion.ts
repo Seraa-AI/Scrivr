@@ -40,7 +40,8 @@ import {
 import { excludes, untracked, type FoundPiece } from "../formatSuggestions";
 import { findLiveNodeById } from "../liveNode";
 import { acceptedRangeToDocRange, bridgeable, buildAcceptedTextMap, collectAccepted, type PosMapEntry } from "./acceptedTextMap";
-import { clearAuthorPendingMarks, namedMoreThanOnce } from "./applyDiffAsSuggestion";
+import { clearAuthorPendingMarks, namedMoreThanOnce, ownerOf } from "./applyDiffAsSuggestion";
+import type { Owner } from "../helpers";
 import { diffText, phraseReplacements } from "./diffText";
 import { groupToSpans } from "./plainProposalMarks";
 import { writeProposal } from "./writeProposal";
@@ -149,7 +150,7 @@ export function applyRichDiffAsSuggestion(
   const tr = state.tr;
   let applied = false;
   for (const edit of resolved) {
-    if (applyRichBlockToTr(state.schema, tr, edit, authorID, onWarn)) applied = true;
+    if (applyRichBlockToTr(state.schema, tr, edit, ownerOf(authorID, operationId), onWarn)) applied = true;
     else rejected.push(edit.nodeId);
   }
 
@@ -164,10 +165,10 @@ function applyRichBlockToTr(
   schema: Schema,
   tr: Transaction,
   edit: RichBlockEdit,
-  authorID: string,
+  owner: Owner,
   onWarn?: (message: string) => void,
 ): boolean {
-  // Replacing inline intent supersedes this author's earlier inline suggestion.
+  // Replacing inline intent supersedes this suggestion's own earlier inline changes.
   // Attribute-only edits are independent and must preserve pending text edits.
   const found = findLiveNodeById(tr.doc, edit.nodeId);
   if (!found) return false;
@@ -175,7 +176,7 @@ function applyRichBlockToTr(
   if (edit.attrs && !attrsApplicable(tr, found.pos, found.node, edit.attrs)) return false;
   const stepsBefore = tr.steps.length;
   if (edit.spans) {
-    clearAuthorPendingMarks(tr, found.pos, found.pos + found.node.nodeSize, authorID, schema);
+    clearAuthorPendingMarks(tr, found.pos, found.pos + found.node.nodeSize, owner, schema);
   }
   // Restating the original withdraws the author's earlier suggestion: a change.
   let applied = tr.steps.length > stepsBefore;

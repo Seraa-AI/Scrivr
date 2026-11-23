@@ -25,7 +25,7 @@ export function deleteTextIfInserted(
   const nodeEnd = pos + node.nodeSize;
   const end = to !== undefined ? Math.min(nodeEnd, to) : nodeEnd;
 
-  if (allowCancellation && canCancelInsertion(node, deleteAttrs.authorID)) {
+  if (allowCancellation && canCancelInsertion(node, deleteAttrs)) {
     newTr.replaceWith(start, end, Fragment.empty);
     return start;
   }

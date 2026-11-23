@@ -37,7 +37,7 @@ import type { Node as PMNode, Schema } from "@scrivr/core/pm";
 import type { EditorState, Transaction } from "@scrivr/core/pm";
 
 import { findLiveNodeById } from "../liveNode";
-import { getBlockInlineTrackedData } from "../helpers";
+import { getBlockInlineTrackedData, ownedBy, type Owner } from "../helpers";
 import { CHANGE_OPERATION, CHANGE_STATUS } from "../types";
 import { bridgeable, buildAcceptedTextMap } from "./acceptedTextMap";
 import { computeEditDensity, diffText, phraseReplacements } from "./diffText";
@@ -67,7 +67,7 @@ export function clearAuthorPendingMarks(
   tr: Transaction,
   nodeFrom: number,
   nodeTo: number,
-  authorID: string,
+  owner: Owner,
   schema: Schema,
 ): void {
   const insertType = schema.marks.trackedInsert;
@@ -87,10 +87,10 @@ export function clearAuthorPendingMarks(
   tr.doc.nodesBetween(nodeFrom + 1, nodeTo - 1, (child, pos) => {
     // A break or other inline object is recorded on the node, not a mark.
     if (child.isInline && !child.isText) {
-      if (ownPending(child, authorID, CHANGE_OPERATION.insert)) {
+      if (ownPending(child, owner, CHANGE_OPERATION.insert)) {
         insertRanges.push({ from: pos, to: pos + child.nodeSize });
-      } else if (ownPending(child, authorID, CHANGE_OPERATION.delete)) {
-        const kept = (getBlockInlineTrackedData(child) ?? []).filter((record) => !isOwnPending(record, authorID, CHANGE_OPERATION.delete));
+      } else if (ownPending(child, owner, CHANGE_OPERATION.delete)) {
+        const kept = (getBlockInlineTrackedData(child) ?? []).filter((record) => !isOwnPending(record, owner, CHANGE_OPERATION.delete));
         // An empty list is the schema default: the node as it was before any record.
         tr.setNodeAttribute(pos, "dataTracked", kept);
       }
@@ -101,8 +101,8 @@ export function clearAuthorPendingMarks(
     const to = pos + child.nodeSize;
 
     for (const mark of child.marks) {
-      const data: { authorID?: string; status?: string } | null = mark.attrs.dataTracked;
-      if (!data || data.authorID !== authorID || data.status !== CHANGE_STATUS.pending) continue;
+      const data: { authorID?: string; operationId?: string; status?: string } | null = mark.attrs.dataTracked;
+      if (!data || !ownedBy(data, owner) || data.status !== CHANGE_STATUS.pending) continue;
 
       if (mark.type === insertType) {
         // This text was inserted by the author's previous suggestion — queue
@@ -127,13 +127,13 @@ export function clearAuthorPendingMarks(
   }
 }
 
-/** Whether an inline node carries `authorID`'s pending `operation` as its own record. */
-function ownPending(node: PMNode, authorID: string, operation: CHANGE_OPERATION): boolean {
-  return (getBlockInlineTrackedData(node) ?? []).some((record) => isOwnPending(record, authorID, operation));
+/** Whether an inline node carries `owner`'s pending `operation` as its own record. */
+function ownPending(node: PMNode, owner: Owner, operation: CHANGE_OPERATION): boolean {
+  return (getBlockInlineTrackedData(node) ?? []).some((record) => isOwnPending(record, owner, operation));
 }
 
-const isOwnPending = (record: { authorID?: string; status?: string; operation?: string }, authorID: string, operation: CHANGE_OPERATION) =>
-  record.authorID === authorID && record.status === CHANGE_STATUS.pending && record.operation === operation;
+const isOwnPending = (record: { authorID?: string; operationId?: string; status?: string; operation?: string }, owner: Owner, operation: CHANGE_OPERATION) =>
+  ownedBy(record, owner) && record.status === CHANGE_STATUS.pending && record.operation === operation;
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -194,16 +194,16 @@ function applyBlockToTr(
   nodeId: string,
   found: ReturnType<typeof findLiveNodeById> & {},
   proposedText: string,
-  authorID: string,
+  owner: Owner,
 ): { applied: boolean; editDensity: number; sourceChars: number } {
   const schema = state.schema;
 
-  // Withdraw the author's pending suggestion on this block before diffing, so a
-  // new proposal replaces their last one rather than stacking on it.
+  // Withdraw this suggestion's own pending changes on the block before diffing,
+  // so re-applying it replaces them; another suggestion's are left as they are.
   const nodeFrom = found.pos;
   const nodeTo   = found.pos + found.node.nodeSize;
   const stepsBefore = tr.steps.length;
-  clearAuthorPendingMarks(tr, nodeFrom, nodeTo, authorID, schema);
+  clearAuthorPendingMarks(tr, nodeFrom, nodeTo, owner, schema);
   // Restating the original withdraws the author's earlier suggestion: a change.
   const withdrew = tr.steps.length > stepsBefore;
 
@@ -248,7 +248,7 @@ export function applyDiffAsSuggestion(
   if (!found) return { applied: false, editDensity: 0 };
 
   const tr = state.tr;
-  const { applied, editDensity } = applyBlockToTr(state, tr, nodeId, found, proposedText, authorID);
+  const { applied, editDensity } = applyBlockToTr(state, tr, nodeId, found, proposedText, ownerOf(authorID, operationId));
 
   if (!applied) return { applied: false, editDensity };
   return { applied: dispatchSuggestion(state, tr, authorID, dispatch, operationId), editDensity };
@@ -292,7 +292,7 @@ export function applyMultiBlockDiff(
   let anyApplied = false;
 
   for (const { nodeId, found, proposedText } of resolved) {
-    const result = applyBlockToTr(state, tr, nodeId, found, proposedText, authorID);
+    const result = applyBlockToTr(state, tr, nodeId, found, proposedText, ownerOf(authorID, operationId));
     if (result.applied) anyApplied = true;
     density.weighted    += result.editDensity * result.sourceChars;
     density.sourceChars += result.sourceChars;
@@ -322,3 +322,7 @@ export function namedMoreThanOnce(edits: ReadonlyArray<{ nodeId: string }>, doc:
   }
   return [...repeated];
 }
+
+/** The writer a lane writes as: its author, and the suggestion when the host named one. */
+export const ownerOf = (authorID: string, operationId?: string): Owner =>
+  operationId ? { authorID, operationId } : { authorID };

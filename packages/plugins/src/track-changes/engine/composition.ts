@@ -1,6 +1,6 @@
 import { EditorState, type Node, type Transaction } from "@scrivr/core/pm";
 import { findChanges } from "../findChanges";
-import { getBlockInlineTrackedData, markRecords, replaceMarkRecords } from "../helpers";
+import { getBlockInlineTrackedData, markRecords, replaceMarkRecords, sameOwner } from "../helpers";
 import type { TrackedAttrs } from "../types";
 
 type TrackedRecord = Partial<TrackedAttrs>;
@@ -51,14 +51,14 @@ export function composeGestureRecords(tr: Transaction, before: Node): void {
   const composed = (record: TrackedRecord, { creation, deletion }: Acts): TrackedRecord => {
     if (!writtenNow(record)) return record;
     let next = record;
-    if (deletion?.id && record.operation === "delete" && !record.moveNodeId && deletion.authorID === record.authorID) {
+    if (deletion?.id && record.operation === "delete" && !record.moveNodeId && sameOwner(deletion, record)) {
       next = { ...next, deletionId: deletion.id };
     }
     // A writer that built a creation has already said which one this belongs to.
     const foldedElsewhere = !!record.creationId && record.creationId !== record.id;
     const id = creation?.creationId ?? creation?.id;
     if (creation && id && !foldedElsewhere) {
-      next = creation.authorID === record.authorID && !creation.foldingClosed
+      next = sameOwner(creation, record) && !creation.foldingClosed
         ? { ...next, creationId: id }
         : { ...next, dependsOn: [...new Set([...(record.dependsOn ?? []), id])] };
     }
@@ -100,7 +100,7 @@ export function closeDependentCreations(tr: Transaction): void {
     for (const id of change.dataTracked.dependsOn ?? []) closed.add(id);
     if (change.type !== "node-change" || change.dataTracked.operation !== "insert") continue;
     if (changes.some(other => other.id !== change.id && other.from >= change.from && other.to <= change.to &&
-      other.dataTracked.authorID !== change.dataTracked.authorID)) closed.add(change.dataTracked.creationId ?? change.id);
+      !sameOwner(other.dataTracked, change.dataTracked))) closed.add(change.dataTracked.creationId ?? change.id);
   }
   if (!closed.size) return;
   const needsClosing = (record: TrackedRecord) =>

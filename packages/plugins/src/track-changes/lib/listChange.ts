@@ -1,7 +1,7 @@
 import { isListType } from "@scrivr/core";
 import { Node as PMNode, ReplaceAroundStep, Transaction } from "@scrivr/core/pm";
 
-import { addTrackIdIfDoesntExist, getBlockInlineTrackedData, NewEmptyAttrs } from "../helpers";
+import { addTrackIdIfDoesntExist, getBlockInlineTrackedData, NewEmptyAttrs, ownedBy } from "../helpers";
 import { CHANGE_OPERATION, CHANGE_STATUS, ListLevel } from "../types";
 import { buildLists, listLeaves, sameList, topLevelRange } from "./listStructure";
 import { addedBy } from "./deleteBreak";
@@ -55,12 +55,12 @@ export function recordListChange(moves: ListMove[], tr: Transaction, attrs: NewE
   let first: string | undefined;
   for (const { pos, oldList, newList, relisted } of moves) {
     const node = tr.doc.nodeAt(pos);
-    if (!node || addedBy(node, attrs.authorID, [CHANGE_OPERATION.insert])) continue;
+    if (!node || addedBy(node, attrs, [CHANGE_OPERATION.insert])) continue;
     const records = getBlockInlineTrackedData(node) ?? [];
     const earlier = records.find(record =>
       record.operation === CHANGE_OPERATION.list_change &&
       record.status === CHANGE_STATUS.pending &&
-      record.authorID === attrs.authorID);
+      ownedBy(record, attrs));
     const original = earlier && "oldList" in earlier ? earlier.oldList : oldList;
     const kept = records.filter(record => record !== earlier);
     if (relisted || !sameList(original, newList)) {

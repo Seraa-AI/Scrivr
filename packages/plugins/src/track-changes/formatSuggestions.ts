@@ -8,7 +8,7 @@
 import { isTrackedMark, stableStringify } from "@scrivr/core";
 import { AddMarkStep, Mark, RemoveMarkStep, type Schema, type Step } from "@scrivr/core/pm";
 
-import { createNewDeleteAttrs, genId, isValidTrackableMark, markRecords, type NewEmptyAttrs } from "./helpers";
+import { createNewDeleteAttrs, genId, isValidTrackableMark, markRecords, ownedBy, type NewEmptyAttrs, type Owner } from "./helpers";
 import { CHANGE_OPERATION, CHANGE_STATUS, type ReplacedMark, type TrackedAttrs } from "./types";
 
 /** A record's decision in a review, by id; `undefined` while it is left undecided. */
@@ -61,8 +61,8 @@ export const excludes = (mark: Mark, other: Mark): boolean => !other.eq(mark) &&
 
 export const pendingRecords = (mark: Mark) => markRecords(mark).filter(r => r.status === CHANGE_STATUS.pending);
 
-/** Whether `mark` carries pending work by someone other than `authorID`: then it stays theirs, held whole. */
-const othersWork = (mark: Mark, authorID: string) => pendingRecords(mark).some(r => r.authorID !== authorID);
+/** Whether `mark` carries pending work by a writer other than `owner`: then it stays theirs, held whole. */
+const othersWork = (mark: Mark, owner: Owner) => pendingRecords(mark).some(r => !ownedBy(r, owner));
 
 /**
  * What rejecting `mark`, set by `authorID` over text carrying `marks`, must
@@ -71,12 +71,12 @@ const othersWork = (mark: Mark, authorID: string) => pendingRecords(mark).some(r
  * own suggestion folds into this change, giving back what it replaced; agreed
  * formatting comes back untracked.
  */
-export function restoredOnReject(mark: Mark, marks: readonly Mark[], authorID: string): readonly Mark[] {
+export function restoredOnReject(mark: Mark, marks: readonly Mark[], owner: Owner): readonly Mark[] {
   return Mark.setFrom(
     marks
       .filter(other => excludes(mark, other))
       .flatMap(other => {
-        if (othersWork(other, authorID)) return [other];
+        if (othersWork(other, owner)) return [other];
         return isSuggested(other) ? markRecords(other).flatMap(r => marksToRestore(r, other.type.schema)) : [untracked(other)];
       }),
   );
@@ -101,10 +101,10 @@ const isSuggested = (mark: Mark) =>
 export function proposeRemoval(mark: Mark, from: number, to: number, emptyAttrs: NewEmptyAttrs): Step[] {
   const deletion = () => ({ ...createNewDeleteAttrs(emptyAttrs), id: genId() });
   const strike = (target: Mark) =>
-    othersWork(target, emptyAttrs.authorID)
+    othersWork(target, emptyAttrs)
       ? new AddMarkStep(from, to, withRecords(target, [...markRecords(target), deletion()]))
       : new AddMarkStep(from, to, withRecords(target, [deletion()]));
-  if (othersWork(mark, emptyAttrs.authorID)) return [new RemoveMarkStep(from, to, mark), strike(mark)];
+  if (othersWork(mark, emptyAttrs)) return [new RemoveMarkStep(from, to, mark), strike(mark)];
   if (isSuggested(mark)) {
     return [new RemoveMarkStep(from, to, mark), ...markRecords(mark).flatMap(r => marksToRestore(r, mark.type.schema)).map(strike)];
   }
@@ -161,7 +161,7 @@ export type RestoreRun = { from: number; to: number; restored: readonly Mark[]; 
  * setting what is already shown changes nothing, and takes no one's
  * suggestion from them.
  */
-export function restoreRuns(mark: Mark, pieces: Iterable<FoundPiece>, authorID: string): RestoreRun[] {
+export function restoreRuns(mark: Mark, pieces: Iterable<FoundPiece>, owner: Owner): RestoreRun[] {
   const runs: (RestoreRun & { key: string })[] = [];
   const push = (piece: FoundPiece, run: Omit<RestoreRun, "from" | "to">, key: string) => {
     const last = runs[runs.length - 1];
@@ -175,7 +175,7 @@ export function restoreRuns(mark: Mark, pieces: Iterable<FoundPiece>, authorID: 
       push(piece, { restored: [], carried }, `carried:${stableStringify(carried.toJSON())}`);
       continue;
     }
-    const restored = restoredOnReject(mark, piece.marks, authorID);
+    const restored = restoredOnReject(mark, piece.marks, owner);
     if (restoresItself(mark, restored)) continue;
     push(piece, { restored }, restoredKey(restored));
   }

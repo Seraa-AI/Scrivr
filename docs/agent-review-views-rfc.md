@@ -230,8 +230,13 @@ it is accepted.
     `applySemanticEdits`, or `trackAsSuggestion` directly). The engine stores
     it on every record that suggestion writes, through the same base attrs the
     author travels in, and the semantic export shows it on each change.
-  - **Changes from different suggestions never fuse.** Two adjacent changes by
-    one author with different operation ids stay two records and two acts.
+  - **Own work is the same author and the same operation id.** Every rule
+    that lets a writer take back, continue, fold into or withdraw its own
+    pending work reads both, so one agent's two suggestions never touch each
+    other's changes. A later one never fuses with an earlier one, never
+    joins its replacement or act, and never takes back, re-labels or
+    withdraws its changes. Re-applying the same suggestion still replaces its
+    own. No id matches no id, so unnamed edits keep the author-only rule.
   - **NEW record field, not `groupId`:** `groupId` already means one phrase's
     replacement, so deciding one decides its other half; a suggestion has
     many phrases.
@@ -311,8 +316,17 @@ Columns, also on plan 155's later list, is its own RFC
 
 - `operationId` is stored on every tracked record a suggestion writes when the
   host passes one, carried by the same base attrs as the author, and shown on
-  each change in the semantic export. Records with different operation ids
-  never fuse, and their formatting pieces are never one act.
+  each change in the semantic export.
+- Ownership is one predicate, `ownedBy`/`sameOwner` (author and operation id).
+  It is used wherever the engine decides own work:
+  - mark fusing;
+  - replacement and phrase grouping;
+  - creation folding, and closing dependent creations;
+  - taking back an insertion or split;
+  - superseding formatting;
+  - list and attribute records;
+  - the lanes' withdraw.
+- `insertAsSuggestion` does not take an operation id yet.
 - It is accepted by:
   - `trackAsSuggestion(tr, authorID, { operationId })`;
   - `applyAiSuggestion`;

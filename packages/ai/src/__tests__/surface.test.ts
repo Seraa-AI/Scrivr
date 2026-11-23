@@ -2,7 +2,7 @@
 // types from the result of the calls that return them, and `tsc` fails here the
 // moment one stops being exported.
 import { describe, expect, it } from "vitest";
-import type { RichBlocksOptions, SemanticEditResult } from "../index";
+import type { AgentEditOptions, RichBlocksOptions, SemanticEditResult } from "../index";
 
 describe("the toolkit's public result and option types", () => {
   it("are reachable from the package", () => {
@@ -10,6 +10,7 @@ describe("the toolkit's public result and option types", () => {
     const result = {
       applied: false, changed: [], stale: [], notFound: [], rejected: [], alreadyProposed: [], anchorProposedForDeletion: [],
     } satisfies SemanticEditResult;
-    expect([options.view, result.applied]).toEqual(["original", false]);
+    const edit = { authorID: "ai", operationId: "row-1" } satisfies AgentEditOptions;
+    expect([options.view, result.applied, edit.operationId]).toEqual(["original", false, "row-1"]);
   });
 });

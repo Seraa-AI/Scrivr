@@ -74,7 +74,7 @@ export function deleteAndMergeSplitNodes(
           // A list item's break is the boundary between two items. It is
           // taken back out when the author added the item after it; any other
           // is read at the paragraphs inside.
-          if (node.isTextblock || (next && next.type === node.type && addedBreakBy(next, trackAttrs.authorID))) {
+          if (node.isTextblock || (next && next.type === node.type && addedBreakBy(next, trackAttrs))) {
             steps.push({ type: "join-node", pos, node, joinsNext: !!next && nodeEnd + next.nodeSize > to });
           }
         }

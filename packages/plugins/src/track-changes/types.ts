@@ -98,9 +98,11 @@ type InsertDeleteAttrs = {
   /**
    * The host's name for the suggestion this change came from — a review
    * row's id — passed when the suggestion was written
-   * (`trackAsSuggestion`'s `operationId`). Every change that suggestion
-   * writes carries it, so the document itself says which suggestion a change
-   * belongs to; changes from different suggestions never fuse into one.
+   * (`trackAsSuggestion`'s `operationId`). Unrelated to `operation`, which is
+   * what the change does. Every change that suggestion writes carries it, so
+   * the document itself says which suggestion a change belongs to. A writer's
+   * own work is the same author and the same operation id, so one agent's two
+   * suggestions never take back, fold into, or decide each other's changes.
    */
   operationId?: string;
   /**

@@ -124,6 +124,25 @@ export function createNewStructureAttrs(attrs: NewEmptyAttrs): NewInsertAttrs {
   return { ...attrs, operation: CHANGE_OPERATION.structure };
 }
 
+/**
+ * Who writes a change: its author and, when the host named it, the suggestion
+ * (`operationId`). Own work — what a writer may take back, continue or fold
+ * into — is the same of both, so one agent's two suggestions never touch
+ * each other's changes; no suggestion matches none.
+ */
+export interface Owner {
+  authorID: string;
+  operationId?: string;
+}
+
+/** Whether `record` is `owner`'s own work. */
+export const ownedBy = (record: { authorID?: string; operationId?: string }, owner: Owner): boolean =>
+  record.authorID === owner.authorID && record.operationId === owner.operationId;
+
+/** Whether two records have one writer. */
+export const sameOwner = (a: { authorID?: string; operationId?: string }, b: { authorID?: string; operationId?: string }): boolean =>
+  a.authorID === b.authorID && a.operationId === b.operationId;
+
 export function createNewPendingAttrs(time: number, authorID: string, operationId?: string): NewEmptyAttrs {
   return {
     authorID,
@@ -132,7 +151,8 @@ export function createNewPendingAttrs(time: number, authorID: string, operationI
     updatedAt: time,
     statusUpdateAt: 0,
     status: CHANGE_STATUS.pending,
-    ...(operationId !== undefined ? { operationId } : {}),
+    // An empty name names nothing.
+    ...(operationId ? { operationId } : {}),
   };
 }
 

@@ -7,7 +7,9 @@
 import "@scrivr/export-semantic/augment";
 import { describe, expect, it } from "vitest";
 import { toSemanticUnits } from "@scrivr/export-semantic";
-import { findChanges, trackChangesPluginKey } from "@scrivr/plugins";
+import { ServerEditor, StarterKit } from "@scrivr/core";
+import { findChanges, TrackChanges, TrackChangesStatus, trackChangesPluginKey } from "@scrivr/plugins";
+import { AiToolkit, getAiToolkit } from "../../index";
 import { computeAiSuggestion } from "../computeAiSuggestion";
 import { AiTestEditor, doc, p } from "./helpers";
 
@@ -62,11 +64,7 @@ describe("an operation id on a suggestion", () => {
 });
 
 describe("an operation id on an agent's semantic edit", () => {
-  it("is on the text and structural changes it writes", async () => {
-    const { ServerEditor, StarterKit } = await import("@scrivr/core");
-    const { TrackChanges, TrackChangesStatus } = await import("@scrivr/plugins");
-    const { AiToolkit } = await import("../../ai-toolkit/AiToolkit");
-    const { getAiToolkit } = await import("../../ai-toolkit/aiToolkitRegistry");
+  it("is on the text and structural changes it writes", () => {
     const editor = new ServerEditor({
       extensions: [StarterKit, TrackChanges.configure({ userID: "human", initialStatus: TrackChangesStatus.enabled }), AiToolkit],
       content: { type: "doc", content: [

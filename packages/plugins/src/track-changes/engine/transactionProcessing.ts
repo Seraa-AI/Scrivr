@@ -14,7 +14,7 @@ import {
 } from "@scrivr/core/pm";
 
 import { isIndentationAction, TrackChangesAction } from "../actions";
-import { genId } from "../helpers";
+import { genId, type Owner } from "../helpers";
 import { canCancelInsertion, inlineNodesIn } from "../lib/deletionPolicy";
 import {
   TrackingRefusal,
@@ -198,14 +198,14 @@ const contentStep = (step: Step | undefined): ContentStep | undefined =>
  * insertion. Nothing is left behind, so it is no move's source. A block keeps
  * its identity when moved, so moving one the author created stays a move.
  */
-const withdrawsOwnInsertion = (doc: Node, from: number, to: number, authorID: string): boolean =>
-  inlineNodesIn(doc, from, to)?.every(node => canCancelInsertion(node, authorID)) ?? false;
+const withdrawsOwnInsertion = (doc: Node, from: number, to: number, owner: Owner): boolean =>
+  inlineNodesIn(doc, from, to)?.every(node => canCancelInsertion(node, owner)) ?? false;
 
 /** Records which steps belong to one move, by grouping them under one id. */
 export const groupMoveSteps = (
   tr: Transaction,
   context: TrTrackingContext,
-  authorID: string,
+  owner: Owner,
 ): void => {
   const movingAssoc = context.stepsByGroupIDMap;
 
@@ -240,7 +240,7 @@ export const groupMoveSteps = (
       continue;
     }
     const stepDeletesContent = step.from !== step.to && step.slice.size === 0 &&
-      !withdrawsOwnInsertion(doc!, step.from, step.to, authorID);
+      !withdrawsOwnInsertion(doc!, step.from, step.to, owner);
     const stepInsertsContent =
       step.slice.size && step.slice.content.firstChild ? true : false;
 
@@ -257,7 +257,7 @@ export const groupMoveSteps = (
         peerStep.slice.size && peerStep.slice.content.firstChild;
       const peerStepDeletesContent =
         peerStep.from !== peerStep.to && peerStep.slice.size === 0 &&
-        !withdrawsOwnInsertion(tr.docs[g]!, peerStep.from, peerStep.to, authorID);
+        !withdrawsOwnInsertion(tr.docs[g]!, peerStep.from, peerStep.to, owner);
 
       if (stepDeletesContent) {
         const deletedContent = doc!.slice(step.from, step.to);
