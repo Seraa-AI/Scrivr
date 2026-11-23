@@ -96,6 +96,14 @@ type InsertDeleteAttrs = {
    */
   groupId?: string;
   /**
+   * The host's name for the suggestion this change came from — a review
+   * row's id — passed when the suggestion was written
+   * (`trackAsSuggestion`'s `operationId`). Every change that suggestion
+   * writes carries it, so the document itself says which suggestion a change
+   * belongs to; changes from different suggestions never fuse into one.
+   */
+  operationId?: string;
+  /**
    * Set on each record that is part of an insertion recorded in several
    * places — the new node and the text inside it. Reviewing the creation
    * reviews all of them.

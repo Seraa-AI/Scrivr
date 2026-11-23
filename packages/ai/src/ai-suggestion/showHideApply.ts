@@ -82,7 +82,7 @@ export function showAiSuggestion(editor: IBaseEditor, suggestion: AiSuggestion |
  */
 export function applyAiSuggestion(
   editor: IBaseEditor,
-  { groupId, blockId, range, mode }: ApplyAiSuggestionOptions,
+  { groupId, blockId, range, mode, operationId }: ApplyAiSuggestionOptions,
 ): boolean {
   const state = editor.getState();
   const ps    = aiSuggestionPluginKey.getState(state);
@@ -97,7 +97,7 @@ export function applyAiSuggestion(
         "applyAiSuggestion: pass `range` or `groupId`, not both — they name different things to accept",
       );
     }
-    return applyRange(editor, blockId, range, mode);
+    return applyRange(editor, blockId, range, mode, operationId);
   }
 
   // A block the reader has edited since the proposal was computed is refused,
@@ -122,7 +122,7 @@ export function applyAiSuggestion(
 
   const scope = groupId ? new Set([groupId]) : undefined;
   const author = authorOf(ps.suggestion);
-  applyProposal(editor, affectedBlocks, scope, mode, author);
+  applyProposal(editor, affectedBlocks, scope, mode, author, operationId);
 
   if (groupId) {
     const wrote = editor.getState().doc !== before;
@@ -162,6 +162,7 @@ function applyRange(
   blockId: string,
   range: AcceptedSpan,
   mode: ApplyAiSuggestionOptions["mode"],
+  operationId: string | undefined,
 ): boolean {
   const state = editor.getState();
   const suggestion = aiSuggestionPluginKey.getState(state)?.suggestion;
@@ -182,7 +183,7 @@ function applyRange(
   const scope = new Set(covered);
   const before = state.doc;
   const author = authorOf(suggestion);
-  applyProposal(editor, [block], scope, mode, author);
+  applyProposal(editor, [block], scope, mode, author, operationId);
 
   if (editor.getState().doc === before) return false;
 
@@ -286,6 +287,7 @@ function applyProposal(
   scope: GroupScope,
   mode: ApplyAiSuggestionOptions["mode"],
   author: string,
+  operationId: string | undefined,
 ): void {
   const state = editor.getState();
   const schema = state.schema;
@@ -316,7 +318,7 @@ function applyProposal(
   if (mode === "direct") {
     skipTracking(tr);
   } else {
-    trackAsSuggestion(tr, author);
+    trackAsSuggestion(tr, author, operationId !== undefined ? { operationId } : {});
     if (suggestionBlocked(state, tr)) return;
   }
   editor.applyTransaction(tr);

@@ -21,7 +21,7 @@ export enum TrackChangesAction {
 }
 
 export type TrackChangesActionParams = {
-  [TrackChangesAction.suggest]: { authorID: string };
+  [TrackChangesAction.suggest]: SuggestionIntent;
   [TrackChangesAction.skipTrack]: boolean;
   [TrackChangesAction.setUserID]: string;
   [TrackChangesAction.setPluginStatus]: TrackChangesStatus;
@@ -68,12 +68,22 @@ export const isIndentationAction = (action: ReturnType<typeof getAction>) =>
   action === "indent" || action === "unindent";
 
 /** Explicit proposal intent is independent of automatic tracking of user edits. */
-export function trackAsSuggestion(tr: Transaction, authorID: string): Transaction {
-  return setAction(tr, TrackChangesAction.suggest, { authorID });
+/** Who a suggestion is from, and the host's name for it. */
+export interface SuggestionIntent {
+  authorID: string;
+  /** Stored on every change the suggestion writes; see `TrackedAttrs.operationId`. */
+  operationId?: string;
+}
+
+export function trackAsSuggestion(tr: Transaction, authorID: string, options: { operationId?: string } = {}): Transaction {
+  return setAction(tr, TrackChangesAction.suggest, {
+    authorID,
+    ...(options.operationId !== undefined ? { operationId: options.operationId } : {}),
+  });
 }
 
 /** Appended normalization steps belong to the same proposal as their root transaction. */
-export function suggestionIntent(tr: Transaction): { authorID: string } | undefined {
+export function suggestionIntent(tr: Transaction): SuggestionIntent | undefined {
   const root: Transaction | undefined = tr.getMeta("appendedTransaction");
   return getAction(tr, TrackChangesAction.suggest) ?? (root && getAction(root, TrackChangesAction.suggest));
 }

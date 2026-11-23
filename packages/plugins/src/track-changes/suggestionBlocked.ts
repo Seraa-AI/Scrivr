@@ -28,8 +28,9 @@ export function dispatchSuggestion(
   tr: Transaction,
   authorID: string,
   dispatch?: (tr: Transaction) => void,
+  operationId?: string,
 ): boolean {
-  const suggestion = trackAsSuggestion(tr, authorID);
+  const suggestion = trackAsSuggestion(tr, authorID, operationId !== undefined ? { operationId } : {});
   if (suggestionBlocked(state, suggestion)) return false;
   dispatch?.(suggestion);
   return true;

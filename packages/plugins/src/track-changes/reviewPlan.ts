@@ -129,6 +129,7 @@ const sameFormattingRun = (a: TrackedChange, b: TrackedChange) =>
   a.type === "mark-change" && b.type === "mark-change" &&
   a.dataTracked.status === b.dataTracked.status &&
   a.dataTracked.authorID === b.dataTracked.authorID &&
+  a.dataTracked.operationId === b.dataTracked.operationId &&
   a.dataTracked.operation === b.dataTracked.operation &&
   markValue(a.mark) === markValue(b.mark) &&
   // A held piece is not on the text, so it is never a run with one that is.

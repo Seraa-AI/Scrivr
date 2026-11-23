@@ -124,7 +124,7 @@ export function createNewStructureAttrs(attrs: NewEmptyAttrs): NewInsertAttrs {
   return { ...attrs, operation: CHANGE_OPERATION.structure };
 }
 
-export function createNewPendingAttrs(time: number, authorID: string): NewEmptyAttrs {
+export function createNewPendingAttrs(time: number, authorID: string, operationId?: string): NewEmptyAttrs {
   return {
     authorID,
     reviewedByID: null,
@@ -132,6 +132,7 @@ export function createNewPendingAttrs(time: number, authorID: string): NewEmptyA
     updatedAt: time,
     statusUpdateAt: 0,
     status: CHANGE_STATUS.pending,
+    ...(operationId !== undefined ? { operationId } : {}),
   };
 }
 
@@ -221,6 +222,7 @@ export function shouldMergeTrackedAttributes(
     left.status === right.status &&
     left.operation === right.operation &&
     left.authorID === right.authorID &&
+    left.operationId === right.operationId &&
     left.creationId === right.creationId &&
     left.deletionId === right.deletionId &&
     left.continuesId === right.continuesId &&

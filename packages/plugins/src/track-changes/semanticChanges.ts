@@ -53,6 +53,7 @@ function describe(type: SemanticChange["type"], text: string, record: TrackedRec
   const status = textOf(record.status);
   const createdAt = numberOf(record.createdAt);
   const groupId = textOf(record.groupId);
+  const operationId = textOf(record.operationId);
   const moveId = textOf(record.moveId) ?? textOf(record.moveNodeId);
   return {
     type,
@@ -62,6 +63,7 @@ function describe(type: SemanticChange["type"], text: string, record: TrackedRec
     ...(status !== undefined ? { status } : {}),
     ...(createdAt !== undefined ? { createdAt } : {}),
     ...(groupId !== undefined ? { groupId } : {}),
+    ...(operationId !== undefined ? { operationId } : {}),
     ...(moveId !== undefined ? { moveId } : {}),
   };
 }

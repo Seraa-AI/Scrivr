@@ -113,6 +113,7 @@ export function trackTransaction(
   newTr: Transaction,
   authorID: string,
   trContext: TrTrackingContext,
+  operationId?: string,
 ) {
   if (
     tr.getMeta("isPaginationChange") ||
@@ -122,7 +123,7 @@ export function trackTransaction(
     return newTr;
   }
 
-  const baseAttrs = createNewPendingAttrs(tr.time, authorID);
+  const baseAttrs = createNewPendingAttrs(tr.time, authorID, operationId);
   const phraseGroups = groupsOfPhrases(tr, authorID);
 
   for (let i = tr.steps.length - 1; i >= 0; i--) {

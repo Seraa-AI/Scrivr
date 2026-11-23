@@ -147,6 +147,8 @@ export interface ApplyDiffOptions {
   proposedText: string;
   /** Author ID to attribute the suggestion to (e.g. "AI Assistant"). */
   authorID: string;
+  /** The host's name for this suggestion, stored on every change it writes. */
+  operationId?: string;
 }
 
 export interface MultiBlockDiffOptions {
@@ -154,6 +156,8 @@ export interface MultiBlockDiffOptions {
   blocks: Array<{ nodeId: string; proposedText: string }>;
   /** Author ID to attribute all suggestions to (e.g. "AI Assistant"). */
   authorID: string;
+  /** The host's name for this suggestion, stored on every change it writes. */
+  operationId?: string;
 }
 
 export interface ApplyDiffResult {
@@ -238,7 +242,7 @@ function applyBlockToTr(
 export function applyDiffAsSuggestion(
   state: EditorState,
   dispatch: (tr: Transaction) => void,
-  { nodeId, proposedText, authorID }: ApplyDiffOptions,
+  { nodeId, proposedText, authorID, operationId }: ApplyDiffOptions,
 ): ApplyDiffResult {
   const found = findLiveNodeById(state.doc, nodeId);
   if (!found) return { applied: false, editDensity: 0 };
@@ -247,7 +251,7 @@ export function applyDiffAsSuggestion(
   const { applied, editDensity } = applyBlockToTr(state, tr, nodeId, found, proposedText, authorID);
 
   if (!applied) return { applied: false, editDensity };
-  return { applied: dispatchSuggestion(state, tr, authorID, dispatch), editDensity };
+  return { applied: dispatchSuggestion(state, tr, authorID, dispatch, operationId), editDensity };
 }
 
 /**
@@ -268,7 +272,7 @@ export function applyDiffAsSuggestion(
 export function applyMultiBlockDiff(
   state: EditorState,
   dispatch: (tr: Transaction) => void,
-  { blocks, authorID }: MultiBlockDiffOptions,
+  { blocks, authorID, operationId }: MultiBlockDiffOptions,
 ): MultiBlockDiffResult {
   const rejected = namedMoreThanOnce(blocks, state.doc);
   // Drop repeated blocks and those no longer in the doc.
@@ -300,7 +304,7 @@ export function applyMultiBlockDiff(
     ? density.weighted / density.sourceChars
     : 0;
 
-  return { applied: dispatchSuggestion(state, tr, authorID, dispatch), editDensity, rejected };
+  return { applied: dispatchSuggestion(state, tr, authorID, dispatch, operationId), editDensity, rejected };
 }
 
 /**

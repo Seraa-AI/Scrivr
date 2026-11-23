@@ -293,6 +293,8 @@ export interface SemanticChange {
   createdAt?: number;
   /** Shared by the two halves of one replacement. */
   groupId?: string;
+  /** The host's name for the suggestion this change came from, when it gave one. */
+  operationId?: string;
   /** Shared by the two halves of one move. */
   moveId?: string;
   /**
