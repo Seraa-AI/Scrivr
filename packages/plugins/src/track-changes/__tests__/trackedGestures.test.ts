@@ -306,15 +306,15 @@ const scenarios: Scenario[] = [
   // Review executor
   { name: "Enter then align new block", doc: hello, gesture: e => { sel(e, 6); key(e, "Enter"); sel(e, at(e, "world", 1)); e.commands.setAlignCenter(); } },
   { name: "Enter then align source block", doc: hello, gesture: e => { sel(e, 6); key(e, "Enter"); sel(e, 3); e.commands.setAlignCenter(); } },
-  { name: "Enter then heading new block", doc: hello, gesture: e => { sel(e, 6); key(e, "Enter"); sel(e, at(e, "world", 1)); e.commands.setHeading1(); } },
+  { name: "Enter then heading new block", doc: hello, gesture: e => { sel(e, 6); key(e, "Enter"); sel(e, at(e, "world", 1)); e.commands.setHeading({ level: 1 }); } },
   { name: "toggle list", doc: hello, gesture: e => { sel(e, 3); e.commands.toggleBulletList(); } },
   { name: "toggle list two paragraphs", doc: [p("one"), p("two")], gesture: e => { sel(e, 2, 7); e.commands.toggleBulletList(); } },
   { name: "toggle list off", doc: [ul("one", "two")], gesture: e => { sel(e, 3); e.commands.toggleBulletList(); } },
   { name: "foreign bold from inserted break", doc: hello, gesture: (e, as) => { sel(e, 3); key(e, "Shift-Enter"); const b = as("bob"); sel(b, 3, 8); key(b, "Mod-b"); return b; } },
   { name: "foreign bold from inserted text", doc: hello, gesture: (e, as) => { sel(e, 3); tr(e, t => t.insertText("abc")); const b = as("bob"); sel(b, 3, 10); key(b, "Mod-b"); return b; } },
   // Ordinary commands nobody generated
-  { name: "heading last paragraph", doc: [p("one"), p("two")], gesture: e => { sel(e, 7); e.commands.setHeading1(); } },
-  { name: "heading only paragraph", doc: [p("one")], gesture: e => { sel(e, 2); e.commands.setHeading1(); } },
+  { name: "heading last paragraph", doc: [p("one"), p("two")], gesture: e => { sel(e, 7); e.commands.setHeading({ level: 1 }); } },
+  { name: "heading only paragraph", doc: [p("one")], gesture: e => { sel(e, 2); e.commands.setHeading({ level: 1 }); } },
   { name: "Tab in list", doc: [ul("one", "two")], gesture: e => { sel(e, 9); key(e, "Tab"); } },
   { name: "Shift-Tab in list", doc: [ul("one", "two")], gesture: e => { sel(e, 9); key(e, "Shift-Tab"); } },
   { name: "Enter in list item", doc: [ul("one", "two")], gesture: e => { sel(e, 5); key(e, "Enter"); } },

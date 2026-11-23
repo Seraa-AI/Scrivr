@@ -88,7 +88,14 @@ describe("list buttons", () => {
 describe("paragraph buttons", () => {
   it("show a heading in a table cell", () => {
     const h2: Json = { type: "heading", attrs: { level: 2 }, content: [{ type: "text", text: "title" }] };
-    expect(pressedAt([table(cell(h2))], "title")).toContain("setHeading2");
+    expect(pressedAt([table(cell(h2))], "title")).toContain("setHeading");
+    // Every level runs `setHeading`, so the button is told apart by its level.
+    if (!editor) throw new Error("pressedAt built no editor");
+    const state = editor.getSelectionSnapshot();
+    const pressedLevels = editor.toolbarItems
+      .filter((spec) => spec.command === "setHeading" && spec.isActive(state))
+      .map((spec) => spec.args);
+    expect(pressedLevels).toEqual([[{ level: 2 }]]);
   });
 
   it("show a centred paragraph in a table cell", () => {

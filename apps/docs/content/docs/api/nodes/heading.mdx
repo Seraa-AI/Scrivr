@@ -37,7 +37,8 @@ Heading.configure({
 
 | Command | Description |
 |---------|-------------|
-| `setHeading1()` … `setHeading6()` | Converts the current block to the given heading level. Only commands for configured levels are registered. |
+| `setHeading({ level })` | Converts the current block to a heading of `level`. Returns `false` for a level not in `options.levels`. |
+| `toggleHeading({ level })` | Converts the current block to a heading of `level`, or back to a paragraph when it already is one. Returns `false` for a level not in `options.levels`. |
 | `setParagraph()` | Converts the current heading back to a paragraph. |
 
 **Keyboard:** `Mod-Alt-1` … `Mod-Alt-6` (heading), `Mod-Alt-0` (paragraph)

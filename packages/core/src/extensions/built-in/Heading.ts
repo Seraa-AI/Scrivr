@@ -1,5 +1,6 @@
 import { setBlockType } from "prosemirror-commands";
 import type { Node } from "prosemirror-model";
+import type { Command } from "prosemirror-state";
 import type { PdfNodeHandler } from "../../exports/pdf";
 import { textblockTypeInputRule } from "prosemirror-inputrules";
 import { Extension } from "../Extension";
@@ -127,13 +128,27 @@ export const Heading = Extension.create<HeadingOptions>({
   },
 
   addCommands() {
-    const cmds: Record<string, () => ReturnType<typeof setBlockType>> = {};
-    for (const level of this.options.levels) {
-      cmds[`setHeading${level}`] = () =>
-        setBlockType(this.schema.nodes["heading"]!, { level });
-    }
-    cmds["setParagraph"] = () => setBlockType(this.schema.nodes["paragraph"]!);
-    return cmds;
+    const heading = this.schema.nodes["heading"]!;
+    const paragraph = this.schema.nodes["paragraph"]!;
+    // A kit built with fewer levels refuses the rest rather than writing a
+    // heading it has no style for.
+    const configured = (level: HeadingLevel) => this.options.levels.includes(level);
+    const refuse: Command = () => false;
+    return {
+      setHeading: ({ level }: { level: HeadingLevel }): Command =>
+        configured(level) ? setBlockType(heading, { level }) : refuse,
+      toggleHeading: ({ level }: { level: HeadingLevel }): Command =>
+        configured(level)
+          ? (state, dispatch) => {
+              const block = state.selection.$from.parent;
+              const isThisHeading = block.type === heading && block.attrs["level"] === level;
+              return isThisHeading
+                ? setBlockType(paragraph)(state, dispatch)
+                : setBlockType(heading, { level })(state, dispatch);
+            }
+          : refuse,
+      setParagraph: (): Command => setBlockType(paragraph),
+    };
   },
 
   addLayoutHandlers() {
@@ -264,8 +279,9 @@ export const Heading = Extension.create<HeadingOptions>({
   addToolbarItems(): ToolbarItemSpec[] {
     const items: ToolbarItemSpec[] = this.options.levels
       .slice(0, 3)
-      .map((level) => ({
-        command: `setHeading${level}`,
+      .map((level): ToolbarItemSpec => ({
+        command: "setHeading",
+        args: [{ level }],
         label: `H${level}`,
         title: `Heading ${level} (⌘⌥${level})`,
         group: "heading",
@@ -300,7 +316,8 @@ export const Heading = Extension.create<HeadingOptions>({
           description: HEADING_DESCRIPTIONS[level] ?? `Level ${level} heading`,
           group: "blocks",
           order: 20 + i * 10,
-          command: `setHeading${level}`,
+          command: "setHeading",
+          args: [{ level }],
         })),
       ],
     }];
@@ -317,8 +334,10 @@ const HEADING_DESCRIPTIONS: Record<number, string> = {
 declare module "@scrivr/core" {
   interface Commands<ReturnType> {
     heading: {
-      [K in 1 | 2 | 3 | 4 | 5 | 6 as `setHeading${K}`]: () => ReturnType;
-    } & {
+      /** Set the current block to a heading of `level`. False for a level the editor was not configured with. */
+      setHeading: (attrs: { level: HeadingLevel }) => ReturnType;
+      /** Set the current block to a heading of `level`, or back to a paragraph when it already is one. */
+      toggleHeading: (attrs: { level: HeadingLevel }) => ReturnType;
       /** Set the current block to a plain paragraph. */
       setParagraph: () => ReturnType;
     };

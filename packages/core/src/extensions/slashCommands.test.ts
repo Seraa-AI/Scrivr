@@ -377,7 +377,7 @@ describe("runCommand", () => {
       content: [{ type: "paragraph", content: [{ type: "text", text: "hello" }] }],
     });
 
-    editor.runCommand("setHeading2");
+    editor.runCommand("setHeading", [{ level: 2 }]);
 
     expect(editor.getState().doc.child(0).type.name).toBe("heading");
     expect(editor.getState().doc.child(0).attrs["level"]).toBe(2);

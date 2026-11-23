@@ -12,7 +12,7 @@
  *   });
  *   // when user selects an item:
  *   //   1. delete slashFrom..cursor via editor.applyTransaction(state.tr.delete(slashFrom, cursor))
- *   //   2. run editor.commands.setHeading1() etc.
+ *   //   2. run editor.commands.setHeading({ level: 1 }) etc.
  *   //   3. call dismissMenu() to force-hide immediately
  */
 import type { IEditor } from "../extensions/types";

@@ -6,7 +6,7 @@
  *
  * @example
  *   <FloatingMenu editor={editor}>
- *     <button onMouseDown={(e) => { e.preventDefault(); editor.commands.setHeading(1); }}>H1</button>
+ *     <button onMouseDown={(e) => { e.preventDefault(); editor.commands.setHeading({ level: 1 }); }}>H1</button>
  *   </FloatingMenu>
  */
 import type { ReactNode } from "react";
