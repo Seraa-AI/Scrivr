@@ -1,6 +1,5 @@
-// React adapter for @scrivr/core. Needs only @scrivr/core: components built on
-// @scrivr/plugins live in "./track-changes" and "./header-footer", those on
-// @scrivr/ai in "./ai".
+// Needs only @scrivr/core. Components built on @scrivr/plugins or @scrivr/ai go
+// in their own entry (track-changes, header-footer, ai).
 
 export { useScrivrEditor } from "./hooks/useScrivrEditor";
 export { useZoom, useZoomRequest } from "./hooks/useZoom";

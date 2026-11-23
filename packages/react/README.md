@@ -87,10 +87,10 @@ The package ships unstyled, headless menu components you can wire up to your own
 | `SlashMenu` | `/` command palette |
 | `LinkPopover` | Popover for inserting/editing links |
 | `ImageMenu` | Popover for image float and resize settings |
-| `AiSuggestionPopover` | Popover for accepting/rejecting AI suggestions |
-| `AiSuggestionCardsPanel` | Card list for reviewing AI diff suggestions |
-| `TrackChangesPopover` | Popover for accepting/rejecting tracked changes |
-| `TrackChangesPanel` | Sidebar panel listing all tracked changes |
+| `AiSuggestionPopover` | Popover for accepting/rejecting AI suggestions (`@scrivr/react/ai`) |
+| `AiSuggestionCardsPanel` | Card list for reviewing AI diff suggestions (`@scrivr/react/ai`) |
+| `TrackChangesPopover` | Popover for accepting/rejecting tracked changes (`@scrivr/react/track-changes`) |
+| `TrackChangesPanel` | Sidebar panel listing all tracked changes (`@scrivr/react/track-changes`) |
 
 ## Re-exports from `@scrivr/core`
 

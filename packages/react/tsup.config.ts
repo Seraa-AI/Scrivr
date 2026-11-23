@@ -8,8 +8,7 @@ export default defineConfig({
     ai: "src/ai.ts",
   },
   format: ["esm", "cjs"],
-  // Entries share one copy of each module in each format, so state a hook
-  // keeps is the same whichever entry it was imported from.
+  // Shared helpers are emitted once instead of copied into every entry.
   splitting: true,
   dts: true,
   sourcemap: true,

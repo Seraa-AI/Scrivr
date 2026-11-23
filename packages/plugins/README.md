@@ -86,7 +86,7 @@ rejectAiSuggestion(editor, suggestion);
 
 ### Track Changes
 
-Multi-author tracked changes with accept/reject and conflict detection. Integrates with the `TrackChangesPanel` and `TrackChangesPopover` React components from `@scrivr/react`.
+Multi-author tracked changes with accept/reject and conflict detection. Integrates with the `TrackChangesPanel` and `TrackChangesPopover` React components from `@scrivr/react/track-changes`.
 
 ```ts
 import { TrackChanges } from '@scrivr/plugins';
