@@ -9,7 +9,7 @@ import {
 } from "@scrivr/plugins";
 import { useScrivrState as useEditorState } from "./useScrivrState";
 import { useZoom } from "./useZoom";
-import type { ElementRef } from "../utils/elementRef";
+import type { AttachableRef } from "../utils/attachableRef";
 
 /**
  * Read the configured ribbon height from the editor's `HeaderFooter`
@@ -44,7 +44,7 @@ export function useHeaderFooterRibbon(
   const controllerRef = useRef<HeaderFooterController | null>(null);
   const [state, setState] = useState<HeaderFooterState | null>(null);
   const [optionsOpen, setOptionsOpen] = useState<number | null>(null);
-  const optionsRef: ElementRef<HTMLDivElement> = useRef<HTMLDivElement>(null);
+  const optionsRef: AttachableRef<HTMLDivElement> = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!editor) return;

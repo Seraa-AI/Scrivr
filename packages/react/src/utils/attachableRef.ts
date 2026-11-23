@@ -6,6 +6,6 @@
  * a `ref` prop. This shape fits both, and still says nothing is attached
  * until React mounts the element.
  */
-export interface ElementRef<T extends HTMLElement> {
+export interface AttachableRef<T extends HTMLElement> {
   readonly current: T | null;
 }
