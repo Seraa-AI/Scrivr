@@ -14,6 +14,7 @@ import "@scrivr/export-semantic/augment";
 import { describe, it, expect } from "vitest";
 import { ServerEditor, StarterKit } from "@scrivr/core";
 import { toSemanticUnits } from "@scrivr/export-semantic";
+import { TextSelection } from "@scrivr/core/pm";
 import { TrackChanges } from "../TrackChanges";
 import { TrackChangesStatus } from "../types";
 
@@ -344,5 +345,23 @@ describe("a unit with pending changes keeps markdown of the proposed view", () =
     editor.applyTransaction(editor.getState().tr.insertText(" new", 10));
 
     expect(toSemanticUnits(editor, { view: "original" })[0]!.markdown).toBe("keep this");
+  });
+});
+
+describe("a replacement a person types over a selection", () => {
+  it("reaches the agent as one act, as an agent's own replacement does", () => {
+    const editor = new ServerEditor({
+      extensions: [StarterKit, TrackChanges.configure({ userID: "alice", initialStatus: TrackChangesStatus.enabled })],
+      content: { type: "doc", content: [{ type: "paragraph", attrs: { nodeId: "p" }, content: [{ type: "text", text: "the quick fox" }] }] },
+    });
+    editor.applyTransaction(editor.getState().tr.setSelection(TextSelection.create(editor.getState().doc, 5, 10)));
+    // A key at a time, as a person types.
+    for (const key of "slow") editor.applyTransaction(editor.getState().tr.insertText(key).setMeta("uiEvent", "input"));
+
+    const changes = toSemanticUnits(editor)[0]!.changes ?? [];
+    expect(changes.map((change) => [change.type, change.text])).toEqual([["suggestedInsert", "slow"], ["suggestedDelete", "quick"]]);
+    expect(new Set(changes.map((change) => change.id)).size).toBe(1);
+    expect(new Set(changes.map((change) => change.groupId)).size).toBe(1);
+    expect(changes[0]!.groupId).toBeDefined();
   });
 });
