@@ -1,6 +1,6 @@
 # @scrivr/plugins
 
-Optional extensions for Scrivr — real-time collaboration, AI Toolkit, AI Suggestions, and Track Changes.
+Optional extensions for Scrivr — Track Changes, headers and footers, citation highlighting, the sealed viewer, and real-time collaboration. The AI Toolkit lives in `@scrivr/ai`.
 
 ## Installation
 
@@ -19,13 +19,15 @@ pnpm add yjs y-prosemirror @hocuspocus/provider
 
 ## Plugins
 
+Each plugin has its own entry (`@scrivr/plugins/track-changes`, `/header-footer`, `/citation-highlight`, `/sealed-viewer`, `/collaboration`). The root exports every plugin except collaboration, the only one that needs `yjs`, `y-prosemirror` and `@hocuspocus/provider`.
+
 ### Collaboration
 
 Real-time collaborative editing via [Yjs](https://yjs.dev) and [HocusPocus](https://hocuspocus.dev).
 
 ```ts
 import { Editor } from '@scrivr/core';
-import { Collaboration, CollaborationCursor } from '@scrivr/plugins';
+import { Collaboration, CollaborationCursor } from '@scrivr/plugins/collaboration';
 import { HocuspocusProvider } from '@hocuspocus/provider';
 import * as Y from 'yjs';
 
@@ -84,7 +86,7 @@ rejectAiSuggestion(editor, suggestion);
 
 ### Track Changes
 
-Multi-author tracked changes with accept/reject and conflict detection. Integrates with the `TrackChangesPanel` and `TrackChangesPopover` React components from `@scrivr/react`.
+Multi-author tracked changes with accept/reject and conflict detection. Integrates with the `TrackChangesPanel` and `TrackChangesPopover` React components from `@scrivr/react/track-changes`.
 
 ```ts
 import { TrackChanges } from '@scrivr/plugins';

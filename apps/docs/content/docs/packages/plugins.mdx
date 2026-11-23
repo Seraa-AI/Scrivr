@@ -26,6 +26,21 @@ when you need one of the advanced features it provides.
   </Tab>
 </Tabs>
 
+### Entry points
+
+Each plugin has its own entry, and the root exports every plugin except collaboration:
+
+| Import from | What |
+|---|---|
+| `@scrivr/plugins` | Everything below except collaboration |
+| `@scrivr/plugins/track-changes` | Track Changes |
+| `@scrivr/plugins/header-footer` | Headers and footers |
+| `@scrivr/plugins/citation-highlight` | Citation highlighting |
+| `@scrivr/plugins/sealed-viewer` | The sealed viewer |
+| `@scrivr/plugins/collaboration` | Collaboration and revisions. Needs `yjs`, `y-prosemirror` and `@hocuspocus/provider` installed |
+
+Collaboration is the only entry that loads Yjs and Hocuspocus, so an app without it doesn't install them.
+
 ---
 
 ## Real-Time Collaboration
@@ -48,7 +63,7 @@ on the client.
 
 ```tsx title="CollaborativeEditor.tsx"
 import { useScrivrEditor, Scrivr, StarterKit } from '@scrivr/react';
-import { Collaboration, CollaborationCursor } from '@scrivr/plugins';
+import { Collaboration, CollaborationCursor } from '@scrivr/plugins/collaboration';
 
 export function CollaborativeEditor() {
   const editor = useScrivrEditor({
@@ -386,12 +401,12 @@ edit to your own suggestion folds into it.
 blocked. `planReview` previews a decision without carrying it out, and `changeActs` groups records
 into the acts a reviewer decides, so a list of changes shows one card per act.
 
-For React, `@scrivr/react` exports a `TrackChangesPopover` component built on
+For React, `@scrivr/react/track-changes` exports a `TrackChangesPopover` component built on
 `createChangePopover` that handles positioning, single-change and conflict layouts, and author
 attribution out of the box. Drop it alongside `<Scrivr />`:
 
 ```tsx
-import { TrackChangesPopover } from '@scrivr/react';
+import { TrackChangesPopover } from '@scrivr/react/track-changes';
 
 <TrackChangesPopover editor={editor} />
 ```

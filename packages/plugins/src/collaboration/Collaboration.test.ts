@@ -16,10 +16,11 @@ vi.mock("@hocuspocus/provider", () => ({
 
 import { ServerEditor, StarterKit } from "@scrivr/core";
 import { Collaboration } from "./Collaboration";
+import { CollaborationCursor } from "./CollaborationCursor";
 import { collaborationRegistry } from "./collaborationState";
-// Through the barrel: `CollabState["binding"]` is how a host names the binding,
+// Through the collaboration entry: `CollabState["binding"]` is how a host names the binding,
 // so a typecheck fails here if that path stops resolving.
-import type { CollabState } from "../index";
+import type { CollabState, CollaborationCursorOptions, CollaborationOptions } from "./index";
 
 describe("Collaboration — headless (ServerEditor)", () => {
   it("wires the Y binding + provider on onEditorReady, with no view", () => {
@@ -132,5 +133,14 @@ describe("Collaboration — undo routes to the editor that asked", () => {
 
     expect(a.getState().doc.textContent).toBe("hello one");
     expect(b.getState().doc.textContent).toBe("hello bee");
+  });
+});
+
+describe("the collaboration entry's option types", () => {
+  it("name what configure takes", () => {
+    const options = { url: "ws://localhost:1234", name: "room" } satisfies Partial<CollaborationOptions>;
+    const cursor = { user: { name: "Ada", color: "#ef4444" } } satisfies Partial<CollaborationCursorOptions>;
+    expect(Collaboration.configure(options).options.url).toBe("ws://localhost:1234");
+    expect(CollaborationCursor.configure(cursor).options.user?.name).toBe("Ada");
   });
 });

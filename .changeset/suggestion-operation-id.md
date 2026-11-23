@@ -20,4 +20,6 @@ A host can name the suggestion a tracked change came from. Pass an `operationId`
   - never withdraws its changes when a lane rewrites the block.
 
   So deciding one suggestion never decides another, and each keeps exactly the changes it wrote. Two suggestions that oppose each other are a conflict, as between two authors. So rejecting one is refused while the other's change sits on it, until both are decided. Re-applying the same suggestion still replaces its own changes. Changes written with no operation id keep the author-only rule.
+- **Breaking:** `clearAuthorPendingMarks` takes the writer, not an author id string, as its fourth argument: replace `clearAuthorPendingMarks(tr, from, to, "alice", schema)` with `clearAuthorPendingMarks(tr, from, to, { authorID: "alice" }, schema)`. The `Owner` type (`{ authorID, operationId? }`) is exported.
+- **Types:** `SuggestionIntent` (`{ authorID, operationId? }`) is exported; `trackAsSuggestion`'s options take its `operationId`.
 - **While pending:** a change keeps its operation id until it is decided, including when other changes from the same suggestion are decided first.

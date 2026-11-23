@@ -7,7 +7,7 @@
 import { describe, expect, it } from "vitest";
 import { ServerEditor, StarterKit } from "@scrivr/core";
 import type { Transaction } from "@scrivr/core/pm";
-import { applyDiffAsSuggestion, changeActs, findChanges, TrackChanges, TrackChangesStatus, trackAsSuggestion, type SuggestionIntent } from "../index";
+import { applyDiffAsSuggestion, changeActs, clearAuthorPendingMarks, findChanges, TrackChanges, TrackChangesStatus, trackAsSuggestion, type Owner, type SuggestionIntent } from "../index";
 
 const editorOf = (content: unknown[]) => new ServerEditor({
   extensions: [StarterKit, TrackChanges.configure({ userID: "human", initialStatus: TrackChangesStatus.disabled, canAcceptReject: true })],
@@ -130,5 +130,17 @@ describe("two suggestions by one author", () => {
     as(editor, "B", (tr) => tr.delete(at(editor, "Q"), at(editor, "Q") + 1));
 
     expect(ofOperation(editor, "A").map((c) => c.id).sort()).toEqual(idsOfA);
+  });
+
+  it("clearAuthorPendingMarks withdraws only the suggestion it is given", () => {
+    const editor = editorOf([para("p", "alpha")]);
+    as(editor, "A", (tr) => tr.insertText(" one", at(editor, "alpha") + 5));
+    as(editor, "B", (tr) => tr.insertText(" two", at(editor, "one") + 3));
+    const suggestionA: Owner = { authorID: "ai", operationId: "A" };
+    const tr = editor.getState().tr;
+    clearAuthorPendingMarks(tr, 0, tr.doc.content.size, suggestionA, editor.getState().schema);
+    editor.applyTransaction(tr);
+
+    expect(editor.getState().doc.textContent).toBe("alpha two");
   });
 });

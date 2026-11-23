@@ -1,34 +1,36 @@
-// Imported through the package barrel on purpose: these are what a signing
+// Imported through the package's entries on purpose: these are what a signing
 // host and its collaboration server build on, and `tsc` fails here the moment
 // one stops being exported.
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import {
   FieldCompletion,
-  REVISION_MAP_NAME,
   ReadingProgress,
+  moveFieldFocus,
+  requestField,
+  type FieldCompletionOptions,
+  type FieldValue,
+  type ReadingEvent,
+  type ReadingProgressOptions,
+  type SigningFieldDrawing,
+} from "../index";
+import {
+  REVISION_MAP_NAME,
   docFromYDoc,
   isSealed,
   matchesSnapshot,
   readRevisionStamp,
-  moveFieldFocus,
-  requestField,
   resetToSnapshot,
   snapshotFromYDoc,
   stampEditable,
   stampSeal,
   watchRevision,
   type EditableStamp,
-  type FieldCompletionOptions,
-  type FieldValue,
-  type ReadingEvent,
-  type ReadingProgressOptions,
   type RevisionCallbacks,
   type RevisionStamp,
   type RevisionWatcher,
   type SealedStamp,
-  type SigningFieldDrawing,
-} from "../index";
+} from "../collaboration";
 
 describe("what a signing host builds on", () => {
   it("is reachable from the package: the room's revision, reading, and completion", () => {

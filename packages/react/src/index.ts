@@ -1,4 +1,5 @@
-// React adapter for @scrivr/core
+// Needs only @scrivr/core. Components built on @scrivr/plugins or @scrivr/ai go
+// in their own entry (track-changes, header-footer, ai).
 
 export { useScrivrEditor } from "./hooks/useScrivrEditor";
 export { useZoom, useZoomRequest } from "./hooks/useZoom";
@@ -14,15 +15,8 @@ export { TableMenu } from "./components/TableMenu";
 export { useTableMenu } from "./hooks/useTableMenu";
 export { SlashMenu } from "./components/SlashMenu";
 export { useSlashMenu } from "./hooks/useSlashMenu";
-export { AiSuggestionCardsPanel } from "./components/AiSuggestionCards";
-export { useAiSuggestionCards } from "./hooks/useAiSuggestionCards";
 export type { SlashMenuProps } from "./components/SlashMenu";
 export type { SlashMenuItem, UseSlashMenuOptions } from "./hooks/useSlashMenu";
-export { TrackChangesPopover } from "./components/TrackChangesPopover";
-export { useTrackChangesPopover } from "./hooks/useTrackChangesPopover";
-export { AiSuggestionPopover } from "./components/AiSuggestionPopover";
-export { useAiSuggestionPopover } from "./hooks/useAiSuggestionPopover";
-export { useBlockMarkerOverlay } from "./hooks/useBlockMarkerOverlay";
 export type { BubbleMenuProps } from "./components/BubbleMenu";
 export type { FloatingMenuProps } from "./components/FloatingMenu";
 export type { LinkPopoverProps, LinkPopoverState } from "./components/LinkPopover";
@@ -32,30 +26,6 @@ export type { UseImageMenuOptions } from "./hooks/useImageMenu";
 export type { TableMenuProps, TableMenuState } from "./components/TableMenu";
 export type { UseTableMenuOptions } from "./hooks/useTableMenu";
 export type { ImageVerticalAlign, ImageWrappingMode } from "./hooks/useImageMenu";
-export type { TrackChangesPopoverProps } from "./components/TrackChangesPopover";
-export type { AiSuggestionPopoverProps } from "./components/AiSuggestionPopover";
-export type { UseAiSuggestionPopoverOptions } from "./hooks/useAiSuggestionPopover";
-export type {
-  AiSuggestionCardsPanelProps,
-  AiSuggestionCardClassNames,
-  AiSuggestionCardStyles,
-} from "./components/AiSuggestionCards";
-export { TrackChangesPanel } from "./components/TrackChangesPanel";
-export { useTrackChangesPanel } from "./hooks/useTrackChangesPanel";
-export type { TrackChangesPanelProps } from "./components/TrackChangesPanel";
-export type { TrackChangesDisplayItem } from "./hooks/useTrackChangesPanel";
-export { useReviewAction } from "./hooks/useReviewAction";
-export type { ReviewAction, ReviewRefusalState } from "./hooks/useReviewAction";
-export { ReviewRefusalNotice } from "./components/ReviewRefusalNotice";
-export { describeSuggestionRefusal } from "./utils/suggestionRefusal";
-export type { SuggestionRefusalText } from "./utils/suggestionRefusal";
-export type { ReviewRefusalNoticeProps } from "./components/ReviewRefusalNotice";
-export { HeaderFooterRibbon } from "./components/HeaderFooterRibbon";
-export { useHeaderFooterRibbon } from "./hooks/useHeaderFooterRibbon";
-export type {
-  HeaderFooterRibbonItem,
-} from "./hooks/useHeaderFooterRibbon";
-export type { HeaderFooterRibbonProps } from "./components/HeaderFooterRibbon";
 export type { UseCanvasEditorOptions } from "./hooks/useScrivrEditor";
 
 export { Scrivr } from "./components/Scrivr";
@@ -89,4 +59,3 @@ export type {
   FontResolution,
   FontShortfall,
 } from "@scrivr/core";
-export { Collaboration, CollaborationCursor } from "@scrivr/plugins";

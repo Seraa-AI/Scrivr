@@ -62,7 +62,8 @@ description: Install Scrivr into your project and configure TypeScript.
 
 | Package | Purpose |
 | --- | --- |
-| `@scrivr/plugins` | **Real-time collaboration**, **AI Toolkit**, and **Track Changes**. |
+| `@scrivr/plugins` | **Track Changes**, headers and footers, and **real-time collaboration** (`@scrivr/plugins/collaboration`). Its React components are in `@scrivr/react/track-changes` and `@scrivr/react/header-footer`. |
+| `@scrivr/ai` | The **AI Toolkit** and AI suggestions. Its React components are in `@scrivr/react/ai`. |
 | `@scrivr/export` | Export to paginated **PDF** and **Markdown**. DOCX coming soon. |
 
 ---
@@ -71,22 +72,22 @@ description: Install Scrivr into your project and configure TypeScript.
 
 ### Real-Time Collaboration
 
-The collaboration layer syncs over WebSockets using **Yjs** CRDTs. You will need to run your own WebSocket backend — any [Hocuspocus](https://hocuspocus.dev/)-compatible server works. Install `@scrivr/plugins` on the frontend:
+The collaboration layer syncs over WebSockets using **Yjs** CRDTs. You will need to run your own WebSocket backend — any [Hocuspocus](https://hocuspocus.dev/)-compatible server works. Install `@scrivr/plugins` with the Yjs packages collaboration needs, and import it from `@scrivr/plugins/collaboration`:
 
 <Tabs items={["pnpm", "npm", "yarn"]}>
   <Tab value="pnpm">
     ```bash
-    pnpm add @scrivr/plugins
+    pnpm add @scrivr/plugins yjs y-prosemirror @hocuspocus/provider
     ```
   </Tab>
   <Tab value="npm">
     ```bash
-    npm install @scrivr/plugins
+    npm install @scrivr/plugins yjs y-prosemirror @hocuspocus/provider
     ```
   </Tab>
   <Tab value="yarn">
     ```bash
-    yarn add @scrivr/plugins
+    yarn add @scrivr/plugins yjs y-prosemirror @hocuspocus/provider
     ```
   </Tab>
 </Tabs>

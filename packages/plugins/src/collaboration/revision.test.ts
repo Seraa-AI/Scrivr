@@ -17,7 +17,7 @@ import {
   stampEditable,
   stampSeal,
   REVISION_MAP_NAME,
-} from "../index";
+} from "./index";
 
 const contract = {
   type: "doc",

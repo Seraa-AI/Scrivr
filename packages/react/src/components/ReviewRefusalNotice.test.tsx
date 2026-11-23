@@ -16,9 +16,9 @@ import { createRoot, type Root } from "react-dom/client";
 import { ServerEditor, StarterKit } from "@scrivr/core";
 import { TrackChanges, TrackChangesStatus, trackChangesPluginKey } from "@scrivr/plugins";
 import type { TrackedChange } from "@scrivr/plugins";
-// Through the package entry, as a consumer imports them.
-import { ReviewRefusalNotice, TrackChangesPanel, useReviewAction, useTrackChangesPanel } from "../index";
-import type { ReviewAction, ReviewRefusalNoticeProps, ReviewRefusalState, TrackChangesDisplayItem } from "../index";
+// Through the track-changes entry, as a consumer imports them.
+import { ReviewRefusalNotice, TrackChangesPanel, useReviewAction, useTrackChangesPanel } from "../track-changes";
+import type { ReviewAction, ReviewRefusalNoticeProps, ReviewRefusalState, TrackChangesDisplayItem } from "../track-changes";
 
 let container: HTMLDivElement;
 let root: Root;

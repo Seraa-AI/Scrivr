@@ -87,10 +87,10 @@ The package ships unstyled, headless menu components you can wire up to your own
 | `SlashMenu` | `/` command palette |
 | `LinkPopover` | Popover for inserting/editing links |
 | `ImageMenu` | Popover for image float and resize settings |
-| `AiSuggestionPopover` | Popover for accepting/rejecting AI suggestions |
-| `AiSuggestionCardsPanel` | Card list for reviewing AI diff suggestions |
-| `TrackChangesPopover` | Popover for accepting/rejecting tracked changes |
-| `TrackChangesPanel` | Sidebar panel listing all tracked changes |
+| `AiSuggestionPopover` | Popover for accepting/rejecting AI suggestions (`@scrivr/react/ai`) |
+| `AiSuggestionCardsPanel` | Card list for reviewing AI diff suggestions (`@scrivr/react/ai`) |
+| `TrackChangesPopover` | Popover for accepting/rejecting tracked changes (`@scrivr/react/track-changes`) |
+| `TrackChangesPanel` | Sidebar panel listing all tracked changes (`@scrivr/react/track-changes`) |
 
 ## Re-exports from `@scrivr/core`
 
@@ -100,8 +100,21 @@ For convenience the following are re-exported so you don't need to import `@scri
 import {
   StarterKit, Pagination, defaultPageConfig,
   DEFAULT_FONT_FAMILY, FontFamily, Link,
-  Collaboration, CollaborationCursor,
 } from '@scrivr/react';
+```
+
+Track changes and AI components have their own entries, so an editor-only app installs neither `@scrivr/plugins` nor `@scrivr/ai`:
+
+```ts
+import { TrackChangesPanel, TrackChangesPopover } from '@scrivr/react/track-changes'; // needs @scrivr/plugins
+import { HeaderFooterRibbon } from '@scrivr/react/header-footer'; // needs @scrivr/plugins
+import { AiSuggestionCardsPanel, AiSuggestionPopover } from '@scrivr/react/ai'; // needs @scrivr/ai
+```
+
+Collaboration is imported from its own entry, so an app without it never loads Yjs:
+
+```ts
+import { Collaboration, CollaborationCursor } from '@scrivr/plugins/collaboration';
 ```
 
 ## License

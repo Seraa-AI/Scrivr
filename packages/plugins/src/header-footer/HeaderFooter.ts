@@ -202,7 +202,7 @@ export interface HeaderFooterOptions {
    * separate `ServerEditor` constructed with `activeEditingGap: 0`,
    * sharing the same doc JSON.
    *
-   * **Single source of truth.** The `@scrivr/react` `HeaderFooterRibbon`
+   * **Single source of truth.** The `HeaderFooterRibbon` from `@scrivr/react/header-footer`
    * sizes itself from this value (via `useHeaderFooterRibbon`, which
    * calls `editor.findExtension("headerFooter")` and reads
    * `options.activeEditingGap`). Change the option and the ribbon's

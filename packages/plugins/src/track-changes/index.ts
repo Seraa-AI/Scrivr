@@ -29,6 +29,7 @@ export { changePreviewText, createChangePopover } from "./createChangePopover";
 export { changedAttrKeys, describeAttrChanges } from "./attrChanges";
 export type { ChangePopoverInfo, ChangePopoverCallbacks } from "./createChangePopover";
 export { isTrackedMark } from "./helpers";
+export type { Owner } from "./helpers";
 export { trackChangesPluginKey } from "./engine/trackChangesPlugin";
 export { findChanges } from "./findChanges";
 export { findLiveNodeById, isShadowNode, moveShadowRanges, shadowRanges } from "./liveNode";

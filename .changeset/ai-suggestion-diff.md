@@ -17,6 +17,6 @@ A small AI edit in a long paragraph is that edit, its new words keep the text's 
 - **A paragraph named more than once in one call is left alone and reported** (#282).
   - `applyMultiBlockDiff` returns it in a new `rejected` list (`MultiBlockDiffResult`), and `applyRichDiffAsSuggestion` in its existing one.
   - `computeAiSuggestion` leaves it out and tells a new `onWarn` option.
-  - An id no block has is reported missing, not repeated.
+  - An id no block has is not counted as repeated: `applyRichDiffAsSuggestion` reports it in `notFound`, and `applyMultiBlockDiff` and `computeAiSuggestion` skip it.
   - The rest of the call still applies. `namedMoreThanOnce` is exported.
 - **Suggesting mode no longer crashes on an insertion of exactly two runs mid-paragraph**, such as a bold word followed by plain text. It was misread as a paragraph break.

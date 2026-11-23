@@ -22,7 +22,7 @@ Stop writes to the room **before** you read it. A snapshot taken of a room still
 
 ```ts
 import { ServerEditor, StarterKit, Field, fieldKindsOf } from "@scrivr/core";
-import { snapshotFromYDoc, stampSeal } from "@scrivr/plugins";
+import { snapshotFromYDoc, stampSeal } from "@scrivr/plugins/collaboration";
 import type { Document } from "@hocuspocus/server";
 
 const server = new ServerEditor({ extensions: [StarterKit, Field] }); // with your Field.configure({ kinds }), if any
@@ -106,7 +106,7 @@ The order people *sign* in is yours too: a viewer completes only the fields you 
 ## Enforcing it, in your HocusPocus hooks
 
 ```ts
-import { isSealed, matchesSnapshot, resetToSnapshot } from "@scrivr/plugins";
+import { isSealed, matchesSnapshot, resetToSnapshot } from "@scrivr/plugins/collaboration";
 
 const server = new Hocuspocus({
   async onAuthenticate({ documentName, connection }) {
@@ -158,7 +158,7 @@ Leave the editor's own `sealed` option off when it joins a room. The room's cont
 A sealed revision is never edited in place. Unsealing starts its successor, and the room says so:
 
 ```ts
-import { stampEditable } from "@scrivr/plugins";
+import { stampEditable } from "@scrivr/plugins/collaboration";
 
 stampEditable(document, { revisionId: newRevisionId, parentRevisionId: sealedRevisionId });
 ```

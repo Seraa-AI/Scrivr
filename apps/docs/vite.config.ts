@@ -34,8 +34,16 @@ export default defineConfig({
       // `@scrivr/react/styles.css` would resolve to `src/index.ts/styles.css`
       // (ENOTDIR). Mirror every subpath export declared in the package.json.
       '@scrivr/react/styles.css': resolve(__dirname, '../../packages/react/src/styles.css'),
+      '@scrivr/react/track-changes': resolve(__dirname, '../../packages/react/src/track-changes.ts'),
+      '@scrivr/react/header-footer': resolve(__dirname, '../../packages/react/src/header-footer.ts'),
+      '@scrivr/react/ai': resolve(__dirname, '../../packages/react/src/ai.ts'),
       '@scrivr/core/pm': resolve(__dirname, '../../packages/core/src/pm.ts'),
       '@scrivr/core': resolve(__dirname, '../../packages/core/src/index.ts'),
+      '@scrivr/plugins/collaboration': resolve(__dirname, '../../packages/plugins/src/collaboration/index.ts'),
+      '@scrivr/plugins/track-changes': resolve(__dirname, '../../packages/plugins/src/track-changes/index.ts'),
+      '@scrivr/plugins/citation-highlight': resolve(__dirname, '../../packages/plugins/src/citation-highlight/index.ts'),
+      '@scrivr/plugins/header-footer': resolve(__dirname, '../../packages/plugins/src/header-footer/index.ts'),
+      '@scrivr/plugins/sealed-viewer': resolve(__dirname, '../../packages/plugins/src/sealed-viewer/index.ts'),
       '@scrivr/plugins': resolve(__dirname, '../../packages/plugins/src/index.ts'),
       '@scrivr/export-pdf': resolve(__dirname, '../../packages/export-pdf/src/index.ts'),
       '@scrivr/export-markdown': resolve(__dirname, '../../packages/export-markdown/src/index.ts'),

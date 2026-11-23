@@ -8,7 +8,6 @@ import {
   SlashMenu,
   ImageMenu,
   TableMenu,
-  HeaderFooterRibbon,
 } from "@scrivr/react";
 import { useEffect, useState, type ReactNode } from "react";
 import { useTheme } from "next-themes";
@@ -16,9 +15,8 @@ import type { EditorStateContext } from "@scrivr/react";
 import { PdfExport } from "@scrivr/export-pdf";
 import { DocxExport, DocxImport } from "@scrivr/docx";
 import { HtmlImport } from "@scrivr/html";
+import { Collaboration, CollaborationCursor } from "@scrivr/plugins/collaboration";
 import {
-  Collaboration,
-  CollaborationCursor,
   TrackChanges,
   HeaderFooter,
   CitationHighlight,
@@ -36,15 +34,15 @@ import { ModeSwitcher, useEditorMode, type EditorMode } from "./ModeSwitcher";
 import { ContentSwitcher } from "./ContentSwitcher";
 import { PLAYGROUND_THEME } from "./theme";
 import { onRefusal, reportRefusal } from "./refusals";
+import { HeaderFooterRibbon } from "@scrivr/react/header-footer";
 import {
   TrackChangesPopover,
   TrackChangesPanel,
-  AiSuggestionCardsPanel,
   useTrackChangesPanel,
-  useAiSuggestionCards,
   describeSuggestionRefusal,
-} from "@scrivr/react";
-import type { SuggestionRefusalText } from "@scrivr/react";
+  type SuggestionRefusalText,
+} from "@scrivr/react/track-changes";
+import { AiSuggestionCardsPanel, useAiSuggestionCards } from "@scrivr/react/ai";
 import { createSnapshot, Field, fieldKindsOf, type Editor, type SealedSnapshot, type SealRefusal, type ToolbarState } from "@scrivr/core";
 import { Selection, TextSelection } from "@scrivr/core/pm";
 import { ChatPanel } from "./ChatPanel";

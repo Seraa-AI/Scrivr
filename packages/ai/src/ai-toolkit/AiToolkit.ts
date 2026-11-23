@@ -328,7 +328,7 @@ function readStringField(item: unknown, key: string): string | undefined {
  * AiToolkitAPI — the single entry point for all AI interactions with an editor.
  *
  * Obtain via:
- *   import { getAiToolkit } from "@scrivr/plugins";
+ *   import { getAiToolkit } from "@scrivr/ai";
  *   const ai = getAiToolkit(editor);
  *
  * Never instantiate directly — created by AiToolkit.onEditorReady().

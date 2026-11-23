@@ -13,7 +13,7 @@ import { Extension, renderLabelledCaret } from "@scrivr/core";
 import type { IEditor, OverlayRenderHandler } from "@scrivr/core";
 import { collaborationRegistry } from "./collaborationState";
 
-interface CollaborationCursorOptions {
+export interface CollaborationCursorOptions {
   user?: { name: string; color: string };
 }
 
