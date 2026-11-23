@@ -129,7 +129,8 @@ export const trackChangesPlugin = (options: TrackChangesOptions) => {
           closeHistory(createdTr);
           docChanged = true;
         } else if (!shouldSkipTracking || suggestionIntent(tx)) {
-          const authorID = suggestionIntent(tx)?.authorID ?? userID;
+          const intent = suggestionIntent(tx);
+          const authorID = intent?.authorID ?? userID;
           const uiEvent = tx.getMeta("uiEvent");
           const lastCut = lastCutKey.getState(newState) ?? null;
           const pastedMoveId = uiEvent === "paste" && lastCut ? moveIdForPaste(tx, lastCut, createdTr.doc, authorID) : null;
@@ -137,7 +138,7 @@ export const trackChangesPlugin = (options: TrackChangesOptions) => {
           // Each transaction is recorded from where it started, as it was judged before it applied.
           const startState = i === 0 ? oldState : EditorState.create({ doc: tx.before, selection: trs[i - 1]!.selection });
           const outcome = trackChanges(
-            tx, createdTr, startState, authorID, skipTrsWithMetas, replayedSelection, pastedMove ?? undefined,
+            tx, createdTr, startState, authorID, skipTrsWithMetas, replayedSelection, pastedMove ?? undefined, intent?.operationId,
           );
           if (outcome.kind === "tracked") {
             createdTr = outcome.tr;

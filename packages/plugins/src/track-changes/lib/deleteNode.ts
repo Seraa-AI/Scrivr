@@ -42,7 +42,7 @@ export function deleteOrSetNodeDeleted(
     return true;
   }
 
-  if (!deleteAttrs.moveNodeId && allowCancellation && canCancelInsertion(node, deleteAttrs.authorID)) {
+  if (!deleteAttrs.moveNodeId && allowCancellation && canCancelInsertion(node, deleteAttrs)) {
     newTr.delete(pos, pos + node.nodeSize);
     return true;
   }

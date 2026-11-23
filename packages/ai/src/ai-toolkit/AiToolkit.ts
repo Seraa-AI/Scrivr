@@ -292,6 +292,14 @@ function sourceHashOf(item: SemanticUnit): string | undefined {
   return readStringField(item, "expectedContentHash") ?? readStringField(item, "richHash");
 }
 
+/** Who an agent's edit is from, and the host's name for it. */
+export interface AgentEditOptions {
+  /** Attributed to every change the edit writes. Defaults to "AI Assistant". */
+  authorID?: string;
+  /** The host's name for this edit — a review row's id — stored on every change it writes. */
+  operationId?: string;
+}
+
 function editForPart(part: SemanticPart, state: EditorState): RichBlockEdit {
   return {
     nodeId: part.nodeId,
@@ -577,7 +585,7 @@ export class AiToolkitAPI {
    */
   applyRichEdit(
     edits: RichBlockEdit[] | SemanticUnit[],
-    options: { authorID?: string } = {},
+    options: AgentEditOptions = {},
   ): { applied: boolean; changed: string[]; stale: string[]; notFound: string[]; rejected: string[]; wrongView: string[] } {
     const authorID = options.authorID ?? "AI Assistant";
 
@@ -691,7 +699,7 @@ export class AiToolkitAPI {
       }
     }
 
-    const laidOut = imageLayouts.length > 0 ? applyImageLayout(this.editor, imageLayouts, authorID) : [];
+    const laidOut = imageLayouts.length > 0 ? applyImageLayout(this.editor, imageLayouts, authorID, options.operationId) : [];
     rejected.push(...imageLayouts.map((edit) => edit.nodeId).filter((nodeId) => !laidOut.includes(nodeId)));
     if (resolved.length === 0) {
       return { applied: laidOut.length > 0, changed: [...changed, ...laidOut], stale, notFound, rejected, wrongView };
@@ -700,7 +708,7 @@ export class AiToolkitAPI {
     const result = applyRichDiffAsSuggestion(
       this.editor.getState(),
       (tr) => this.editor.applyTransaction(tr),
-      { edits: resolved, authorID },
+      { edits: resolved, authorID, ...(options.operationId !== undefined ? { operationId: options.operationId } : {}) },
     );
     const unapplied = new Set([...result.notFound, ...result.rejected]);
     return {
@@ -729,7 +737,7 @@ export class AiToolkitAPI {
    */
   applySemanticEdits(
     edits: SemanticEdit[],
-    options: { authorID?: string } = {},
+    options: AgentEditOptions = {},
   ): SemanticEditResult {
     const rich: RichBlockEdit[] = [];
     const structural: StructuralSemanticEdit[] = [];
@@ -759,7 +767,11 @@ export class AiToolkitAPI {
     const empty = { changed: [], notFound: [], rejected: [], alreadyProposed: [], anchorProposedForDeletion: [] };
 
     // One transaction: the structural batch is one undo step.
-    const tr = trackAsSuggestion(this.editor.getState().tr, options.authorID ?? "AI Assistant");
+    const tr = trackAsSuggestion(
+      this.editor.getState().tr,
+      options.authorID ?? "AI Assistant",
+      options.operationId !== undefined ? { operationId: options.operationId } : {},
+    );
     const structuralResult = current.length > 0 ? applyStructuralEdits(tr, current) : empty;
     const touched = tr.docChanged;
     if (touched) this.editor.applyTransaction(tr);

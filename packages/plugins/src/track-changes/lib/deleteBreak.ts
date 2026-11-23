@@ -5,15 +5,17 @@ import {
   createNewJoinAttrs,
   getBlockInlineTrackedData,
   NewEmptyAttrs,
+  ownedBy,
+  type Owner,
 } from "../helpers";
 import { CHANGE_OPERATION, CHANGE_STATUS } from "../types";
 
 const recordsOf = (node: PMNode) => getBlockInlineTrackedData(node) ?? [];
 
 /** Does this node carry a pending record of one of `operations` by this author? */
-export const addedBy = (node: PMNode, authorID: string, operations: CHANGE_OPERATION[]) =>
+export const addedBy = (node: PMNode, owner: Owner, operations: CHANGE_OPERATION[]) =>
   recordsOf(node).some(record =>
-    record.status === CHANGE_STATUS.pending && record.authorID === authorID && !record.foldingClosed &&
+    record.status === CHANGE_STATUS.pending && ownedBy(record, owner) && !record.foldingClosed &&
     record.operation !== undefined && operations.includes(record.operation),
   );
 
@@ -21,8 +23,8 @@ export const addedBy = (node: PMNode, authorID: string, operations: CHANGE_OPERA
  * Did this author add the block that starts at a break, so that deleting the
  * break takes their proposal back out rather than proposing a join?
  */
-export const addedBreakBy = (next: PMNode, authorID: string) =>
-  addedBy(next, authorID, [CHANGE_OPERATION.insert, CHANGE_OPERATION.node_split]);
+export const addedBreakBy = (next: PMNode, owner: Owner) =>
+  addedBy(next, owner, [CHANGE_OPERATION.insert, CHANGE_OPERATION.node_split]);
 
 /**
  * Where the block a deleted break joins onto starts: the next block with text
@@ -69,8 +71,8 @@ export function deleteBreak(pos: number, joinsNext: boolean, newTr: Transaction,
   if (!node) return;
   const boundary = pos + node.nodeSize;
   const next = newTr.doc.nodeAt(boundary);
-  const addedNext = !!next && addedBreakBy(next, attrs.authorID);
-  const addedThis = addedBy(node, attrs.authorID, [CHANGE_OPERATION.insert]);
+  const addedNext = !!next && addedBreakBy(next, attrs);
+  const addedThis = addedBy(node, attrs, [CHANGE_OPERATION.insert]);
 
   if (joinsNext && next && (addedNext || addedThis) && canJoin(newTr.doc, boundary)) {
     const [kept, taken] = addedNext ? [node, next] : [next, node];

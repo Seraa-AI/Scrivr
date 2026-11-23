@@ -54,10 +54,12 @@ declare module "@scrivr/core" {
       refreshChanges: () => ReturnType;
       /**
        * Suggest `text` in place of [from, to], as `authorID` typing it in
-       * suggesting mode. A "\n" is a line break. Returns false, writing
-       * nothing, when the suggestion would not be recorded (`suggestionBlocked`).
+       * suggesting mode. A "\n" is a line break. `operationId` is the host's
+       * name for the suggestion, stored on every change it writes. Returns
+       * false, writing nothing, when the suggestion would not be recorded
+       * (`suggestionBlocked`).
        */
-      insertAsSuggestion: (text: string, from: number, to: number, authorID: string) => ReturnType;
+      insertAsSuggestion: (text: string, from: number, to: number, authorID: string, operationId?: string) => ReturnType;
     };
   }
 
@@ -362,13 +364,13 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
        * This is the correct way for AI assistants to propose edits — they always
        * show up as suggestions the user can accept or reject, never as direct edits.
        *
-       * args: [text: string, from: number, to: number, authorID: string]
+       * args: [text: string, from: number, to: number, authorID: string, operationId?: string]
        */
       insertAsSuggestion:
-        (text: string, from: number, to: number, authorID: string) =>
+        (text: string, from: number, to: number, authorID: string, operationId?: string) =>
         (state: EditorState, dispatch: ((tr: Transaction) => void) | undefined) => {
           const content = spansToFragment([{ text, marks: [] }], state.schema, { parentType: state.doc.resolve(from).parent.type });
-          return dispatchSuggestion(state, state.tr.replaceWith(from, to, content), authorID, dispatch);
+          return dispatchSuggestion(state, state.tr.replaceWith(from, to, content), authorID, dispatch, operationId);
         },
     };
   },

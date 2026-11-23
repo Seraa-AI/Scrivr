@@ -22,8 +22,8 @@ export interface ImageLayoutEdit {
  * Sets each image unit's layout in one transaction, as `authorID`'s tracked
  * suggestion whatever mode the person is in. Returns the ids it changed.
  */
-export function applyImageLayout(editor: IBaseEditor, edits: ImageLayoutEdit[], authorID: string): string[] {
-  const tr = trackAsSuggestion(editor.getState().tr, authorID);
+export function applyImageLayout(editor: IBaseEditor, edits: ImageLayoutEdit[], authorID: string, operationId?: string): string[] {
+  const tr = trackAsSuggestion(editor.getState().tr, authorID, operationId !== undefined ? { operationId } : {});
   const changed: string[] = [];
   for (const { nodeId, attrs } of edits) {
     const found = findLiveNodeById(tr.doc, nodeId);

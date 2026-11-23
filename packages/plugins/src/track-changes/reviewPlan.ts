@@ -2,7 +2,7 @@ import type { Mark } from "@scrivr/core/pm";
 import { stableStringify } from "@scrivr/core";
 
 import type { ChangeSet } from "./ChangeSet";
-import { isMoveShadow } from "./helpers";
+import { isMoveShadow, sameOwner } from "./helpers";
 import type { ReplacementView, TrackedChange } from "./types";
 
 /** What deciding a change does to the document, which settles what it can take with it. */
@@ -128,7 +128,7 @@ const markValue = (mark: Mark) =>
 const sameFormattingRun = (a: TrackedChange, b: TrackedChange) =>
   a.type === "mark-change" && b.type === "mark-change" &&
   a.dataTracked.status === b.dataTracked.status &&
-  a.dataTracked.authorID === b.dataTracked.authorID &&
+  sameOwner(a.dataTracked, b.dataTracked) &&
   a.dataTracked.operation === b.dataTracked.operation &&
   markValue(a.mark) === markValue(b.mark) &&
   // A held piece is not on the text, so it is never a run with one that is.
@@ -140,7 +140,7 @@ const sameFormattingRun = (a: TrackedChange, b: TrackedChange) =>
 /** The two halves of one replacement: the words taken out and the words put in. */
 const sameReplacement = (a: TrackedChange, b: TrackedChange) =>
   !!a.dataTracked.groupId && a.dataTracked.groupId === b.dataTracked.groupId &&
-  a.dataTracked.authorID === b.dataTracked.authorID &&
+  sameOwner(a.dataTracked, b.dataTracked) &&
   new Set([a.dataTracked.operation, b.dataTracked.operation]).size === 2 &&
   [a, b].every((c) => c.dataTracked.operation === "insert" || c.dataTracked.operation === "delete");
 
@@ -151,7 +151,7 @@ const sameReplacement = (a: TrackedChange, b: TrackedChange) =>
  */
 const samePhrase = (a: TrackedChange, b: TrackedChange) =>
   !!a.dataTracked.groupId && a.dataTracked.groupId === b.dataTracked.groupId &&
-  a.dataTracked.authorID === b.dataTracked.authorID &&
+  sameOwner(a.dataTracked, b.dataTracked) &&
   a.dataTracked.operation === b.dataTracked.operation;
 
 /** The record pointing back at what a split was split from. */

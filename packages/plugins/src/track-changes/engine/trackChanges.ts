@@ -95,6 +95,7 @@ export function trackChanges(
   skipTrsWithMetas: (PluginKey | string)[],
   replayedSelection: ReplayedSelection,
   pastedMove?: PastedMove,
+  operationId?: string,
 ): TrackingOutcome {
   if (untracked(tx, skipTrsWithMetas)) return { kind: "skipped" };
 
@@ -102,7 +103,7 @@ export function trackChanges(
   // it is recorded on the blocks rather than replayed step by step.
   const listMoves = listMovesOnly(tx);
   if (listMoves) {
-    recordListChange(listMoves, createdTr, createNewPendingAttrs(tx.time, userID));
+    recordListChange(listMoves, createdTr, createNewPendingAttrs(tx.time, userID, operationId));
     return {
       kind: "tracked",
       tr: passThroughMeta(tx, createdTr),
@@ -121,7 +122,7 @@ export function trackChanges(
     replayedSelection,
   };
 
-  groupMoveSteps(gesture, trContext, userID);
+  groupMoveSteps(gesture, trContext, { authorID: userID, ...(operationId ? { operationId } : {}) });
   groupIndentationSteps(gesture, trContext);
 
   const steps = contentSteps(tx.steps).length;
@@ -131,7 +132,7 @@ export function trackChanges(
   if (refusal) return { kind: "refused", result: { status: "refused", ...refusal, steps } };
 
   const startedAt = Date.now();
-  const tr = trackTransaction(gesture, oldState, createdTr, userID, trContext);
+  const tr = trackTransaction(gesture, oldState, createdTr, userID, trContext, operationId);
   return {
     kind: "tracked",
     tr,

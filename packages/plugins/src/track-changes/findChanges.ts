@@ -3,7 +3,7 @@ import { EditorState } from "@scrivr/core/pm";
 
 import { ChangeSet } from "./ChangeSet";
 import { joinedBlockAt } from "./lib/deleteBreak";
-import { getMarkTrackedData, getNodeTrackedData } from "./helpers";
+import { getMarkTrackedData, getNodeTrackedData, sameOwner } from "./helpers";
 import { marksToRestore, pendingRecords } from "./formatSuggestions";
 import {
   CHANGE_OPERATION,
@@ -285,7 +285,8 @@ export function findChanges(state: EditorState): ChangeSet {
     for (let j = i + 1; j < pending.length; j++) {
       const a = pending[i]!;
       const b = pending[j]!;
-      if (a.dataTracked.authorID === b.dataTracked.authorID) continue;
+      // One writer's own changes do not conflict; two suggestions by one agent do.
+      if (sameOwner(a.dataTracked, b.dataTracked)) continue;
       // Only flag as conflict when operations are opposing (insert vs delete).
       // Two inserts from different authors coexisting in the same range is normal
       // multi-author collaboration, not a conflict.

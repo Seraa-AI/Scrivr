@@ -44,7 +44,7 @@ export {
   trackAsSuggestion,
   TrackChangesAction,
 } from "./actions";
-export type { TrackChangesActionParams } from "./actions";
+export type { SuggestionIntent, TrackChangesActionParams } from "./actions";
 export { suggestionBlocked } from "./suggestionBlocked";
 export { TrackChangesStatus, CHANGE_STATUS, CHANGE_OPERATION } from "./types";
 export type { TrackChangesState } from "./engine/trackChangesPlugin";

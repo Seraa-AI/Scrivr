@@ -218,6 +218,29 @@ it is accepted.
     - Markdown rebuilt from `spans`: a second serializer, which loses
       structure such as tables and list markers.
 
+- **D10: A host names the suggestion a change came from** (decided
+  2026-11-23, Seraa's ask S5). Today the link from a tracked change back to the
+  review row it was written for exists only in the host's database: Scrivr
+  gives each change a fresh id, and the host records those ids. When the
+  database and the document disagree — a write it could not record, a stray
+  change a failed withdraw left, a retry — the document cannot say which row a
+  change belongs to, and two edits by one agent look the same.
+  - **`operationId`:** a host passes it when it writes a suggestion
+    (`applyAiSuggestion`, the suggestion lanes, `AiToolkit.applyRichEdit` /
+    `applySemanticEdits`, or `trackAsSuggestion` directly). The engine stores
+    it on every record that suggestion writes, through the same base attrs the
+    author travels in, and the semantic export shows it on each change.
+  - **Own work is the same author and the same operation id.** Every rule
+    that lets a writer take back, continue, fold into or withdraw its own
+    pending work reads both, so one agent's two suggestions never touch each
+    other's changes. A later one never fuses with an earlier one, never
+    joins its replacement or act, and never takes back, re-labels or
+    withdraws its changes. Re-applying the same suggestion still replaces its
+    own. No id matches no id, so unnamed edits keep the author-only rule.
+  - **NEW record field, not `groupId`:** `groupId` already means one phrase's
+    replacement, so deciding one decides its other half; a suggestion has
+    many phrases.
+
 ## Phases
 
 1. **Views and the structural guard** — design §1 and §2. One PR across
@@ -288,6 +311,29 @@ Columns, also on plan 155's later list, is its own RFC
   - two records on one mark keep their own ids;
   - a split's reference record is stamped too, so the repair does not run on
     every edit.
+
+### D10: the suggestion a change came from (2026-11-23)
+
+- `operationId` is stored on every tracked record a suggestion writes when the
+  host passes one, carried by the same base attrs as the author, and shown on
+  each change in the semantic export.
+- Ownership is one predicate, `ownedBy`/`sameOwner` (author and operation id).
+  It is used wherever the engine decides own work:
+  - mark fusing;
+  - replacement and phrase grouping;
+  - creation folding, and closing dependent creations;
+  - taking back an insertion or split;
+  - superseding formatting;
+  - list and attribute records;
+  - the lanes' withdraw.
+- `insertAsSuggestion` takes it as its fifth argument.
+- It is accepted by:
+  - `trackAsSuggestion(tr, authorID, { operationId })`;
+  - `applyAiSuggestion`;
+  - `applyDiffAsSuggestion`, `applyMultiBlockDiff` and
+    `applyRichDiffAsSuggestion`;
+  - `AiToolkit.applyRichEdit` and `applySemanticEdits`, which cover text,
+    structural and image-layout changes.
 
 ### Next release cycle (decided 2026-11-10)
 

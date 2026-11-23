@@ -2,7 +2,7 @@ import { Fragment, Mark, Node as PMNode, Schema } from "@scrivr/core/pm";
 import { Transaction } from "@scrivr/core/pm";
 import { stableStringify } from "@scrivr/core";
 
-import { genId, isValidTrackableMark, markRecords, shouldMergeTrackedAttributes } from "../helpers";
+import { genId, isValidTrackableMark, markRecords, shouldMergeTrackedAttributes, ownedBy, type Owner } from "../helpers";
 import { ChangeStep, DeleteNodeStep, DeleteTextStep } from "../types";
 import { TrackedAttrs } from "../types";
 
@@ -99,7 +99,7 @@ function sameOwnAttrs(a: Mark, b: Mark): boolean {
  * `shouldMergeTrackedAttributes` decides, and only the single records of
  * `authorID`, the author writing, fuse: fusing renames records.
  */
-export function mergeTrackedMarks(pos: number, doc: PMNode, newTr: Transaction, schema: Schema, authorID: string) {
+export function mergeTrackedMarks(pos: number, doc: PMNode, newTr: Transaction, schema: Schema, owner: Owner) {
   const resolved = doc.resolve(pos);
   const { nodeAfter, nodeBefore } = resolved;
 
@@ -130,7 +130,7 @@ export function mergeTrackedMarks(pos: number, doc: PMNode, newTr: Transaction, 
 
     if (!shouldMergeTrackedAttributes(leftDataTracked, rightDataTracked)) continue;
     // Fusing gives the run one id, renaming the records it fuses: only the author writing does that to their own.
-    if (leftDataTracked.authorID !== authorID) continue;
+    if (!ownedBy(leftDataTracked, owner)) continue;
 
     const isLeftOlder = (leftDataTracked.createdAt || 0) < (rightDataTracked.createdAt || 0);
     const ancestorAttrs = isLeftOlder ? leftDataTracked : rightDataTracked;

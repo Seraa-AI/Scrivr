@@ -18,7 +18,7 @@ import {
   excludeFromTracking,
   passThroughMeta,
 } from "./transactionProcessing";
-import { createNewPendingAttrs, genId, NewEmptyAttrs } from "../helpers";
+import { createNewPendingAttrs, genId, NewEmptyAttrs, type Owner } from "../helpers";
 import { alreadyProposedForDeletion, canCancelInsertion, inlineNodesIn, ownReplacementOf } from "../lib/deletionPolicy";
 import { diffChangeSteps } from "../lib/structuralChange";
 import { mergeTrackedMarks } from "../lib/mergeTrackedMarks";
@@ -63,19 +63,19 @@ function caretBeforeStepEnd(tr: Transaction, i: number, step: ReplaceStep): numb
  * Typing right beside, or over, the author's own replacement text continues it,
  * so a word typed in several strokes stays one act.
  */
-function replacementGroup(step: ReplaceStep, doc: PMNode, authorID: string): string | undefined {
+function replacementGroup(step: ReplaceStep, doc: PMNode, owner: Owner): string | undefined {
   // A step bringing blocks in (an open slice), or across blocks (which
   // `inlineNodesIn` refuses), also joins or splits them, which is not a word swap.
   const closedInsert = step.slice.size > 0 && step.slice.openStart === 0 && step.slice.openEnd === 0;
   const covered = closedInsert ? inlineNodesIn(doc, step.from, step.to) : null;
   if (!covered) return undefined;
   const $from = doc.resolve(step.from);
-  if (step.from === step.to) return ownReplacementOf($from.nodeBefore, authorID) ?? ownReplacementOf($from.nodeAfter, authorID);
+  if (step.from === step.to) return ownReplacementOf($from.nodeBefore, owner) ?? ownReplacementOf($from.nodeAfter, owner);
   let recordsDeletion = false;
   let continued: string | undefined;
   for (const node of covered) {
     if (alreadyProposedForDeletion(node)) continue;
-    if (canCancelInsertion(node, authorID)) continued ??= ownReplacementOf(node, authorID);
+    if (canCancelInsertion(node, owner)) continued ??= ownReplacementOf(node, owner);
     else recordsDeletion = true;
   }
   return recordsDeletion ? genId() : continued;
@@ -86,12 +86,12 @@ function replacementGroup(step: ReplaceStep, doc: PMNode, authorID: string): str
  * step starts, or one of its own when that step starts none, so words deleted
  * around an image the phrase keeps stay one act.
  */
-function groupsOfPhrases(tr: Transaction, authorID: string): Map<Step, string> {
+function groupsOfPhrases(tr: Transaction, owner: Owner): Map<Step, string> {
   const groups = new Map<Step, string>();
   for (const steps of getAction(tr, TrackChangesAction.phrases) ?? []) {
     const [lead] = steps;
     const at = lead ? tr.steps.indexOf(lead) : -1;
-    const group = (lead instanceof ReplaceStep && at >= 0 ? replacementGroup(lead, tr.docs[at]!, authorID) : undefined) ?? genId();
+    const group = (lead instanceof ReplaceStep && at >= 0 ? replacementGroup(lead, tr.docs[at]!, owner) : undefined) ?? genId();
     for (const step of steps) groups.set(step, group);
   }
   return groups;
@@ -113,6 +113,7 @@ export function trackTransaction(
   newTr: Transaction,
   authorID: string,
   trContext: TrTrackingContext,
+  operationId?: string,
 ) {
   if (
     tr.getMeta("isPaginationChange") ||
@@ -122,8 +123,8 @@ export function trackTransaction(
     return newTr;
   }
 
-  const baseAttrs = createNewPendingAttrs(tr.time, authorID);
-  const phraseGroups = groupsOfPhrases(tr, authorID);
+  const baseAttrs = createNewPendingAttrs(tr.time, authorID, operationId);
+  const phraseGroups = groupsOfPhrases(tr, baseAttrs);
 
   for (let i = tr.steps.length - 1; i >= 0; i--) {
     const step = tr.steps[i]!;
@@ -167,7 +168,7 @@ function trackOneStep(
     const moveId = trContext.textMoves.get(step);
     // A move's two halves already pair through its move id.
     const partOfMove = !!moveNodeId || !!moveId || !!trContext.pastedMove;
-    const groupId = partOfMove ? undefined : phraseGroups.get(step) ?? replacementGroup(step, tr.docs[i]!, baseAttrs.authorID);
+    const groupId = partOfMove ? undefined : phraseGroups.get(step) ?? replacementGroup(step, tr.docs[i]!, baseAttrs);
     const stepAttrs = groupId === undefined ? baseAttrs : { ...baseAttrs, groupId };
 
     const [initialTrackedContent, newSelectionPos] = trackReplaceStep(
@@ -243,14 +244,14 @@ function trackOneStep(
     trackAddMarkStep(step, i, tr, baseAttrs, newTr, replayBridge);
     // Fuse this tracked mark with same-author/same-attrs neighbours so a run
     // built from several edits stays one change (as typing already does).
-    mergeTrackedMarks(placed.from, newTr.doc, newTr, oldState.schema, baseAttrs.authorID);
-    mergeTrackedMarks(placed.to, newTr.doc, newTr, oldState.schema, baseAttrs.authorID);
+    mergeTrackedMarks(placed.from, newTr.doc, newTr, oldState.schema, baseAttrs);
+    mergeTrackedMarks(placed.to, newTr.doc, newTr, oldState.schema, baseAttrs);
   } else if (step instanceof RemoveMarkStep) {
     const placed = step.map(replayBridge);
     if (!(placed instanceof RemoveMarkStep)) return;
     trackRemoveMarkStep(step, i, tr, baseAttrs, newTr, replayBridge);
-    mergeTrackedMarks(placed.from, newTr.doc, newTr, oldState.schema, baseAttrs.authorID);
-    mergeTrackedMarks(placed.to, newTr.doc, newTr, oldState.schema, baseAttrs.authorID);
+    mergeTrackedMarks(placed.from, newTr.doc, newTr, oldState.schema, baseAttrs);
+    mergeTrackedMarks(placed.to, newTr.doc, newTr, oldState.schema, baseAttrs);
   } else if (step instanceof RemoveNodeMarkStep) {
     trackRemoveNodeMarkStep(step, baseAttrs, newTr, tr.docs[i]!, replayBridge);
   } else if (step instanceof AddNodeMarkStep) {

@@ -114,6 +114,12 @@ export interface ApplyAiSuggestionOptions {
    */
   range?: AcceptedSpan;
   mode: "direct" | "tracked";
+  /**
+   * The host's name for this suggestion — a review row's id. In tracked mode
+   * it is stored on every change the apply writes, and shown on each in the
+   * semantic export, so the document says which suggestion a change came from.
+   */
+  operationId?: string;
 }
 
 /**

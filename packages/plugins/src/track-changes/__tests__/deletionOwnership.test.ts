@@ -152,14 +152,14 @@ describe("cancellation policy", () => {
     const alice = schema.marks.trackedInsert!.create({ dataTracked: { authorID: "alice", operation: "insert", status: "pending" } });
     const bob = schema.marks.trackedInsert!.create({ dataTracked: { authorID: "bob", operation: "insert", status: "pending" } });
     for (const marks of [[alice, bob], [bob, alice]]) {
-      expect(canCancelInsertion(schema.text("shared", marks), "alice")).toBe(false);
-      expect(canCancelInsertion(schema.text("shared", marks), "bob")).toBe(false);
+      expect(canCancelInsertion(schema.text("shared", marks), { authorID: "alice" })).toBe(false);
+      expect(canCancelInsertion(schema.text("shared", marks), { authorID: "bob" })).toBe(false);
     }
   });
 
   it("does not treat accepted insertion records as a cancellable proposal", () => {
     const mark = schema.marks.trackedInsert!.create({ dataTracked: { authorID: "alice", operation: "insert", status: "accepted" } });
-    expect(canCancelInsertion(schema.text("accepted", [mark]), "alice")).toBe(false);
+    expect(canCancelInsertion(schema.text("accepted", [mark]), { authorID: "alice" })).toBe(false);
   });
 });
 
