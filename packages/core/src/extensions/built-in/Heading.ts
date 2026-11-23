@@ -347,9 +347,10 @@ function setTextblock(type: NodeType, attrs: Attrs): Command {
 
 /**
  * The selected ranges, less the empty paragraph a document ends in when a
- * range covers more than it. Select All takes in the one TrailingNode keeps
- * after a closing heading, and restyling it would make TrailingNode add
- * another, one more for every press.
+ * range starts before it and runs past it, as only Select All does. Select All
+ * takes in the one TrailingNode keeps after a closing heading, and restyling it
+ * would make TrailingNode add another, one more for every press. A selection
+ * that ends inside that line still changes it.
  */
 function headingSpans(state: EditorState): { from: number; to: number }[] {
   const { doc } = state;
@@ -358,7 +359,7 @@ function headingSpans(state: EditorState): { from: number; to: number }[] {
   const endsEmpty = last !== null && last.type.name === "paragraph" && last.content.size === 0;
   return state.selection.ranges.map(({ $from, $to }) => ({
     from: $from.pos,
-    to: endsEmpty && $from.pos < lastStart && $to.pos > lastStart ? lastStart : $to.pos,
+    to: endsEmpty && $from.pos < lastStart && $to.pos >= doc.content.size ? lastStart : $to.pos,
   }));
 }
 

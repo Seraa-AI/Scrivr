@@ -192,6 +192,14 @@ describe("toggleHeading over several blocks", () => {
     expect([node?.attrs["level"], node?.attrs["align"], node?.attrs["nodeId"]]).toEqual([3, "right", "keep"]);
   });
 
+  it("still sets the heading on an empty last line a drag ends in", () => {
+    const e = editorOf(p("a"), p("b"), { type: "paragraph" });
+    const end = e.getState().doc.content.size - 1;
+    e.applyTransaction(e.getState().tr.setSelection(TextSelection.create(e.getState().doc, 1, end)));
+    e.commands.setHeading({ level: 2 });
+    expect(blocks(e).slice(0, 3)).toEqual(["h2", "h2", "h2"]);
+  });
+
   it("reads a level stored as text as that level", () => {
     const e = editorOf({ type: "heading", attrs: { level: "2" }, content: [{ type: "text", text: "one" }] }, p("two"));
     e.applyTransaction(e.getState().tr.setSelection(TextSelection.create(e.getState().doc, 2)));
