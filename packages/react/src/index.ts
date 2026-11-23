@@ -33,6 +33,7 @@ export type { ScrivrProps } from "./components/Scrivr";
 
 export { useScrivrState as useEditorState, shallowEqual, deepEqual } from "./hooks/useScrivrState";
 export type { UseEditorStateOptions, EditorStateContext } from "./hooks/useScrivrState";
+export type { AttachableRef } from "./utils/attachableRef";
 
 // Re-export core types consumers need when building with this adapter
 export type { Editor, SelectionSnapshot } from "@scrivr/core";
