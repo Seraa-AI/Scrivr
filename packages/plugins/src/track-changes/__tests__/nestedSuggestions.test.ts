@@ -329,3 +329,23 @@ describe("what else reads a held suggestion", () => {
     expect(pending(editor).map((c) => c.id).sort()).toEqual(["carol-1", "carol-2"]);
   });
 });
+
+describe("a held suggestion stored without its timestamps", () => {
+  /** Every createdAt and updatedAt left out, as a stored or converted document may have it. */
+  const withoutTimestamps = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(withoutTimestamps);
+    if (typeof value !== "object" || value === null) return value;
+    return Object.fromEntries(Object.entries(value).filter(([key]) => key !== "createdAt" && key !== "updatedAt").map(([key, v]) => [key, withoutTimestamps(v)]));
+  };
+
+  it("stays held when someone edits elsewhere", () => {
+    const stored = withoutTimestamps(aliceOverBob().getState().doc.child(0).toJSON().content);
+    const carol = editorWith([...(Array.isArray(stored) ? stored : []), { type: "text", text: " tail" }], "carol");
+    carol.applyTransaction(carol.getState().tr.insertText("x", carol.getState().doc.child(0).content.size + 1));
+
+    const alice = by(carol, "alice");
+    const bob = by(carol, "bob");
+    expect(bob.type === "mark-change" && bob.within).toEqual([alice.id]);
+    expect(shown(carol)).toEqual(["green", null]);
+  });
+});

@@ -51,6 +51,8 @@ export function fixInconsistentChanges(
 
   // A change the set already counts keeps its id; only its bookkeeping is filled.
   changeSet.unstampedChanges.forEach(c => {
+    // A held suggestion is in its holder's record, not on the text: it is filled with its holder.
+    if (c.type === "mark-change" && "within" in c && c.within !== undefined) return;
     const { createdAt, updatedAt, statusUpdateAt, reviewedByID } = c.dataTracked;
     updateChangeAttrs(newTr, c, {
       ...c.dataTracked,
