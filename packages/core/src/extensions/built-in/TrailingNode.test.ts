@@ -22,6 +22,11 @@ const caretAt = (e: ServerEditor, pos: number) =>
   e.applyTransaction(e.getState().tr.setSelection(TextSelection.create(e.getState().doc, pos)));
 const select = (e: ServerEditor, selection: (doc: Node) => Selection) =>
   e.applyTransaction(e.getState().tr.setSelection(selection(e.getState().doc)));
+const create = (e: ServerEditor, name: string) => {
+  const type = e.getState().schema.nodes[name];
+  if (!type) throw new Error(`no ${name} node`);
+  return type.create();
+};
 const toParagraph = (e: ServerEditor) =>
   e.applyTransaction(e.getState().tr.setNodeMarkup(0, e.getState().schema.nodes.paragraph));
 
@@ -163,6 +168,29 @@ describe("TrailingNode", () => {
     expect(blocks(e)).toEqual(["heading:one", "paragraph:"]);
     toParagraph(e);
     expect(blocks(e)).toEqual(["paragraph:one", "paragraph:"]);
+  });
+
+  it("leaves a line it did not add alone when an undo takes away a paragraph after it", () => {
+    const e = editor(h1("one"), p());
+    const { tr } = e.getState();
+    e.applyTransaction(closeHistory(tr.insert(tr.doc.content.size, create(e, "paragraph"))));
+    e.commands.undo();
+    expect(blocks(e)).toEqual(["heading:one", "paragraph:"]);
+    toParagraph(e);
+    expect(blocks(e)).toEqual(["paragraph:one", "paragraph:"]);
+  });
+
+  it("takes its paragraph away again after an undo of a block that replaced it", () => {
+    const e = editor(p("one"));
+    caretAt(e, 2);
+    e.commands.setHeading({ level: 1 });
+    const { tr } = e.getState();
+    const line = tr.doc.content.size - 2;
+    e.applyTransaction(closeHistory(tr.replaceWith(line, tr.doc.content.size, create(e, "horizontalRule"))));
+    e.commands.undo();
+    expect(blocks(e)).toEqual(["heading:one", "paragraph:"]);
+    toParagraph(e);
+    expect(blocks(e)).toEqual(["paragraph:one"]);
   });
 
   it.each([
