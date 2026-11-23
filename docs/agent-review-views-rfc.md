@@ -195,8 +195,16 @@ it is accepted.
     pending proposal accepted, by the engine's own Accept on a copy. This is
     the original view's Reject-all run the other way, so the two stay one
     rule.
-  - **One copy per call:** each unit's blocks are found in that copy by id. A
-    block proposed for deletion has no markdown.
+  - **One copy per call:** each unit's blocks are found in that copy by id,
+    and rendered through the unit's own node handler, so a table that
+    declines GFM for merged cells still does.
+  - **Only the unit's own words:** a unit gets markdown only where the copy
+    holds every one of its blocks, reading exactly as its `text`. Otherwise it
+    gets none. That covers:
+    - a block proposed for deletion;
+    - a move's old place, which shares its id with the new one;
+    - a block a pending deletion joins to the next;
+    - a block with no stored id.
   - **What stays the same:** `text`, `spans` and `changes` are unchanged, so
     the changes still say what is proposed and where. The markdown only reads
     as the proposal would.
@@ -254,8 +262,13 @@ Columns, also on plan 155's later list, is its own RFC
   change on a copy, sharing one function with the original view's Reject.
 - The walker builds that copy once per call, and only when a unit with
   changes asks for it.
-- A block proposed for deletion has no markdown. Without a contribution that
-  supplies the document, a unit with changes has none either, as before.
+- A unit's blocks are found in the copy and must read exactly as its `text`,
+  so a deletion, a move's old place or a pending join never gives a unit
+  another unit's words. The unit's node handler renders them, so a table with
+  merged cells still has none.
+- Without a contribution that supplies the document, or if supplying it fails,
+  a unit with changes has none, as before. Markdown is a convenience, so a
+  fault there does not fail the export.
 - The unit hash does not cover `markdown`, so no pinned hash goes stale.
 
 ### Next release cycle (decided 2026-11-10)

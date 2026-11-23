@@ -148,10 +148,11 @@ export interface SemanticUnit {
    * `text`/`cells` stay for embedding and geometry; the merge never reads them.
    */
   parts?: SemanticPart[];
-   /** Structure-preserving markdown. Simple tables → GFM. Convenience only — a
+  /** Structure-preserving markdown. Simple tables → GFM. Convenience only — a
    * lossy, non-canonical projection. With review `changes`, it reads as the
-   * proposal would — every change accepted — and is omitted when no
-   * contribution can supply that document, rather than mix in redlines. */
+   * proposal would — every change accepted — and only where the proposed
+   * document holds the unit's blocks reading exactly as its `text`; it is
+   * omitted otherwise, rather than mix in redlines or another unit's words. */
   markdown?: string;
   /** Structured rows/cells with spans — emitted for tables GFM can't encode. */
   cells?: TableCells;

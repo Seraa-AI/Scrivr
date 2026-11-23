@@ -267,6 +267,52 @@ describe("a unit with pending changes keeps markdown of the proposed view", () =
     expect(gone?.markdown).toBeUndefined();
   });
 
+  it("has none for a table whose merged cells markdown cannot draw", () => {
+    const cell = (text: string, attrs: Record<string, unknown> = {}) =>
+      ({ type: "tableCell", attrs, content: [{ type: "paragraph", content: [{ type: "text", text }] }] });
+    const editor = new ServerEditor({
+      extensions: [StarterKit.configure({ table: true }), TrackChanges.configure({ userID: "alice", initialStatus: TrackChangesStatus.enabled })],
+      content: { type: "doc", content: [{ type: "table", attrs: { nodeId: "t1" }, content: [
+        { type: "tableRow", content: [cell("wide", { gridSpan: 2 })] },
+        { type: "tableRow", content: [cell("a"), cell("b")] },
+      ] }] },
+    });
+    let at = -1;
+    editor.getState().doc.descendants((node, pos) => { if (at < 0 && node.isText && node.text === "a") at = pos + 1; });
+    editor.applyTransaction(editor.getState().tr.insertText("Z", at));
+
+    const unit = toSemanticUnits(editor)[0]!;
+    expect(unit.changes?.length).toBeGreaterThan(0);
+    expect(unit.markdown).toBeUndefined();
+  });
+
+  it("has none for a block's old place when a move is pending", () => {
+    const editor = suggesting([para("p1", [{ type: "text", text: "first" }]), para("p2", [{ type: "text", text: "second" }])]);
+    const first = editor.getState().doc.child(0);
+    const tr = editor.getState().tr.delete(0, first.nodeSize);
+    editor.applyTransaction(tr.insert(tr.doc.content.size, first));
+
+    const withMarkdown = toSemanticUnits(editor).filter((unit) => unit.markdown?.includes("first"));
+    expect(withMarkdown).toHaveLength(1);
+    expect(withMarkdown[0]!.proposedForDeletion).not.toBe(true);
+  });
+
+  it("does not take the next paragraph's text when a join is pending", () => {
+    const editor = suggesting([para("p1", [{ type: "text", text: "aaa" }]), para("p2", [{ type: "text", text: "bbb" }])]);
+    const boundary = editor.getState().doc.child(0).nodeSize;
+    editor.applyTransaction(editor.getState().tr.delete(boundary - 1, boundary + 1));
+
+    const units = toSemanticUnits(editor);
+    expect(units.filter((unit) => unit.markdown?.includes("bbb"))).toHaveLength(1);
+  });
+
+  it("does not take the next paragraph's words when a deletion runs across the break", () => {
+    const editor = suggesting([para("p1", [{ type: "text", text: "first" }]), para("p2", [{ type: "text", text: "second" }])]);
+    editor.applyTransaction(editor.getState().tr.delete(4, 10));
+
+    expect(toSemanticUnits(editor).filter((unit) => unit.markdown?.includes("cond"))).toEqual([]);
+  });
+
   it("leaves the original view as it reads", () => {
     const editor = suggesting([para("p1", [{ type: "text", text: "keep this" }])]);
     editor.applyTransaction(editor.getState().tr.insertText(" new", 10));

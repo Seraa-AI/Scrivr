@@ -48,7 +48,7 @@ export function walkSemantic(
   const units: SemanticUnit[] = [];
   const stack: { level: number; title: string }[] = [];
   let order = 0;
-  const proposed = proposedBlocks(doc, handlers, view);
+  const proposed = proposedBlocksOnce(doc, handlers, view);
 
   // What the proposed view leaves out of a title: what the lane reports
   // removed, and a text run its mark handlers drop (a tracked deletion).
@@ -135,7 +135,9 @@ export function walkSemantic(
     if (spans.map((s) => s.text).join("") === text && spans.some((s) => s.marks.length > 0)) {
       unit.spans = spans;
     }
-    const markdown = changes.length === 0 ? result.markdown ?? ctx.toMarkdown(nodes) : proposedMarkdown(nodeIds, proposed, ctx);
+    const markdown = changes.length === 0
+      ? result.markdown ?? ctx.toMarkdown(nodes)
+      : proposedMarkdown(nodeIds, text, proposed(), handlers, ctx);
     if (markdown.length > 0) unit.markdown = markdown;
     if (result.cells !== undefined) unit.cells = result.cells;
     if (result.image !== undefined) unit.image = result.image;
@@ -153,18 +155,25 @@ export function walkSemantic(
 }
 
 /**
- * The blocks of the proposed document — every pending change accepted — by
- * id, built once and only when a unit asks: null when the view is not the
- * proposed one, or no contribution can supply that document.
+ * A getter for the blocks of the proposed document — every pending change
+ * accepted — by id, built on the first call only, so a call with no changes
+ * never builds it. Null when the view is not the proposed one, no contribution
+ * supplies that document, or supplying it fails: markdown is a convenience, so
+ * it is left out rather than the whole export failing.
  */
-function proposedBlocks(doc: PmNode, handlers: ResolvedHandlers, view: SemanticTextView): () => Map<string, PmNode> | null {
+function proposedBlocksOnce(doc: PmNode, handlers: ResolvedHandlers, view: SemanticTextView): () => Map<string, PmNode> | null {
   let blocks: Map<string, PmNode> | null | undefined;
   return () => {
     if (blocks !== undefined) return blocks;
     blocks = null;
     if (view !== "proposed") return blocks;
     for (const supply of handlers.proposedDocuments) {
-      const accepted = supply(doc);
+      let accepted: PmNode | null;
+      try {
+        accepted = supply(doc);
+      } catch {
+        return blocks;
+      }
       if (!accepted) continue;
       const byId = new Map<string, PmNode>();
       accepted.forEach((node) => {
@@ -179,15 +188,27 @@ function proposedBlocks(doc: PmNode, handlers: ResolvedHandlers, view: SemanticT
 }
 
 /**
- * A unit with changes as markdown: its blocks as the proposal leaves them. A
- * block proposed for deletion has none; without the proposed document there is
- * no markdown, rather than the live blocks' redlines.
+ * A unit with changes as markdown: its blocks as the proposal leaves them,
+ * through the same node handler, so one that declines markdown (a table with
+ * merged cells) still does. Only where the proposed document holds every one of
+ * the unit's blocks and they read exactly as its text — not for a block
+ * proposed for deletion, a move's old place, a block a pending deletion joins
+ * to the next, or one with no stored id — so a unit never carries another
+ * unit's words. Without the proposed document there is none, rather than the
+ * live blocks' redlines.
  */
-function proposedMarkdown(nodeIds: readonly string[], proposed: () => Map<string, PmNode> | null, ctx: UnitCtx): string {
-  const blocks = proposed();
+function proposedMarkdown(
+  nodeIds: readonly string[],
+  text: string,
+  blocks: Map<string, PmNode> | null,
+  handlers: ResolvedHandlers,
+  ctx: UnitCtx,
+): string {
   if (!blocks) return "";
-  const nodes = nodeIds.flatMap((id) => blocks.get(id) ?? []);
-  return nodes.length > 0 ? ctx.toMarkdown(nodes) : "";
+  const nodes = nodeIds.map((id) => blocks.get(id));
+  if (!nodes.every((node): node is PmNode => node !== undefined) || ctx.toText(nodes) !== text) return "";
+  const handled = handlers.nodes[nodes[0]!.type.name]?.(nodes[0]!, ctx);
+  return handled?.markdown ?? ctx.toMarkdown(nodes);
 }
 
 /** Location label for a positional container level in a part breadcrumb. */

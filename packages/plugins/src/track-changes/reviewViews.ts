@@ -14,7 +14,7 @@ const VIEW_READER = "semantic:view";
  * nothing is pending: the original is `doc` itself.
  */
 export function originalDocument(doc: PMNode): { doc: PMNode; mapping: Mapping } | null {
-  return everyChangeDecided(doc, "rejected");
+  return decideEveryChange(doc, "rejected");
 }
 
 /**
@@ -22,7 +22,7 @@ export function originalDocument(doc: PMNode): { doc: PMNode; mapping: Mapping }
  * them leaves. Null when nothing is pending: the proposal is `doc` itself.
  */
 export function proposedDocument(doc: PMNode): PMNode | null {
-  return everyChangeDecided(doc, "accepted")?.doc ?? null;
+  return decideEveryChange(doc, "accepted")?.doc ?? null;
 }
 
 /**
@@ -32,7 +32,7 @@ export function proposedDocument(doc: PMNode): PMNode | null {
  * review that cannot be carried out is an engine fault, reported rather than
  * read as some other document.
  */
-function everyChangeDecided(doc: PMNode, decision: "accepted" | "rejected"): { doc: PMNode; mapping: Mapping } | null {
+function decideEveryChange(doc: PMNode, decision: "accepted" | "rejected"): { doc: PMNode; mapping: Mapping } | null {
   const state = EditorState.create({ doc });
   const changeSet = findChanges(state);
   const ids = changeSet.pending.map((change) => change.id);
