@@ -77,7 +77,7 @@ Each returns whether it ran — `false` when it did not apply, or in a read-only
 
 ```ts
 editor.commands.toggleBold();
-editor.commands.setHeading2();
+editor.commands.setHeading({ level: 2 });
 editor.commands.undo();
 ```
 

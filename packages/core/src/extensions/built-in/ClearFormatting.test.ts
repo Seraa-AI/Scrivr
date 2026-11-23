@@ -78,7 +78,7 @@ describe("ClearFormatting", () => {
 
   it("converts heading to paragraph", () => {
     const editor = makeEditor();
-    run(editor, "setHeading1");
+    run(editor, "setHeading", { level: 1 });
     type(editor, "Title");
     // cursor is inside heading — no need for selectAll
     expect(editor.getBlockInfo().blockType).toBe("heading");

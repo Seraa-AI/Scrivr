@@ -1007,10 +1007,10 @@ describe("Editor — CursorManager", () => {
 // ── Heading commands ─────────────────────────────────────────────────────────
 
 describe("Editor — heading commands", () => {
-  it("setHeading1 converts the current paragraph to h1", () => {
+  it("setHeading converts the current paragraph to h1", () => {
     const { editor, type, cleanup } = makeEditor();
     type("Hello");
-    editor.commands["setHeading1"]?.();
+    editor.commands.setHeading({ level: 1 });
     const info = editor.getBlockInfo();
     expect(info.blockType).toBe("heading");
     expect(info.blockAttrs["level"]).toBe(1);
@@ -1020,7 +1020,7 @@ describe("Editor — heading commands", () => {
   it("setParagraph converts a heading back to paragraph", () => {
     const { editor, type, cleanup } = makeEditor();
     type("Hello");
-    editor.commands["setHeading1"]?.();
+    editor.commands.setHeading({ level: 1 });
     editor.commands["setParagraph"]?.();
     const info = editor.getBlockInfo();
     expect(info.blockType).toBe("paragraph");
@@ -1144,7 +1144,7 @@ describe("Editor — alignment commands", () => {
   it("setAlignCenter preserves heading level attr", () => {
     const { editor, type, cleanup } = makeEditor();
     type("Hello");
-    editor.commands["setHeading2"]?.();
+    editor.commands.setHeading({ level: 2 });
     editor.commands["setAlignCenter"]?.();
     const info = editor.getBlockInfo();
     expect(info.blockType).toBe("heading");

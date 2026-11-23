@@ -37,28 +37,28 @@ export interface UseSlashMenuOptions {
 }
 
 /**
- * Short glyph for an entry, by the command it runs.
+ * Short glyph for an entry, by its id.
  *
  * A spec carries no icon: Scrivr contributes no renderer, so what an entry
- * looks like is the host's business — the same split the playground toolbar
- * makes, keying its Lucide icons off `item.command`. An entry whose command is
- * not listed here renders with no glyph rather than a wrong one.
+ * looks like is the host's business. Keyed by id, not command: every heading
+ * level runs the same `setHeading`. An entry not listed here renders with no
+ * glyph rather than a wrong one.
  */
-const GLYPHS: Partial<Record<SlashCommandSpec["command"], string>> = {
-  setParagraph: "¶",
-  setHeading1: "H1",
-  setHeading2: "H2",
-  setHeading3: "H3",
-  toggleBulletList: "•",
-  toggleOrderedList: "1.",
-  toggleCodeBlock: "<>",
-  insertHorizontalRule: "—",
+const GLYPHS: Partial<Record<string, string>> = {
+  "heading.paragraph": "¶",
+  "heading.1": "H1",
+  "heading.2": "H2",
+  "heading.3": "H3",
+  "list.bullet": "•",
+  "list.ordered": "1.",
+  "codeBlock.insert": "<>",
+  "horizontalRule.insert": "—",
 };
 
 /** Turn an extension's declared entry into something this menu can render. */
 function toItem(editor: Editor, spec: SlashCommandSpec): SlashMenuItem {
   return {
-    label: GLYPHS[spec.command] ?? "",
+    label: GLYPHS[spec.id] ?? "",
     title: spec.label,
     description: spec.description ?? "",
     id: spec.id,

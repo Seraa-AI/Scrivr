@@ -1,5 +1,5 @@
-import { setBlockType } from "prosemirror-commands";
-import type { Node } from "prosemirror-model";
+import type { Attrs, Node, NodeType } from "prosemirror-model";
+import type { Command, EditorState } from "prosemirror-state";
 import type { PdfNodeHandler } from "../../exports/pdf";
 import { textblockTypeInputRule } from "prosemirror-inputrules";
 import { Extension } from "../Extension";
@@ -116,24 +116,32 @@ export const Heading = Extension.create<HeadingOptions>({
   },
 
   addKeymap() {
-    const km: Record<string, ReturnType<typeof setBlockType>> = {};
+    const km: Record<string, Command> = {};
     for (const level of this.options.levels) {
-      km[`Mod-Alt-${level}`] = setBlockType(this.schema.nodes["heading"]!, {
-        level,
-      });
+      km[`Mod-Alt-${level}`] = setTextblock(this.schema.nodes["heading"]!, { level });
     }
-    km["Mod-Alt-0"] = setBlockType(this.schema.nodes["paragraph"]!);
+    km["Mod-Alt-0"] = setTextblock(this.schema.nodes["paragraph"]!, {});
     return km;
   },
 
   addCommands() {
-    const cmds: Record<string, () => ReturnType<typeof setBlockType>> = {};
-    for (const level of this.options.levels) {
-      cmds[`setHeading${level}`] = () =>
-        setBlockType(this.schema.nodes["heading"]!, { level });
-    }
-    cmds["setParagraph"] = () => setBlockType(this.schema.nodes["paragraph"]!);
-    return cmds;
+    const heading = this.schema.nodes["heading"]!;
+    const paragraph = this.schema.nodes["paragraph"]!;
+    const { levels } = this.options;
+    return {
+      setHeading: (attrs: unknown): Command => (state, dispatch) => {
+        const level = configuredLevel(attrs, levels);
+        return level !== null && setTextblock(heading, { level })(state, dispatch);
+      },
+      toggleHeading: (attrs: unknown): Command => (state, dispatch) => {
+        const level = configuredLevel(attrs, levels);
+        if (level === null) return false;
+        return everyBlockIsHeading(state, heading, level)
+          ? setTextblock(paragraph, {})(state, dispatch)
+          : setTextblock(heading, { level })(state, dispatch);
+      },
+      setParagraph: (): Command => setTextblock(paragraph, {}),
+    };
   },
 
   addLayoutHandlers() {
@@ -264,8 +272,9 @@ export const Heading = Extension.create<HeadingOptions>({
   addToolbarItems(): ToolbarItemSpec[] {
     const items: ToolbarItemSpec[] = this.options.levels
       .slice(0, 3)
-      .map((level) => ({
-        command: `setHeading${level}`,
+      .map((level): ToolbarItemSpec => ({
+        command: "setHeading",
+        args: [{ level }],
         label: `H${level}`,
         title: `Heading ${level} (⌘⌥${level})`,
         group: "heading",
@@ -300,12 +309,79 @@ export const Heading = Extension.create<HeadingOptions>({
           description: HEADING_DESCRIPTIONS[level] ?? `Level ${level} heading`,
           group: "blocks",
           order: 20 + i * 10,
-          command: `setHeading${level}`,
+          command: "setHeading",
+          args: [{ level }],
         })),
       ],
     }];
   },
 });
+
+/**
+ * The level a caller asked for, when the editor was configured with it.
+ *
+ * A toolbar or slash spec carries its args untyped, so a missing or malformed
+ * level refuses like an unconfigured one: a kit built with fewer levels has no
+ * style for the rest.
+ */
+function configuredLevel(attrs: unknown, levels: readonly HeadingLevel[]): HeadingLevel | null {
+  if (typeof attrs !== "object" || attrs === null || !("level" in attrs)) return null;
+  return levels.find((level) => level === attrs.level) ?? null;
+}
+
+/**
+ * Turns the selected textblocks into `type` with `attrs`, keeping what else
+ * they carry that `type` has too: alignment, indent, id.
+ */
+function setTextblock(type: NodeType, attrs: Attrs): Command {
+  return (state, dispatch) => {
+    const tr = state.tr;
+    for (const { from, to } of headingSpans(state)) {
+      tr.setBlockType(tr.mapping.map(from), tr.mapping.map(to), type, (node) => ({ ...node.attrs, ...attrs }));
+    }
+    if (!tr.docChanged) return false;
+    dispatch?.(tr.scrollIntoView());
+    return true;
+  };
+}
+
+/**
+ * The selected ranges, less the empty paragraph a document ends in when a
+ * range starts before it and runs past it, as only Select All does. Select All
+ * takes in the one TrailingNode keeps after a closing heading, and restyling it
+ * would make TrailingNode add another, one more for every press. A selection
+ * that ends inside that line still changes it.
+ */
+function headingSpans(state: EditorState): { from: number; to: number }[] {
+  const { doc } = state;
+  const last = doc.lastChild;
+  const lastStart = doc.content.size - (last?.nodeSize ?? 0);
+  const endsEmpty = last !== null && last.type.name === "paragraph" && last.content.size === 0;
+  return state.selection.ranges.map(({ $from, $to }) => ({
+    from: $from.pos,
+    to: endsEmpty && $from.pos < lastStart && $to.pos >= doc.content.size ? lastStart : $to.pos,
+  }));
+}
+
+/**
+ * Whether every textblock the heading commands would change already is a
+ * heading of `level`. One that is not means a toggle sets the heading on all of them, as
+ * Word does when a style meets a mixed selection.
+ */
+function everyBlockIsHeading(state: EditorState, heading: NodeType, level: HeadingLevel): boolean {
+  let touched = false;
+  let every = true;
+  for (const { from, to } of headingSpans(state)) {
+    state.doc.nodesBetween(from, to, (node) => {
+      if (!node.isTextblock) return true;
+      touched = true;
+      // An imported heading can carry its level as text.
+      if (node.type !== heading || Number(node.attrs["level"]) !== level) every = false;
+      return false;
+    });
+  }
+  return touched && every;
+}
 
 /** Relative size, which is what a reader picking a heading is choosing between. */
 const HEADING_DESCRIPTIONS: Record<number, string> = {
@@ -317,8 +393,10 @@ const HEADING_DESCRIPTIONS: Record<number, string> = {
 declare module "@scrivr/core" {
   interface Commands<ReturnType> {
     heading: {
-      [K in 1 | 2 | 3 | 4 | 5 | 6 as `setHeading${K}`]: () => ReturnType;
-    } & {
+      /** Set the current block to a heading of `level`. False for a level the editor was not configured with. */
+      setHeading: (attrs: { level: HeadingLevel }) => ReturnType;
+      /** Set the selected blocks to a heading of `level`, or back to paragraphs when every one already is a heading of that level. False for a level the editor was not configured with. */
+      toggleHeading: (attrs: { level: HeadingLevel }) => ReturnType;
       /** Set the current block to a plain paragraph. */
       setParagraph: () => ReturnType;
     };

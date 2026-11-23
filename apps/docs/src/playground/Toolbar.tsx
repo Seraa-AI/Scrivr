@@ -51,9 +51,6 @@ const ICON_MAP: Record<string, LucideIcon> = {
   setAlignCenter: AlignCenter,
   setAlignRight: AlignRight,
   setAlignJustify: AlignJustify,
-  setHeading1: Heading1,
-  setHeading2: Heading2,
-  setHeading3: Heading3,
   setParagraph: Pilcrow,
   toggleBulletList: List,
   toggleOrderedList: ListOrdered,
@@ -66,6 +63,9 @@ const ICON_MAP: Record<string, LucideIcon> = {
   importDocxFromFile: FileUp,
   importHtmlFromFile: FileCode,
 };
+
+/** Every heading level runs `setHeading`, so its icon is chosen by the item's label. */
+const HEADING_ICONS: Record<string, LucideIcon> = { H1: Heading1, H2: Heading2, H3: Heading3 };
 
 /**
  * Toolbar — data-driven from extension ToolbarItemSpecs.
@@ -204,7 +204,7 @@ function ButtonLabel({ item }: { item: ToolbarItemSpec }) {
   }
 
   // Lucide icon if we have a mapping
-  const Icon = ICON_MAP[item.command];
+  const Icon = item.command === "setHeading" ? HEADING_ICONS[item.label] : ICON_MAP[item.command];
   if (Icon) return <Icon size={14} strokeWidth={2} />;
 
   // Fallback to text label

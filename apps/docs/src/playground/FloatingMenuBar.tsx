@@ -18,17 +18,17 @@ function useBlockItems(editor: Editor | null): BlockItem[] {
       {
         label: "H1",
         title: "Heading 1",
-        action: (e) => e.commands.setHeading1(),
+        action: (e) => e.commands.setHeading({ level: 1 }),
       },
       {
         label: "H2",
         title: "Heading 2",
-        action: (e) => e.commands.setHeading2(),
+        action: (e) => e.commands.setHeading({ level: 2 }),
       },
       {
         label: "H3",
         title: "Heading 3",
-        action: (e) => e.commands.setHeading3(),
+        action: (e) => e.commands.setHeading({ level: 3 }),
       },
       {
         label: "•",

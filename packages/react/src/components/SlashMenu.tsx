@@ -13,7 +13,7 @@
  *   // Replacing the entries entirely:
  *   <SlashMenu editor={editor} items={[
  *     { id: "my.h1", label: "H1", title: "Heading 1", description: "Large title",
- *       action: () => editor.commands.setHeading1() },
+ *       action: () => editor.commands.setHeading({ level: 1 }) },
  *   ]} />
  */
 import { createPortal } from "react-dom";

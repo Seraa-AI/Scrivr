@@ -287,9 +287,10 @@ not reorder the menu.
 
 *Where the glyph comes from.* The spec has `label` and `description` and no icon,
 which is right under §5 ("Scrivr contributes no renderer"). The React menu
-therefore keys a glyph off `spec.command`, the same way the playground toolbar
-keys its Lucide icons off `item.command`. An entry whose command is not in that
-map renders without a glyph rather than a wrong one.
+therefore keys a glyph off `spec.id`, not `spec.command`: every heading level
+runs the same `setHeading` with its level in `args`, so only the id tells them
+apart. An entry whose id is not in that map renders without a glyph rather than
+a wrong one.
 
 `SlashMenuItem` carries `id` and `group` through to the renderer. Dropping them
 meant the one shipped menu keyed on a title — fine for eight fixed entries, but

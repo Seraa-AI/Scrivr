@@ -22,21 +22,21 @@ describe("TrailingNode", () => {
   it("can be added by a host that leaves it out of StarterKit", () => {
     const e = new ServerEditor({ extensions: [StarterKit.configure({ trailingNode: false }), TrailingNode, Typography], content: { type: "doc", content: [p("one")] } });
     caretAt(e, 2);
-    e.commands.setHeading1();
+    e.commands.setHeading({ level: 1 });
     expect(blocks(e)).toEqual(["heading:one", "paragraph:"]);
   });
 
   it("adds a paragraph after a last block that is not one", () => {
     const e = editor(p("one"));
     caretAt(e, 2);
-    e.commands.setHeading1();
+    e.commands.setHeading({ level: 1 });
     expect(blocks(e)).toEqual(["heading:one", "paragraph:"]);
   });
 
   it("takes its paragraph away once the last block is a paragraph again", () => {
     const e = editor(p("one"));
     caretAt(e, 2);
-    e.commands.setHeading1();
+    e.commands.setHeading({ level: 1 });
     e.commands.setParagraph();
     expect(blocks(e)).toEqual(["paragraph:one"]);
   });
@@ -44,7 +44,7 @@ describe("TrailingNode", () => {
   it("keeps the paragraph once someone has typed in it", () => {
     const e = editor(p("one"));
     caretAt(e, 2);
-    e.commands.setHeading1();
+    e.commands.setHeading({ level: 1 });
     const end = e.getState().doc.content.size - 1;
     e.applyTransaction(e.getState().tr.insertText("two", end));
     caretAt(e, 2);
@@ -55,7 +55,7 @@ describe("TrailingNode", () => {
   it("keeps the paragraph for someone already in it", () => {
     const e = editor(p("one"));
     caretAt(e, 2);
-    e.commands.setHeading1();
+    e.commands.setHeading({ level: 1 });
     caretAt(e, e.getState().doc.content.size - 1);
     e.applyTransaction(e.getState().tr.setNodeMarkup(0, e.getState().schema.nodes.paragraph));
     expect(blocks(e)).toEqual(["paragraph:one", "paragraph:"]);
@@ -64,7 +64,7 @@ describe("TrailingNode", () => {
   it("keeps a paragraph someone was in after they click away and back", () => {
     const e = editor(p("one"));
     caretAt(e, 2);
-    e.commands.setHeading1();
+    e.commands.setHeading({ level: 1 });
     const end = e.getState().doc.content.size - 1;
     caretAt(e, end);
     e.applyTransaction(e.getState().tr.setNodeMarkup(0, e.getState().schema.nodes.paragraph));
@@ -77,7 +77,7 @@ describe("TrailingNode", () => {
   it("takes the paragraph away from a caret the edit moved into it", () => {
     const e = editor(p("one"));
     caretAt(e, 2);
-    e.commands.setHeading1();
+    e.commands.setHeading({ level: 1 });
     const tr = e.getState().tr.setNodeMarkup(0, e.getState().schema.nodes.paragraph);
     e.applyTransaction(tr.setSelection(TextSelection.create(tr.doc, tr.doc.content.size - 1)));
     expect(blocks(e)).toEqual(["paragraph:one"]);
