@@ -454,6 +454,11 @@ const REFUSAL_WORDS: Record<Exclude<ExecutedPdfRefusal["reason"] | CertificateRe
   "undated-signature": "a signature carries no time.",
   "signed-after-completed": "a signature is dated after completion.",
   "events-out-of-order": "the record's events are out of order.",
+  "unprintable-certificate": "the room cannot print the certificate's titles, paragraphs or images.",
+  "verified-slot": "the certificate layout does not show what was checked exactly once.",
+  "record-slot": "the certificate layout does not show the record exactly once.",
+  "duplicate-signature-slot": "the certificate layout places one role's signatures twice.",
+  "invalid-content": "the certificate is not a document the room can open.",
 };
 
 const pdfUrl = (bytes: Uint8Array): string => URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: "application/pdf" }));
