@@ -5,7 +5,7 @@
  * host customises a built-in it finds limiting.
  */
 import { describe, expect, it } from "vitest";
-import { Bold, Extension, Heading, ServerEditor, StarterKit, type ExtendConfig } from "../index";
+import { Bold, Extension, Heading, Paragraph, ServerEditor, StarterKit, type ExtendConfig, type Phase1Context } from "../index";
 
 const doc = { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "hello" }] }] };
 
@@ -92,7 +92,7 @@ describe("Extension.extend", () => {
   it("passes hook arguments to the override and on to parent", () => {
     const got: unknown[] = [];
     const Base = Extension.create({ name: "life", onEditorReady(editor) { got.push(["base", editor === undefined]); } });
-    const Extended = Base.extend({ onEditorReady(editor) { got.push(["over", editor === undefined]); this.parent?.(editor); } });
+    const Extended = Base.extend({ onEditorReady(editor) { got.push(["over", editor === undefined]); return this.parent?.(editor); } });
     new ServerEditor({ extensions: [StarterKit, Extended], content: doc });
 
     expect(got).toEqual([["over", false], ["base", false]]);
@@ -100,10 +100,34 @@ describe("Extension.extend", () => {
 
   it("extends a bundle: StarterKit with one more child", () => {
     const Stamp = Extension.create({ name: "stamp", addMarks() { return { stamp: { toDOM: () => ["span", 0] } }; } });
+    // The context most hooks run in is public, so a host can type a hook it writes apart.
+    const context: Phase1Context | null = null;
+    expect(context).toBeNull();
     const withStamp: ExtendConfig = { addExtensions() { return [...(this.parent?.() ?? []), Stamp]; } };
     const editor = new ServerEditor({ extensions: [StarterKit.extend(withStamp)], content: doc });
 
     expect(editor.getState().schema.marks["stamp"]).toBeDefined();
     expect(editor.getState().schema.marks["bold"]).toBeDefined();
+  });
+
+  it("a lifecycle override that returns parent's cleanup keeps it", () => {
+    let cleaned = false;
+    const Base = Extension.create({ name: "sub", onEditorReady() { return () => { cleaned = true; }; } });
+    const Extended = Base.extend({ onEditorReady(editor) { return this.parent?.(editor); } });
+    new ServerEditor({ extensions: [StarterKit, Extended], content: doc }).destroy();
+
+    expect(cleaned).toBe(true);
+  });
+
+  it("replaces a StarterKit child in place, so Paragraph stays the default block", () => {
+    const MyParagraph = Paragraph.extend({});
+    const Kit = StarterKit.extend({
+      addExtensions() {
+        return (this.parent?.() ?? []).map((child) => (child.name === "paragraph" ? MyParagraph : child));
+      },
+    });
+    const editor = new ServerEditor({ extensions: [Kit], content: doc });
+
+    expect(editor.getState().schema.topNodeType.contentMatch.defaultType?.name).toBe("paragraph");
   });
 });

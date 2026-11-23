@@ -26,8 +26,11 @@
   - The new extension starts from the original's current options, so a configured extension extends as configured.
   - `overrides.defaultOptions` merges over them, and `configure` applies after, as for any extension.
   - The new options type must extend the original's, because the original's hooks still read them.
-- **Name and keymap priority** carry over unless `overrides` names them.
-- **Replacing a StarterKit child:** turn it off in `StarterKit.configure` and list the extended one. Otherwise both register the same node or mark, and the later one wins with a warning. Bundles extend like any extension, through `addExtensions` and `parent`.
+- **Name and keymap priority** carry over unless `overrides` names them. A new name renames only the extension: the keys its hooks contribute stay the same.
+- **Lifecycle hooks:** an `onEditorReady` or `onViewReady` override returns the parent's cleanup, or combines it with its own.
+- **Replacing a StarterKit child:** turn it off in `StarterKit.configure` and list the extended one. Otherwise both register the same node or mark, and the later one wins with a warning.
+- **Replacing Paragraph:** it must be replaced in place, by mapping `this.parent()` in `StarterKit.extend({ addExtensions })`. The first block type registered is the one an empty document starts with. Bundles extend like any extension.
+- **Declined from review:** keeping the stored config as a strict `ExtensionConfig`, without explicitly `undefined` hooks. The private config names every hook so that the compiler checks `extend` covers each one, and every reader calls hooks with `?.call`.
 
 ### Rejected
 
@@ -36,7 +39,7 @@
 
 ## What shipped
 
-- `Extension.prototype.extend` in `@scrivr/core`, with the `ExtendConfig`, `ExtendHookContext` and `ExtensionHookName` types exported.
+- `Extension.prototype.extend` in `@scrivr/core`, with the `ExtendConfig`, `ExtendHookContext`, `ExtensionHookName` and `Phase1Context` types exported.
 - Tests in `packages/core/src/extensions/extend.test.ts`, covering:
   - a node attribute added to Heading;
   - a command added beside Bold's;
@@ -46,5 +49,7 @@
   - `parent` being `undefined` with no original hook;
   - option merging with `configure` after `extend`;
   - lifecycle hook arguments;
-  - extending StarterKit with a child.
+  - extending StarterKit with a child;
+  - a lifecycle override keeping the parent's cleanup;
+  - replacing Paragraph in place, so it stays the default block.
 - A "Customising a built-in extension" section in the custom extensions guide.

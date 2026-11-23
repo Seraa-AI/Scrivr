@@ -124,6 +124,7 @@ export type {
   PasteFileHandler,
   PasteFileSpec,
   InitialDocContext,
+  Phase1Context,
   IBaseEditor,
   IEditor,
   ResolvedExtension,

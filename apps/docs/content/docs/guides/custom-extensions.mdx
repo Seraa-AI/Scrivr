@@ -119,7 +119,7 @@ export function registerHighlightPainter(editor) {
 When a built-in does almost what you need, `extend` makes a new extension from it without copying it. A hook you declare replaces the original's. `this.parent` calls the original's hook with the same context and arguments, so you can change its result or add to it. Any hook you leave out stays the original's.
 
 ```typescript
-import { Bold, Heading, StarterKit } from "@scrivr/core";
+import { Bold, Editor, Heading, StarterKit } from "@scrivr/core";
 
 // One more attribute on the heading node; everything else stays Heading's.
 const AnchoredHeading = Heading.extend({
@@ -142,9 +142,19 @@ new Editor({
 ```
 
 - **Replacing a built-in that StarterKit includes:** turn it off in `StarterKit.configure` and list your extended one, as above. Otherwise both register the same node or mark, and the later one wins with a warning.
+- **Replacing Paragraph:** do it in place, because order matters there. The first block type registered is the one an empty document starts with, and StarterKit lists Paragraph first:
+
+  ```typescript
+  const Kit = StarterKit.extend({
+    addExtensions() {
+      return (this.parent?.() ?? []).map((child) => (child.name === "paragraph" ? MyParagraph : child));
+    },
+  });
+  ```
+- **Lifecycle hooks:** an `onEditorReady` or `onViewReady` override should `return this.parent?.(editor)`, or combine it with its own cleanup. Otherwise the original's cleanup never runs on `destroy()`.
 - **No original hook:** `this.parent` is `undefined` when the original doesn't declare that hook. Writing `this.parent?.()` handles both cases.
-- **Options:** the extended extension starts from the original's current options, so a configured extension extends as configured. `defaultOptions` merges over them, and `configure` still works afterwards. New options must keep the original's, because its hooks still read them.
-- **Name:** pass `name` to give the extended extension its own name, so it can sit beside the original.
+- **Options:** the extended extension starts from the original's current options, so a configured extension extends as configured. `defaultOptions` merges over them, and `configure` still works afterwards. New options must keep the original's, because its hooks still read them. You can add options, but not narrow the type of an inherited one.
+- **Name:** `name` changes only the extension's own name, the one `findExtension` answers to. The nodes, marks and commands its hooks contribute keep their keys. To run beside the original, also override the hooks whose keys would clash.
 - **Chaining:** `extend` can be chained, and each layer's `parent` is the one below it.
 - **Bundles:** a bundle extends the same way. `StarterKit.extend({ addExtensions() { return [...(this.parent?.() ?? []), MyExtension]; } })` adds a child to it.
 

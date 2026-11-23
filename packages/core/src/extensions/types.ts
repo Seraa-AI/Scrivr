@@ -1317,7 +1317,7 @@ export interface ExtensionConfig<Options = object> {
   addInputHandlers?(this: Phase1Context<Options>): Record<string, InputHandler>;
 }
 
-/** An `ExtensionConfig` hook: everything but its identity and settings. */
+/** The name of an `ExtensionConfig` hook: every key but `name`, `defaultOptions` and `keymapPriority`. */
 export type ExtensionHookName = Exclude<keyof ExtensionConfig, "name" | "defaultOptions" | "keymapPriority">;
 
 /**
@@ -1339,7 +1339,9 @@ type ExtendHook<Hook> = Hook extends (this: infer Context, ...args: infer Args) 
  * `this.parent`; one left out stays the original's.
  */
 export type ExtendConfig<Options = object> = {
+  /** The extended extension's own name. The keys its hooks contribute are unchanged. */
   name?: string;
+  /** Merged over the extended extension's current, configured options. */
   defaultOptions?: Partial<Options>;
   keymapPriority?: number;
 } & {
