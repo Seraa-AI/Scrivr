@@ -326,7 +326,7 @@ Columns, also on plan 155's later list, is its own RFC
   - superseding formatting;
   - list and attribute records;
   - the lanes' withdraw.
-- `insertAsSuggestion` does not take an operation id yet.
+- `insertAsSuggestion` takes it as its fifth argument.
 - It is accepted by:
   - `trackAsSuggestion(tr, authorID, { operationId })`;
   - `applyAiSuggestion`;

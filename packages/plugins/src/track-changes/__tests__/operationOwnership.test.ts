@@ -103,4 +103,11 @@ describe("two suggestions by one author", () => {
     expect(acts.every((act) => new Set(act.records.map((r) => r.dataTracked.operationId)).size === 1)).toBe(true);
     expect(acts.length).toBeGreaterThanOrEqual(2);
   });
+
+  it("insertAsSuggestion stores the operation id it is given", () => {
+    const editor = editorOf([para("p", "teh cat")]);
+    editor.commands.insertAsSuggestion("the", 1, 4, "ai", "row-7");
+    expect(pending(editor).length).toBeGreaterThan(0);
+    expect(pending(editor).every((c) => c.dataTracked.operationId === "row-7")).toBe(true);
+  });
 });
