@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Node } from "prosemirror-model";
+import { closeHistory } from "prosemirror-history";
 import { AllSelection, TextSelection, type Selection } from "prosemirror-state";
 import { ServerEditor } from "../../ServerEditor";
 import { StarterKit } from "../StarterKit";
@@ -115,6 +116,29 @@ describe("TrailingNode", () => {
     caretAt(e, 2);
     e.commands.setHeading({ level: 1 });
     select(e, doc => TextSelection.create(doc, 1, doc.content.size - 1));
+    toParagraph(e);
+    expect(blocks(e)).toEqual(["paragraph:one"]);
+  });
+
+  it("takes its paragraph away again after an undo brings it back", () => {
+    const e = editor(p("one"));
+    caretAt(e, 2);
+    e.commands.setHeading({ level: 1 });
+    e.applyTransaction(closeHistory(e.getState().tr));
+    toParagraph(e);
+    e.commands.undo();
+    expect(blocks(e)).toEqual(["heading:one", "paragraph:"]);
+    toParagraph(e);
+    expect(blocks(e)).toEqual(["paragraph:one"]);
+  });
+
+  it("takes its paragraph away again after a redo brings it back", () => {
+    const e = editor(p("one"));
+    caretAt(e, 2);
+    e.commands.setHeading({ level: 1 });
+    e.commands.undo();
+    e.commands.redo();
+    expect(blocks(e)).toEqual(["heading:one", "paragraph:"]);
     toParagraph(e);
     expect(blocks(e)).toEqual(["paragraph:one"]);
   });
