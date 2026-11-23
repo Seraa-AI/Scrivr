@@ -25,7 +25,7 @@ pnpm add @scrivr/core @scrivr/react
 import { useState } from 'react';
 import {
   useScrivrEditor,
-  useScrivrState,
+  useEditorState,
   Scrivr,
   BubbleMenu,
   SlashMenu,
@@ -75,11 +75,11 @@ export function DocumentEditor({ initialDoc, onUpdate }: DocumentEditorProps) {
 // ── Toolbar ───────────────────────────────────────────────────────────────────
 
 function Toolbar({ editor }: { editor: ReturnType<typeof useScrivrEditor> }) {
-  const isBold = useScrivrState({
+  const isBold = useEditorState({
     editor,
     selector: ({ editor }) => editor?.isActive('bold') ?? false,
   });
-  const isItalic = useScrivrState({
+  const isItalic = useEditorState({
     editor,
     selector: ({ editor }) => editor?.isActive('italic') ?? false,
   });
@@ -92,8 +92,8 @@ function Toolbar({ editor }: { editor: ReturnType<typeof useScrivrEditor> }) {
       <button onClick={() => editor?.commands.toggleItalic()} style={{ fontStyle: isItalic ? 'italic' : 'normal' }}>
         I
       </button>
-      <button onClick={() => editor?.commands.setHeading({ level: 1 })}>H1</button>
-      <button onClick={() => editor?.commands.setHeading({ level: 2 })}>H2</button>
+      <button onClick={() => editor?.commands.setHeading1()}>H1</button>
+      <button onClick={() => editor?.commands.setHeading2()}>H2</button>
       <button onClick={() => editor?.commands.toggleBulletList()}>• List</button>
       <button onClick={() => editor?.commands.undo()}>↩ Undo</button>
       <button onClick={() => editor?.commands.redo()}>↪ Redo</button>
@@ -122,7 +122,7 @@ function FormatButtons({ editor }: { editor: ReturnType<typeof useScrivrEditor> 
 - **`useState` initializer** captures `initialDoc` once at mount time so it is available to `addInitialDoc()` on construction — even if the parent re-renders before the effect fires.
 - **`addInitialDoc()`** is the extension hook that seeds the editor with an initial ProseMirror document. Returning `null` starts with an empty document instead.
 - **`onUpdate`** surfaces changes back to the parent. Debounce or batch this in production before writing to your backend.
-- **`useScrivrState`** makes the toolbar reactive — it re-renders only the toolbar, not the canvas, on each state change.
+- **`useEditorState`** makes the toolbar reactive — it re-renders only the toolbar, not the canvas, on each state change.
 - **`BubbleMenu`** and **`SlashMenu`** are standalone React components from `@scrivr/react` — no manual wiring needed.
 
 ---

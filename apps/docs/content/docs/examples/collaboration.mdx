@@ -50,7 +50,7 @@ console.log('Collaboration server running on ws://localhost:1234');
 ## Frontend Setup
 
 ```tsx title="CollaborativeEditor.tsx"
-import { useScrivrEditor, Scrivr, useScrivrState, StarterKit } from '@scrivr/react';
+import { useScrivrEditor, Scrivr, useEditorState, StarterKit } from '@scrivr/react';
 import { Collaboration, CollaborationCursor } from '@scrivr/plugins/collaboration';
 
 interface Props {
@@ -73,7 +73,7 @@ export function CollaborativeEditor({ documentId, user }: Props) {
     [documentId], // re-initialize when document changes
   );
 
-  const loadingState = useScrivrState({
+  const loadingState = useEditorState({
     editor,
     selector: ({ editor }) => editor?.loadingState,
   });

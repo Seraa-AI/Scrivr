@@ -23,7 +23,7 @@ Here is a full, copy-pasteable implementation of a rich text Bubble Menu that fl
 
 ```tsx title="CustomBubbleMenu.tsx"
 import { useFloating, shift, offset } from "@floating-ui/react";
-import { useScrivrState } from "@scrivr/react";
+import { useEditorState } from "@scrivr/react";
 
 export function CustomBubbleMenu({ editor }) {
 	// 1. Initialize Floating UI
@@ -36,7 +36,7 @@ export function CustomBubbleMenu({ editor }) {
 	});
 
 	// 2. Track ProseMirror selection changes using Scrivr's state selector
-	const selection = useScrivrState({
+	const selection = useEditorState({
 		editor,
 		selector: ctx => ctx.editor.getSelectionSnapshot(),
 	});
