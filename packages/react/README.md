@@ -5,7 +5,7 @@ React bindings for the Scrivr canvas document editor.
 ## Installation
 
 ```bash
-pnpm add @scrivr/core @scrivr/react @scrivr/plugins @scrivr/ai
+pnpm add @scrivr/core @scrivr/react
 ```
 
 ## Quick Start
@@ -101,6 +101,14 @@ import {
   StarterKit, Pagination, defaultPageConfig,
   DEFAULT_FONT_FAMILY, FontFamily, Link,
 } from '@scrivr/react';
+```
+
+Track changes and AI components have their own entries, so an editor-only app installs neither `@scrivr/plugins` nor `@scrivr/ai`:
+
+```ts
+import { TrackChangesPanel, TrackChangesPopover } from '@scrivr/react/track-changes'; // needs @scrivr/plugins
+import { HeaderFooterRibbon } from '@scrivr/react/header-footer'; // needs @scrivr/plugins
+import { AiSuggestionCardsPanel, AiSuggestionPopover } from '@scrivr/react/ai'; // needs @scrivr/ai
 ```
 
 Collaboration is imported from its own entry, so an app without it never loads Yjs:

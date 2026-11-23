@@ -21,17 +21,17 @@ description: Install Scrivr into your project and configure TypeScript.
 <Tabs items={["pnpm", "npm", "yarn"]}>
   <Tab value="pnpm">
     ```bash
-    pnpm add @scrivr/core @scrivr/react @scrivr/plugins @scrivr/ai
+    pnpm add @scrivr/core @scrivr/react
     ```
   </Tab>
   <Tab value="npm">
     ```bash
-    npm install @scrivr/core @scrivr/react @scrivr/plugins @scrivr/ai
+    npm install @scrivr/core @scrivr/react
     ```
   </Tab>
   <Tab value="yarn">
     ```bash
-    yarn add @scrivr/core @scrivr/react @scrivr/plugins @scrivr/ai
+    yarn add @scrivr/core @scrivr/react
     ```
   </Tab>
 </Tabs>
@@ -62,8 +62,8 @@ description: Install Scrivr into your project and configure TypeScript.
 
 | Package | Purpose |
 | --- | --- |
-| `@scrivr/plugins` | **Track Changes**, headers and footers, and **real-time collaboration** (`@scrivr/plugins/collaboration`). `@scrivr/react` needs it. |
-| `@scrivr/ai` | The **AI Toolkit** and AI suggestions. `@scrivr/react` needs it. |
+| `@scrivr/plugins` | **Track Changes**, headers and footers, and **real-time collaboration** (`@scrivr/plugins/collaboration`). Its React components are in `@scrivr/react/track-changes` and `@scrivr/react/header-footer`. |
+| `@scrivr/ai` | The **AI Toolkit** and AI suggestions. Its React components are in `@scrivr/react/ai`. |
 | `@scrivr/export` | Export to paginated **PDF** and **Markdown**. DOCX coming soon. |
 
 ---

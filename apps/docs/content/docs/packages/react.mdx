@@ -12,17 +12,17 @@ building toolbars and menus without excessive re-renders.
 <Tabs items={["pnpm", "npm", "yarn"]}>
   <Tab value="pnpm">
     ```bash
-    pnpm add @scrivr/core @scrivr/react @scrivr/plugins @scrivr/ai
+    pnpm add @scrivr/core @scrivr/react
     ```
   </Tab>
   <Tab value="npm">
     ```bash
-    npm install @scrivr/core @scrivr/react @scrivr/plugins @scrivr/ai
+    npm install @scrivr/core @scrivr/react
     ```
   </Tab>
   <Tab value="yarn">
     ```bash
-    yarn add @scrivr/core @scrivr/react @scrivr/plugins @scrivr/ai
+    yarn add @scrivr/core @scrivr/react
     ```
   </Tab>
 </Tabs>
@@ -179,7 +179,7 @@ function Toolbar() {
 
 ## Menu Components
 
-`@scrivr/react` exports five ready-made floating menu components:
+`@scrivr/react` exports these ready-made floating menu components:
 
 | Component | Description |
 |-----------|-------------|
@@ -188,7 +188,18 @@ function Toolbar() {
 | `LinkPopover` | Popover for inserting and editing links. |
 | `ImageMenu` | Context menu for selected images — alignment, float mode, resize. |
 | `SlashMenu` | `/`-triggered command palette for inserting blocks. |
-| `TrackChangesPopover` | Inline accept/reject popover — appears when the cursor is inside a pending tracked change. Handles single changes and multi-author conflicts. |
+
+### Entry points
+
+The root needs only `@scrivr/core`. Components built on the optional packages have their own entries:
+
+| Import from | Needs | Exports |
+|---|---|---|
+| `@scrivr/react/track-changes` | `@scrivr/plugins` | `TrackChangesPopover`, `TrackChangesPanel`, `useTrackChangesPanel`, `useReviewAction`, `ReviewRefusalNotice`, `describeSuggestionRefusal` and their hooks |
+| `@scrivr/react/header-footer` | `@scrivr/plugins` | `HeaderFooterRibbon` and `useHeaderFooterRibbon` |
+| `@scrivr/react/ai` | `@scrivr/ai` | `AiSuggestionCardsPanel`, `AiSuggestionPopover`, their hooks, and `useBlockMarkerOverlay` |
+
+`TrackChangesPopover` is the inline accept/reject popover that appears when the cursor is inside a pending tracked change. It handles single changes and multi-author conflicts.
 
 ---
 

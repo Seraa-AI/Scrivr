@@ -3,8 +3,8 @@ import { ServerEditor, StarterKit } from "@scrivr/core";
 import { Fragment, ReplaceStep, Slice, Step, StepMap, StepResult, type Node } from "@scrivr/core/pm";
 import { TrackChanges, TrackChangesStatus } from "@scrivr/plugins";
 import type { TrackingRefusal } from "@scrivr/plugins";
-// Through the package entry, as a consumer imports it.
-import { describeSuggestionRefusal } from "../index";
+// Through the track-changes entry, as a consumer imports it.
+import { describeSuggestionRefusal } from "../track-changes";
 
 /** A step kind track changes has no way to record. */
 class ShoutStep extends Step {
