@@ -3,8 +3,10 @@
 "@scrivr/react": patch
 ---
 
-Headings take their level as an argument: `editor.commands.setHeading({ level: 2 })`. The new `toggleHeading({ level })` sets that heading, or turns it back into a paragraph when the block already is one. Both return `false` for a level the editor was not configured with.
+Headings take their level as an argument: `editor.commands.setHeading({ level: 2 })`. The new `toggleHeading({ level })` sets the selected blocks to that heading, or turns them back into paragraphs when every one already is a heading of that level. Both return `false` for a level the editor was not configured with, or when no level is passed. `HeadingLevel` is exported from `@scrivr/core` for a host that holds a level in a variable.
 
-**Breaking:** `setHeading1()` … `setHeading6()` are removed. Replace each with `setHeading({ level: N })`, and a call that still uses the old name fails to compile. The toolbar and slash-menu entries now run `setHeading` with `args: [{ level }]`, so a host that told the heading entries apart by `command` should use the slash entry's `id` (`heading.1` …) or the toolbar item's `args`.
+**Breaking:** `setHeading1()` … `setHeading6()` are removed. Replace each with `setHeading({ level: N })`.
+- TypeScript reports every old call. In plain JavaScript, `editor.commands.setHeading1` is now undefined, and `runCommand("setHeading1")` or a saved spec naming it returns `false`.
+- The toolbar and slash-menu heading entries now run `setHeading` with `args: [{ level }]`. A host that told them apart by `command` should use the slash entry's `id` (`heading.1` …) or the toolbar item's `args`.
 
-`useSlashMenu` picks its glyphs by entry `id`, so H1, H2 and H3 keep their own.
+`useSlashMenu` picks its glyphs by entry `id`, so H1, H2 and H3 keep their own. A host's own entry gets a glyph only under one of the built-in ids, even when it runs a built-in command.

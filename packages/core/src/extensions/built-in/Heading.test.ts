@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import { TextSelection } from "prosemirror-state";
 import { ServerEditor } from "../../ServerEditor";
 import { StarterKit } from "../StarterKit";
+import { CellSelection } from "../../table/cellSelection";
+// Through the package entry: a host types its own level variable with it.
+import type { HeadingLevel } from "../../index";
 
 const p = (text: string) => ({ type: "paragraph", content: [{ type: "text", text }] });
 const h = (level: number, text: string) => ({ type: "heading", attrs: { level }, content: [{ type: "text", text }] });
@@ -11,6 +14,19 @@ function editorWith(block: object, kit = StarterKit) {
   e.applyTransaction(e.getState().tr.setSelection(TextSelection.create(e.getState().doc, 2)));
   return e;
 }
+const blocks = (e: ServerEditor) => {
+  const out: string[] = [];
+  e.getState().doc.descendants((node) => {
+    if (!node.isTextblock) return true;
+    out.push(node.type.name === "heading" ? `h${String(node.attrs["level"])}` : node.type.name);
+    return false;
+  });
+  return out;
+};
+const selectAll = (e: ServerEditor) => {
+  const { doc } = e.getState();
+  e.applyTransaction(e.getState().tr.setSelection(TextSelection.create(doc, 1, doc.content.size - 1)));
+};
 const firstBlock = (e: ServerEditor) => {
   const node = e.getState().doc.firstChild;
   return { type: node?.type.name, level: node?.attrs["level"] };
@@ -32,6 +48,22 @@ describe("setHeading", () => {
   it("refuses a level the editor was not configured with", () => {
     const e = editorWith(p("one"), StarterKit.configure({ heading: { levels: [1, 2] } }));
     expect(e.commands.setHeading({ level: 3 })).toBe(false);
+    expect(firstBlock(e)).toEqual({ type: "paragraph", level: undefined });
+  });
+
+  it("takes a level a host holds in a variable", () => {
+    const e = editorWith(p("one"));
+    const level: HeadingLevel = 4;
+    e.commands.setHeading({ level });
+    expect(firstBlock(e)).toEqual({ type: "heading", level: 4 });
+  });
+
+  it("reports false, not an error, when a caller passes no level", () => {
+    // A toolbar or slash spec names its command but carries its args untyped.
+    const e = editorWith(p("one"));
+    expect(e.runCommand("setHeading")).toBe(false);
+    expect(e.runCommand("setHeading", [null])).toBe(false);
+    expect(e.runCommand("toggleHeading", [{}])).toBe(false);
     expect(firstBlock(e)).toEqual({ type: "paragraph", level: undefined });
   });
 });
@@ -59,6 +91,50 @@ describe("toggleHeading", () => {
     const e = editorWith(h(1, "one"), StarterKit.configure({ heading: { levels: [1, 2] } }));
     expect(e.commands.toggleHeading({ level: 3 })).toBe(false);
     expect(firstBlock(e)).toEqual({ type: "heading", level: 1 });
+  });
+});
+
+describe("toggleHeading over several blocks", () => {
+  function editorOf(...content: object[]) {
+    return new ServerEditor({ extensions: [StarterKit.configure({ table: true })], content: { type: "doc", content } });
+  }
+
+  it("turns every block into the heading unless all of them already are", () => {
+    const e = editorOf(h(2, "one"), p("two"));
+    selectAll(e);
+    e.commands.toggleHeading({ level: 2 });
+    // The trailing paragraph is TrailingNode's, after a document now ending in a heading.
+    expect(blocks(e)).toEqual(["h2", "h2", "paragraph"]);
+  });
+
+  it("does the same whichever block the selection starts in", () => {
+    const e = editorOf(p("one"), h(2, "two"));
+    selectAll(e);
+    e.commands.toggleHeading({ level: 2 });
+    expect(blocks(e)).toEqual(["h2", "h2", "paragraph"]);
+  });
+
+  it("turns them all back into paragraphs when every one is that heading", () => {
+    const e = editorOf(h(2, "one"), h(2, "two"));
+    selectAll(e);
+    e.commands.toggleHeading({ level: 2 });
+    expect(blocks(e)).toEqual(["paragraph", "paragraph"]);
+  });
+
+  it("turns headings in selected table cells back into paragraphs", () => {
+    const cell = (block: object) => ({ type: "tableCell", content: [block] });
+    const e = editorOf({ type: "table", content: [{ type: "tableRow", content: [cell(h(2, "a")), cell(h(2, "b"))] }] }, p("after"));
+    const cells: number[] = [];
+    e.getState().doc.descendants((node, pos) => {
+      if (node.type.name === "tableCell") cells.push(pos);
+    });
+    const [first, second] = cells;
+    if (first === undefined || second === undefined) throw new Error("expected two cells");
+    const { doc } = e.getState();
+    e.applyTransaction(e.getState().tr.setSelection(new CellSelection(doc.resolve(first), doc.resolve(second))));
+
+    expect(e.commands.toggleHeading({ level: 2 })).toBe(true);
+    expect(blocks(e)).toEqual(["paragraph", "paragraph", "paragraph"]);
   });
 });
 

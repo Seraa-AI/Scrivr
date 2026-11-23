@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { StarterKit } from "../StarterKit";
 import { createTestEditor } from "../../test-utils";
 import type { Editor } from "../../Editor";
+import type { ToolbarItemSpec } from "../types";
 
 type Json = { type: string; attrs?: Record<string, unknown>; content?: Json[]; text?: string };
 const p = (text: string): Json => ({ type: "paragraph", content: [{ type: "text", text }] });
@@ -28,7 +29,7 @@ afterEach(() => {
 });
 
 /** The pressed toolbar buttons with the caret in the text `at`. */
-function pressedAt(content: Json[], at: string): string[] {
+function pressedItemsAt(content: Json[], at: string): ToolbarItemSpec[] {
   editor = createTestEditor({
     extensions: [StarterKit.configure({ table: true })],
     content: { type: "doc", content },
@@ -42,8 +43,11 @@ function pressedAt(content: Json[], at: string): string[] {
   const state = editor.getSelectionSnapshot();
   return editor.toolbarItems
     .filter((spec) => spec.group === "list" || spec.group === "heading" || spec.group === "align")
-    .filter((spec) => spec.isActive(state))
-    .map((spec) => spec.command);
+    .filter((spec) => spec.isActive(state));
+}
+
+function pressedAt(content: Json[], at: string): string[] {
+  return pressedItemsAt(content, at).map((spec) => spec.command);
 }
 
 describe("list buttons", () => {
@@ -88,14 +92,9 @@ describe("list buttons", () => {
 describe("paragraph buttons", () => {
   it("show a heading in a table cell", () => {
     const h2: Json = { type: "heading", attrs: { level: 2 }, content: [{ type: "text", text: "title" }] };
-    expect(pressedAt([table(cell(h2))], "title")).toContain("setHeading");
     // Every level runs `setHeading`, so the button is told apart by its level.
-    if (!editor) throw new Error("pressedAt built no editor");
-    const state = editor.getSelectionSnapshot();
-    const pressedLevels = editor.toolbarItems
-      .filter((spec) => spec.command === "setHeading" && spec.isActive(state))
-      .map((spec) => spec.args);
-    expect(pressedLevels).toEqual([[{ level: 2 }]]);
+    const headings = pressedItemsAt([table(cell(h2))], "title").filter((spec) => spec.command === "setHeading");
+    expect(headings.map((spec) => spec.args)).toEqual([[{ level: 2 }]]);
   });
 
   it("show a centred paragraph in a table cell", () => {

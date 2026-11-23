@@ -1,6 +1,6 @@
 import { setBlockType } from "prosemirror-commands";
-import type { Node } from "prosemirror-model";
-import type { Command } from "prosemirror-state";
+import type { Node, NodeType } from "prosemirror-model";
+import type { Command, EditorState } from "prosemirror-state";
 import type { PdfNodeHandler } from "../../exports/pdf";
 import { textblockTypeInputRule } from "prosemirror-inputrules";
 import { Extension } from "../Extension";
@@ -130,23 +130,19 @@ export const Heading = Extension.create<HeadingOptions>({
   addCommands() {
     const heading = this.schema.nodes["heading"]!;
     const paragraph = this.schema.nodes["paragraph"]!;
-    // A kit built with fewer levels refuses the rest rather than writing a
-    // heading it has no style for.
-    const configured = (level: HeadingLevel) => this.options.levels.includes(level);
-    const refuse: Command = () => false;
+    const { levels } = this.options;
     return {
-      setHeading: ({ level }: { level: HeadingLevel }): Command =>
-        configured(level) ? setBlockType(heading, { level }) : refuse,
-      toggleHeading: ({ level }: { level: HeadingLevel }): Command =>
-        configured(level)
-          ? (state, dispatch) => {
-              const block = state.selection.$from.parent;
-              const isThisHeading = block.type === heading && block.attrs["level"] === level;
-              return isThisHeading
-                ? setBlockType(paragraph)(state, dispatch)
-                : setBlockType(heading, { level })(state, dispatch);
-            }
-          : refuse,
+      setHeading: (attrs: unknown): Command => (state, dispatch) => {
+        const level = configuredLevel(attrs, levels);
+        return level !== null && setBlockType(heading, { level })(state, dispatch);
+      },
+      toggleHeading: (attrs: unknown): Command => (state, dispatch) => {
+        const level = configuredLevel(attrs, levels);
+        if (level === null) return false;
+        return everyBlockIsHeading(state, heading, level)
+          ? setBlockType(paragraph)(state, dispatch)
+          : setBlockType(heading, { level })(state, dispatch);
+      },
       setParagraph: (): Command => setBlockType(paragraph),
     };
   },
@@ -324,6 +320,37 @@ export const Heading = Extension.create<HeadingOptions>({
   },
 });
 
+/**
+ * The level a caller asked for, when the editor was configured with it.
+ *
+ * A toolbar or slash spec carries its args untyped, so a missing or malformed
+ * level refuses like an unconfigured one: a kit built with fewer levels has no
+ * style for the rest.
+ */
+function configuredLevel(attrs: unknown, levels: readonly HeadingLevel[]): HeadingLevel | null {
+  if (typeof attrs !== "object" || attrs === null || !("level" in attrs)) return null;
+  return levels.find((level) => level === attrs.level) ?? null;
+}
+
+/**
+ * Whether every textblock the selection touches is a heading of `level`. One
+ * that is not means a toggle sets the heading on all of them, as Word does when
+ * a style meets a mixed selection.
+ */
+function everyBlockIsHeading(state: EditorState, heading: NodeType, level: HeadingLevel): boolean {
+  let touched = false;
+  let every = true;
+  for (const { $from, $to } of state.selection.ranges) {
+    state.doc.nodesBetween($from.pos, $to.pos, (node) => {
+      if (!node.isTextblock) return true;
+      touched = true;
+      if (node.type !== heading || node.attrs["level"] !== level) every = false;
+      return false;
+    });
+  }
+  return touched && every;
+}
+
 /** Relative size, which is what a reader picking a heading is choosing between. */
 const HEADING_DESCRIPTIONS: Record<number, string> = {
   1: "Large section title",
@@ -336,7 +363,7 @@ declare module "@scrivr/core" {
     heading: {
       /** Set the current block to a heading of `level`. False for a level the editor was not configured with. */
       setHeading: (attrs: { level: HeadingLevel }) => ReturnType;
-      /** Set the current block to a heading of `level`, or back to a paragraph when it already is one. */
+      /** Set the selected blocks to a heading of `level`, or back to paragraphs when every one already is a heading of that level. False for a level the editor was not configured with. */
       toggleHeading: (attrs: { level: HeadingLevel }) => ReturnType;
       /** Set the current block to a plain paragraph. */
       setParagraph: () => ReturnType;

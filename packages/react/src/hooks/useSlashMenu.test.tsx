@@ -31,13 +31,23 @@ function Listed({ editor }: { editor: Editor }) {
   return null;
 }
 
-it("gives each heading level its own glyph, and runs that level", () => {
+it("gives each built-in entry its glyph, and a heading entry runs its own level", () => {
   const editor = new Editor({ extensions: [StarterKit], textMeasurer: new TextMeasurer({ context: fixedWidthContext }) });
   const root = createRoot(document.createElement("div"));
   act(() => root.render(<Listed editor={editor} />));
 
   const glyphs = Object.fromEntries((menu?.items ?? []).map((item) => [item.id, item.label]));
-  expect(glyphs).toMatchObject({ "heading.paragraph": "¶", "heading.1": "H1", "heading.2": "H2", "heading.3": "H3" });
+  // Every id the glyph table names, so a misspelt one shows here rather than as a blank entry.
+  expect(glyphs).toMatchObject({
+    "heading.paragraph": "¶",
+    "heading.1": "H1",
+    "heading.2": "H2",
+    "heading.3": "H3",
+    "list.bullet": "•",
+    "list.ordered": "1.",
+    "codeBlock.insert": "<>",
+    "horizontalRule.insert": "—",
+  });
 
   menu?.items.find((item) => item.id === "heading.3")?.action();
   const block = editor.getState().doc.firstChild;
