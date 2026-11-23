@@ -40,6 +40,11 @@ jobs:
       - name: Test
         run: pnpm test
 
+      # `pnpm typecheck` runs each workspace's `typecheck` script. The docs app
+      # names its check `types:check`, so the root run never reached it.
+      - name: Typecheck docs app
+        run: pnpm --filter @scrivr/docs types:check
+
       # Root `pnpm build` filters to ./packages/**, so nothing here consumed the
       # published packages the way an app does. The docs app resolves them
       # through its own vite aliases, which means a new subpath in an exports map
