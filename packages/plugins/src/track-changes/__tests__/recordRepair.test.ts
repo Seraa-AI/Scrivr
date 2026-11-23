@@ -104,15 +104,15 @@ describe("repairing stored records", () => {
     });
   });
 
-  it("does not store a conflict it only computed", () => {
-    const pending = (id: string, authorID: string, operation: string) => ({ dataTracked: { id, authorID, operation, status: "pending" } });
+  it("reports a conflict only while it lasts, whatever a stored record says", () => {
+    // A record an earlier editor saved with the conflict it had then, and
+    // nothing opposing it now.
+    const flagged = { id: "i1", authorID: "alice", operation: "insert", status: "pending", createdAt: 1, updatedAt: 1, statusUpdateAt: 0, reviewedByID: null, isConflict: true };
     const editor = editorAs("carol", [{ type: "paragraph", attrs: { nodeId: "a" }, content: [
-      { type: "text", text: "both", marks: [{ type: "trackedInsert", attrs: pending("i1", "alice", "insert") }, { type: "trackedDelete", attrs: pending("d1", "bob", "delete") }] },
+      { type: "text", text: "proposed", marks: [{ type: "trackedInsert", attrs: { dataTracked: flagged } }] },
       { type: "text", text: " tail" },
     ] }]);
-    editAtEnd(editor);
-    const stored: unknown[] = [];
-    editor.getState().doc.descendants((node) => { for (const mark of node.marks) stored.push(mark.attrs["dataTracked"]); });
-    expect(JSON.stringify(stored)).not.toContain("isConflict");
+    const record = findChanges(editor.getState()).pending.find((change) => change.id === "i1");
+    expect(record?.dataTracked.isConflict).not.toBe(true);
   });
 });

@@ -16,5 +16,5 @@ Repairing such records on the next edit now touches only the record it repairs:
 - Two formatting records on one mark are each stamped under their own id, and only on the text each covers. Before, there were two problems:
   - one record overwrote the other, because both matched on the shared missing `createdAt`;
   - the mark from the change's first character was written over its whole range, which erased another author's record on part of it.
-- A conflict the change set works out between a pending insertion and deletion is no longer stored with a repaired record. Before, it stayed flagged after it was resolved.
+- A conflict between a pending insertion and deletion is worked out afresh on every read. A conflict flag a record was stored with is ignored, whichever writer stored it: repair, cut and paste, or a structural change. Before, such a flag kept a resolved conflict flagged, in documents saved before this fix too.
 - A paragraph split's reference record gets its timestamps. Before, it stayed unstamped, and the repair ran again on every edit.
