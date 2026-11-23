@@ -2,4 +2,10 @@
 "@scrivr/plugins": patch
 ---
 
-The original view undoes a tracked change whose record lacks its bookkeeping fields (`createdAt`, `updatedAt`, `reviewedByID`, `statusUpdateAt`), as the proposed view applies it. Before, such a record changed the proposed text but not the original, so the two views disagreed about the same change. A document a host stored or converted can carry such records; the editor repairs them on the next edit, and the views now repair them the same way on their own copy before deciding. The proposed view's `markdown` reads them as applied too.
+A tracked change whose record lacks its timestamps (`createdAt`, `updatedAt`) is pending from the moment it is loaded, and decided like any other. Before, such a record, from a document a host stored or converted, changed the proposed text, but:
+
+- the change set did not count it until the next edit repaired it;
+- the original view did not undo it, so the two views disagreed about the same change;
+- `reviewChanges` could not decide it.
+
+`ChangeSet.isValidDataTracked` now requires a record's identity (id, author, operation, status). The new `ChangeSet.isCompleteDataTracked` also requires the timestamps. The next edit still fills them in, keeping the record's id.

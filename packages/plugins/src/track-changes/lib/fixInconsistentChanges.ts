@@ -49,5 +49,18 @@ export function fixInconsistentChanges(
     if (claimedId) claimed.add(claimedId);
   });
 
+  // A change the set already counts keeps its id; only its bookkeeping is filled.
+  changeSet.unstampedChanges.forEach(c => {
+    const { createdAt, updatedAt, statusUpdateAt, reviewedByID } = c.dataTracked;
+    updateChangeAttrs(newTr, c, {
+      ...c.dataTracked,
+      ...(!createdAt && { createdAt: Date.now() }),
+      ...(!updatedAt && { updatedAt: Date.now() }),
+      ...(!statusUpdateAt && { statusUpdateAt: 0 }),
+      ...(reviewedByID === undefined && { reviewedByID: null }),
+    }, schema);
+    changed = true;
+  });
+
   return changed;
 }

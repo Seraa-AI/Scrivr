@@ -4,7 +4,6 @@ import type { Mapping, Node as PMNode } from "@scrivr/core/pm";
 import { findChanges } from "./findChanges";
 import { planChangeReview } from "./reviewPlan";
 import { updateChangesStatus } from "./engine/updateChangesStatus";
-import { fixInconsistentChanges } from "./lib/fixInconsistentChanges";
 
 /** Who the throwaway review is stamped by; the copy it decides is never kept. */
 const VIEW_READER = "semantic:view";
@@ -32,22 +31,14 @@ export function proposedDocument(doc: PMNode): PMNode | null {
  * blocked — every act and every piece it depends on is decided together — so a
  * review that cannot be carried out is an engine fault, reported rather than
  * read as some other document.
- *
- * A record missing its bookkeeping fields (when it was made, reviewed) is
- * first repaired as the engine repairs it on the next edit, so it is decided
- * like any other: the proposed view applies it from its marks either way, and
- * the two views must agree about it.
  */
 function decideEveryChange(doc: PMNode, decision: "accepted" | "rejected"): { doc: PMNode; mapping: Mapping } | null {
-  const loaded = EditorState.create({ doc });
-  const tr = loaded.tr;
-  const found = findChanges(loaded);
-  if (found.invalidChanges.length > 0) fixInconsistentChanges(found, VIEW_READER, tr, doc.type.schema);
-  const state = EditorState.create({ doc: tr.doc });
+  const state = EditorState.create({ doc });
   const changeSet = findChanges(state);
   const ids = changeSet.pending.map((change) => change.id);
   if (ids.length === 0) return null;
   const plan = planChangeReview(changeSet, decision === "accepted" ? { accepted: ids, rejected: [] } : { accepted: [], rejected: ids });
+  const tr = state.tr;
   if (plan.status !== "ready" || updateChangesStatus(tr, changeSet, plan, VIEW_READER).status !== "applied") {
     throw new Error(`@scrivr/plugins track-changes: a view could not be computed — deciding every pending change as ${decision} failed`);
   }

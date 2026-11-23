@@ -9,6 +9,8 @@ import { ServerEditor, StarterKit } from "@scrivr/core";
 import { toSemanticUnits } from "@scrivr/export-semantic";
 import { TrackChanges } from "../TrackChanges";
 import { TrackChangesStatus } from "../types";
+import { findChanges } from "../findChanges";
+import { reviewChanges } from "../reviewChanges";
 
 function tracked(content: unknown[]) {
   return new ServerEditor({
@@ -72,7 +74,7 @@ describe("a record missing its bookkeeping fields", () => {
   // as it is.
   const record = (id: string, operation: "insert" | "delete") => ({ dataTracked: { id, authorID: "bob", operation, status: "pending" } });
   const incomplete = () => new ServerEditor({
-    extensions: [StarterKit, TrackChanges.configure({ userID: "u2", initialStatus: TrackChangesStatus.enabled })],
+    extensions: [StarterKit, TrackChanges.configure({ userID: "u2", initialStatus: TrackChangesStatus.enabled, canAcceptReject: true })],
     content: { type: "doc", content: [{ type: "paragraph", attrs: { nodeId: "a" }, content: [
       { type: "text", text: "keep " },
       { type: "text", text: "added ", marks: [{ type: "trackedInsert", attrs: record("i1", "insert") }] },
@@ -85,6 +87,25 @@ describe("a record missing its bookkeeping fields", () => {
     const editor = incomplete();
     expect(read(editor)[0]?.text).toBe("keep added end");
     expect(read(editor, "original")[0]?.text).toBe("keep removed end");
+  });
+
+  it("can be decided as soon as the document is loaded", () => {
+    const editor = incomplete();
+    expect(reviewChanges(editor, { accepted: ["i1", "d1"], rejected: [] }).status).toBe("applied");
+    expect(editor.getState().doc.textContent).toBe("keep added end");
+  });
+
+  it("is listed pending, as both views read it", () => {
+    const pending = findChanges(incomplete().getState()).pending.map((change) => change.id).sort();
+    expect(pending).toEqual(["d1", "i1"]);
+  });
+
+  it("gets its bookkeeping on the next edit, under the same id", () => {
+    const editor = incomplete();
+    editor.applyTransaction(editor.getState().tr.insertText("x", editor.getState().doc.content.size - 1));
+    const records = findChanges(editor.getState()).pending.filter((change) => change.id === "i1" || change.id === "d1");
+    expect(records.map((change) => change.id).sort()).toEqual(["d1", "i1"]);
+    expect(records.every((change) => typeof change.dataTracked.createdAt === "number" && typeof change.dataTracked.updatedAt === "number")).toBe(true);
   });
 
   it("reads in the proposed view's markdown as applied", () => {

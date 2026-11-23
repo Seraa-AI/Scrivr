@@ -157,7 +157,12 @@ export class ChangeSet {
   }
 
   get hasIncompleteAttrs() {
-    return this.#changes.some(c => !ChangeSet.isValidDataTracked(c.dataTracked));
+    return this.#changes.some(c => !ChangeSet.isCompleteDataTracked(c.dataTracked));
+  }
+
+  /** Changes the set counts that still lack their bookkeeping, filled on the next edit. */
+  get unstampedChanges(): TrackedChange[] {
+    return this.changes.filter(c => !ChangeSet.isCompleteDataTracked(c.dataTracked));
   }
 
   get(id: string) {
@@ -254,12 +259,26 @@ export class ChangeSet {
     );
   }
 
+  /**
+   * A record the set counts as a change: it says which change it is, whose,
+   * what it does and where it stands. When it was made is bookkeeping — a
+   * stored or converted document can lack it — so a record without it is still
+   * pending, and decided like any other; the next edit fills it in.
+   */
   static isValidDataTracked(dataTracked: Partial<TrackedAttrs> = {}): boolean {
+    return ChangeSet.hasKeys(dataTracked, ["id", "authorID", "operation", "status"]);
+  }
+
+  /** A record with its bookkeeping too: when it was made and last updated. */
+  static isCompleteDataTracked(dataTracked: Partial<TrackedAttrs> = {}): boolean {
+    return ChangeSet.hasKeys(dataTracked, ["id", "authorID", "operation", "status", "createdAt", "updatedAt"]);
+  }
+
+  private static hasKeys(dataTracked: Partial<TrackedAttrs>, required: ReadonlyArray<keyof TrackedAttrs>): boolean {
     if ("dataTracked" in dataTracked) {
       console.warn('passed "dataTracked" as property to isValidTrackedAttrs()', dataTracked);
     }
-    const trackedKeys: ReadonlyArray<string> =
-      ["id", "authorID", "operation", "status", "createdAt", "updatedAt"] satisfies Array<keyof TrackedAttrs>;
+    const trackedKeys: ReadonlyArray<string> = required;
     const optionalKeys: ReadonlyArray<string> = ["reviewedByID"] satisfies Array<keyof TrackedAttrs>;
     const entries = Object.entries(dataTracked).filter(([key]) =>
       trackedKeys.includes(key),
