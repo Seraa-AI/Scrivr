@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { TextSelection } from "prosemirror-state";
+import { AllSelection, TextSelection } from "prosemirror-state";
 import { ServerEditor } from "../../ServerEditor";
 import { StarterKit } from "../StarterKit";
 import { CellSelection } from "../../table/cellSelection";
@@ -119,6 +119,43 @@ describe("toggleHeading over several blocks", () => {
     selectAll(e);
     e.commands.toggleHeading({ level: 2 });
     expect(blocks(e)).toEqual(["paragraph", "paragraph"]);
+  });
+
+  it("turns a whole document of headings off, with the empty paragraph TrailingNode keeps after it", () => {
+    const e = editorOf(h(2, "one"), h(2, "two"));
+    // One transaction lets TrailingNode add its paragraph before the selection is made.
+    e.applyTransaction(e.getState().tr);
+    expect(blocks(e)).toEqual(["h2", "h2", "paragraph"]);
+    const toggleAll = () => {
+      e.applyTransaction(e.getState().tr.setSelection(new AllSelection(e.getState().doc)));
+      e.commands.toggleHeading({ level: 2 });
+    };
+
+    toggleAll();
+    expect(blocks(e)).toEqual(["paragraph", "paragraph", "paragraph"]);
+    toggleAll();
+    toggleAll();
+    expect(blocks(e)).toEqual(["paragraph", "paragraph", "paragraph"]);
+  });
+
+  it("leaves the trailing empty paragraph alone when setting a heading over everything", () => {
+    const e = editorOf(p("one"), p("two"));
+    const setAll = () => {
+      e.applyTransaction(e.getState().tr.setSelection(new AllSelection(e.getState().doc)));
+      e.commands.setHeading({ level: 1 });
+    };
+
+    setAll();
+    setAll();
+    setAll();
+    expect(blocks(e)).toEqual(["h1", "h1", "paragraph"]);
+  });
+
+  it("reads a level stored as text as that level", () => {
+    const e = editorOf({ type: "heading", attrs: { level: "2" }, content: [{ type: "text", text: "one" }] }, p("two"));
+    e.applyTransaction(e.getState().tr.setSelection(TextSelection.create(e.getState().doc, 2)));
+    e.commands.toggleHeading({ level: 2 });
+    expect(blocks(e)[0]).toBe("paragraph");
   });
 
   it("turns headings in selected table cells back into paragraphs", () => {

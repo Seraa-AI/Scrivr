@@ -1,6 +1,6 @@
 import { setBlockType } from "prosemirror-commands";
 import type { Node, NodeType } from "prosemirror-model";
-import type { Command, EditorState } from "prosemirror-state";
+import type { Command, EditorState, Transaction } from "prosemirror-state";
 import type { PdfNodeHandler } from "../../exports/pdf";
 import { textblockTypeInputRule } from "prosemirror-inputrules";
 import { Extension } from "../Extension";
@@ -131,17 +131,26 @@ export const Heading = Extension.create<HeadingOptions>({
     const heading = this.schema.nodes["heading"]!;
     const paragraph = this.schema.nodes["paragraph"]!;
     const { levels } = this.options;
+    const setHeadingOn = (state: EditorState, level: HeadingLevel, dispatch?: (tr: Transaction) => void) => {
+      const tr = state.tr;
+      for (const { from, to } of headingSpans(state)) {
+        tr.setBlockType(tr.mapping.map(from), tr.mapping.map(to), heading, { level });
+      }
+      if (!tr.docChanged) return false;
+      dispatch?.(tr.scrollIntoView());
+      return true;
+    };
     return {
       setHeading: (attrs: unknown): Command => (state, dispatch) => {
         const level = configuredLevel(attrs, levels);
-        return level !== null && setBlockType(heading, { level })(state, dispatch);
+        return level !== null && setHeadingOn(state, level, dispatch);
       },
       toggleHeading: (attrs: unknown): Command => (state, dispatch) => {
         const level = configuredLevel(attrs, levels);
         if (level === null) return false;
         return everyBlockIsHeading(state, heading, level)
           ? setBlockType(paragraph)(state, dispatch)
-          : setBlockType(heading, { level })(state, dispatch);
+          : setHeadingOn(state, level, dispatch);
       },
       setParagraph: (): Command => setBlockType(paragraph),
     };
@@ -333,18 +342,45 @@ function configuredLevel(attrs: unknown, levels: readonly HeadingLevel[]): Headi
 }
 
 /**
- * Whether every textblock the selection touches is a heading of `level`. One
- * that is not means a toggle sets the heading on all of them, as Word does when
- * a style meets a mixed selection.
+ * The stretches of the selection a heading is set on: each range, from its
+ * first textblock with text to its last. Empty blocks at either end are left
+ * alone, unless nothing selected has text: Select All takes in the empty
+ * paragraph TrailingNode keeps after a closing heading, and turning that into a
+ * heading would make TrailingNode add another, one more for every press.
+ */
+function headingSpans(state: EditorState): { from: number; to: number }[] {
+  const spans: { from: number; to: number }[] = [];
+  for (const { $from, $to } of state.selection.ranges) {
+    let from = -1;
+    let to = -1;
+    state.doc.nodesBetween($from.pos, $to.pos, (node, pos) => {
+      if (!node.isTextblock) return true;
+      if (node.content.size > 0) {
+        if (from < 0) from = pos + 1;
+        to = pos + 1;
+      }
+      return false;
+    });
+    if (from >= 0) spans.push({ from, to });
+  }
+  if (spans.length > 0) return spans;
+  return state.selection.ranges.map(({ $from, $to }) => ({ from: $from.pos, to: $to.pos }));
+}
+
+/**
+ * Whether every textblock in the heading's stretches already is a heading of
+ * `level`. One that is not means a toggle sets the heading on all of them, as
+ * Word does when a style meets a mixed selection.
  */
 function everyBlockIsHeading(state: EditorState, heading: NodeType, level: HeadingLevel): boolean {
   let touched = false;
   let every = true;
-  for (const { $from, $to } of state.selection.ranges) {
-    state.doc.nodesBetween($from.pos, $to.pos, (node) => {
+  for (const { from, to } of headingSpans(state)) {
+    state.doc.nodesBetween(from, to, (node) => {
       if (!node.isTextblock) return true;
       touched = true;
-      if (node.type !== heading || node.attrs["level"] !== level) every = false;
+      // An imported heading can carry its level as text.
+      if (node.type !== heading || Number(node.attrs["level"]) !== level) every = false;
       return false;
     });
   }
