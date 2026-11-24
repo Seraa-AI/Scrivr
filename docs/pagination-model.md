@@ -4,7 +4,8 @@
 > `applyFloatLayout`-after-pagination pipeline. The current anchored-object
 > pipeline resolves placements and wrap constraints before pagination; use
 > `docs/anchored-objects/02-layout-pipeline.md` for float/anchored-object
-> behavior.
+> behavior. Line numbers below are from that older code. Columns, continuation
+> and page-break ownership are now in `docs/resumable-layout-rfc.md`.
 
 This document explains how pagination works in Scrivr, evaluates how well the current pipeline accommodates planned features (headers/footers, columns, tables), and calls out the concrete refactor points.
 
@@ -143,27 +144,7 @@ Alternatively, the hack-tier version: bake `headerHeight` / `footerHeight` into 
 
 ### Columns
 
-Columns change what `paginateFlow` considers a "page." Right now a page has one content region. With columns:
-
-```ts
-// Current mental model
-Page → { contentBox: Rect }
-
-// Multi-column
-Page → { columns: Rect[] }
-```
-
-`paginateFlow` would need to fill column 0, overflow into column 1, etc. before advancing pages. The cleanest approach is abstracting the current page/y cursor into a **ContentRegion cursor**:
-
-```ts
-ContentRegion = { pageIndex, columnIndex, y, bottom }
-```
-
-Then "advance page" becomes "advance to next region" — which is either the next column or a new page if you're in the last column. Single-column is the degenerate case of one region per page.
-
-Note that `paginateFlow` currently has *two* cursors entangled: the Y cursor (`y`, `prevSpaceAfter`) and the page cursor (`currentPage`, `pages`). Plus the split loop has its own `currentPartStartY`. A region refactor has to sweep all three plus the Phase 1b early-termination path (`PageLayout.ts:733`), which hard-codes `prevCurPage.blocks` scans by page index — that would need to become region index.
-
-Also, "Stage 1 position-independence means columns don't affect measurement" is only true if all columns on a page are the same width. Stage 1 measures at a specific `contentWidth` (`FlowConfig`, `PageLayout.ts:246`). Different column widths → different line breaks → different measurements. The `WeakMap<Node, MeasureCacheEntry>` is keyed by node identity but carries a single `availableWidth` — a multi-column layout where a block could land in columns of different widths would thrash the cache. Not fatal (unequal-width columns are rare), but worth flagging.
+See the [columns RFC](./columns-rfc.md) and the [resumable layout RFC](./resumable-layout-rfc.md). The sketch that stood here (a `ContentRegion` cursor inside `paginateFlow`) named one of the three places that decide page breaks; the global-Y model in `FlowPlacement` and the solver's line space are the others.
 
 ### Tables
 
@@ -186,4 +167,4 @@ The phased plan for this lives in `docs/tables.md`.
 1. **Refactor `pageBottom` / `contentTop` into single-source-of-truth helpers on `PageConfig`.** Tiny change, removes the drift between `runPipeline`, `paginateFlow`, and `applyFloatLayout`. Worth doing for its own sake.
 2. **Headers/footers** as additive fields consumed via those helpers. Page-number late binding is a rendering concern and stays out of the pipeline.
 3. **Tables** (already planned). No pipeline surgery — tables are opaque to `paginateFlow`.
-4. **Columns** last. Refactor Y cursor → region cursor, and at that point the Phase 1b shortcut needs region-aware keys in the `measureCache`.
+4. **Columns**: the resumable layout RFC's phases.

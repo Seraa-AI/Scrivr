@@ -129,16 +129,21 @@ relationship consumers key on. Nothing on the read path mints ids, so
 back to a deterministic ordinal id (`section:<n>`).
 
 `breakType` describes the boundary a section's terminating break creates — how
-the *following* section starts. This is DOCX's own ownership rule for
-`<w:type>` inside `sectPr`, so the round trip stays direct. It is inert on the
-final section, which has no break.
+the *following* section starts. It is inert on the final section, which has no
+break. **DOCX is the other way round:** `<w:type>` in a `sectPr` says how *that*
+section starts (checked in Word: the next-page type that moves the last section
+to a new page is the one in the last section's own `sectPr`). The columns in the
+same `sectPr` do belong to the section it ends. So the round trip shifts the
+transition by one section and leaves the rest.
 
 Layout in this phase reads exactly one thing from the model, the break type: a
 `continuous` break is a pure marker with no flow effect; `nextPage` starts the
 next page; `evenPage`/`oddPage` skip a page when the next one has the wrong
 parity, emitting the blank page Word does. The parity rule lives in one helper
 (`targetPageNumber`) that both the pagination loop and the global-Y advance
-call, so page geometry and anchored-object placement agree.
+call, so page geometry and anchored-object placement agree. The rest of the
+page-break decision is written twice; the resumable layout RFC gives it one
+owner, and turns sections into layout runs before placement.
 
 `<w:sectPr>` export/import lands with the DOCX section round trip.
 
@@ -284,10 +289,12 @@ interface HeaderFooterController {
    terminator, which is both the command's policy and Word's. Even/odd section
    starts landed here too, since the parity rule is one helper on the same
    page-advance seam — step 6 keeps orientation, margins, and page numbering.
-2. **Region-ready pagination**: refactor page/Y advancement into a single-region
-   `ContentRegion` cursor with byte-for-byte-equivalent one-column output.
-3. **Section-scoped columns**: generate equal-width regions from the derived
-   section settings and support continuous/next-page transitions.
+2. **Region-ready pagination**: resumable layout RFC, Phases 1–3: one
+   page-break authority, paragraph continuation, and exclusions read by region,
+   with equivalent one-column output.
+3. **Section-scoped columns**: its Phases 4–5. Runs and equal-width regions from
+   the derived section settings, continuous and next-page transitions, balancing
+   before a continuous break.
 4. **Column breaks**: forced region advancement plus DOCX round trip.
 5. **Section-aware chrome**: move header/footer policy into section settings,
    make `SlotContext.section` required, then update controllers and surfaces.
