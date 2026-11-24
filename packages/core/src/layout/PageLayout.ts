@@ -208,6 +208,12 @@ export interface DocumentLayout {
    * bypass runPipeline. Seeds the next run's previousRunPayload.
    */
   chromePayloads?: Record<string, unknown>;
+  /**
+   * @internal
+   * What this layout laid out, in order, boundaries included. The next run
+   * compares it with its own to find the tail it may reuse.
+   */
+  items?: readonly LayoutItem[];
 }
 
 /**
@@ -463,6 +469,25 @@ function regionFloatPlacements(
     visit(page.blocks, 0);
   }
   return placements;
+}
+
+/**
+ * The document position from which two runs lay out the same items to the end,
+ * or Infinity when their last items already differ. An item is the same when it
+ * is the same node in the same style, moved no differently from the items after
+ * it: the rest of what shapes it is in its measurement.
+ */
+function sameItemsFrom(items: readonly LayoutItem[], previous: readonly LayoutItem[]): number {
+  let from = Infinity;
+  let shift: number | undefined;
+  for (let back = 1; back <= Math.min(items.length, previous.length); back++) {
+    const item = items[items.length - back]!;
+    const before = previous[previous.length - back]!;
+    shift ??= item.nodePos - before.nodePos;
+    if (item.node !== before.node || item.styleKey !== before.styleKey || item.nodePos - before.nodePos !== shift) break;
+    from = item.nodePos;
+  }
+  return from;
 }
 
 function pageRectsDigest(rects: readonly AnchoredObjectPlacement[] | undefined): string {
@@ -737,11 +762,13 @@ export function runFlowPipeline(
     previousLayout.metrics?.every((metrics) => samePageMetrics(metrics, metricsFor(metrics.pageNumber))) &&
     pageRectsDigest(previousBodyPlacements) === pageRectsDigest(mergedPlacements);
   const previousLayoutForPagination = canReuseCachedTail ? previousLayout : undefined;
+  const sameItemsFromPos = sameItemsFrom(items, previousLayoutForPagination?.items ?? []);
 
   const pr = paginateFlow(
     anchoredFlow.flows, pageConfig, resolved, geometry, runId,
     {
       previousLayout: previousLayoutForPagination,
+      sameItemsFromPos,
       measureCache,
       measurer,
       pageless: pageConfig.pageless,
@@ -817,6 +844,7 @@ export function runFlowPipeline(
     totalContentHeight: 0,
     metrics: pr.metrics,
     pageStarts: buildPageStarts(pageConfig, pr.metrics),
+    items,
     runId,
     convergence: "stable",
     iterationCount: 1,
@@ -889,6 +917,8 @@ function runPipelineBody(
 /** Options bag for paginateFlow — cross-cutting context + resumption cursor. */
 export interface PaginateFlowOptions {
   previousLayout?: DocumentLayout | undefined;
+  /** Where the items start being the previous layout's to the end. Absent = nowhere: no tail is reused. */
+  sameItemsFromPos?: number | undefined;
   measureCache?: WeakMap<Node, MeasureCacheEntry> | undefined;
   measurer?: TextMeasurerLike | undefined;
   pageless?: boolean | undefined;
@@ -935,7 +965,7 @@ export function paginateFlow(
 
   const metricsFor = geometry.metricsFor;
 
-  const { previousLayout, measureCache, measurer = new TextMeasurer(), pageless, init } = opts;
+  const { previousLayout, sameItemsFromPos = Infinity, measureCache, measurer = new TextMeasurer(), pageless, init } = opts;
   const { margins } = pageConfig;
   const pages = init.pages;
   let currentPage = init.page;
@@ -1243,13 +1273,15 @@ export function paginateFlow(
     }
 
     // Early termination: copy downstream pages from previous run when
-    // targetY, page, runId, and contentTop all match the cached placement.
+    // targetY, page, runId, and contentTop all match the cached placement and
+    // the run before laid out the same items from here on.
     const canUsePreviousLayoutTail = !flow.solverPushedThisFlow && !flow.overlapsWrapZone;
     if (
       previousLayout &&
       canUsePreviousLayoutTail &&
       seenCacheMiss &&
       remainingCacheMisses === 0 &&
+      nodePos >= sameItemsFromPos &&
       flow.wasCacheHit &&
       flow.preCachedTargetY !== undefined &&
       flow.preCachedPage !== undefined &&
@@ -1272,7 +1304,7 @@ export function paginateFlow(
 
         if (triggerIdx >= 0) {
           for (let bi = triggerIdx + 1; bi < prevCurPage.blocks.length; bi++) {
-            currentPage.blocks.push(shiftBlock(prevCurPage.blocks[bi]!, delta, measureCache));
+            currentPage.blocks.push(shiftBlock(prevCurPage.blocks[bi]!, delta));
           }
           // currentPage pushed into pages — its metrics entry is already the
           // trailing one, now aligned 1:1 with pages.
@@ -1282,7 +1314,7 @@ export function paginateFlow(
             const prevPage = prevPages[pi]!;
             pages.push({
               pageNumber: prevPage.pageNumber,
-              blocks: prevPage.blocks.map((b) => shiftBlock(b, delta, measureCache)),
+              blocks: prevPage.blocks.map((b) => shiftBlock(b, delta)),
             });
             metrics.push(metricsFor(prevPage.pageNumber));
           }
@@ -1448,50 +1480,23 @@ function newPage(pageNumber: number): LayoutPage {
 /**
  * Returns a LayoutBlock with nodePos and span docPos values shifted by `delta`.
  * Used by the Phase 1b early-termination path when copying blocks from
- * `previousLayout` that haven't passed through the main loop this run.
+ * `previousLayout` that haven't passed through the main loop this run. The
+ * measure cache is left alone: measuring already moved these entries.
  *
  * When `delta === 0` the original block is returned unchanged (no allocation).
- *
- * Also updates the measureCache entry for the block so the next layout run
- * sees a correct nodePos and avoids redundant adjustment.
  */
-function shiftBlock(
-  block: LayoutBlock,
-  delta: number,
-  measureCache: WeakMap<Node, MeasureCacheEntry> | undefined,
-): LayoutBlock {
+function shiftBlock(block: LayoutBlock, delta: number): LayoutBlock {
   if (delta === 0) return block;
 
-  const adjustedLines = block.lines.map((line) => ({
-    ...line,
-    spans: line.spans.map((span) => ({ ...span, docPos: span.docPos + delta })),
-  }));
-
-  const shifted: LayoutBlock = {
+  return {
     ...block,
     nodePos: block.nodePos + delta,
-    lines: adjustedLines,
+    ...(block.sourceNodePos !== undefined ? { sourceNodePos: block.sourceNodePos + delta } : {}),
+    lines: block.lines.map((line) => ({
+      ...line,
+      spans: line.spans.map((span) => ({ ...span, docPos: span.docPos + delta })),
+    })),
   };
-
-  // Propagate the correction into the cache so the next run's resolveBlockEntry
-  // sees delta === 0 and skips the per-span adjustment.
-  if (measureCache) {
-    const cached = measureCache.get(block.node);
-    // Only update the cache when this block holds ALL the cached lines.
-    // Split-part blocks carry a subset of lines; updating with partial data
-    // would corrupt subsequent layout runs that expect the full measurement.
-    if (cached && block.lines.length === cached.lines.length) {
-      // Keep placedTargetY / placedPage intact — they reflect the correct
-      // placement positions from the previous run and are still valid.
-      measureCache.set(block.node, {
-        ...cached,
-        nodePos: cached.nodePos + delta,
-        lines: adjustedLines,
-      });
-    }
-  }
-
-  return shifted;
 }
 
 /** A flow's marker, as the block that carries its first line takes it. */
