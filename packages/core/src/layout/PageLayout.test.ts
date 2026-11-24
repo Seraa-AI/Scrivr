@@ -503,10 +503,8 @@ describe("runPipeline — Phase 1b early termination", () => {
   });
 
   it("does not reuse a tail before a later cache miss across a page break", () => {
-    // A page break sits between the two edits. It is a cache miss by
-    // construction, so it must be counted and discounted on the same terms as
-    // any other flow — a page break that stopped counting would let the tail
-    // splice in before "new later block" was ever processed.
+    // A page break sits between the two edits, and is a cache miss by
+    // construction.
     const stableMiddle = p("stable middle");
     const stableTail = p("stable tail");
     const doc1 = doc(p("prefix A"), stableMiddle, pageBreak(), p("old later block"), stableTail);
@@ -1477,12 +1475,8 @@ describe("runPipeline — float image wrapping", () => {
   });
 
   it("Phase 1b drag: re-layout after float move does not double-shift block positions", () => {
-    // Regression for the Phase 1b float-drag bug:
-    // Phase 1b copies blocks from previousLayout which has Pass-3 yDelta baked
-    // into block.y values. When the float moves and runFloatPass runs again,
-    // Pass 3 stacks its new yDelta on top — doubling displacement and pushing
-    // the last paragraphs off the page. The fix: Phase 1b copies from
-    // _pass1Pages (clean pre-float positions) instead of the float-adjusted pages.
+    // A reused block is already where the float put it, so moving the float
+    // must not push it again.
     const { schema, fontConfig } = buildStarterKitContext();
     const smallPage = {
       pageWidth: 360,
