@@ -53,6 +53,7 @@ describe("tracked representation follows the schema", () => {
     ).not.toThrow();
   });
 
+  // A guard: it held before the fix it was written for, so no revert makes it fail.
   it("guards against marking the text of a deleted block that admits no marks", () => {
     const editor = new TestEditor(doc(unmarked("x = 1"), p("tail")));
     editor.deleteRange(0, 7);
@@ -62,6 +63,7 @@ describe("tracked representation follows the schema", () => {
     expect(() => editor.state.doc.check()).not.toThrow();
   });
 
+  // A guard: it held before the fix it was written for, so no revert makes it fail.
   it("guards against leaving text unmarked where the schema admits marks", () => {
     const editor = new TestEditor(doc(p("tail")));
     editor.dispatch(editor.state.tr.insert(0, p("new")));
