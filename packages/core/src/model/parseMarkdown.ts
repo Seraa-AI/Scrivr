@@ -8,7 +8,7 @@ import type { MarkdownParserTokenSpec } from "../extensions/types";
  * while markdown writes a cell's text bare, so each cell's text is read as a
  * paragraph.
  */
-export function createMarkdownIt(): InstanceType<typeof MarkdownIt> {
+export function createMarkdownIt(): MarkdownIt {
   const md = new MarkdownIt({ html: false });
   md.core.ruler.push("table_cell_paragraphs", (state) => {
     const tokens = state.tokens;

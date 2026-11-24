@@ -59,22 +59,22 @@
     "build": "tsup",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.browser.json",
     "clean": "rm -rf dist"
   },
   "devDependencies": {
     "@napi-rs/canvas": "^1.2.0",
+    "@types/markdown-it": "^14.2.0",
     "tsup": "^9.0.0",
     "typescript": "^6.0.3"
   },
   "dependencies": {
-    "@floating-ui/dom": "^1.8.0",
-    "markdown-it": "^15.0.3",
+    "markdown-it": "^14.3.3",
     "prosemirror-commands": "^1.7.2",
-    "prosemirror-history": "^1.5.2",
+    "prosemirror-history": "1.5.1",
     "prosemirror-inputrules": "^1.7.0",
     "prosemirror-keymap": "^1.2.3",
-    "prosemirror-markdown": "^1.14.0",
+    "prosemirror-markdown": "1.13.9",
     "prosemirror-model": "^1.25.13",
     "prosemirror-schema-list": "^1.6.1",
     "prosemirror-state": "^1.4.4",

@@ -447,11 +447,11 @@ export type FontModifier = (parsed: ParsedFont, attrs: Record<string, unknown>) 
 
 /**
  * Minimal markdown-it Token interface.
- * Keeps markdown-it's own types out of the public API — covers all attributes
- * used by built-in token handlers (tag, info, attrGet).
+ * Avoids @types/markdown-it as a hard peer dep — covers all attributes used
+ * by built-in token handlers (tag, info, attrGet).
  */
 export interface MarkdownToken {
-  attrGet(name: string): string | number | null;
+  attrGet(name: string): string | null;
   /** e.g. "h1", "h2" for heading tokens */
   tag: string;
   /** Fenced code block language hint */

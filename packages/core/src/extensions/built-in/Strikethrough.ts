@@ -89,7 +89,7 @@ export const Strikethrough = Extension.create({
   addMarkdownSerializerRules() {
     return {
       marks: {
-        strikethrough: { open: "~~", close: "~~", mixable: true },
+        strikethrough: { open: "~~", close: "~~", mixable: true, expelEnclosingWhitespace: true },
       },
     };
   },

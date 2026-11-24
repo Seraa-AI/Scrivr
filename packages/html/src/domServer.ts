@@ -9,7 +9,7 @@ import type { WithHtmlBody } from "./dom";
 export const withServerBody: WithHtmlBody = async (html, read) => {
   const window = new Window({
     settings: {
-      disableJavaScriptEvaluation: true,
+      enableJavaScriptEvaluation: false,
       disableJavaScriptFileLoading: true,
       enableCSSFileLoading: false,
       enableIframePageLoading: false,

@@ -24,6 +24,14 @@ describe("a document with pending changes as markdown", () => {
     expect(editor.getMarkdown().trim()).toBe("keep {++new ++}this {--word--}");
   });
 
+  it("closes bold before the space that follows proposed text", () => {
+    const editor = suggesting();
+    const { tr, schema } = editor.getState();
+    editor.applyTransaction(tr.insert(6, schema.text("new ", [schema.mark("bold")])));
+
+    expect(editor.getMarkdown().trim()).toBe("keep **{++new++}** this word");
+  });
+
   it("writes plain markdown once every change is decided", () => {
     const editor = suggesting();
     editor.applyTransaction(editor.getState().tr.insertText("new ", 6));

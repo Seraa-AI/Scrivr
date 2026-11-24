@@ -57,9 +57,8 @@ HTMLCanvasElement.prototype.getContext = function (
   return ctx;
 } as typeof HTMLCanvasElement.prototype.getContext;
 
-// Patch OffscreenCanvas too so a future happy-dom that ships it doesn't
-// silently bypass the wiring. happy-dom 20.x doesn't expose it, but
-// guarding the symbol means we ship a forward-compat setup.
+// `TextMeasurer` prefers OffscreenCanvas, and happy-dom's returns no 2D
+// context either. Older happy-dom does not have it at all.
 if (typeof OffscreenCanvas !== "undefined") {
   const originalOffscreen = OffscreenCanvas.prototype.getContext;
   OffscreenCanvas.prototype.getContext = function (
