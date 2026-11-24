@@ -320,10 +320,10 @@ issue.
 |---|---|---|
 | 1. Conflict | Pass. Both buttons complete, and one undo restores the conflict | |
 | 2. One card | Pass. One card, and rejecting it removes the whole paragraph | |
-| 3. Paragraph break | The text is restored by rejecting both cards. The Changes panel has no Reject all to do it in one step | No Accept all or Reject all in the Changes panel |
+| 3. Paragraph break | The text is restored by rejecting both cards. The Changes panel has no Reject all to do it in one step | #300 |
 | 4. Two moves | Pass. No text lost or duplicated | |
-| 5. Dependent work | It asks before rejecting. But it counts each typed key as a dependent change ("8" for " details"), and its text is unreadable in the dark theme | Each key typed inside another author's insertion is its own change; the dependent-changes notice is unreadable in the dark theme |
-| 6. Undo | Fails. In suggesting mode, one undo removes one letter, however fast the word was typed | Suggesting mode breaks undo grouping |
+| 5. Dependent work | It asks before rejecting. But it counts each typed key as a dependent change ("8" for " details"), Alice's card shows the typed word as part of her addition, and the notice is unreadable in the dark theme | #297, #299 |
+| 6. Undo | Fails. In suggesting mode, one undo removes one letter, however fast the word was typed | #298 |
 
 **What the tests showed:**
 
