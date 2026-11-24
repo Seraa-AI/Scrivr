@@ -292,7 +292,7 @@ function pressurePagination(blocks: number): {
     EMPTY_RESOLVED_CHROME,
     geometry,
     1,
-    { measureCache: cache, measurer, init: freshInit() },
+    { measureCache: cache, init: freshInit() },
   );
   const pages = result.pages.length + 1;
 
@@ -300,7 +300,6 @@ function pressurePagination(blocks: number): {
   const paginateMs = median(() => {
     void paginateFlow(flows, defaultPageConfig, EMPTY_RESOLVED_CHROME, geometry, 1, {
       measureCache: cache,
-      measurer,
       init: freshInit(),
     });
   }, 3);
@@ -326,7 +325,7 @@ function pressurePagination(blocks: number): {
     EMPTY_RESOLVED_CHROME,
     inner,
     1,
-    { measureCache: cache, measurer, init: freshInit() },
+    { measureCache: cache, init: freshInit() },
   );
   const allPages = [...paged.pages, paged.currentPage];
   const fragmentsMs = median(() => void buildFragments(allPages), 3);
