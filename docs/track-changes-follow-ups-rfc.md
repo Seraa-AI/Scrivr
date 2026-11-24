@@ -1,6 +1,6 @@
 # Track Changes Follow-ups RFC — closing what #228's review left open
 
-Status: proposed (2026-11-24). Phase 2 run; see What shipped. Answers parts 1, 3, 4 and 5 of #232. Part 2 was
+Status: proposed (2026-11-24). Phases 2 and 3 done; see What shipped. Answers parts 1, 3, 4 and 5 of #232. Part 2 was
 answered by the [overlapping steps RFC](./overlapping-steps-rfc.md) (#257).
 
 **Answer:** each part closes in its own PR, stacked on this one:
@@ -338,3 +338,36 @@ issue.
 - **Check 5's colours.** The notice's text uses `--scrivr-react-text`, which the
   dark theme makes light. Its background `--scrivr-react-notice-surface` is set
   nowhere, so it stays at its light fallback, `#fdf6e7`.
+
+### Phase 3: tests that prove their fix (2026-11-24)
+
+Each fix was reverted in place on main, one at a time, and the tests run
+against it.
+
+**Prove their fix.** These fail with the revert, and stay as they are:
+
+| Test | Reverted |
+|---|---|
+| `trackingRefusal`: "stops a step kind the replay has no tracker for", and the 8 straddling steps | `filterTransaction` no longer asks `gestureRefusal`, so the edit lands |
+| `compositionContract`: "names that edit before accepting the move takes the shadow away" | the planner no longer links a move to its shadow (`pairedMove`) |
+| `compositionContract`: "requires shadow edits before rejecting a forward / backward move" | rejecting a move no longer consumes its shadow (`removesContent`); the link revert fails them too |
+| `selectionContract`: "keeps a range selecting the same text…", "keeps a backward range…", "carries a range that spans the tracked edit", "never collapses a range the gesture left standing" | a range collapses to a caret, as before #228 |
+| `selectionContract`: "remaps an explicit caret past content the deletion retained" | an explicit caret is left where it was, not mapped through the replay, as before #228 |
+| `selectionContract`: "lands after the replacement…", "keeps typing after a replacement in one run…" | the selection is not carried through the replay at all |
+| `selectionContract`: "leaves a caret alone when the edit landed somewhere else" | the caret always follows the insertion, as before #228 |
+| `selectionContract`: "keeps a caret in the middle of the text it wrapped" | a wrap is written back instead of re-applied as a wrap |
+
+**Guards.** No revert in Scrivr fails these, so each is renamed "guards
+against …":
+
+| Was | Why no fix stands behind it |
+|---|---|
+| `compositionContract`: "keeps a second author's edit made inside a move's shadow" | Text typed into a shadow's unmarked text is a plain insertion with or without #228 |
+| `trackedRepresentation`: "stamps a deleted block that admits no marks on the node, not its text" | ProseMirror's `addMark` already skips text whose parent admits no such mark |
+| `trackedRepresentation`: "still marks text where the schema admits marks" | It checks the schema fix doesn't overreach; the fix's own test is the inserted-block one, which fails without it |
+| `selectionContract`: "preserves a node selection" | The code before #228 mapped a node selection the same way |
+| `selectionContract`: "keeps the caret at the end of the text it wrapped" | A caret at the end of the wrapped text survives a written-back wrap too |
+| `selectionContract`: "lands after typed text" | The code before #228 put the caret after typed text the same way |
+
+Of `selectionContract`'s 12 tests, 9 prove their fix, not the 5 the issue
+estimated.
