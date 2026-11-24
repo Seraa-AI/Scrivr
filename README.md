@@ -56,7 +56,7 @@ packages/
 
 ## Development
 
-**Prerequisites:** Node.js ≥ 18, pnpm
+**Prerequisites:** Node.js ≥ 24.11, pnpm
 
 ```bash
 # Install dependencies

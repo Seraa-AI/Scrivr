@@ -125,7 +125,7 @@
     }
   },
   "devDependencies": {
-    "@hocuspocus/provider": "^3.4.4",
+    "@hocuspocus/provider": "^4.9.0",
     "@scrivr/docx": "workspace:*",
     "@scrivr/export-semantic": "workspace:*",
     "fflate": "^0.8.3",
