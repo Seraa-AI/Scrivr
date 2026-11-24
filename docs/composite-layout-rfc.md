@@ -28,7 +28,7 @@ comparison block) would need engine changes.
 The resumable-layout RFC (`docs/resumable-layout-rfc.md`) already names the
 shape: a table is a **producer**. A region cursor offers a region; the table
 producer offers each unfinished cell a nested region, the row accepts all cell
-results together, and a row may split across pages (its Phase 5). This RFC
+results together, and a row may split across pages (its Phase 7). This RFC
 does not build resumable producers. It moves the table onto a declaration
 whose shape that producer will take, so the engine stops knowing tables now
 and row splitting later changes one function, not the engine's vocabulary.
@@ -88,7 +88,7 @@ interface RegionPlacement {
   place of `cells` and `isLastRow`.
 - **A composite unit is atomic** for now, as a row is today: it moves to the
   next page whole. A unit's break policy (`atomic` / `splittable`) is where
-  resumable layout Phase 5 attaches row splitting.
+  resumable layout Phase 7 attaches row splitting.
 
 ### 2. What becomes generic in the engine
 
@@ -185,6 +185,14 @@ details:
   inset are clamped to finite, non-negative numbers.
 - **A selection's own clipboard form that is not text** is ignored, and the
   document's own form is used.
+- **A region's spacing is not the body's.** `layoutRegionBlocks` adds each
+  block's space before *and* after below it: adjacent margins add instead of
+  collapsing, and a heading's space before is drawn under it. Word keeps the
+  first block's space before and the last one's after, and collapses between.
+  Found 2026-11-24; the resumable layout RFC §7 owns the policy.
+- **A `RegionPlacement` is both space and content** (it names a node). It stays
+  what an extension declares; inside the engine it becomes a flow region and a
+  prepared flow, so that a column, which has no node, can be a region too.
 - **Contract for a custom composite**: `units()` should return at least one
   unit (a composite with none takes no place in the flow), and a region node
   should hold at least one block to take a caret (an empty region is only its

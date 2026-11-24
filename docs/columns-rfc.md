@@ -1,19 +1,52 @@
 # Columns RFC — Newspaper (Snaking) Columns
 
-> Status: **design / RFC** — not started. Proposes multi-column ("newspaper") text flow for Scrivr, built on the `ContentRegion` abstraction sketched in [`pagination-model.md`](./pagination-model.md) and the section substrate in [`sections-roadmap.md`](./sections-roadmap.md).
+> Status: **design / RFC** — engine not started. Multi-column ("newspaper") text flow for Scrivr, built on the region contract in [`resumable-layout-rfc.md`](./resumable-layout-rfc.md) and the section substrate in [`sections-roadmap.md`](./sections-roadmap.md).
 
 ## Direction
 
 Support text that **snakes**: it fills column 1 to the bottom of the content area, continues at the top of column 2, and only then advances to the next page. Column count is a **section-scoped** property (a run of the document is N-up), so a full-width title can sit above a 2-up body, matching Word/Pages/InDesign.
 
-The layout engine is already column-ready at the measurement layer. `layoutBlock()` is stateless and lays out a block at any `(x, availableWidth)` ([`layout-pipeline-architecture.md`](./layout-pipeline-architecture.md):126 — "Table cells and column blocks already call it"). `CharacterMap` is already a unified 2D model keyed by `(page, lineIndex, x, contentWidth)`, so hit-testing and caret nav resolve across side-by-side regions without change. **The work is concentrated in pagination** — teaching it that a page is an ordered list of regions, not one box.
+How content is consumed, where it breaks and which region comes next is the contract in the [resumable layout RFC](./resumable-layout-rfc.md). This document owns what is specific to columns: the model, the region geometry a section generates, Word's behaviour, and the feature's phases. Where this document and the contract disagree, the contract wins.
+
+`layoutBlock()` lays out a block at any `(x, availableWidth)`, so measurement is column-ready. The rest is not: three places decide page breaks today, floats are placed on pages, and the arrow keys and drag geometry assume one region per page.
+
+<a id="word-measured"></a>
+## Word's behaviour, measured
+
+Word for Mac 16.111, Letter page, 1in margins, Arial 12 at exactly 20pt, widow control off, two columns of 216pt with a 36pt gap (x 72 and 324), compatibility mode 15 unless said. Positions read from Word itself.
+
+| Case | Word |
+|---|---|
+| Title, 11 lines in 2 columns, continuous break, full width | Balanced 6 + 5. The next section starts under the taller column |
+| The same, ended by a next-page break | Not balanced: 11 + 0 |
+| The same, in the final section | Not balanced |
+| 70 lines over two pages, then a continuous break | Page 1 full (31 + 31); page 2 balanced 4 + 4 |
+| 5 lines in 2 columns then 7 in 3, both continuous | 3 + 2, then 3 + 3 + 1 |
+| A block with 60pt after it at the foot of column 1 | Those 60pt count: the next section starts below them |
+| `noColumnBalance`, mode 12 and 14 | Not balanced; next section starts at the largest bottom |
+| `noColumnBalance`, mode 15 | **Ignored**: balanced |
+| A column break inside the section | What follows it starts column 2; nothing is moved back over the break |
+| `before` 12pt, landing at the top of column 2 below a title | Kept: text starts 12pt down |
+| `before` 10pt after an `after` of 20pt, same place | Adds nothing |
+| `before` 12pt, landing at the top of column 2 of a page-tall section, or of page 2 | Dropped |
+| `after` 20pt, then a continuous break, then `before` 30pt | 30pt between them: collapsed, as in one column |
+| A float anchored in column 2, reaching over column 1 | Column 1's text wraps it. The anchor moved down and the float stayed |
+| A float anchored in column 1, reaching over column 2 | Column 2's text wraps it |
+| A 400pt float in a 216pt column | Stays 400pt wide |
+| A top-and-bottom float, 100pt wide, in column 2 | Clears column 2 only |
+| A float in a balanced section | Counted in the balance (the gap is in column 1's height) |
+| A line taller than the page, met in column 1 | Skips column 2, lands alone on the next page |
+| A table row that does not fit in column 1 | Splits into column 2 |
+| A row whose second cell cannot start | Moves whole |
+
+ECMA-376 agrees on the default: "Typically, column balancing is automatically performed on the contents of sections with multiple columns" (`noColumnBalance`). Not measured: the arrow keys (Word's scripting has no command for them), unequal widths, and widow control, which is on by default in Word and can move one line between balanced columns.
 
 ## Non-goals (v1)
 
-- **Balanced columns** (equal-height fill). v1 is sequential fill. See Open Questions.
-- **Unequal column widths.** v1 is `equalWidth`. The cache caveat below is why.
+- **Balanced fill anywhere Word does not balance.** Before a continuous break it does, and v1 follows (resumable layout RFC, Phase 5).
+- **Unequal column widths.** v1 is `equalWidth`. The measure cache carries one width per block.
 - **Column-spanning blocks** (a heading that breaks the snake to span all columns). Deferred; see Open Questions.
-- **Tables inside columns.** Tables already run their own mini-pipeline; nesting is out of scope until both land independently.
+- **Splitting a table row between columns.** A table in a column works: its units are atomic there, as on a page. Splitting a row is the resumable layout RFC's Phase 7 and blocks nothing here.
 
 ## Columns ≠ Tables
 
@@ -23,9 +56,10 @@ The table work is a useful *measurement* analog but not a *flow* analog, and con
 |---|---|---|
 | Block→region binding | A block lives in exactly one cell | A block is *assigned* to whichever region it lands in |
 | Flow | Content never crosses cells | One continuous flow snakes across regions |
-| Where it lives | `TableLayoutEngine` lays cells side-by-side and stops | `paginateFlow` walks the whole doc and advances region→region |
+| Streams | Separate streams, one per cell, accepted together | One stream through every region |
+| Where it lives | The Table extension's `CompositeLayout`, laid out by `layout/compositeLayout.ts` | The fill loop, over regions a section's run generates |
 
-So we reuse `layoutBlock` (measure a paragraph at a column's width) but the snake logic is new and belongs in pagination.
+They share the fill machinery (`fillRegion`, the flow container) and own their content differently: a column owns no node.
 
 ## Standards baseline
 
@@ -38,8 +72,9 @@ So we reuse `layoutBlock` (measure a paragraph at a column's width) but the snak
 ```
 
 - Unequal: `<w:cols w:num="2"><w:col w:w="4320" w:space="360"/><w:col w:w="4752"/></w:cols>` (deferred).
-- **Column break:** `<w:br w:type="column"/>` — the exact sibling of `w:type="page"`, which the importer already parses and splits on (`packages/docx/src/import/parser.ts:196`).
-- A section's `sectPr` lives in the **last paragraph's** `pPr`; the final section's at body level — the single default `<w:sectPr>` the exporter already emits (`packages/docx/src/export/defaults.ts:127`). The importer currently **drops** `<w:sectPr>` (`parser.ts:73` "Not modeled yet"); columns wire through that seam, giving near-free round trip.
+- **Column break:** `<w:br w:type="column"/>` — the exact sibling of `w:type="page"`, which the importer already parses and splits on (`packages/docx/src/import/parser.ts`).
+- A section's `sectPr` lives in the **last paragraph's** `pPr`; the final section's at body level — the single default `<w:sectPr>` the exporter already emits (`packages/docx/src/export/defaults.ts`). The importer reads only header and footer references from the body `sectPr`; section breaks and `<w:cols>` are not modelled yet.
+- **`<w:type>` describes how *its own* section starts**, while our `sectionBreak.breakType` describes how the next one does. The import and export shift it by one section (measured: a next-page break is written on the section *after* it).
 
 ### ProseMirror — keep the tree linear
 
@@ -83,132 +118,81 @@ There is deliberately no temporary `doc.attrs.columnCount` fallback. The
 region-cursor refactor can be verified with one generated region per page; the
 first public column settings land directly in `SectionSettings`.
 
-## The `ContentRegion` engine
+## Region geometry
 
-Per `pagination-model.md`:144, abstract the page/y cursor into a region cursor.
+For a run with `count = N`, gap `g`, and the page's content box `W` wide:
 
-```ts
-interface ContentRegion {
-  pageIndex: number;
-  columnIndex: number;
-  x: number;       // absolute page-local left of this column's content box
-  width: number;   // column content width
-  top: number;     // region top (content-box top of the page)
-  bottom: number;  // region bottom (content-box bottom; columns share full page height)
-}
+```text
+width = (W - g*(N-1)) / N
+box[i] = { x: i * (width + g), width }
 ```
 
-A page becomes an ordered `ContentRegion[]`. For a section with `columnCount = N`, gap `g`, content width `W`:
+That is all a section says to the engine: an ordered list of boxes, and how the run ends (`model/sectionFlow.ts`). Core never sees `columns`. Pages, tops, bottoms, progression, closing and balancing are the resumable layout RFC's §5. One box per run is today's layout.
 
-```
-colWidth = (W - g*(N-1)) / N
-region[i].x = contentLeft + i*(colWidth + g)
-```
+## What each part needs
 
-`paginateFlow`'s page-advance becomes a **region-advance**:
-
-```
-if blockBottom > region.bottom:
-  if region.columnIndex < N-1:  advance to next column (same page)
-  else:                         advance to first column of next page
-```
-
-`splitBlockAtBoundary` already exists for the overflow case — it splits at `region.bottom` instead of the old `pageBottom`. **Single-column is one region per page → today's behavior falls out unchanged.**
-
-### The real refactor cost (not the happy path)
-
-`pagination-model.md`:164 flags this honestly, and it's where the effort actually is:
-
-1. **Three entangled cursors.** `paginateFlow` carries a Y cursor (`y`, `prevSpaceAfter`), a page cursor (`currentPage`, `pages`), and the split loop's own `currentPartStartY`. All three must collapse into the region cursor.
-2. **Phase 1b early-termination** (`PageLayout.ts:733`) hard-codes `prevCurPage.blocks` scans *by page index*; these become *by region index*.
-3. **Measurement / cache thrash** (`pagination-model.md`:166). Stage 1 measures at one `contentWidth` and the `WeakMap<Node, MeasureCacheEntry>` carries a single `availableWidth`. Equal-width columns are fine (every region on a page shares `colWidth`, so a block measured once is valid in any column). **Unequal widths would thrash** — which is why v1 is `equalWidth`. When unequal lands, the cache key gains `columnWidth` (mirrors the per-column key already noted for tables).
-
-## Layout pipeline changes (by stage)
-
-| Stage | File | Change |
-|---|---|---|
-| `collectLayoutItems` | `PageLayout.ts:1895` | Already walks top-level children linearly. Track the **active section settings** as it walks (toggle on `sectionBreak`); tag each item with its `columnCount`. No reparenting. |
-| `buildBlockFlow` | `PageLayout.ts:1648` | Compute `availableWidth = colWidth` from the item's section `columnCount` (known before pagination). Measurement is otherwise unchanged. |
-| `assignGlobalY` / floats | — | Unchanged for v1 (floats confined to their column is an Open Question; default v1 keeps float exclusions within the column box). |
-| `paginateFlow` | `PageLayout.ts:1221` | The region-cursor refactor above. The bulk of the work. |
-| `buildFragments` | `PageLayout.ts:2087` | Fragments gain `columnIndex` metadata; indexing is otherwise unchanged. `layout-pipeline-architecture.md`:251 — column splits are just `Block → N fragments`, same as page/row splits. |
+| Part | Change |
+|---|---|
+| `collectLayoutItems` | None to the walk. A section boundary becomes the end of a run |
+| `buildBlockFlow` | Width from the item's run, not from the page margins |
+| Global Y, floats | **Not** unchanged, as an earlier version said. Exclusions are page-scoped and read per region; the settle works by touched region; a placement can invalidate an earlier region of the same page |
+| `paginateFlow` | Emits what the fill loop landed |
+| `buildFragments` | Page blocks stay in reading order, which is no longer y order |
+| Phase 1b tail reuse | Keys on region and run structure; never starts inside a run that balances |
 
 ## Rendering, selection, navigation
 
-- **Rendering:** Blocks already carry absolute `x` and per-line positions from `layoutBlock`. The painter draws each fragment at its region `x` — no new painter. Optional vertical **rule line** between columns is a paint-only addition in the renderer (Open Question).
+- **Rendering:** blocks carry absolute `x`, so the painter draws each part where it sits. A vertical **rule line** between columns is paint-only (Open Question). `AiSuggestion`'s stripe and `SourcedBlock`'s gutter read `margins.left` and must read the block's region.
 - **Headers and footers:** Columns divide the body content box only. Page chrome
   remains full-width and renders once per physical page. When a continuous
   section starts mid-page, the first section present on that page owns its
   header/footer; the new section's chrome takes effect on the first later page
   it owns. Pagination records this page-to-section ownership explicitly. See
   `sections-roadmap.md`.
-- **Hit-testing:** `CharacterMap.lineAtPoint` already filters by `x >= l.x && x < l.x + l.contentWidth` (`CharacterMap.ts`). A click in column 2 resolves to column-2 lines because their `x` differs. No change.
-- **Caret nav:** `posBelow`/`posAbove` resolve by 2D line geometry, not by a single-column vertical-stack assumption. The one thing to **verify** (test contract, not code): at the bottom of column 1, ArrowDown should land at the top of column 2 (next region), because that's the next line by document order whose geometry sits down-and-right. This is the highest-risk nav case and gets explicit tests.
+- **Hit-testing:** `CharacterMap.lineAtPoint` filters by x as well as y, so a click in column 2 resolves there. The gutter resolves to the nearest line.
+- **Caret nav needs code.** `posBelow` takes the next line *down the page*, so at the foot of column 1 it goes past column 2 altogether, and even given the right line it would resolve the old x back into column 1. The rule is in the resumable layout RFC's §9: within a region by y, then to the region next in reading order with x moved by the difference of their origins.
+- **Node rects** union per page; across columns they need one rect per region.
+- **Drag** maps page y to global Y by page. With two regions it needs the region under the pointer.
+- **Pageless** has no column bottom: one column.
 
 ## Export parity
 
 Per `feedback_pdf_parity`: any new layout the canvas renders must render in PDF, and tree-driven exports must round-trip.
 
-- **PDF** (`@scrivr/export-pdf`): renders `LayoutPages` directly, so columns render for free once fragments carry region `x` — they already will. Add a column-rule paint only if the canvas paints one.
-- **DOCX** (`@scrivr/docx`): emit `<w:cols w:num w:space>` into the section's `sectPr`; map `columnBreak` → `<w:br w:type="column"/>`. Import reads them back through the existing (currently no-op) `sectPr` branch.
+- **PDF** (`@scrivr/export-pdf`): draws each block at its own `x`, so column text should follow. An `x` does not prove parity: the op log of a multi-column document is compared with the canvas (floats, justified lines, links, outline destinations), and a column rule is painted only if the canvas paints one.
+- **DOCX** (`@scrivr/docx`): emit `<w:cols w:num w:space>` into the section's `sectPr`; map `columnBreak` → `<w:br w:type="column"/>`. Import has no section breaks yet; that work reads `<w:cols>` and shifts `<w:type>` (above).
 - **Markdown**: no column concept; columns flatten to linear blocks (lossy, documented), same as other layout-only properties.
 
 ## Phased implementation
 
-### Phase 0 — Section substrate ✅ landed
+Section substrate landed (`SectionSettings`, `sectionBreak`, `finalSection`, `deriveSections`, commands); `columns.count` is carried and reads as `1` everywhere. The engine phases are the resumable layout RFC's:
 
-The boundary-based section model from `sections-roadmap.md` is in core:
-`SectionSettings`, `sectionBreak`, `finalSection`, `deriveSections`, and the
-structural commands. Inserting a break copies the current section's settings to
-both halves, so the operation changes no geometry — `columns.count` is already
-carried per section and simply reads as `1` everywhere until Phase 2 generates
-regions from it.
+| Here | There |
+|---|---|
+| Regions and cursor, one per page | Phase 1 |
+| Paragraph continuation, flow filling | Phase 2 |
+| Exclusions by region | Phase 3 |
+| **Sequential equal-width columns**, `continuous` and `nextPage` transitions | Phase 4 |
+| **Balancing** before a continuous break, released with the above | Phase 5 |
 
-### Phase 1 — Region cursor, one region per page
+Then, on this RFC: `columnBreak` (schema node, command, keymap, a run ending, DOCX `<w:br w:type="column"/>`); DOCX `<w:cols>` round trip; the toolbar control and column rule.
 
-Refactor `paginateFlow` from separate page/Y/split cursors to a
-`ContentRegionCursor`, but generate exactly one region per page. Existing
-single-column output is the regression oracle. Phase 1b cache keys become
-region-aware here, before multiple regions exist.
-
-### Phase 2 — Section-scoped equal-width columns
-
-Generate regions from each derived section's `columns` settings. Implement
-sequential snaking plus `continuous` and `nextPage` section transitions. This is
-the first phase that changes rendered output and unlocks title-over-2-up.
-
-### Phase 3 — `columnBreak`
-
-Mirror `pageBreak`: schema node, command, keymap, forced region advance, and
-DOCX `<w:br w:type="column"/>` round trip.
-
-### Phase 4 — DOCX section round trip + UX
-
-DOCX `<w:cols>` export/import; toolbar control (1 / 2 / 3 columns); column rule cosmetic.
-
-### Deferred
-
-Balanced columns; unequal widths; column-spanning blocks; float confinement policy; tables-in-columns.
+Deferred: unequal widths; column-spanning blocks.
 
 ## Open questions
 
-1. **Fill strategy.** Sequential (v1, Word default) vs balanced (InDesign/Pages default look). Balanced needs an iterative height-target pass (measure → guess split → re-check) and is a real chunk of work — recommend deferring.
+1. ~~**Fill strategy.**~~ Word balances before a continuous break and nowhere else (measured above). Decision pending in the resumable layout RFC §14.2.
 2. **Unequal column widths.** Needs the per-column cache key. Rare; defer.
-3. **Column-spanning blocks.** Word's "span all columns" for headings/figures. Needs the region loop to handle a full-width block mid-section (close the open regions, emit one full-width region, resume). Moderate; defer to after Phase 3.
-4. **Float confinement.** Does a square-wrapped image's exclusion stay inside its column or span the gutter? v1 default: confined to the column (reuses `ExclusionManager` within the column box). Revisit if a consumer wants spanning figures.
-5. **Column rule line.** Cosmetic vertical rule between columns. Paint-only; low risk; bundle with Phase 4 if wanted.
-
-## Files to create / modify
-
-- `packages/core/src/layout/PageLayout.ts` — `ContentRegion`, region-cursor refactor in `paginateFlow`, region keys in Phase 1b, section-tagging in `collectLayoutItems`, `colWidth` in `buildBlockFlow`.
-- `packages/core/src/model/schema.ts` + `extensions/built-in/` — `columnBreak` node (and `sectionBreak` if not already landed by sections work); column attrs on section settings.
-- `packages/core/src/extensions/built-in/` — toolbar/command for column count and column break.
-- `packages/docx/src/export/` + `import/` — `<w:cols>` and `<w:br w:type="column"/>` through the existing `sectPr` seam.
-- `docs/pagination-model.md` — update the `### Columns` section to point at this RFC once the engine lands.
-- Tests: `paginateFlow` region snake + split-at-region-bottom; `CharacterMap` ArrowDown col1→col2; DOCX `<w:cols>` round trip; single-column regression (degenerate region == today).
+3. **Column-spanning blocks.** Word's "span all columns" for headings/figures. Needs the region loop to handle a full-width block mid-section (close the open regions, emit one full-width region, resume). Moderate; deferred.
+4. ~~**Float confinement.**~~ Word does not confine a float to its column. Decision pending in the resumable layout RFC §14.4.
+5. **Column rule line.** Cosmetic vertical rule between columns. Paint-only; low risk; with the toolbar control if wanted.
 
 ## Dependencies
 
 - **Sections substrate** (`sections-roadmap.md`) is Phase 0. Columns do not need
   the later section-aware header/footer controller and surface work.
-- No dependency on the table work beyond the shared `layoutBlock` contract, which is already stable.
+- **Resumable layout Phases 1–3** come first. Table row splitting (Phases 6–7) does not.
+
+## What shipped
+
+The section substrate (#146). Nothing of the column engine.
