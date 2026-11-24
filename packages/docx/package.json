@@ -55,7 +55,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "fast-xml-parser": "^4.5.7",
+    "fast-xml-parser": "^5.12.1",
     "fflate": "^0.8.3"
   },
   "peerDependencies": {
@@ -65,8 +65,8 @@
     "@expo-google-fonts/inter": "0.4.2",
     "@napi-rs/canvas": "^1.2.0",
     "@scrivr/core": "workspace:*",
-    "tsup": "^8.5.1",
-    "typescript": "^5.9.3",
-    "vitest": "^2.1.9"
+    "tsup": "^9.0.0",
+    "typescript": "^6.0.3",
+    "vitest": "^5.1.1"
   }
 }
