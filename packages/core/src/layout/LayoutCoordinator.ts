@@ -516,8 +516,8 @@ export class LayoutCoordinator {
     this.layoutResumption = null;
     this.charMap.clear();
     this.populatedPages.clear();
-    // From scratch: no `previousLayout`, or pagination's early-termination
-    // copies the partial's truncated tail. measureCache still speeds measuring.
+    // From scratch: a partial layout has no tail to reuse. measureCache still
+    // speeds measuring.
     this.layout = this.runLayout({ previousVersion: prev.version });
     this.layoutIsPartial = this.layout.isPartial ?? false; // read, don't force false
     this.indexLayout();

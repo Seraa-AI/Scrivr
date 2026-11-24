@@ -172,7 +172,7 @@ export interface LayoutBlock {
   fragmentCount?: number;
   /**
    * nodePos of the original unsplit source block.
-   * Same as nodePos for the first part; allows grouping all parts of a split back to their origin.
+   * Same as nodePos on every part; groups the parts of a split back to their origin.
    */
   sourceNodePos?: number;
   /** A composite unit's regions, laid out. */
