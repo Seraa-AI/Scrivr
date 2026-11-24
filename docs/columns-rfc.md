@@ -35,6 +35,9 @@ Word for Mac 16.111, Letter page, 1in margins, Arial 12 at exactly 20pt, widow c
 | A 400pt float in a 216pt column | Stays 400pt wide |
 | A top-and-bottom float, 100pt wide, in column 2 | Clears column 2 only |
 | A float in a balanced section | Counted in the balance (the gap is in column 1's height) |
+| Balanced height, 8 mixed cases (tall lines, spacing, floats) | Always the smallest at which everything fits |
+| A paragraph whose own top-and-bottom float fits the page but leaves no line below | Moves to the next page with its float |
+| A paragraph after someone else's such float | Moves whole; nothing of it stays |
 | A line taller than the page, met in column 1 | Skips column 2, lands alone on the next page |
 | A table row that does not fit in column 1 | Splits into column 2 |
 | A row whose second cell cannot start | Moves whole |
