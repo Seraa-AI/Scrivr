@@ -1,6 +1,6 @@
 # Resumable Layout RFC
 
-> Status: **contract proposed, revised after a first review, awaiting sign-off on
+> Status: **contract proposed, revised after two reviews, awaiting sign-off on
 > §14**. No engine code yet.
 > Grounded in the code on `main` at `54b21ca3` and in Word 16.111 (measured,
 > [columns RFC](./columns-rfc.md#word-measured)). It is the contract behind
@@ -27,6 +27,14 @@
 disagree, the disagreement is painted as a gap. An earlier version of this RFC
 named only the first, so a region cursor built from it would have left the
 second and third unaware of columns.
+
+Measured with §1.2's fix applied, over 9,033 flows in 600 random documents: the
+first disagreement in a document was, all 43 times, in a wrapped paragraph that
+crosses a page, and in those inspected it is the third authority's. It fills the
+foot of a page with a spacer line. When the sum misses the page bottom by 1e-13,
+pagination moves the spacer to the next page, whose text then starts below its
+top. It also breaks a line short at a page foot when a taller word arrives, since
+it decides from one word at a time.
 
 ### 1.2 Pagination rebuilds source from lines
 
@@ -72,7 +80,34 @@ whole layout has 3 unwrapped lines when the cutoff falls between it and the
 float's anchor, with the image drawn over the text, and everything after it
 sits 38px higher. It stays that way until something lays the document out again.
 
-## 2. Vocabulary
+### 1.6 A deleted block can stay on the page
+
+Tail reuse asks whether an edit has been seen (`seenCacheMiss`) and whether more
+is to come (`remainingCacheMisses`). A composite unit is never in the measure
+cache, so a document with a table always looks edited; after a pure deletion no
+block is new, and the first block that has not moved copies the old tail, the
+deleted block included. Reproduced in an `Editor`: table, A, B, C, delete B; the
+document says A C and the layout A B C. Over 800 random edits of each kind, with
+and without tables: 74 deletions with a table are wrong, and nothing else is.
+
+## 2. The laws, and the words
+
+The interfaces below may change. These may not.
+
+1. **Source conservation.** Layout loses, repeats and reorders nothing.
+2. **Explicit constraints.** A producer is given its inputs. It finds none in
+   ambient mutable state.
+3. **Local purity.** An attempt cannot change the result of another attempt.
+4. **One placement authority.** Many decide fit; one accepts.
+5. **Computational equivalence.** Whole, streamed, incremental and replayed give
+   one layout (§6).
+6. **Recursive composition.** A container speaks its children's protocol.
+7. **Termination.** Every accepted step advances a finite computation, and every
+   refusal has an explicit escape.
+
+Layout is three operations, never one: **propose** (a producer), **accept** (the
+fill loop, with container and composite policy), **publish** (the coordinator).
+Accepted is not final, and neither means visible.
 
 | Term | Meaning | Today |
 |---|---|---|
@@ -134,8 +169,10 @@ function fillRegion(
 ): FillResult<FlowContinuation, FlowFragment>;
 ```
 
-`shortage` is how much more height would have let the attempt take one more line;
-only balancing reads it (§5). `LineSpaceProvider` and `LineSpace` are today's.
+`shortage` is the smallest increase of the offer's height that could change any
+height-dependent decision made in the attempt: a line, a gap, a whole unit, later
+a keep rule. Each layer reports its own and passes up the least. Only balancing
+reads it (§5). `LineSpaceProvider` and `LineSpace` are today's.
 `FlowFragment` holds the placed parts in region-local coordinates, the extent
 consumed (space after and clearance past floats included), and the space after its
 last child. Painted bounds and flow advance are different numbers.
@@ -192,8 +229,12 @@ container only stores it.
 
 1. Same flow, continuation and offer give an equivalent result. Page numbers,
    fonts and mutable exclusion managers are not ambient inputs.
-2. `partial` strictly advances the source, and its fragment **ends on consumed
-   source**. `noFit` consumes nothing. Space is never progress (below).
+2. `partial` strictly advances the producer's **finite state**, and its fragment
+   **ends on consumed source**. `noFit` consumes nothing. Space is never progress
+   (below). Running out of source is not being complete: after a final hard break
+   all source is consumed and an empty line is owed, so `partial` at
+   `offset === content size` is legal once, and the next step completes. An empty
+   child completes with no source and advances the child index.
 3. Consumption over accepted fragments is ordered, with nothing dropped or
    repeated. (`LineBreaker` drops a word today when a line has no segments and
    no `skipToY`; the producer must treat that as no room, not as consumed.)
@@ -241,8 +282,12 @@ bottom): the overflow table's last resort, with clearance kept.
 | Does not fit, region empty and starts its page | Offered again with `onOversize: "place"`: one line, leaf or unit is placed and overflows |
 | Unbounded region | Never `noFit` |
 
-A first line within half a pixel of fitting fits (`lineFitsAt`, unchanged). A
-region with no room for anything is skipped the same way, so a continuous run
+**Fit and shortage are one function**, so they cannot disagree: it returns how much
+height is missing, zero meaning it fits. The half-pixel allowance for a first line
+(`lineFitsAt`) lives in it. (*Prototyped*: a shortage unaware of the allowance
+skips a smaller height in 2 of 2,000 stacks; an aware one in none.)
+
+A region with no room for anything is skipped like any other, so a continuous run
 that starts at the very foot of a page continues on the next.
 
 Word agrees: a line taller than the page, in a short two-column group, skips
@@ -357,20 +402,25 @@ it is not: a height changes where anchors land, which changes the wrapping
 (*prototyped*: non-monotone in 11 of 120 groups with floats, bisection wrong in 8;
 monotone in all 60 without). Instead, step:
 
-1. Start at a height nothing smaller can beat: the content's line heights, laid
-   with no exclusions and no spacing, over the number of regions.
-2. Fill and settle. Every `noFit` and `partial` reports its **shortage**: how much
-   more height would have let it take one more line.
+1. Start at or below the answer. With no wrapping float: the content's line and
+   unit heights, unspaced, over the number of regions, less the fit allowance. With
+   one: the tallest single line or unit. The first is **not** a bound once lines
+   are narrowed, because wrapping can make a paragraph shorter (a small word left
+   alone lets two large ones share a line: 88.8px free, 62.4px narrowed, measured).
+2. Fill and settle. Every `noFit` and `partial` reports its **shortage** (§3).
 3. Fits: done. Otherwise raise by the smallest shortage **seen in any pass of the
    settle**, and repeat.
 
 Nothing is skipped: between one height and the next, no fit test anywhere can
 answer differently, so every pass is identical. That is an argument, not
-monotonicity, and it holds as long as **no float placement reads the target
-height** (the clamp and the push read the page). *Prototyped* against trying every
-pixel: the same answer in all 180 groups, in 4 attempts on average without floats
-and 10 with them (27 at most). The unbalanced height fits, so it is a ceiling and
-the search ends. No logarithmic claim is made.
+monotonicity, and it holds under three conditions, each tested: **no float
+placement reads the target height** (the clamp and the push read the page); every
+height-dependent decision reports its shortage; and **each candidate settles from
+scratch**, so trying one cannot colour the next. *Prototyped* against trying every
+pixel: the same answer in all 180 groups. About 4 attempts from the first bound;
+with floats, 22 on average and 79 at most in 250 groups of mixed sizes, started
+from 1px, which is worse than the second bound. The unbalanced height fits, so the search ends. Columns of unequal
+width, later, need the bound worked out again.
 
 Word, in full, in the [columns RFC](./columns-rfc.md#word-measured):
 
@@ -434,11 +484,49 @@ differently:
 On a placement change:
 
 1. Take the old and the new footprint. The vacated space counts.
-2. Restore the checkpoint before the earliest child with a part in a region
-   either touches, **whichever streaming slice placed it** (§1.5). Until a shorter
-   prefix is proven safe, the run's start.
+2. Restore the checkpoint before the earliest child with a part in a region either
+   touches. Until a shorter prefix is proven safe, restore the **frontier** (below).
+   A run's start is not enough: a page can hold an earlier run's end.
 3. Refill from there with the new snapshot. All later parts are discarded.
 4. Accept when the settle ends.
+
+**How long the solver's state lives:**
+
+| Event | Placements, locks, seen placements |
+|---|---|
+| Replay within a settle | Kept |
+| Another balancing height | Fresh, from the state before the group |
+| Another chrome iteration | Fresh |
+| Next streaming slice | Rebuilt by replaying from the frontier. Placements behind it are final |
+| An edit | Discarded with the run |
+
+Today the seen placements last one settle and a lock lasts the run until its float
+moves; both stay. What changes is that nothing reaches a run from outside it.
+
+### When a page is final
+
+Filled is not final: a float found later can re-wrap what came before it.
+
+> **The frontier is the top of the earliest of: the page being filled, and the page
+> on which the child in progress starts. Accepted source before it cannot change.**
+
+Because a float excludes **only on the page its anchor paragraph starts on** (the
+clamp keeps it there), and content only flows forward. A paragraph still in
+progress counts from its start, since a float anchored in its later text is placed
+from its top. The open group is on the page being filled, so it is covered, and so
+is an earlier run that ends there.
+
+Checked on `main`: a document's every prefix laid out alone, its pages before the
+last compared with the whole document's. 8,551 pages, 6 differ, and those looked
+at are §1.1's line broken short at a page foot, which line breaking by offer
+removes.
+
+- `completedPages` is the pages behind the frontier. `LayoutResumption` keeps the
+  checkpoint **at** the frontier, and a slice starts by replaying from it: at most
+  a page or so of work, and §1.5 is gone.
+- Finality is within one chrome geometry. A header that changes height makes
+  everything provisional, as it does now.
+- Provisional pages are painted. Publishing is not finality.
 
 Publication is already one step: `runPipeline` returns a value and
 `LayoutCoordinator` swaps it, rebuilds its index and stamps the `CharacterMap`
@@ -462,7 +550,7 @@ The second does not follow from the first: a settle's answer depends on its
 iteration order and locks. It holds because order, locks and seen placements are
 **functions of the run's input** — floats in document order, starting from no
 placements, history discarded with the run — and nothing is seeded from a previous
-layout. Reuse may only skip work whose inputs are shown equal. Today streaming
+layout. Reuse may only skip work whose inputs are shown equal (§10). Today streaming
 breaks it (§1.5). One exception is inherited and stays visible: a chrome loop
 that ends `exhausted` may depend on the payload it was seeded with.
 
@@ -553,14 +641,27 @@ an earlier continuation is all a group keep needs.
   there are two authorities.
 - The block budget may stop between items, as now, or inside a child once its
   continuation exists. Runs are derived whole, up front, and travel with it.
-- A float may reach back over an earlier slice: that slice is replayed, as one
-  is today when chrome moves the geometry (`replaying`).
+- A slice starts by replaying from the frontier (§6). `replaying` already does this
+  from the document's start when chrome moves the geometry.
 - The open group's page is never in `completedPages` or `prevPageCount`. A
   partial layout shows an unfinished run unbalanced; balancing happens when its
   ending is reached, on a page not yet declared final.
-- Tail reuse (Phase 1b) keys on region id, local y and `spaceSpent`, and on the
-  previous layout having the same runs from here on. It never starts inside a
-  run that balances.
+- **Tail reuse needs equal dependencies, not an equal cursor.** Two layouts at the
+  same region, y and `spaceSpent` still differ if a float reaches into what is left,
+  or if a block was deleted from it (§1.6). Reuse is allowed when all of these are
+  equal, and refused when any is unknown:
+
+  | Dependency | Shown equal by |
+  |---|---|
+  | Remaining source | Same items to the end, by node identity. **Missing today** |
+  | Remaining runs | Same boxes and endings |
+  | Cursor | Region, y, `spaceSpent` |
+  | Page geometry | `samePageMetrics`, as now |
+  | Exclusions | Same placements for every float, as now (`pageRectsDigest`) |
+  | Preparation | Same node, width and marker, as the measure cache checks |
+
+  It never starts inside a run that balances. A remaining-source check also replaces
+  `seenCacheMiss` and `remainingCacheMisses`, which guess at it.
 - Fragment caching is not part of this. The measure cache stays keyed by width;
   equal widths need no new key.
 
@@ -621,10 +722,16 @@ without the last space after, as `runMiniPipeline` reports now.
   `regions`: a row maps its "may break across pages" to it. Word splits rows
   unless told not to; a row that may not and does not fit starts a new page and
   overflows from there.
-- A unit's policy: every region with content left must make progress, or all
-  are rejected. The unit's height is the tallest result plus insets, and every
-  box gets it. If accepting changes the capacity (a border, an inset), the
-  attempts are **made again**, not trimmed.
+- **Acceptance is the composite's policy, not the engine's.** The engine requires
+  only law 7: an accepted unit advances at least one region. A table row asks that
+  every unfinished cell progress, or rejects all (measured in Word). Independent
+  parallel streams could accept any progress, an atomic card only completion, and
+  aligned bilingual text a shared boundary: other policies over the same protocol.
+  Phase 7 ships the row's, owned by the Table extension; an undeclared composite
+  stays atomic.
+- The unit's height is the tallest result plus insets, and every box gets it. If
+  accepting changes the capacity (a border, an inset), the attempts are **made
+  again**, not trimmed.
 - A region that is done repeats its box only, and its source range is empty.
 - Vertical merges stay atomic. Repeated header rows, vertical alignment across
   fragments, and a grid that changes width between regions are later work.
@@ -637,9 +744,10 @@ the oracle of §15 is unchanged unless a difference is listed here first.
 
 | Phase | Work | Output changes |
 |---|---|---|
-| 0 | Correct what the oracle would otherwise freeze, one PR each: cell spacing (§7); stale wrapped lines (§1.2); oversized atomic blocks (§14.7); streamed ≠ whole (§1.5) | Yes, these four |
-| 1 | `FlowRegion`, cursor and progression, one region per page. Landing is data; `paginateFlow` emits; `FlowPlacement`'s model goes. Cache placement written once | None |
-| 2 | Paragraph continuation and the flow container. Line breaking stops at the offer's height; the solver's provider loses pages | A paragraph with nothing but clearance on a page (§3) |
+| H | The harness (§15), before anything moves. Known defects are recorded as tests expected to fail | None |
+| 0 | Fix what the oracle would otherwise freeze, one PR each: a deleted block that stays (§1.6); streamed ≠ whole (§1.5); stale wrapped lines (§1.2); cell spacing (§7); oversized atomic blocks (§14.7). Each flips its expected failure | Yes, these five |
+| 1 | `FlowRegion`, cursor and progression, one region per page. Landing is data; `paginateFlow` emits; `FlowPlacement`'s model goes. Cache placement written once; reuse by dependencies | A page top no longer starts with a stray gap (§1.1) |
+| 2 | Paragraph continuation and the flow container. Line breaking stops at the offer's height; the solver's provider loses pages | A paragraph with nothing but clearance on a page (§3); a mixed-size line is no longer broken short at a page foot (§1.1) |
 | 3 | Exclusions by region, settle by touched region, checkpoints, `FlowPosition` | None: still one region per page |
 | 4 | Runs from sections; sequential equal-width columns; closing; navigation, pageless, tail reuse, drag, PDF | Multi-column sections |
 | 5 | Balancing | Multi-column sections ending continuous |
@@ -649,6 +757,13 @@ the oracle of §15 is unchanged unless a difference is listed here first.
 6 and 7 need 2, not 3–5. Columns need 1–4, not 6–7, so **neither blocks the
 other**. Phases 0–3 change nothing a column setting does today (nothing). 4 and 5
 merge separately and are released together (§14.2).
+
+**Between 1 and 2 one predictor is left.** Landing decides alone after Phase 1, but
+the solver's line space still skips page bottoms while it breaks a wrapped
+paragraph, because breaking cannot stop and resume until Phase 2. It predicts
+landing's answer; it can no longer override it. Phase 1 adds a counter of lines
+where the two differ, asserted zero over the harness. Merging 1 and 2 avoids the
+gap at the price of one PR that is both the largest and the riskiest (§14.13).
 
 A composite fills through the same `fillRegion` at Phase 6; until then today's
 three passes lay its regions out. That is the one place a second *algorithm*
@@ -692,12 +807,19 @@ checkpoint rule (3); 1, 4, 6 are reviewable alone.
     nobody chose, and nothing tells it from one somebody did. *Recommend: new
     tables split; what a stored `false` means is decided when Phase 7 starts, with
     the stored documents looked at first.*
-11. **Streamed equals whole, fixed in Phase 0** (§1.5), by replaying the earlier
-    slices when a float reaches back over them, as chrome changes already do.
+11. **Streamed equals whole, fixed in Phase 0** (§1.5), by replaying from the
+    frontier (§6) at the start of each slice.
     *Recommend yes: the oracle compares the two, and it is a bug users can see.*
 12. **A paragraph whose float leaves it no line moves to the next page with the
     float**, as Word does, instead of stranding the float (§3). *Recommend yes, in
     Phase 2, which makes clearance alone `noFit`.*
+13. **Phases 1 and 2 stay separate**, with a guarded predictor between them, or
+    merge. Strictly, separate breaks the "no second authority" rule for one phase.
+    *Recommend separate: it predicts and cannot override, and the merged PR would be
+    too large to review.*
+14. **The deleted block that stays (§1.6) is fixed now**, ahead of this work and of
+    the next release. *Recommend yes: it needs no contract, only a check that the
+    remaining blocks are the same.*
 
 ## 15. Verification
 
@@ -706,8 +828,16 @@ after an edit, and replayed give equivalent pages, parts, source ranges,
 placements and caret mapping. Checked over the same documents by one harness, so a
 new producer is covered by joining it.
 
-The oracle (written after sign-off) adds: each phase against the one before;
-headers; the DOCX layout and Word-comparison baselines; PDF ops. It asserts
+The harness is the **first** thing built, so that Phase 0 changes a recorded
+behaviour rather than an unrecorded one. Every difference is one of three:
+
+| Class | Treatment |
+|---|---|
+| Correct today | Preserved by every phase |
+| Known defect (§1) | Expected to fail, then flipped by the PR that fixes it |
+| Not supported before | New expectation, added by the phase that builds it |
+
+Beside the invariant: each phase against the one before; headers; the DOCX layout and Word-comparison baselines; PDF ops. It asserts
 relationships, never wrap counts, and counts work (fill calls, lines broken,
 children refilled, balancing attempts), never time. Beyond it:
 
@@ -722,7 +852,11 @@ children refilled, balancing attempts), never time. Beyond it:
 - A float moved up re-wraps earlier content, and moved away gives it back, across
   a streaming cutoff too.
 - A rejected unit advances no region, at any nesting depth.
-- Balancing equals trying every height, with and without floats.
+- Balancing equals trying every height, with and without floats and mixed sizes;
+  its starting bound never exceeds the answer; a candidate's result does not depend
+  on which were tried before it.
+- Every page behind the frontier equals the whole document's.
+- Reuse refuses when any one dependency differs, one test each, deletion included.
 - A discarded pass leaves the measure cache as it found it.
 - `engineVocabulary.test.ts` keeps column vocabulary out of `layout/`.
 - **Adding a layout changes no engine file.** A test-only extension declares a
@@ -743,6 +877,12 @@ search.
 | An oversized line ends | 2 parts in at most 3 offers |
 | A row of cells uses the same `fillRegion` and rejects together | 100 rows, 2,017 splits, 49 rejections, no line lost |
 | Stepping finds the smallest balanced height | 180 of 180 groups; bisection 172 |
+| Fit and shortage must share the allowance | Unaware: a smaller height skipped in 2 of 2,000; aware: none |
+| Line heights over regions bound the height from below | Only with no float narrowing a line: 88.8px free, 62.4px narrowed |
+
+Measured on `main`, also not merged: 8,551 pages behind a frontier; 9,033 flows'
+landing in both authorities; 4,800 edits against a cold layout; 1,200 streamed
+layouts against whole ones (348 of 600 with floats differ, none of 600 without).
 
 Not covered: the real settle and its lock, markers, real pages, caret mapping.
 
