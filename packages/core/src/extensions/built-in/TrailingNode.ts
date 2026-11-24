@@ -18,8 +18,8 @@ const addedKey = new PluginKey<TrailingState>("trailingNode");
  * Without this, if the last block is a heading, list, or code block the user
  * has no way to click below it and start typing as a paragraph.
  *
- * The paragraph it adds lasts only as long as it is needed: once the document
- * ends in a paragraph again, it is taken away, unless someone has typed in it
+ * The paragraph it adds lasts only as long as it is needed: once the block
+ * above it is a paragraph, an edit takes it away, unless someone has typed in it
  * or put the caret in it. An empty last paragraph it did not add is left alone,
  * and so is one a collaborator's sync has rewritten, since sync replaces the
  * whole document and the paragraph can no longer be told apart. An undo or
@@ -48,9 +48,16 @@ export const TrailingNode = Extension.create({
     const missingFrom = (doc: EditorState["doc"], ids: ReadonlySet<string>): ReadonlySet<string> => {
       if (ids.size === 0) return ids;
       const missing = new Set(ids);
-      doc.descendants(node => { missing.delete(node.attrs["nodeId"]); });
+      doc.descendants(node => {
+        missing.delete(node.attrs["nodeId"]);
+        return !node.isTextblock;
+      });
       return missing;
     };
+
+    /** Whether `tr` changes the document as part of an edit, not of an undo or redo. */
+    const isAuthored = (tr: Transaction): boolean =>
+      tr.docChanged && !isHistoryTransaction(tr.getMeta("appendedTransaction") ?? tr);
 
     return [
       new Plugin<TrailingState>({
@@ -58,11 +65,8 @@ export const TrailingNode = Extension.create({
         state: {
           init: () => ({ added: null, gone: new Set() }),
           apply(tr, { added, gone }) {
-            const id = idAt(tr.before, added);
-            const ours = id === null ? gone : new Set(gone).add(id);
             const own = tr.getMeta(addedKey);
-            if (own !== undefined) return { added: own, gone: missingFrom(tr.doc, ours) };
-            if (!tr.docChanged) {
+            if (own === undefined && !tr.docChanged) {
               // Someone who puts the caret in the line makes it theirs. A caret an
               // edit moves there does not, since the edit is what made it unneeded.
               // Nor does a selection that only runs into it, like Select All.
@@ -70,17 +74,23 @@ export const TrailingNode = Extension.create({
               return { added: claimed ? null : added, gone };
             }
 
+            const id = idAt(tr.before, added);
+            const known = id === null ? gone : new Set(gone).add(id);
+            const next = { gone: missingFrom(tr.doc, known) };
+            if (own !== undefined) return { ...next, added: own };
+
             // Positions cannot say whose line an undo brought back, so its id
             // does. A line without one keeps being followed by position.
-            if (isHistoryTransaction(tr) && (added === null || id !== null)) {
-              const last = tr.doc.content.size - (tr.doc.lastChild?.nodeSize ?? 0);
-              const lastId = idAt(tr.doc, last);
-              const isOurs = lastId !== null && ours.has(lastId) && isEmptyLastParagraph(tr.doc, last);
-              return { added: isOurs ? last : null, gone: missingFrom(tr.doc, ours) };
+            const followedByPosition = added !== null && id === null;
+            if (isHistoryTransaction(tr) && !followedByPosition) {
+              const lastPos = tr.doc.content.size - (tr.doc.lastChild?.nodeSize ?? 0);
+              const lastId = idAt(tr.doc, lastPos);
+              const isOurs = lastId !== null && known.has(lastId);
+              return { ...next, added: isOurs ? lastPos : null };
             }
 
             const pos = added === null ? null : tr.mapping.map(added);
-            return { added: isEmptyLastParagraph(tr.doc, pos) ? pos : null, gone: missingFrom(tr.doc, gone) };
+            return { ...next, added: isEmptyLastParagraph(tr.doc, pos) ? pos : null };
           },
         },
         appendTransaction(transactions, _oldState, state) {
@@ -94,6 +104,9 @@ export const TrailingNode = Extension.create({
               .insert(doc.content.size, paragraph!.create())
               .setMeta(addedKey, doc.content.size);
           } else {
+            // History does not map its older steps through what is appended to an
+            // undo or redo, so deleting here would make the next undo throw.
+            if (!transactions.some(isAuthored)) return null;
             const added = addedKey.getState(state)?.added ?? null;
             const previous = doc.childCount > 1 ? doc.child(doc.childCount - 2) : null;
             if (!isEmptyLastParagraph(doc, added) || previous?.type !== paragraph) return null;

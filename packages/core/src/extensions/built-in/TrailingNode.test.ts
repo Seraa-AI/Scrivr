@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { Node } from "prosemirror-model";
-import { closeHistory } from "prosemirror-history";
-import { AllSelection, NodeSelection, TextSelection, type Selection, type Transaction } from "prosemirror-state";
+import { closeHistory, isHistoryTransaction } from "prosemirror-history";
+import { AllSelection, NodeSelection, Plugin, TextSelection, type Selection, type Transaction } from "prosemirror-state";
 import { ServerEditor } from "../../ServerEditor";
+import { Extension } from "../Extension";
 import { StarterKit } from "../StarterKit";
 // Through the package entry, as a host composing its own extensions imports them.
 import { COLLAB_SYNC_META, NORMALIZATION_META, TrailingNode, Typography } from "../../index";
@@ -29,6 +30,11 @@ const create = (e: ServerEditor, name: string) => {
 };
 const firstToParagraph = (e: ServerEditor) =>
   e.applyTransaction(e.getState().tr.setNodeMarkup(0, e.getState().schema.nodes.paragraph));
+
+const lastLinePos = (e: ServerEditor) => e.getState().doc.content.size - 2;
+/** An edit that undoes on its own, apart from the one before it. */
+const edit = (e: ServerEditor, change: (tr: Transaction) => Transaction) =>
+  e.applyTransaction(closeHistory(change(e.getState().tr)));
 
 describe("TrailingNode", () => {
   it("can be added by a host that leaves it out of StarterKit", () => {
@@ -202,17 +208,13 @@ describe("TrailingNode", () => {
     expect(blocks(e)).toEqual(["paragraph:one", "paragraph:"]);
   });
 
-  const line = (e: ServerEditor) => e.getState().doc.content.size - 2;
-  const edit = (e: ServerEditor, change: (tr: Transaction) => Transaction) =>
-    e.applyTransaction(closeHistory(change(e.getState().tr)));
-
   it.each<{ name: string; change: (e: ServerEditor) => void }>([
-    { name: "a rule inserted before it", change: e => edit(e, tr => tr.insert(line(e), create(e, "horizontalRule"))) },
-    { name: "a heading inserted before it", change: e => edit(e, tr => tr.insert(line(e), create(e, "heading"))) },
-    { name: "a rule that replaced it", change: e => edit(e, tr => tr.replaceWith(line(e), tr.doc.content.size, create(e, "horizontalRule"))) },
-    { name: "turning it into a heading", change: e => { caretAt(e, line(e) + 1); e.commands.setHeading({ level: 2 }); } },
-    { name: "turning it into a list", change: e => { caretAt(e, line(e) + 1); e.commands.toggleBulletList(); } },
-    { name: "deleting it", change: e => edit(e, tr => tr.delete(line(e), tr.doc.content.size)) },
+    { name: "a rule inserted before it", change: e => edit(e, tr => tr.insert(lastLinePos(e), create(e, "horizontalRule"))) },
+    { name: "a heading inserted before it", change: e => edit(e, tr => tr.insert(lastLinePos(e), create(e, "heading"))) },
+    { name: "a rule that replaced it", change: e => edit(e, tr => tr.replaceWith(lastLinePos(e), tr.doc.content.size, create(e, "horizontalRule"))) },
+    { name: "turning it into a heading", change: e => { caretAt(e, lastLinePos(e) + 1); e.commands.setHeading({ level: 2 }); } },
+    { name: "turning it into a list", change: e => { caretAt(e, lastLinePos(e) + 1); e.commands.toggleBulletList(); } },
+    { name: "deleting it", change: e => edit(e, tr => tr.delete(lastLinePos(e), tr.doc.content.size)) },
     { name: "deleting it along with the heading", change: e => edit(e, tr => tr.delete(0, tr.doc.content.size)) },
   ])("leaves a line it did not add alone after an undo of $name", ({ change }) => {
     const e = editor(h1("one"), p());
@@ -224,7 +226,7 @@ describe("TrailingNode", () => {
     expect(blocks(e)).toEqual(["paragraph:one", "paragraph:"]);
   });
 
-  it("leaves a line a collaborator's sync brought alone", () => {
+  it("does not take away a line a collaborator's sync brought", () => {
     const e = editor(p("one"));
     caretAt(e, 2);
     e.commands.setHeading({ level: 1 });
@@ -261,7 +263,7 @@ describe("TrailingNode", () => {
     expect(blocks(e)).toEqual(["paragraph:one", "paragraph:", "paragraph:"]);
   });
 
-  it("leaves a copy of its paragraph that someone put back alone", () => {
+  it("does not take away a copy of its paragraph that someone put back", () => {
     const e = editor(p("one"));
     caretAt(e, 2);
     e.commands.setHeading({ level: 1 });
@@ -274,12 +276,67 @@ describe("TrailingNode", () => {
     expect(blocks(e)).toEqual(["paragraph:one", "paragraph:"]);
   });
 
+  it.each<{ name: string; change: (tr: Transaction) => Transaction }>([
+    { name: "deleting everything", change: tr => tr.setSelection(new AllSelection(tr.doc)).deleteSelection() },
+    { name: "typing over everything", change: tr => tr.setSelection(new AllSelection(tr.doc)).insertText("x") },
+    { name: "deleting the line", change: tr => tr.delete(tr.doc.content.size - 2, tr.doc.content.size) },
+  ])("takes its paragraph away again after an undo of $name", ({ change }) => {
+    const e = editor(p("one"));
+    caretAt(e, 2);
+    e.commands.setHeading({ level: 1 });
+    edit(e, change);
+    e.commands.undo();
+    expect(blocks(e)).toEqual(["heading:one", "paragraph:"]);
+    firstToParagraph(e);
+    expect(blocks(e)).toEqual(["paragraph:one"]);
+  });
+
+  describe("when an undo brings its line back where it is not needed", () => {
+    function undone(...extensions: Extension[]) {
+      const e = new ServerEditor({ extensions: [StarterKit, ...extensions], content: { type: "doc", content: [p("one")] } });
+      caretAt(e, 2);
+      e.commands.setHeading({ level: 1 });
+      edit(e, tr => tr);
+      e.commands.setParagraph();
+      const loaded = e.getState().schema.nodeFromJSON({ type: "doc", content: [h1("Demo"), p("body")] });
+      e.applyTransaction(e.getState().tr.replaceWith(0, e.getState().doc.content.size, loaded.content).setMeta("addToHistory", false));
+      e.commands.undo();
+      return e;
+    }
+
+    it("can still undo", () => {
+      const e = undone();
+      expect(blocks(e)).toEqual(["heading:Demo", "paragraph:body", "paragraph:"]);
+      e.commands.undo();
+      expect(blocks(e)).toEqual(["heading:Demo", "paragraph:body"]);
+    });
+
+    it("takes the line away at the next edit, not the next click", () => {
+      const e = undone();
+      caretAt(e, 2);
+      expect(blocks(e)).toEqual(["heading:Demo", "paragraph:body", "paragraph:"]);
+      e.applyTransaction(e.getState().tr.insertText("!", 5));
+      expect(blocks(e)).toEqual(["heading:Demo!", "paragraph:body"]);
+    });
+
+    it("leaves the line through what another plugin adds to the undo", () => {
+      const marksUndo = Extension.create({
+        name: "marksUndo",
+        addProseMirrorPlugins: () => [new Plugin({
+          appendTransaction: (transactions, _old, state) =>
+            transactions.some(isHistoryTransaction) ? state.tr.insertText("!", 5) : null,
+        })],
+      });
+      expect(blocks(undone(marksUndo))).toEqual(["heading:Demo!", "paragraph:body", "paragraph:"]);
+    });
+  });
+
   it("gives back a line it did not add when everything is undone", () => {
     const e = editor(p("one"), p());
     caretAt(e, 2);
     e.commands.setHeading({ level: 1 });
     e.applyTransaction(closeHistory(e.getState().tr));
-    caretAt(e, line(e) + 1);
+    caretAt(e, lastLinePos(e) + 1);
     e.commands.setHeading({ level: 2 });
     e.commands.undo();
     e.commands.undo();
