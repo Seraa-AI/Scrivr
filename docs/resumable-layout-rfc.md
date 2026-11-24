@@ -909,6 +909,12 @@ Not covered: the real settle and its lock, markers, real pages, caret mapping.
 
 ## 17. What shipped
 
-Nothing. Updated as each phase lands, with every difference from the design
-above and why. The split at a page boundary in `paginateFlow` is the approach
-this replaces, not a first phase of it.
+Updated as each phase lands, with every difference from the design above and why.
+
+| Phase | State |
+|---|---|
+| 0, a deleted block that stays (§1.6) | In #314. `findReusableTail` compares the remaining items, as §10 asks; `seenCacheMiss` and `remainingCacheMisses` stay until Phase 1, because a changed marker or width is still the counter's to catch. The same PR fixed what else made a reused layout differ: positions moved twice in the measure cache, hard breaks never moved, pageless height, a float's margin, and a node the document holds twice |
+| Everything else | Not started |
+
+The split at a page boundary in `paginateFlow` is the approach this replaces, not a
+first phase of it.
