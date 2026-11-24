@@ -1,5 +1,38 @@
 # @scrivr/react
 
+## 1.0.27
+
+### Patch Changes
+
+- f3d4186: Dependency updates, including the ones that fix known security advisories. `@scrivr/docx` moves to `fast-xml-parser` 5 and `@scrivr/html` to `happy-dom` 21. `@scrivr/core` no longer depends on `@floating-ui/dom`, which it did not use.
+
+  Importing a Word file keeps text that looks like a number as it was written: `007` came in as `7` and `1.50` as `1.5`. Numeric character references such as `&#8217;` are read as the character they stand for, and an error for a file that cannot be read no longer quotes the file's text. A file with elements after the end of its root element is refused instead of losing them. Exporting leaves out characters that XML does not allow, which made the file unreadable.
+
+  `@scrivr/core` pins two ProseMirror packages whose newest releases change behavior. With `prosemirror-history` 1.5.2, redoing an alignment or heading moved the selection to the next paragraph. With `prosemirror-markdown` 1.14, bold text that also has a color, font, link or underline and ends in a space was written as literal asterisks. A new install of an earlier Scrivr release could already pick these up. Import ProseMirror from `@scrivr/core/pm`: a second copy of `prosemirror-history` in your app does not see the editor's history.
+
+  Markdown export writes the space at the end of struck text outside the `~~`, so it is read back as struck text.
+
+- 622f87e: `@scrivr/react` accepts React 19 as well as React 18. The peer range was `^18.0.0` only, so `npm install` with React 19 failed with a peer-dependency conflict.
+
+  The refs the headless hooks return (`rootRef`, and `optionsRef` from `useHeaderFooterRibbon`) now have a declared type, `AttachableRef<HTMLDivElement>` (`{ readonly current: HTMLDivElement | null }`), exported from `@scrivr/react`. It attaches with `ref={…}` under both `@types/react` 18 and 19.
+
+- 867d7e2: Headings take their level as an argument: `editor.commands.setHeading({ level: 2 })`. The new `toggleHeading({ level })` sets the selected blocks to that heading, or turns them back into paragraphs when every one already is a heading of that level. Both return `false` for a level the editor was not configured with, when no level is passed, or when nothing would change. Changing a block between paragraph and heading, or a heading's level, now keeps its alignment, indent and id, through the commands and the `Mod-Alt-0…6` shortcuts alike. With Select All, the empty paragraph a document ends in is not turned into a heading, so pressing a heading button repeatedly no longer adds an empty heading each time. `HeadingLevel` is exported from `@scrivr/core` for a host that holds a level in a variable.
+
+  **Breaking:** `setHeading1()` … `setHeading6()` are removed. Replace each with `setHeading({ level: N })`.
+
+  - TypeScript reports every old call. In plain JavaScript, `editor.commands.setHeading1` is now undefined, and `runCommand("setHeading1")` or a saved spec naming it returns `false`.
+  - The toolbar and slash-menu heading entries now run `setHeading` with `args: [{ level }]`. A host that told them apart by `command` should use the slash entry's `id` (`heading.1` …) or the toolbar item's `args`.
+
+  `useSlashMenu` picks its glyphs by entry `id`, so H1, H2 and H3 keep their own. A host's own entry gets a glyph only under one of the built-in ids, even when it runs a built-in command.
+
+- d4861f1: `useEditorState`'s own documentation, shown when you hover it, now uses the name the package exports. Its examples called `useScrivrState`, which `@scrivr/react` does not export.
+- Updated dependencies [f3d4186]
+- Updated dependencies [867d7e2]
+- Updated dependencies [54b21ca]
+  - @scrivr/ai@1.0.27
+  - @scrivr/core@1.0.27
+  - @scrivr/plugins@1.0.27
+
 ## 1.0.26
 
 ### Patch Changes
