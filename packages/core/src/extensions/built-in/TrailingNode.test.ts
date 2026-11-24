@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { Node } from "prosemirror-model";
 import { closeHistory } from "prosemirror-history";
-import { AllSelection, TextSelection, type Selection } from "prosemirror-state";
+import { AllSelection, NodeSelection, TextSelection, type Selection, type Transaction } from "prosemirror-state";
 import { ServerEditor } from "../../ServerEditor";
 import { StarterKit } from "../StarterKit";
 // Through the package entry, as a host composing its own extensions imports them.
-import { NORMALIZATION_META, TrailingNode, Typography } from "../../index";
+import { COLLAB_SYNC_META, NORMALIZATION_META, TrailingNode, Typography } from "../../index";
 
 const h1 = (text: string) => ({ type: "heading", attrs: { level: 1 }, content: [{ type: "text", text }] });
 const p = (text = "") => ({ type: "paragraph", content: text ? [{ type: "text", text }] : undefined });
@@ -27,7 +27,7 @@ const create = (e: ServerEditor, name: string) => {
   if (!type) throw new Error(`no ${name} node`);
   return type.create();
 };
-const toParagraph = (e: ServerEditor) =>
+const firstToParagraph = (e: ServerEditor) =>
   e.applyTransaction(e.getState().tr.setNodeMarkup(0, e.getState().schema.nodes.paragraph));
 
 describe("TrailingNode", () => {
@@ -113,7 +113,7 @@ describe("TrailingNode", () => {
     caretAt(e, 2);
     e.commands.setHeading({ level: 1 });
     select(e, doc => new AllSelection(doc));
-    toParagraph(e);
+    firstToParagraph(e);
     expect(blocks(e)).toEqual(["paragraph:one"]);
   });
 
@@ -122,7 +122,7 @@ describe("TrailingNode", () => {
     caretAt(e, 2);
     e.commands.setHeading({ level: 1 });
     select(e, doc => TextSelection.create(doc, 1, doc.content.size - 1));
-    toParagraph(e);
+    firstToParagraph(e);
     expect(blocks(e)).toEqual(["paragraph:one"]);
   });
 
@@ -131,10 +131,10 @@ describe("TrailingNode", () => {
     caretAt(e, 2);
     e.commands.setHeading({ level: 1 });
     e.applyTransaction(closeHistory(e.getState().tr));
-    toParagraph(e);
+    firstToParagraph(e);
     e.commands.undo();
     expect(blocks(e)).toEqual(["heading:one", "paragraph:"]);
-    toParagraph(e);
+    firstToParagraph(e);
     expect(blocks(e)).toEqual(["paragraph:one"]);
   });
 
@@ -145,7 +145,7 @@ describe("TrailingNode", () => {
     e.commands.undo();
     e.commands.redo();
     expect(blocks(e)).toEqual(["heading:one", "paragraph:"]);
-    toParagraph(e);
+    firstToParagraph(e);
     expect(blocks(e)).toEqual(["paragraph:one"]);
   });
 
@@ -155,7 +155,7 @@ describe("TrailingNode", () => {
     e.applyTransaction(closeHistory(e.getState().tr.insertText("X", 2)));
     e.commands.undo();
     expect(blocks(e)).toEqual(["heading:one", "paragraph:"]);
-    toParagraph(e);
+    firstToParagraph(e);
     expect(blocks(e)).toEqual(["paragraph:one", "paragraph:"]);
   });
 
@@ -166,7 +166,7 @@ describe("TrailingNode", () => {
     e.applyTransaction(closeHistory(e.getState().tr.insertText("x", e.getState().doc.content.size - 1)));
     e.commands.undo();
     expect(blocks(e)).toEqual(["heading:one", "paragraph:"]);
-    toParagraph(e);
+    firstToParagraph(e);
     expect(blocks(e)).toEqual(["paragraph:one", "paragraph:"]);
   });
 
@@ -176,21 +176,114 @@ describe("TrailingNode", () => {
     e.applyTransaction(closeHistory(tr.insert(tr.doc.content.size, create(e, "paragraph"))));
     e.commands.undo();
     expect(blocks(e)).toEqual(["heading:one", "paragraph:"]);
-    toParagraph(e);
+    firstToParagraph(e);
     expect(blocks(e)).toEqual(["paragraph:one", "paragraph:"]);
   });
 
-  it("takes its paragraph away again after an undo of a block that replaced it", () => {
+  it("keeps the paragraph for someone who selects it", () => {
     const e = editor(p("one"));
     caretAt(e, 2);
     e.commands.setHeading({ level: 1 });
-    const { tr } = e.getState();
-    const line = tr.doc.content.size - 2;
-    e.applyTransaction(closeHistory(tr.replaceWith(line, tr.doc.content.size, create(e, "horizontalRule"))));
+    select(e, doc => NodeSelection.create(doc, doc.content.size - 2));
+    firstToParagraph(e);
+    expect(blocks(e)).toEqual(["paragraph:one", "paragraph:"]);
+  });
+
+  it("keeps the paragraph someone was in after undo and redo take it away and back", () => {
+    const e = editor(p("one"));
+    caretAt(e, 2);
+    e.commands.setHeading({ level: 1 });
+    e.commands.undo();
+    e.commands.redo();
+    caretAt(e, e.getState().doc.content.size - 1);
+    e.commands.undo();
+    e.commands.redo();
+    firstToParagraph(e);
+    expect(blocks(e)).toEqual(["paragraph:one", "paragraph:"]);
+  });
+
+  const line = (e: ServerEditor) => e.getState().doc.content.size - 2;
+  const edit = (e: ServerEditor, change: (tr: Transaction) => Transaction) =>
+    e.applyTransaction(closeHistory(change(e.getState().tr)));
+
+  it.each<{ name: string; change: (e: ServerEditor) => void }>([
+    { name: "a rule inserted before it", change: e => edit(e, tr => tr.insert(line(e), create(e, "horizontalRule"))) },
+    { name: "a heading inserted before it", change: e => edit(e, tr => tr.insert(line(e), create(e, "heading"))) },
+    { name: "a rule that replaced it", change: e => edit(e, tr => tr.replaceWith(line(e), tr.doc.content.size, create(e, "horizontalRule"))) },
+    { name: "turning it into a heading", change: e => { caretAt(e, line(e) + 1); e.commands.setHeading({ level: 2 }); } },
+    { name: "turning it into a list", change: e => { caretAt(e, line(e) + 1); e.commands.toggleBulletList(); } },
+    { name: "deleting it", change: e => edit(e, tr => tr.delete(line(e), tr.doc.content.size)) },
+    { name: "deleting it along with the heading", change: e => edit(e, tr => tr.delete(0, tr.doc.content.size)) },
+  ])("leaves a line it did not add alone after an undo of $name", ({ change }) => {
+    const e = editor(h1("one"), p());
+    caretAt(e, 2);
+    change(e);
     e.commands.undo();
     expect(blocks(e)).toEqual(["heading:one", "paragraph:"]);
-    toParagraph(e);
+    firstToParagraph(e);
+    expect(blocks(e)).toEqual(["paragraph:one", "paragraph:"]);
+  });
+
+  it("leaves a line a collaborator's sync brought alone", () => {
+    const e = editor(p("one"));
+    caretAt(e, 2);
+    e.commands.setHeading({ level: 1 });
+    const { doc } = e.getState();
+    e.applyTransaction(e.getState().tr.replaceWith(0, doc.content.size, doc.content).setMeta(COLLAB_SYNC_META, true));
+    firstToParagraph(e);
+    expect(blocks(e)).toEqual(["paragraph:one", "paragraph:"]);
+  });
+
+  it.each([
+    { blocks: "with ids", starterKit: StarterKit },
+    { blocks: "without ids", starterKit: StarterKit.configure({ uniqueId: false }) },
+  ])("still takes its paragraph away after an undo of something else, for blocks $blocks", ({ starterKit }) => {
+    const e = new ServerEditor({ extensions: [starterKit], content: { type: "doc", content: [p("one")] } });
+    caretAt(e, 2);
+    e.commands.setHeading({ level: 1 });
+    edit(e, tr => tr.insertText("x", 1));
+    e.commands.undo();
+    firstToParagraph(e);
     expect(blocks(e)).toEqual(["paragraph:one"]);
+  });
+
+  it("keeps a line someone was in while an undo had a paragraph below it", () => {
+    const e = editor(p("one"), p("two"));
+    edit(e, tr => tr.delete(5, tr.doc.content.size));
+    e.applyTransaction(e.getState().tr.insert(5, create(e, "heading")).setMeta("addToHistory", false));
+    e.commands.undo();
+    expect(blocks(e)).toEqual(["paragraph:one", "heading:", "paragraph:", "paragraph:two"]);
+    caretAt(e, 8);
+    caretAt(e, 2);
+    e.commands.redo();
+    expect(blocks(e)).toEqual(["paragraph:one", "heading:", "paragraph:"]);
+    e.applyTransaction(e.getState().tr.setNodeMarkup(5, e.getState().schema.nodes.paragraph));
+    expect(blocks(e)).toEqual(["paragraph:one", "paragraph:", "paragraph:"]);
+  });
+
+  it("leaves a copy of its paragraph that someone put back alone", () => {
+    const e = editor(p("one"));
+    caretAt(e, 2);
+    e.commands.setHeading({ level: 1 });
+    const copied = e.getState().doc.slice(0, e.getState().doc.content.size);
+    e.commands.setParagraph();
+    edit(e, tr => tr.replace(0, tr.doc.content.size, copied));
+    edit(e, tr => tr.insertText("x", 1));
+    e.commands.undo();
+    firstToParagraph(e);
+    expect(blocks(e)).toEqual(["paragraph:one", "paragraph:"]);
+  });
+
+  it("gives back a line it did not add when everything is undone", () => {
+    const e = editor(p("one"), p());
+    caretAt(e, 2);
+    e.commands.setHeading({ level: 1 });
+    e.applyTransaction(closeHistory(e.getState().tr));
+    caretAt(e, line(e) + 1);
+    e.commands.setHeading({ level: 2 });
+    e.commands.undo();
+    e.commands.undo();
+    expect(blocks(e)).toEqual(["paragraph:one", "paragraph:"]);
   });
 
   it.each([
