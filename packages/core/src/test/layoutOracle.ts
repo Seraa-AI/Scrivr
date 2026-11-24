@@ -108,8 +108,7 @@ export const whole = (node: Node, setup: Setup): DocumentLayout => runPipeline(n
 const cachedOptions = (setup: Setup): PageLayoutOptions => ({ ...optionsOf(setup), measureCache: new WeakMap<Node, MeasureCacheEntry>() });
 
 /** In chunks of `blocks`, as the editor streams a long document. */
-export function streamed(node: Node, setup: Setup, blocks: number): DocumentLayout {
-  const options = cachedOptions(setup);
+export function streamed(node: Node, setup: Setup, blocks: number, options = cachedOptions(setup)): DocumentLayout {
   let layout = runPipeline(node, { ...options, maxBlocks: blocks });
   while (layout.isPartial) {
     if (!layout.resumption) throw new Error("a partial layout with nothing to resume from");
@@ -118,14 +117,18 @@ export function streamed(node: Node, setup: Setup, blocks: number): DocumentLayo
   return layout;
 }
 
-/** Each document on top of the last one's layout, as an editor lays out edits. Returns the last. */
-export function inTurn(nodes: readonly Node[], setup: Setup): DocumentLayout {
+/**
+ * Each document on top of the last one's layout, as an editor lays out edits:
+ * the first streamed, when `blocks` says in what chunks. Returns the last.
+ */
+export function inTurn(nodes: readonly Node[], setup: Setup, blocks?: number): DocumentLayout {
   const options = cachedOptions(setup);
   const [first, ...rest] = nodes;
   if (!first) throw new Error("no document to lay out");
+  const opened = blocks === undefined ? runPipeline(first, options) : streamed(first, setup, blocks, options);
   return rest.reduce(
     (previousLayout, node) => runPipeline(node, { ...options, previousLayout, previousVersion: previousLayout.version }),
-    runPipeline(first, options),
+    opened,
   );
 }
 

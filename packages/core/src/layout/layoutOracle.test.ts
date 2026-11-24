@@ -20,7 +20,7 @@ const cases = (documents: Record<string, Node>): [string, string, Node, Setup][]
   );
 
 describe("a document streamed in chunks", () => {
-  it.each(cases(FLOWING))("is the whole document's layout: %s, %s", (_name, _setup, node, setup) => {
+  it.each(cases({ ...FLOWING, ...FLOATING }))("is the whole document's layout: %s, %s", (_name, _setup, node, setup) => {
     for (const blocks of CHUNKS) expect(differencesFromWhole(streamed(node, setup, blocks), node, setup)).toEqual([]);
   });
 });
@@ -49,9 +49,12 @@ describe("a document after an edit", () => {
 });
 
 describe("a streamed document after an edit", () => {
-  it.each(cases(FLOWING))("is the whole document's layout: %s, %s", (_name, _setup, node, setup) => {
-    const edited = edit(node, (tr) => tr.insert(0, p(words(12))));
-    expect(differencesFromWhole(streamed(edited, setup, 3), edited, setup)).toEqual([]);
+  it.each(cases({ ...FLOWING, ...FLOATING }))("is the whole document's layout: %s, %s", (_name, _setup, node, setup) => {
+    for (const [change, apply] of Object.entries(EDITS)) {
+      const edited = edit(node, apply);
+      const differences = differencesFromWhole(inTurn([node, edited], setup, 2), edited, setup);
+      expect({ change, differences }).toEqual({ change, differences: [] });
+    }
   });
 });
 

@@ -652,6 +652,76 @@ export interface FlowPipelineResult {
   anchoredObjects: AnchoredObjectPlacement[];
 }
 
+/** Where a run starts laying out, and what is already laid out before it. */
+interface FlowStart {
+  itemIndex: number;
+  /** Pages finished before it. */
+  pages: LayoutPage[];
+  page: LayoutPage;
+  y: number;
+  prevSpaceAfter: number;
+  /** Omits `prevSpaceAfter` at the top of a page, where a leading margin is dropped. */
+  flowCursor: { y: number; prevSpaceAfter?: number };
+  /** Floats on pages before this one are kept as they were placed. */
+  firstPageLaid: number;
+}
+
+const startOfPage = (pageNumber: number, itemIndex: number, pages: LayoutPage[], y: number, flowY: number): FlowStart => ({
+  itemIndex,
+  pages,
+  page: newPage(pageNumber),
+  y,
+  prevSpaceAfter: 0,
+  flowCursor: { y: flowY },
+  firstPageLaid: pageNumber,
+});
+
+function startOfDocument(metricsFor: PageGeometry["metricsFor"]): FlowStart {
+  const { contentTop } = metricsFor(1);
+  return startOfPage(1, 0, [], contentTop, contentTop);
+}
+
+/** Where the snapshot stopped. */
+function afterSnapshot(snapshot: LayoutResumption, flowCursor: { y: number; prevSpaceAfter: number }): FlowStart {
+  return {
+    itemIndex: snapshot.nextItemIndex,
+    pages: [...snapshot.completedPages],
+    page: { ...snapshot.currentPage, blocks: [...snapshot.currentPage.blocks] },
+    y: snapshot.currentY,
+    prevSpaceAfter: snapshot.prevSpaceAfter,
+    flowCursor,
+    firstPageLaid: Infinity,
+  };
+}
+
+/**
+ * The last page the snapshot reached that starts with a whole block. A float
+ * moves nothing on the pages before its own, so what is before this stands.
+ */
+function startOfLastWholePage(snapshot: LayoutResumption, geometry: PageGeometry): FlowStart {
+  const reached = [...snapshot.completedPages, snapshot.currentPage];
+  for (const page of reached.reverse()) {
+    const first = page.blocks[0];
+    if (!first || first.isContinuation) continue;
+    const itemIndex = snapshot.items.findIndex((item) => item.nodePos === first.nodePos && !item.boundary);
+    if (itemIndex < 0) continue;
+    return startOfPage(
+      page.pageNumber,
+      itemIndex,
+      snapshot.completedPages.slice(0, page.pageNumber - 1),
+      geometry.metricsFor(page.pageNumber).contentTop,
+      geometry.startOf(page.pageNumber),
+    );
+  }
+  return startOfDocument(geometry.metricsFor);
+}
+
+/** A run that lays out again what the snapshot had still advances by a whole chunk. Boundaries are free. */
+function blockBudget(start: FlowStart, snapshot: LayoutResumption | undefined, maxBlocks: number | undefined): number | undefined {
+  if (maxBlocks === undefined || !snapshot) return maxBlocks;
+  return maxBlocks + snapshot.items.slice(start.itemIndex, snapshot.nextItemIndex).filter((item) => !item.boundary).length;
+}
+
 /**
  * Stage 1 + Stage 2 of the pipeline (measure + paginate). Extracted so the
  * chrome aggregator can call it N times per layout run while floats + fragments
@@ -670,45 +740,20 @@ export function runFlowPipeline(
 
   const { pageWidth, pageHeight, margins } = pageConfig;
   const contentWidth = pageWidth - margins.left - margins.right;
-  let maxBlocks = options.maxBlocks;
 
   // Every page-position question in the pipeline reads through this, so none of
   // them re-derive a page start by summing the pages before it.
   const metricsFor = geometry.metricsFor;
 
-  // Resumption. The snapshot is always usable for what does not depend on
-  // where blocks landed — the item list, the version, the progress already
-  // made. Its cursors are usable only while the geometry that placed them
-  // still holds, so the two are read through separate names.
+  // Resumption. The snapshot's items, version and progress are always usable.
+  // Its cursors are usable only while the geometry that placed them still
+  // holds, and only where no float can reach over the cutoff.
   const snapshot = options.resumption;
-  const cursor = snapshot !== undefined
-    && snapshot.flowCursor !== undefined
-    && snapshot.metrics.every((m) => samePageMetrics(m, metricsFor(m.pageNumber)))
-    ? snapshot
-    : undefined;
-  const replaying = snapshot !== undefined && cursor === undefined;
-  if (replaying && maxBlocks !== undefined) {
-    // Replay the consumed prefix plus this chunk, preserving progress. Page
-    // breaks are layout items but do not count against the block budget.
-    maxBlocks += snapshot.items.slice(0, snapshot.nextItemIndex)
-      .filter((item) => !item.boundary).length;
-  }
   const items = snapshot ? snapshot.items : collectLayoutItems(doc);
-  const startIndex = cursor ? cursor.nextItemIndex : 0;
-  const pages: LayoutPage[] = cursor ? [...cursor.completedPages] : [];
-  const currentPage: LayoutPage = cursor
-    ? { ...cursor.currentPage, blocks: [...cursor.currentPage.blocks] }
-    : { pageNumber: 1, blocks: [] };
-  const initY = cursor ? cursor.currentY : metricsFor(1).contentTop;
-  const initPrevSpaceAfter = cursor ? cursor.prevSpaceAfter : 0;
-  // A resumed chunk appends, so pages already painted are untouched and the
-  // version they were stamped with still describes them. A replay re-paginates
-  // that prefix, which is a different picture: it needs a version of its own,
-  // or paint keeps the old pixels while the charmap moves to the new geometry
-  // and the caret is drawn against text that is no longer there.
-  const chunkVersion = snapshot
-    ? (replaying ? snapshot.version + 1 : snapshot.version)
-    : runId;
+  const appended = snapshot?.flowCursor !== undefined
+    && snapshot.metrics.every((m) => samePageMetrics(m, metricsFor(m.pageNumber)))
+    ? afterSnapshot(snapshot, snapshot.flowCursor)
+    : undefined;
 
   // Stage 1: measure.
   const flowConfig: FlowConfig = { margins, contentWidth };
@@ -720,15 +765,40 @@ export function runFlowPipeline(
     ...(options.inlineRegistry ? { inlineRegistry: options.inlineRegistry } : {}),
     ...(options.fonts ? { fonts: options.fonts } : {}),
   };
-  const flowResult = buildBlockFlow(items, startIndex, flowConfig, measureCtx, maxBlocks);
+  const flowsFrom = (start: FlowStart) =>
+    buildBlockFlow(items, start.itemIndex, flowConfig, measureCtx, blockBudget(start, snapshot, options.maxBlocks));
+
+  // In-cell images are read off the rows after pagination, so only body
+  // placements carry over or decide whether the cached tail still holds.
+  const previousBodyPlacements = (previousLayout?.anchoredObjects ?? []).filter((p) => p.regionPos === undefined);
+  let start = appended ?? startOfDocument(metricsFor);
+  let flowResult = flowsFrom(start);
+  // A float is wrapped by everything on its page, on both sides of the cutoff,
+  // so a chunk that shares its first page with one starts that page again.
+  if (appended && snapshot && (
+    flowResult.flows.some((flow) => flow.hasAnchoredObject) ||
+    previousBodyPlacements.some((p) => p.page >= snapshot.currentPage.pageNumber)
+  )) {
+    start = startOfLastWholePage(snapshot, geometry);
+    flowResult = flowsFrom(start);
+  }
+  const { pages } = start;
+  // A chunk that only appends leaves the pages already painted as they were, and
+  // the version they were stamped with still describes them. One that lays some
+  // out again needs a version of its own, or paint keeps the old pixels while
+  // the charmap moves to the new geometry and the caret is drawn against text
+  // that is no longer there.
+  const chunkVersion = snapshot
+    ? (start === appended ? snapshot.version : snapshot.version + 1)
+    : runId;
 
   // Stage 2: assign continuous flow coordinates and resolve anchored objects.
   // The flow cursor and the paginated cursor are distinct: pagination may
   // suppress margins at page boundaries. Reconstructing one from the other
   // makes a chunk boundary change subsequent positions.
-  const seedGlobalY = cursor?.flowCursor?.y ?? metricsFor(1).contentTop;
+  const seedGlobalY = start.flowCursor.y;
   const flowsWithGlobalY = assignGlobalY(
-    flowResult.flows, seedGlobalY, pageConfig, geometry, cursor?.flowCursor?.prevSpaceAfter,
+    flowResult.flows, seedGlobalY, pageConfig, geometry, start.flowCursor.prevSpaceAfter,
   );
   const anchoredFlow = resolveAnchoredObjects(
     flowsWithGlobalY,
@@ -737,18 +807,11 @@ export function runFlowPipeline(
     measureCtx,
   );
 
-  // Merge anchored placements from prior streamed chunks with the current
-  // chunk's placements. Without this, resumed layouts overwrite the
-  // accumulated anchoredObjects list — placements from earlier chunks
-  // disappear from rendering, hit testing, and PDF export.
-  // In-cell images are read off the rows after pagination, so only body
-  // placements carry over or decide whether the cached tail still holds.
-  const previousBodyPlacements = (previousLayout?.anchoredObjects ?? []).filter((p) => p.regionPos === undefined);
-  const carriedPlacements = cursor
-    ? previousBodyPlacements.filter(
-        (p) => !anchoredFlow.placements.some((q) => q.docPos === p.docPos),
-      )
-    : [];
+  // The floats of the pages this chunk does not lay out again carry over from
+  // the chunks that placed them.
+  const carriedPlacements = previousBodyPlacements.filter(
+    (p) => p.page < start.firstPageLaid && !anchoredFlow.placements.some((q) => q.docPos === p.docPos),
+  );
   const mergedPlacements = carriedPlacements.length > 0
     ? [...carriedPlacements, ...anchoredFlow.placements]
     : anchoredFlow.placements;
@@ -766,7 +829,7 @@ export function runFlowPipeline(
       tail: canReuseTail ? findReusableTail(items, previousLayout) : undefined,
       measureCache,
       pageless: pageConfig.pageless,
-      init: { pages, page: currentPage, y: initY, prevSpaceAfter: initPrevSpaceAfter },
+      init: { pages, page: start.page, y: start.y, prevSpaceAfter: start.prevSpaceAfter },
     },
   );
 
@@ -783,7 +846,7 @@ export function runFlowPipeline(
     const flowCursor = lastFlow
       // `globalY` is optional on the type; assignGlobalY above always sets it.
       ? flowCursorAfter(lastFlow, lastFlow.globalY ?? seedGlobalY, pageConfig, geometry)
-      : cursor?.flowCursor;
+      : snapshot?.flowCursor;
     const resumption: LayoutResumption = {
       items,
       ...(flowCursor ? { flowCursor } : {}),

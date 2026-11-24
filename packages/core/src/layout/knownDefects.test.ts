@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import type { Node } from "prosemirror-model";
 import {
-  cell, differencesFromWhole, doc, fixedWidths, FLOATING, h, image, p, row, SETUPS, sized, streamed, table, text, whole, words, type Setup,
+  cell, differencesFromWhole, doc, fixedWidths, h, image, p, row, sized, streamed, table, text, whole, words, type Setup,
 } from "../test/layoutOracle";
 import { expectSamePosition } from "../test-utils";
 import { isSpacerLine } from "./LineBreaker";
@@ -30,18 +30,6 @@ const partsOf = (layout: DocumentLayout, start: string): { page: number; block: 
   );
 const lineText = (line: Block["lines"][number]): string => line.spans.map((span) => (span.kind === "text" ? span.text : "")).join("");
 const textLines = (block: Block): string[] => block.lines.filter((line) => line.spans.length > 0).map(lineText);
-
-describe("a streamed document with a float", () => {
-  const names = ["a square float beside several paragraphs", "a float reaching back over the paragraph before", "a float beside a list", "a float before a table"];
-
-  it.fails.each(names.flatMap((name) => Object.entries(SETUPS).filter(([setup]) => setup !== "no pages").map(([setup, options]): [string, string, Setup] => [name, setup, options])))(
-    "is the whole document's layout: %s, %s",
-    (name, _setup, options) => {
-      const node = must(FLOATING[name], name);
-      expect(differencesFromWhole(streamed(node, options, 1), node, options)).toEqual([]);
-    },
-  );
-});
 
 describe("a paragraph that wraps a float across two pages", () => {
   /** A tall word starts its third line on page 1, where it does not fit. */
@@ -92,5 +80,30 @@ describe("a paragraph whose own float leaves it no line on the page", () => {
   it.fails("takes the float with it, as Word does", () => {
     const subject = must(partsOf(layout(), "Subject").find((part) => textLines(part.block).join("") !== ""), "text");
     expect(layout().anchoredObjects?.[0]?.page).toBe(subject.page);
+  });
+});
+
+describe("a streamed document whose floats reach back over one another", () => {
+  const float = (xAlign: string, width: number, height: number, yOffset: number): Node => image({ wrapMode: "square", xAlign, width, height, yOffset });
+  const rows = (count: number): Node => table(...Array.from({ length: count }, () => row(cell(p("a")), cell(p("b")))));
+
+  it.fails("keeps no space at a page foot for a paragraph that goes on to the next page", () => {
+    const node = doc(
+      p([text(words(41)), float("left", 340, 120, -130)]),
+      p([text(words(51)), image({ wrapMode: "top-bottom", xAlign: "right", width: 240, height: 190, yOffset: -30 })]),
+      p(words(57)),
+      p(words(18)),
+    );
+    expect(differencesFromWhole(streamed(node, PAGE, 1), node, PAGE)).toEqual([]);
+  });
+
+  it.fails("places a float that gave way to another as the whole document does", () => {
+    const node = doc(
+      p(words(6)), rows(2), p(words(14)), rows(1), p(words(55)), p(words(4)), rows(2), rows(2), p(words(37)),
+      p([text(words(5)), float("right", 280, 140, -20)]),
+      p([text(words(56)), float("left", 320, 160, -180)]),
+      p([text(words(41)), image({ wrapMode: "top-bottom", xAlign: "right", width: 320, height: 180, yOffset: -100 })]),
+    );
+    expect(differencesFromWhole(streamed(node, PAGE, 1), node, PAGE)).toEqual([]);
   });
 });

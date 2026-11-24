@@ -613,7 +613,7 @@ contentWidth`.
 | 32 | A restamp inside one reflow leaves another float's rect stale | The table stays at its natural y; no hole |
 | 34 | Guard: an anchor whose first line lands on the next page | The float is on its anchor's page at the anchor's y |
 | 35 | Pageless with a page height | The table is not moved; nothing after it is laid out as if it had |
-| 36 | Streaming: float and table in different chunks | Pinned gap: the table stays at its natural y |
+| 36 | Streaming: float and table in different chunks | As laid out whole |
 | 37 | A float that does not reach back is carried onto the next page | Guard: the table still clears the reaching-back float |
 | 38 | A move would carry the table under a float that does not follow it | Guard: no row overlaps that float |
 | 39 | A float pulled over the line above its anchor | No text under a float; floats on their anchors' pages; two layouts agree |
@@ -739,12 +739,10 @@ bottom against the page's whole manager — and scenarios 20–22 and 27 cover i
   other's paragraphs.
 - **A table that a locked image reaches back over is overlapped**, not moved
   (Decision 3).
-- **Streaming.** Each streamed chunk starts with no floats and no
-  exclusions, so a float in one chunk does not move a table (or wrap text) in
-  the next. Text has the same gap on `main`; the editor's synchronous first
-  100 blocks make it reachable. Carrying floats across chunks means carrying
-  the solver's state in `LayoutResumption`, which is not a small change at
-  this seam. Pinned by scenario 36.
+- **Streaming.** Was: each chunk started with no floats, so a float in one
+  chunk moved no table and wrapped no text in the next. Now a chunk that shares
+  its first page with a float lays that page out again (resumable layout RFC,
+  §1.5). Scenario 36.
 - **A drop on a page no paragraph starts on** (one paragraph longer than the
   page) is measured from that paragraph's real start, on an earlier page, so
   the image is clamped onto that page (Decision 4).
