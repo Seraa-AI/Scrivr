@@ -67,18 +67,19 @@ export function advanceFlowGlobalY(
   const pageBottom = (p: number): number => geometry.bottomOf(p);
 
   // Atomic blocks (image / hr / a composite unit) never split: if the block overflows
-  // its page and fits on a fresh one, it moves whole (the gap). `paginateFlow`
-  // keeps a too-tall block or a first-on-page block where it is.
+  // its page it moves whole to a fresh one (the gap), and overflows from there
+  // when it is taller than a page. `paginateFlow` does the same.
   const isAtomic = flow.kind === "leaf" || flow.kind === "composite";
   if (isAtomic || flow.lines.length === 0) {
     let start = naturalStart;
     const page = pageOf(start);
     const atTop = start === pageStart(page);
-    const tooTall = flow.height > geometry.metricsFor(page).contentHeight;
-    if (!atTop && !tooTall && start + flow.height > pageBottom(page)) {
+    if (!atTop && start + flow.height > pageBottom(page)) {
       start = pageStart(page + 1);
     }
-    return { startGlobalY: start, endGlobalY: start + flow.height };
+    // However far a block hangs past its page, the page ends at its bottom, and
+    // what follows starts the next one.
+    return { startGlobalY: start, endGlobalY: Math.min(start + flow.height, pageBottom(pageOf(start))) };
   }
 
   // Text blocks: place lines page by page; the remainder jumps to the next page
@@ -98,9 +99,9 @@ export function advanceFlowGlobalY(
       if (forced) {
         fitted = [first];
         rest = remaining.slice(1);
-        // A line within tolerance overhangs the bottom by under half a pixel;
-        // its page still ends there, so what follows starts the next page.
-        fittedHeight = cursor === top ? first.lineHeight : pageBottom(page) - cursor;
+        // A line taller than the page, or within tolerance of fitting, hangs past
+        // the bottom; its page still ends there, so what follows starts the next.
+        fittedHeight = Math.min(first.lineHeight, pageBottom(page) - cursor);
       } else {
         cursor = pageStart(page + 1);
         continue;

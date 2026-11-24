@@ -1096,35 +1096,25 @@ export function paginateFlow(
       y = targetY + block.height;
       prevSpaceAfter = flow.spaceAfter;
     } else if (isAtomicBlock) {
-      // ── Leaf block (image, HR): move whole block to next page ──────────────
-      const tooTallForAnyPage = flow.height > contentHeight;
-      if (tooTallForAnyPage) {
-        if ((globalThis as Record<string,unknown>).__LAYOUT_DEBUG__) {
-          console.log(`  → LEAF too-tall: forced onto current page ${currentPage.pageNumber}`);
-        }
-        currentPage.blocks.push(block);
-        y = targetY + block.height;
-        prevSpaceAfter = flow.spaceAfter;
-      } else {
-        if ((globalThis as Record<string,unknown>).__LAYOUT_DEBUG__) {
-          console.log(`  → LEAF moved to page ${pages.length + 2}`);
-        }
-        pages.push(currentPage);
-        currentPage = newPage(pages.length + 1);
-        // Fetch the NEW page's metrics — differentFirstPage or footnote bands
-        // can make this differ from the page we just left.
-        const newPageContentTop = metricsFor(currentPage.pageNumber).contentTop;
-        metrics.push(metricsFor(currentPage.pageNumber));
-        y = newPageContentTop;
-        prevSpaceAfter = 0;
-
-        const reflow = buildBlock(blockX, newPageContentTop);
-        Object.assign(reflow, markerFields(flow));
-
-        currentPage.blocks.push(reflow);
-        y = newPageContentTop + reflow.height;
-        prevSpaceAfter = flow.spaceAfter;
+      // ── Leaf or composite: move the whole block to the next page ───────────
+      if ((globalThis as Record<string,unknown>).__LAYOUT_DEBUG__) {
+        console.log(`  → LEAF moved to page ${pages.length + 2}`);
       }
+      pages.push(currentPage);
+      currentPage = newPage(pages.length + 1);
+      // Fetch the NEW page's metrics — differentFirstPage or footnote bands
+      // can make this differ from the page we just left.
+      const newPageContentTop = metricsFor(currentPage.pageNumber).contentTop;
+      metrics.push(metricsFor(currentPage.pageNumber));
+      y = newPageContentTop;
+      prevSpaceAfter = 0;
+
+      const reflow = buildBlock(blockX, newPageContentTop);
+      Object.assign(reflow, markerFields(flow));
+
+      currentPage.blocks.push(reflow);
+      y = newPageContentTop + reflow.height;
+      prevSpaceAfter = flow.spaceAfter;
     } else {
       // ── Text block: split lines across page boundaries ─────────────────────
       if ((globalThis as Record<string,unknown>).__LAYOUT_DEBUG__) {
