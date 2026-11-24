@@ -63,23 +63,23 @@
     "clean": "rm -rf dist"
   },
   "devDependencies": {
-    "@napi-rs/canvas": "^1.0.0",
-    "@types/markdown-it": "^14.1.2",
-    "tsup": "^8.0.0",
-    "typescript": "^5.4.0"
+    "@napi-rs/canvas": "^1.2.0",
+    "@types/markdown-it": "^14.2.0",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3"
   },
   "dependencies": {
-    "@floating-ui/dom": "^1.7.6",
-    "markdown-it": "^14.1.1",
+    "@floating-ui/dom": "^1.8.0",
+    "markdown-it": "^14.3.3",
     "prosemirror-commands": "^1.7.2",
-    "prosemirror-history": "^1.5.1",
-    "prosemirror-inputrules": "^1.6.0",
+    "prosemirror-history": "^1.5.2",
+    "prosemirror-inputrules": "^1.7.0",
     "prosemirror-keymap": "^1.2.3",
-    "prosemirror-markdown": "^1.13.9",
+    "prosemirror-markdown": "^1.14.0",
     "prosemirror-model": "^1.25.13",
-    "prosemirror-schema-list": "^1.6.0",
+    "prosemirror-schema-list": "^1.6.1",
     "prosemirror-state": "^1.4.4",
-    "prosemirror-transform": "^1.12.6",
-    "zod": "^4.3.6"
+    "prosemirror-transform": "^1.12.7",
+    "zod": "^4.6.7"
   }
 }

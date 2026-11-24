@@ -87,7 +87,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@floating-ui/dom": "^1.7.6"
+    "@floating-ui/dom": "^1.8.0"
   },
   "peerDependencies": {
     "@scrivr/ai": "workspace:*",
@@ -108,12 +108,12 @@
     "@scrivr/ai": "workspace:*",
     "@scrivr/core": "workspace:*",
     "@scrivr/plugins": "workspace:*",
-    "@types/react": "^19.2.14",
-    "@types/react-dom": "^19.2.3",
-    "happy-dom": "^20.8.4",
-    "react": "^19.2.4",
-    "react-dom": "^19.2.4",
-    "tsup": "^8.0.0",
-    "typescript": "^5.4.0"
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "happy-dom": "^20.14.6",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3"
   }
 }

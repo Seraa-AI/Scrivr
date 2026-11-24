@@ -61,8 +61,8 @@
   },
   "devDependencies": {
     "@scrivr/core": "workspace:*",
-    "tsup": "^8.0.0",
-    "typescript": "^5.4.0",
-    "vitest": "^2.1.0"
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "vitest": "^2.1.9"
   }
 }

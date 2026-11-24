@@ -55,12 +55,12 @@
   },
   "dependencies": {
     "@scrivr/core": "workspace:*",
-    "@scrivr/export-pdf": "workspace:*",
-    "@scrivr/export-markdown": "workspace:*"
+    "@scrivr/export-markdown": "workspace:*",
+    "@scrivr/export-pdf": "workspace:*"
   },
   "devDependencies": {
-    "tsup": "^8.0.0",
-    "typescript": "^5.4.0",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
     "vitest": "^2.1.9"
   }
 }

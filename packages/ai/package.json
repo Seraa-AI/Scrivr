@@ -56,11 +56,11 @@
     "@scrivr/core": "workspace:*",
     "@scrivr/export-semantic": "workspace:*",
     "@scrivr/plugins": "workspace:*",
-    "zod": "^4.3.6"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
-    "tsup": "^8.0.0",
-    "typescript": "^5.4.0",
-    "vitest": "^2.1.0"
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "vitest": "^2.1.9"
   }
 }

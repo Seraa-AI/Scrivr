@@ -33,12 +33,12 @@
     "deploy:production:push": "turbo run deploy:production:push"
   },
   "devDependencies": {
-    "@changesets/cli": "^2.30.0",
-    "@vitest/coverage-v8": "^2.0.0",
-    "@vitest/ui": "^2.0.0",
-    "happy-dom": "^20.8.4",
-    "turbo": "^2.8.20",
-    "typescript": "^5.4.0",
-    "vitest": "^2.0.0"
+    "@changesets/cli": "^2.31.1",
+    "@vitest/coverage-v8": "^2.1.9",
+    "@vitest/ui": "^2.1.9",
+    "happy-dom": "^20.14.6",
+    "turbo": "^2.11.13",
+    "typescript": "^5.9.3",
+    "vitest": "^2.1.9"
   }
 }

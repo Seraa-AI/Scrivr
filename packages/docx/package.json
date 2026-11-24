@@ -55,18 +55,18 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "fast-xml-parser": "^4.5.0",
-    "fflate": "^0.8.2"
+    "fast-xml-parser": "^4.5.7",
+    "fflate": "^0.8.3"
   },
   "peerDependencies": {
     "@scrivr/core": "workspace:*"
   },
   "devDependencies": {
     "@expo-google-fonts/inter": "0.4.2",
-    "@napi-rs/canvas": "^1.0.0",
+    "@napi-rs/canvas": "^1.2.0",
     "@scrivr/core": "workspace:*",
-    "tsup": "^8.0.0",
-    "typescript": "^5.4.0",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
     "vitest": "^2.1.9"
   }
 }

@@ -8,12 +8,12 @@
     "start": "tsx src/index.ts"
   },
   "dependencies": {
-    "@hocuspocus/server": "^2.13.6",
-    "yjs": "^13.6.30"
+    "@hocuspocus/server": "^2.15.3",
+    "yjs": "^13.6.33"
   },
   "devDependencies": {
-    "@types/node": "^20.0.0",
-    "tsx": "^4.19.2",
-    "typescript": "^5.4.0"
+    "@types/node": "^20.19.43",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3"
   }
 }
