@@ -122,7 +122,7 @@ describe("toggleHeading over several blocks", () => {
     expect(blocks(e)).toEqual(["paragraph", "paragraph"]);
   });
 
-  it("turns a whole document of headings off, with the empty paragraph TrailingNode keeps after it", () => {
+  it("turns a whole document of headings off, and TrailingNode takes away the line it added", () => {
     const e = editorOf(h(2, "one"), h(2, "two"));
     // One transaction lets TrailingNode add its paragraph before the selection is made.
     e.applyTransaction(e.getState().tr);
@@ -133,10 +133,10 @@ describe("toggleHeading over several blocks", () => {
     };
 
     toggleAll();
-    expect(blocks(e)).toEqual(["paragraph", "paragraph", "paragraph"]);
+    expect(blocks(e)).toEqual(["paragraph", "paragraph"]);
     toggleAll();
     toggleAll();
-    expect(blocks(e)).toEqual(["paragraph", "paragraph", "paragraph"]);
+    expect(blocks(e)).toEqual(["paragraph", "paragraph"]);
   });
 
   it("leaves the trailing empty paragraph alone when setting a heading over everything", () => {
@@ -162,7 +162,7 @@ describe("toggleHeading over several blocks", () => {
     toggleAll();
     expect(blocks(e)).toEqual(["h2", "paragraph"]);
     toggleAll();
-    expect(blocks(e)).toEqual(["paragraph", "paragraph"]);
+    expect(blocks(e)).toEqual(["paragraph"]);
     toggleAll();
     expect(blocks(e)).toEqual(["h2", "paragraph"]);
   });
