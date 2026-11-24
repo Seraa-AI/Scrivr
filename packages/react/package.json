@@ -82,7 +82,7 @@
     "build": "tsup",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.browser.json",
     "typecheck:consumer": "tsc -p type-tests",
     "clean": "rm -rf dist"
   },

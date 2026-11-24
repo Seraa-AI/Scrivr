@@ -6,8 +6,10 @@
 "@scrivr/react": patch
 ---
 
-Dependency updates, including the ones that fix known security advisories. Runtime majors: `markdown-it` 15 in `@scrivr/core`, `fast-xml-parser` 5 in `@scrivr/docx` and `happy-dom` 21 in `@scrivr/html`.
+Dependency updates, including the ones that fix known security advisories. `@scrivr/docx` moves to `fast-xml-parser` 5 and `@scrivr/html` to `happy-dom` 21. `@scrivr/core` no longer depends on `@floating-ui/dom`, which it did not use.
 
-Importing a Word file keeps text that looks like a number as it was written. `007` came in as `7`, `1.50` as `1.5` and `1.00.01` as `1001`. Numeric character references such as `&#8217;` are now read as the character they stand for.
+Importing a Word file keeps text that looks like a number as it was written: `007` came in as `7` and `1.50` as `1.5`. Numeric character references such as `&#8217;` are read as the character they stand for, and an error for a file that cannot be read no longer quotes the file's text. Exporting leaves out characters that XML does not allow, which made the file unreadable.
 
-**Breaking (types):** `MarkdownToken.attrGet()` returns `string | number | null`. It already returned numbers for some attributes, such as a list's `start`.
+`@scrivr/core` pins two ProseMirror packages whose newest releases change behavior. With `prosemirror-history` 1.5.2, redoing an alignment or heading moved the selection to the next paragraph. With `prosemirror-markdown` 1.14, bold text that also has a color, font, link or underline and ends in a space was written as literal asterisks. A new install of an earlier Scrivr release could already pick these up.
+
+Markdown export writes the space at the end of struck text outside the `~~`, so it is read back as struck text.
