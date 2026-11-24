@@ -771,8 +771,14 @@ lives on between phases. It is not a second authority: it has no page to break.
 
 **Riskiest: Phase 2.** It replaces line breaking's all-at-once loop and is called
 from inside the float settle, where a fraction of a pixel decides an oscillation.
-Phase 3 is second. Pair on both the seam between fill and settle (2) and the
-checkpoint rule (3); 1, 4, 6 are reviewable alone.
+Phase 3 is second. Each gets a red-test list agreed before code, and its own review
+of the seam: between fill and settle (2), and the checkpoint rule (3).
+
+**DOCX is a separate track.** This work changes what layout produces, never what
+import reads. The meeting point is the fidelity layout baselines: a phase that moves
+one re-records it in its own PR, and says which documents moved and why. Section
+breaks and `<w:cols>` import come after Phase 5, with the `w:type` shift of the
+[columns RFC](./columns-rfc.md).
 
 ## 14. Decisions needed
 
