@@ -30,7 +30,7 @@ pnpm add @hocuspocus/server
 ```ts title="server.ts"
 import { Server } from '@hocuspocus/server';
 
-const server = Server.configure({
+const server = new Server({
   port: 1234,
   // Optional: persist documents to a database
   async onLoadDocument({ documentName }) {

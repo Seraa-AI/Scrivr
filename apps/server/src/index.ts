@@ -31,7 +31,7 @@ function docPath(name: string): string {
 
 const AUTH_TOKEN = process.env.AUTH_TOKEN;
 
-const server = Server.configure({
+const server = new Server({
   port: 3030,
   async onAuthenticate({ token, documentName }) {
     if (!AUTH_TOKEN) return; // no token configured — allow all connections
@@ -76,5 +76,5 @@ const server = Server.configure({
 });
 
 server.listen();
-console.log("Scrivr collaboration server listening on ws://localhost:1234");
+console.log("Scrivr collaboration server listening on ws://localhost:3030");
 console.log(`Documents persisted to: ${DATA_DIR}`);

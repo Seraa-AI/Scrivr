@@ -106,13 +106,13 @@ See the [Collaboration example](/examples/collaboration) for the full setup.
 
 ### AI Toolkit
 
-`AiToolkit` is bring-your-own-LLM — it provides the editor-side context and ghost text overlay, but the actual LLM call is made from your own backend endpoint. Install `@scrivr/plugins` on the frontend and whatever AI SDK you prefer on the backend:
+`AiToolkit` is bring-your-own-LLM — it provides the editor-side context and ghost text overlay, but the actual LLM call is made from your own backend endpoint. Install `@scrivr/ai` on the frontend and whatever AI SDK you prefer on the backend:
 
 <Tabs items={["pnpm", "npm", "yarn"]}>
   <Tab value="pnpm">
     ```bash
     # Frontend
-    pnpm add @scrivr/plugins
+    pnpm add @scrivr/ai
 
     # Backend (example using Vercel AI SDK + Anthropic)
     pnpm add ai @ai-sdk/anthropic
@@ -121,7 +121,7 @@ See the [Collaboration example](/examples/collaboration) for the full setup.
   <Tab value="npm">
     ```bash
     # Frontend
-    npm install @scrivr/plugins
+    npm install @scrivr/ai
 
     # Backend (example using Vercel AI SDK + Anthropic)
     npm install ai @ai-sdk/anthropic
@@ -130,7 +130,7 @@ See the [Collaboration example](/examples/collaboration) for the full setup.
   <Tab value="yarn">
     ```bash
     # Frontend
-    yarn add @scrivr/plugins
+    yarn add @scrivr/ai
 
     # Backend (example using Vercel AI SDK + Anthropic)
     yarn add ai @ai-sdk/anthropic

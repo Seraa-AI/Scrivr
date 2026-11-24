@@ -109,10 +109,10 @@ The order people *sign* in is yours too: a viewer completes only the fields you 
 import { isSealed, matchesSnapshot, resetToSnapshot } from "@scrivr/plugins/collaboration";
 
 const server = new Hocuspocus({
-  async onAuthenticate({ documentName, connection }) {
+  async onAuthenticate({ documentName, connectionConfig }) {
     // Your own auth first. The room is not loaded yet here, so ask your own
     // record: a sealed room — or one being sealed — is read-only for everyone who joins it.
-    if (sealing.has(documentName) || (await latestRevisionIsSealed(documentName))) connection.readOnly = true; // yours
+    if (sealing.has(documentName) || (await latestRevisionIsSealed(documentName))) connectionConfig.readOnly = true; // yours
   },
 
   async onLoadDocument({ document, documentName }) {

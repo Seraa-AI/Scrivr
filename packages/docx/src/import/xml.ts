@@ -21,11 +21,21 @@ export interface OoxmlElement {
   children: OoxmlChild[];
 }
 
+/** The parser throws on these names, which would lose the document over one element. */
+const RESERVED_NAMES = new Set(["__proto__", "constructor", "prototype"]);
+const renameReserved = (name: string) => (RESERVED_NAMES.has(name) ? `_${name}` : name);
+
 const parser = new XMLParser({
+  transformTagName: renameReserved,
+  transformAttributeName: renameReserved,
   ignoreAttributes: false,
   attributeNamePrefix: "",
   preserveOrder: true,
   parseAttributeValue: false,
+  // Read as a number, text loses how it was written: "007" becomes 7.
+  parseTagValue: false,
+  // Off, `&#8217;` stays as written.
+  htmlEntities: true,
   trimValues: false,
 });
 
@@ -36,12 +46,25 @@ const parser = new XMLParser({
  * Skips the leading `<?xml ...?>` declaration if present — fast-xml-parser
  * with `preserveOrder: true` emits the declaration as its own pseudo-node
  * keyed by `?xml`.
+ *
+ * Throws on XML it cannot read, and on a second root: closing tags too many
+ * can end the root early, and what follows would be lost unreported.
  */
 export function parseOoxml(xml: string): OoxmlElement | null {
-  const raw = parser.parse(xml);
+  const raw = readXml(xml);
   if (!Array.isArray(raw)) return null;
-  const normalized = normalizeArray(raw);
-  return normalized.find((el) => !el.name.startsWith("?")) ?? null;
+  const roots = normalizeArray(raw).filter((el) => !el.name.startsWith("?"));
+  if (roots.length > 1) throw new Error("Invalid XML: more than one root element");
+  return roots[0] ?? null;
+}
+
+/** The parser quotes the document in its errors, which apps may show or log. */
+function readXml(xml: string): unknown {
+  try {
+    return parser.parse(xml);
+  } catch {
+    throw new Error("Invalid XML");
+  }
 }
 
 /** `parseOoxml` for one package part, watched by `tracker` when there is one. */

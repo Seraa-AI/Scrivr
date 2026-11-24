@@ -51,7 +51,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: pnpm
 
       - name: Install dependencies
@@ -77,7 +77,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: pnpm
 
       - name: Install dependencies
@@ -87,7 +87,7 @@ jobs:
       # as a peerDependency to MAJOR — changesets majors a peer dependent
       # whenever the new version leaves the declared range, and `workspace:*`
       # never satisfies a semver check, so it always reads as out of range. The
-      # `fixed` group then carries that major to all eight packages. That is how
+      # `fixed` group then carries that major to all nine packages. That is how
       # one `minor` changeset produced a 2.0.0 release plan.
       # `changeset status` resolves the config's `baseBranch` as a local ref,
       # which a PR checkout does not have — pass the remote ref explicitly, the

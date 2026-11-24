@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
+import { afterEach, beforeEach, describe, it, expect, vi, type MockInstance } from "vitest";
 import { ExtensionManager, getSchema } from "./ExtensionManager";
 import { Extension } from "./Extension";
 import { StarterKit } from "./StarterKit";
@@ -583,7 +583,7 @@ describe("ExtensionManager", () => {
     // intentional to allow StarterKit-style customization, but a typo can shadow
     // a built-in with no warning. Spy on console.warn so we can assert the
     // warning fires for every collision kind.
-    let warnSpy: ReturnType<typeof vi.spyOn>;
+    let warnSpy: MockInstance<typeof console.warn>;
 
     beforeEach(() => {
       warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -932,7 +932,7 @@ describe("ExtensionManager", () => {
   });
 
   describe("multiple initial-doc providers", () => {
-    let warnSpy: ReturnType<typeof vi.spyOn>;
+    let warnSpy: MockInstance<typeof console.warn>;
     beforeEach(() => {
       warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     });
@@ -1016,7 +1016,7 @@ describe("ExtensionManager", () => {
   });
 
   describe("addPageConfig lane", () => {
-    let warnSpy: ReturnType<typeof vi.spyOn>;
+    let warnSpy: MockInstance<typeof console.warn>;
     beforeEach(() => {
       warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     });
