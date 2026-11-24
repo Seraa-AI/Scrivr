@@ -310,7 +310,9 @@ export function layoutBlockWithMarker(
 export function layoutItem(
   item: LayoutItem,
   box: { x: number; width: number },
-  options: Omit<BlockLayoutOptions, "x" | "availableWidth" | "nodePos" | "fontConfig"> & { fontConfig: FontConfig },
+  /** Where the item starts, given the space it keeps above. */
+  startAfter: (spaceBefore: number) => number,
+  options: Omit<BlockLayoutOptions, "x" | "y" | "availableWidth" | "nodePos" | "fontConfig"> & { fontConfig: FontConfig },
   /** The line space for the box the item's text resolves to, when something wraps it. */
   lineSpaceIn?: (x: number, width: number) => LineSpaceProvider,
 ): LayoutBlock {
@@ -319,13 +321,18 @@ export function layoutItem(
     ...options,
     nodePos: item.nodePos,
     x: resolved.x,
+    y: startAfter(resolved.style.spaceBefore),
     availableWidth: resolved.width,
     ...(lineSpaceIn ? { lineSpaceProvider: lineSpaceIn(resolved.x, resolved.width) } : {}),
     ...(item.unit ? { unit: item.unit } : {}),
   }, resolved.marker);
+  const spacing = itemSpacing(resolved, block);
   return {
     ...block,
-    ...itemSpacing(resolved, block),
+    ...spacing,
+    // What an item keeps above is only known once it is measured: none, for one
+    // that holds only anchors.
+    y: startAfter(spacing.spaceBefore),
     ...(item.lastUnit ? { lastUnit: true } : {}),
   };
 }

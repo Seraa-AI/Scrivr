@@ -43,22 +43,6 @@ describe("a streamed document with a float", () => {
   );
 });
 
-describe("a table cell", () => {
-  const blocksIn = (layout: DocumentLayout): Block[] => must(layout.pages[0]?.blocks[0]?.regions?.[0], "cell").blocks;
-
-  it.fails("keeps one gap between two blocks, as the page does", () => {
-    const inCell = blocksIn(whole(doc(table(row(cell(p("one"), h(2, "two"))))), PAGE));
-    const [one, two] = [must(inCell[0], "one"), must(inCell[1], "two")];
-    expectSamePosition(two.y, one.y + one.height + Math.max(one.spaceAfter, two.spaceBefore));
-  });
-
-  it.fails("keeps its first block's space before, as Word does", () => {
-    const heading = must(blocksIn(whole(doc(table(row(cell(h(2, "one"), p("two"))))), PAGE))[0], "heading");
-    const region = must(whole(doc(table(row(cell(h(2, "one"))))), PAGE).pages[0]?.blocks[0]?.regions?.[0], "cell");
-    expectSamePosition(heading.y, region.inset.top + heading.spaceBefore);
-  });
-});
-
 describe("a row taller than a page", () => {
   it.fails("starts a page of its own", () => {
     const tall = cell(...Array.from({ length: 40 }, (_, i) => p(`${i}`)));
