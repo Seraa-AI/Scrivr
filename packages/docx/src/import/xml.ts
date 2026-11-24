@@ -26,6 +26,10 @@ const parser = new XMLParser({
   attributeNamePrefix: "",
   preserveOrder: true,
   parseAttributeValue: false,
+  // Read as a number, text loses how it was written: "007" becomes 7.
+  parseTagValue: false,
+  // Numeric references (`&#8217;`) are read only with this on.
+  htmlEntities: true,
   trimValues: false,
 });
 

@@ -2,7 +2,7 @@
 {"op":"block","page":1,"depth":0,"type":"paragraph","x":72,"y":72,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
 {"op":"block","page":1,"depth":0,"type":"paragraph","x":72,"y":98.8,"width":650,"height":22.8,"spaceBefore":0,"spaceAfter":10,"lines":["27 October 2017"]}
 {"op":"block","page":1,"depth":0,"type":"paragraph","x":72,"y":131.6,"width":650,"height":25.2,"spaceBefore":0,"spaceAfter":10,"lines":["Enrollment MEPRS"]}
-{"op":"block","page":1,"depth":0,"type":"paragraph","x":72,"y":166.8,"width":650,"height":25.2,"spaceBefore":0,"spaceAfter":10,"lines":["(Version 1.0101)"]}
+{"op":"block","page":1,"depth":0,"type":"paragraph","x":72,"y":166.8,"width":650,"height":25.2,"spaceBefore":0,"spaceAfter":10,"lines":["(Version 1.01.01"]}
 {"op":"block","page":1,"depth":0,"type":"paragraph","x":72,"y":202,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
 {"op":"block","page":1,"depth":0,"type":"paragraph","x":72,"y":228.8,"width":650,"height":22.8,"spaceBefore":0,"spaceAfter":10,"lines":["Current Specific"]}
 {"op":"block","page":1,"depth":0,"type":"paragraph","x":72,"y":261.6,"width":650,"height":16.8,"spaceBefore":0,"spaceAfter":10,"lines":["​"]}
@@ -15,13 +15,13 @@
 {"op":"block","page":1,"depth":1,"type":"paragraph","x":368.282,"y":4,"width":80.582,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["Originator"]}
 {"op":"block","page":1,"depth":1,"type":"paragraph","x":460.864,"y":4,"width":255.136,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["Description of C"]}
 {"op":"block","page":1,"depth":0,"type":"tableRow","x":72,"y":373.2,"width":650,"height":32.4,"spaceBefore":0,"spaceAfter":0,"lines":[]}
-{"op":"block","page":1,"depth":1,"type":"paragraph","x":78,"y":4,"width":49.721,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["100"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":78,"y":4,"width":49.721,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["1.00.00"]}
 {"op":"block","page":1,"depth":1,"type":"paragraph","x":139.721,"y":4,"width":77.688,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["4/10/2012"]}
 {"op":"block","page":1,"depth":1,"type":"paragraph","x":229.409,"y":4,"width":126.872,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["Whole Document"]}
 {"op":"block","page":1,"depth":1,"type":"paragraph","x":368.282,"y":4,"width":80.582,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["K. Hofmann"]}
 {"op":"block","page":1,"depth":1,"type":"paragraph","x":460.864,"y":4,"width":255.136,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["Initial version"]}
 {"op":"block","page":1,"depth":0,"type":"tableRow","x":72,"y":405.6,"width":650,"height":110,"spaceBefore":0,"spaceAfter":0,"lines":[]}
-{"op":"block","page":1,"depth":1,"type":"paragraph","x":78,"y":4,"width":49.721,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["1001"]}
+{"op":"block","page":1,"depth":1,"type":"paragraph","x":78,"y":4,"width":49.721,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["1.00.01"]}
 {"op":"block","page":1,"depth":1,"type":"paragraph","x":139.721,"y":4,"width":77.688,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["9/10/2012"]}
 {"op":"block","page":1,"depth":1,"type":"paragraph","x":229.409,"y":4,"width":126.872,"height":14.4,"spaceBefore":0,"spaceAfter":10,"lines":["Section VIII, Ta"]}
 {"op":"block","page":1,"depth":1,"type":"paragraph","x":229.409,"y":28.4,"width":126.872,"height":43.2,"spaceBefore":0,"spaceAfter":10,"lines":["Section VI, ","Paragraph 7; Sec","VIII, Table 4"]}
