@@ -1,0 +1,352 @@
+## A4 pages, 2246 tall
+page 1
+  paragraph x=72 y=72 w=650 h=100.8
+    | 16.8 @0 "0 word0 word1 word2 word"
+    | 16.8 @0 "word10 word11 word12 wor"
+    | 16.8 @0 "word19 word20 word21 wor"
+    | 16.8 @0 "word28 word29 word30 wor"
+    | 16.8 @0 "word37 word38 word39 wor"
+    | 16.8 @0 "word46 word47 word48 wor"
+  paragraph x=72 y=182.8 w=650 h=67.2
+    | 16.8 @0 "1 word0 word1 word2 word"
+    | 16.8 @0 "word14 word15 word16 wor"
+    | 16.8 @0 "word27 word28 word29 wor"
+    | 16.8 @0 "word40 word41 word42 wor"
+  paragraph x=72 y=260 w=650 h=67.2
+    | 16.8 @0 "2 word0 word1 word2 word"
+    | 16.8 @0 "word14 word15 word16 wor"
+    | 16.8 @0 "word27 word28 word29 wor"
+    | 16.8 @0 "word40 word41 word42 wor"
+  paragraph x=72 y=337.2 w=650 h=100.8
+    | 16.8 @172 "3 word0 word1 word2 word"
+    | 16.8 @172 "word10 word11 word12 wor"
+    | 16.8 @172 "word19 word20 word21 wor"
+    | 16.8 @172 "word28 word29 word30 wor"
+    | 16.8 @172 "word37 word38 word39 wor"
+    | 16.8 @172 "word46 word47 word48 wor"
+  paragraph x=72 y=448 w=650 h=67.2
+    | 16.8 @0 "4 word0 word1 word2 word"
+    | 16.8 @0 "word14 word15 word16 wor"
+    | 16.8 @0 "word27 word28 word29 wor"
+    | 16.8 @0 "word40 word41 word42 wor"
+  paragraph x=72 y=525.2 w=650 h=67.2
+    | 16.8 @0 "5 word0 word1 word2 word"
+    | 16.8 @0 "word14 word15 word16 wor"
+    | 16.8 @0 "word27 word28 word29 wor"
+    | 16.8 @0 "word40 word41 word42 wor"
+  paragraph x=72 y=602.4 w=650 h=100.8
+    | 16.8 @0 "6 word0 word1 word2 word"
+    | 16.8 @0 "word10 word11 word12 wor"
+    | 16.8 @0 "word19 word20 word21 wor"
+    | 16.8 @0 "word28 word29 word30 wor"
+    | 16.8 @0 "word37 word38 word39 wor"
+    | 16.8 @0 "word46 word47 word48 wor"
+  paragraph x=72 y=713.2 w=650 h=67.2
+    | 16.8 @0 "7 word0 word1 word2 word"
+    | 16.8 @0 "word14 word15 word16 wor"
+    | 16.8 @0 "word27 word28 word29 wor"
+    | 16.8 @0 "word40 word41 word42 wor"
+  paragraph x=72 y=790.4 w=650 h=67.2
+    | 16.8 @0 "8 word0 word1 word2 word"
+    | 16.8 @0 "word14 word15 word16 wor"
+    | 16.8 @0 "word27 word28 word29 wor"
+    | 16.8 @0 "word40 word41 word42 wor"
+  paragraph x=72 y=867.6 w=650 h=100.8
+    | 16.8 @172 "9 word0 word1 word2 word"
+    | 16.8 @172 "word10 word11 word12 wor"
+    | 16.8 @172 "word19 word20 word21 wor"
+    | 16.8 @172 "word28 word29 word30 wor"
+    | 16.8 @172 "word37 word38 word39 wor"
+    | 16.8 @172 "word46 word47 word48 wor"
+  paragraph x=72 y=978.4 w=650 h=67.2
+    | 16.8 @0 "10 word0 word1 word2 wor"
+    | 16.8 @0 "word14 word15 word16 wor"
+    | 16.8 @0 "word27 word28 word29 wor"
+    | 16.8 @0 "word40 word41 word42 wor"
+page 2
+  paragraph x=72 y=72 w=650 h=67.2
+    | 16.8 @0 "11 word0 word1 word2 wor"
+    | 16.8 @0 "word14 word15 word16 wor"
+    | 16.8 @0 "word27 word28 word29 wor"
+    | 16.8 @0 "word40 word41 word42 wor"
+  paragraph x=72 y=149.2 w=650 h=100.8
+    | 16.8 @0 "12 word0 word1 word2 wor"
+    | 16.8 @0 "word10 word11 word12 wor"
+    | 16.8 @0 "word19 word20 word21 wor"
+    | 16.8 @0 "word28 word29 word30 wor"
+    | 16.8 @0 "word37 word38 word39 wor"
+    | 16.8 @0 "word46 word47 word48 wor"
+  paragraph x=72 y=260 w=650 h=67.2
+    | 16.8 @0 "13 word0 word1 word2 wor"
+    | 16.8 @0 "word14 word15 word16 wor"
+    | 16.8 @0 "word27 word28 word29 wor"
+    | 16.8 @0 "word40 word41 word42 wor"
+float page=1 x=562 y=72 160×90 square
+float page=1 x=72 y=337.2 160×90 square
+float page=1 x=562 y=602.4 160×90 square
+float page=1 x=72 y=867.6 160×90 square
+float page=2 x=562 y=149.2 160×90 square
+## short pages, 2220 tall
+page 1
+  paragraph x=72 y=72 w=650 h=100.8
+    | 16.8 @0 "0 word0 word1 word2 word"
+    | 16.8 @0 "word10 word11 word12 wor"
+    | 16.8 @0 "word19 word20 word21 wor"
+    | 16.8 @0 "word28 word29 word30 wor"
+    | 16.8 @0 "word37 word38 word39 wor"
+    | 16.8 @0 "word46 word47 word48 wor"
+  paragraph x=72 y=182.8 w=650 h=67.2
+    | 16.8 @0 "1 word0 word1 word2 word"
+    | 16.8 @0 "word14 word15 word16 wor"
+    | 16.8 @0 "word27 word28 word29 wor"
+    | 16.8 @0 "word40 word41 word42 wor"
+  paragraph x=72 y=260 w=650 h=67.2
+    | 16.8 @0 "2 word0 word1 word2 word"
+    | 16.8 @0 "word14 word15 word16 wor"
+    | 16.8 @0 "word27 word28 word29 wor"
+    | 16.8 @0 "word40 word41 word42 wor"
+page 2
+  paragraph x=72 y=72 w=650 h=100.8
+    | 16.8 @172 "3 word0 word1 word2 word"
+    | 16.8 @172 "word10 word11 word12 wor"
+    | 16.8 @172 "word19 word20 word21 wor"
+    | 16.8 @172 "word28 word29 word30 wor"
+    | 16.8 @172 "word37 word38 word39 wor"
+    | 16.8 @172 "word46 word47 word48 wor"
+  paragraph x=72 y=182.8 w=650 h=67.2
+    | 16.8 @0 "4 word0 word1 word2 word"
+    | 16.8 @0 "word14 word15 word16 wor"
+    | 16.8 @0 "word27 word28 word29 wor"
+    | 16.8 @0 "word40 word41 word42 wor"
+  paragraph x=72 y=260 w=650 h=67.2
+    | 16.8 @0 "5 word0 word1 word2 word"
+    | 16.8 @0 "word14 word15 word16 wor"
+    | 16.8 @0 "word27 word28 word29 wor"
+    | 16.8 @0 "word40 word41 word42 wor"
+page 3
+  paragraph x=72 y=72 w=650 h=100.8
+    | 16.8 @0 "6 word0 word1 word2 word"
+    | 16.8 @0 "word10 word11 word12 wor"
+    | 16.8 @0 "word19 word20 word21 wor"
+    | 16.8 @0 "word28 word29 word30 wor"
+    | 16.8 @0 "word37 word38 word39 wor"
+    | 16.8 @0 "word46 word47 word48 wor"
+  paragraph x=72 y=182.8 w=650 h=67.2
+    | 16.8 @0 "7 word0 word1 word2 word"
+    | 16.8 @0 "word14 word15 word16 wor"
+    | 16.8 @0 "word27 word28 word29 wor"
+    | 16.8 @0 "word40 word41 word42 wor"
+  paragraph x=72 y=260 w=650 h=67.2
+    | 16.8 @0 "8 word0 word1 word2 word"
+    | 16.8 @0 "word14 word15 word16 wor"
+    | 16.8 @0 "word27 word28 word29 wor"
+    | 16.8 @0 "word40 word41 word42 wor"
+page 4
+  paragraph x=72 y=72 w=650 h=100.8
+    | 16.8 @172 "9 word0 word1 word2 word"
+    | 16.8 @172 "word10 word11 word12 wor"
+    | 16.8 @172 "word19 word20 word21 wor"
+    | 16.8 @172 "word28 word29 word30 wor"
+    | 16.8 @172 "word37 word38 word39 wor"
+    | 16.8 @172 "word46 word47 word48 wor"
+  paragraph x=72 y=182.8 w=650 h=67.2
+    | 16.8 @0 "10 word0 word1 word2 wor"
+    | 16.8 @0 "word14 word15 word16 wor"
+    | 16.8 @0 "word27 word28 word29 wor"
+    | 16.8 @0 "word40 word41 word42 wor"
+  paragraph x=72 y=260 w=650 h=67.2
+    | 16.8 @0 "11 word0 word1 word2 wor"
+    | 16.8 @0 "word14 word15 word16 wor"
+    | 16.8 @0 "word27 word28 word29 wor"
+    | 16.8 @0 "word40 word41 word42 wor"
+page 5
+  paragraph x=72 y=72 w=650 h=100.8
+    | 16.8 @0 "12 word0 word1 word2 wor"
+    | 16.8 @0 "word10 word11 word12 wor"
+    | 16.8 @0 "word19 word20 word21 wor"
+    | 16.8 @0 "word28 word29 word30 wor"
+    | 16.8 @0 "word37 word38 word39 wor"
+    | 16.8 @0 "word46 word47 word48 wor"
+  paragraph x=72 y=182.8 w=650 h=67.2
+    | 16.8 @0 "13 word0 word1 word2 wor"
+    | 16.8 @0 "word14 word15 word16 wor"
+    | 16.8 @0 "word27 word28 word29 wor"
+    | 16.8 @0 "word40 word41 word42 wor"
+float page=1 x=562 y=72 160×90 square
+float page=2 x=72 y=72 160×90 square
+float page=3 x=562 y=72 160×90 square
+float page=4 x=72 y=72 160×90 square
+float page=5 x=562 y=72 160×90 square
+## pages with a header and footer, 2664 tall
+page 1
+  paragraph x=72 y=132 w=650 h=100.8
+    | 16.8 @0 "0 word0 word1 word2 word"
+    | 16.8 @0 "word10 word11 word12 wor"
+    | 16.8 @0 "word19 word20 word21 wor"
+    | 16.8 @0 "word28 word29 word30 wor"
+    | 16.8 @0 "word37 word38 word39 wor"
+    | 16.8 @0 "word46 word47 word48 wor"
+  paragraph x=72 y=242.8 w=650 h=67.2
+    | 16.8 @0 "1 word0 word1 word2 word"
+    | 16.8 @0 "word14 word15 word16 wor"
+    | 16.8 @0 "word27 word28 word29 wor"
+    | 16.8 @0 "word40 word41 word42 wor"
+  paragraph x=72 y=320 w=650 h=16.8 continues
+    | 16.8 @0 "2 word0 word1 word2 word"
+page 2
+  paragraph x=72 y=92 w=650 h=50.4 continued
+    | 16.8 @0 "word14 word15 word16 wor"
+    | 16.8 @0 "word27 word28 word29 wor"
+    | 16.8 @0 "word40 word41 word42 wor"
+  paragraph x=72 y=152.4 w=650 h=100.8
+    | 16.8 @172 "3 word0 word1 word2 word"
+    | 16.8 @172 "word10 word11 word12 wor"
+    | 16.8 @172 "word19 word20 word21 wor"
+    | 16.8 @172 "word28 word29 word30 wor"
+    | 16.8 @172 "word37 word38 word39 wor"
+    | 16.8 @172 "word46 word47 word48 wor"
+  paragraph x=72 y=263.2 w=650 h=67.2
+    | 16.8 @0 "4 word0 word1 word2 word"
+    | 16.8 @0 "word14 word15 word16 wor"
+    | 16.8 @0 "word27 word28 word29 wor"
+    | 16.8 @0 "word40 word41 word42 wor"
+page 3
+  paragraph x=72 y=92 w=650 h=67.2
+    | 16.8 @0 "5 word0 word1 word2 word"
+    | 16.8 @0 "word14 word15 word16 wor"
+    | 16.8 @0 "word27 word28 word29 wor"
+    | 16.8 @0 "word40 word41 word42 wor"
+  paragraph x=72 y=169.2 w=650 h=100.8
+    | 16.8 @0 "6 word0 word1 word2 word"
+    | 16.8 @0 "word10 word11 word12 wor"
+    | 16.8 @0 "word19 word20 word21 wor"
+    | 16.8 @0 "word28 word29 word30 wor"
+    | 16.8 @0 "word37 word38 word39 wor"
+    | 16.8 @0 "word46 word47 word48 wor"
+  paragraph x=72 y=280 w=650 h=50.4 continues
+    | 16.8 @0 "7 word0 word1 word2 word"
+    | 16.8 @0 "word14 word15 word16 wor"
+    | 16.8 @0 "word27 word28 word29 wor"
+page 4
+  paragraph x=72 y=92 w=650 h=16.8 continued
+    | 16.8 @0 "word40 word41 word42 wor"
+  paragraph x=72 y=118.8 w=650 h=67.2
+    | 16.8 @0 "8 word0 word1 word2 word"
+    | 16.8 @0 "word14 word15 word16 wor"
+    | 16.8 @0 "word27 word28 word29 wor"
+    | 16.8 @0 "word40 word41 word42 wor"
+  paragraph x=72 y=196 w=650 h=100.8
+    | 16.8 @172 "9 word0 word1 word2 word"
+    | 16.8 @172 "word10 word11 word12 wor"
+    | 16.8 @172 "word19 word20 word21 wor"
+    | 16.8 @172 "word28 word29 word30 wor"
+    | 16.8 @172 "word37 word38 word39 wor"
+    | 16.8 @172 "word46 word47 word48 wor"
+  paragraph x=72 y=306.8 w=650 h=33.6 continues
+    | 16.8 @0 "10 word0 word1 word2 wor"
+    | 16.8 @0 "word14 word15 word16 wor"
+page 5
+  paragraph x=72 y=92 w=650 h=33.6 continued
+    | 16.8 @0 "word27 word28 word29 wor"
+    | 16.8 @0 "word40 word41 word42 wor"
+  paragraph x=72 y=135.6 w=650 h=67.2
+    | 16.8 @0 "11 word0 word1 word2 wor"
+    | 16.8 @0 "word14 word15 word16 wor"
+    | 16.8 @0 "word27 word28 word29 wor"
+    | 16.8 @0 "word40 word41 word42 wor"
+  paragraph x=72 y=212.8 w=650 h=100.8
+    | 16.8 @0 "12 word0 word1 word2 wor"
+    | 16.8 @0 "word10 word11 word12 wor"
+    | 16.8 @0 "word19 word20 word21 wor"
+    | 16.8 @0 "word28 word29 word30 wor"
+    | 16.8 @0 "word37 word38 word39 wor"
+    | 16.8 @0 "word46 word47 word48 wor"
+  paragraph x=72 y=323.6 w=650 h=16.8 continues
+    | 16.8 @0 "13 word0 word1 word2 wor"
+page 6
+  paragraph x=72 y=92 w=650 h=50.4 continued
+    | 16.8 @0 "word14 word15 word16 wor"
+    | 16.8 @0 "word27 word28 word29 wor"
+    | 16.8 @0 "word40 word41 word42 wor"
+float page=1 x=562 y=132 160×90 square
+float page=2 x=72 y=152.4 160×90 square
+float page=3 x=562 y=169.2 160×90 square
+float page=4 x=72 y=196 160×90 square
+float page=5 x=562 y=212.8 160×90 square
+## no pages, 1150.8 tall
+page 1
+  paragraph x=73 y=40 w=739 h=67.2
+    | 16.8 @0 "0 word0 word1 word2 word"
+    | 16.8 @0 "word16 word17 word18 wor"
+    | 16.8 @0 "word31 word32 word33 wor"
+    | 16.8 @0 "word46 word47 word48 wor"
+  paragraph x=73 y=117.2 w=739 h=67.2
+    | 16.8 @0 "1 word0 word1 word2 word"
+    | 16.8 @0 "word16 word17 word18 wor"
+    | 16.8 @0 "word31 word32 word33 wor"
+    | 16.8 @0 "word46 word47 word48 wor"
+  paragraph x=73 y=194.4 w=739 h=67.2
+    | 16.8 @0 "2 word0 word1 word2 word"
+    | 16.8 @0 "word16 word17 word18 wor"
+    | 16.8 @0 "word31 word32 word33 wor"
+    | 16.8 @0 "word46 word47 word48 wor"
+  paragraph x=73 y=271.6 w=739 h=67.2
+    | 16.8 @0 "3 word0 word1 word2 word"
+    | 16.8 @0 "word16 word17 word18 wor"
+    | 16.8 @0 "word31 word32 word33 wor"
+    | 16.8 @0 "word46 word47 word48 wor"
+  paragraph x=73 y=348.8 w=739 h=67.2
+    | 16.8 @0 "4 word0 word1 word2 word"
+    | 16.8 @0 "word16 word17 word18 wor"
+    | 16.8 @0 "word31 word32 word33 wor"
+    | 16.8 @0 "word46 word47 word48 wor"
+  paragraph x=73 y=426 w=739 h=67.2
+    | 16.8 @0 "5 word0 word1 word2 word"
+    | 16.8 @0 "word16 word17 word18 wor"
+    | 16.8 @0 "word31 word32 word33 wor"
+    | 16.8 @0 "word46 word47 word48 wor"
+  paragraph x=73 y=503.2 w=739 h=67.2
+    | 16.8 @0 "6 word0 word1 word2 word"
+    | 16.8 @0 "word16 word17 word18 wor"
+    | 16.8 @0 "word31 word32 word33 wor"
+    | 16.8 @0 "word46 word47 word48 wor"
+  paragraph x=73 y=580.4 w=739 h=67.2
+    | 16.8 @0 "7 word0 word1 word2 word"
+    | 16.8 @0 "word16 word17 word18 wor"
+    | 16.8 @0 "word31 word32 word33 wor"
+    | 16.8 @0 "word46 word47 word48 wor"
+  paragraph x=73 y=657.6 w=739 h=67.2
+    | 16.8 @0 "8 word0 word1 word2 word"
+    | 16.8 @0 "word16 word17 word18 wor"
+    | 16.8 @0 "word31 word32 word33 wor"
+    | 16.8 @0 "word46 word47 word48 wor"
+  paragraph x=73 y=734.8 w=739 h=67.2
+    | 16.8 @0 "9 word0 word1 word2 word"
+    | 16.8 @0 "word16 word17 word18 wor"
+    | 16.8 @0 "word31 word32 word33 wor"
+    | 16.8 @0 "word46 word47 word48 wor"
+  paragraph x=73 y=812 w=739 h=67.2
+    | 16.8 @0 "10 word0 word1 word2 wor"
+    | 16.8 @0 "word16 word17 word18 wor"
+    | 16.8 @0 "word31 word32 word33 wor"
+    | 16.8 @0 "word46 word47 word48 wor"
+  paragraph x=73 y=889.2 w=739 h=67.2
+    | 16.8 @0 "11 word0 word1 word2 wor"
+    | 16.8 @0 "word16 word17 word18 wor"
+    | 16.8 @0 "word31 word32 word33 wor"
+    | 16.8 @0 "word46 word47 word48 wor"
+  paragraph x=73 y=966.4 w=739 h=67.2
+    | 16.8 @0 "12 word0 word1 word2 wor"
+    | 16.8 @0 "word16 word17 word18 wor"
+    | 16.8 @0 "word31 word32 word33 wor"
+    | 16.8 @0 "word46 word47 word48 wor"
+  paragraph x=73 y=1043.6 w=739 h=67.2
+    | 16.8 @0 "13 word0 word1 word2 wor"
+    | 16.8 @0 "word16 word17 word18 wor"
+    | 16.8 @0 "word31 word32 word33 wor"
+    | 16.8 @0 "word46 word47 word48 wor"
+float page=1 x=652 y=40 160×90 square
+float page=1 x=73 y=271.6 160×90 square
+float page=1 x=652 y=503.2 160×90 square
+float page=1 x=73 y=734.8 160×90 square
+float page=1 x=652 y=966.4 160×90 square

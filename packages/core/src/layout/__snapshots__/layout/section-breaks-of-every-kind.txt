@@ -1,0 +1,63 @@
+## A4 pages, 5615 tall
+page 1
+  paragraph x=72 y=72 w=650 h=16.8
+    | 16.8 @0 "before continuous"
+  paragraph x=72 y=98.8 w=650 h=16.8
+    | 16.8 @0 "before nextPage"
+page 2
+  paragraph x=72 y=72 w=650 h=16.8
+    | 16.8 @0 "before evenPage"
+page 3
+page 4
+  paragraph x=72 y=72 w=650 h=16.8
+    | 16.8 @0 "before oddPage"
+page 5
+  paragraph x=72 y=72 w=650 h=16.8
+    | 16.8 @0 "last"
+## short pages, 2220 tall
+page 1
+  paragraph x=72 y=72 w=650 h=16.8
+    | 16.8 @0 "before continuous"
+  paragraph x=72 y=98.8 w=650 h=16.8
+    | 16.8 @0 "before nextPage"
+page 2
+  paragraph x=72 y=72 w=650 h=16.8
+    | 16.8 @0 "before evenPage"
+page 3
+page 4
+  paragraph x=72 y=72 w=650 h=16.8
+    | 16.8 @0 "before oddPage"
+page 5
+  paragraph x=72 y=72 w=650 h=16.8
+    | 16.8 @0 "last"
+## pages with a header and footer, 2220 tall
+page 1
+  paragraph x=72 y=132 w=650 h=16.8
+    | 16.8 @0 "before continuous"
+  paragraph x=72 y=158.8 w=650 h=16.8
+    | 16.8 @0 "before nextPage"
+page 2
+  paragraph x=72 y=92 w=650 h=16.8
+    | 16.8 @0 "before evenPage"
+page 3
+page 4
+  paragraph x=72 y=92 w=650 h=16.8
+    | 16.8 @0 "before oddPage"
+page 5
+  paragraph x=72 y=92 w=650 h=16.8
+    | 16.8 @0 "last"
+## no pages, 204 tall
+page 1
+  paragraph x=73 y=40 w=739 h=16.8
+    | 16.8 @0 "before continuous"
+  paragraph x=73 y=66.8 w=739 h=16.8
+    | 16.8 @0 "before nextPage"
+  sectionBreak x=73 y=93.6 w=0 h=0
+  paragraph x=73 y=93.6 w=739 h=16.8
+    | 16.8 @0 "before evenPage"
+  sectionBreak x=73 y=120.4 w=0 h=0
+  paragraph x=73 y=120.4 w=739 h=16.8
+    | 16.8 @0 "before oddPage"
+  sectionBreak x=73 y=147.2 w=0 h=0
+  paragraph x=73 y=147.2 w=739 h=16.8
+    | 16.8 @0 "last"

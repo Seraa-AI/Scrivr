@@ -1,0 +1,131 @@
+## A4 pages, 1123 tall
+page 1
+  paragraph x=120 y=72 w=602 h=50.4
+    | 16.8 @0 "0 word0 word1 word2 word"
+    | 16.8 @0 "word13 word14 word15 wor"
+    | 16.8 @0 "word25 word26 word27 wor"
+  paragraph x=120 y=126.4 w=602 h=50.4
+    | 16.8 @0 "1 word0 word1 word2 word"
+    | 16.8 @0 "word13 word14 word15 wor"
+    | 16.8 @0 "word25 word26 word27 wor"
+  paragraph x=120 y=180.8 w=602 h=50.4
+    | 16.8 @0 "2 word0 word1 word2 word"
+    | 16.8 @0 "word13 word14 word15 wor"
+    | 16.8 @0 "word25 word26 word27 wor"
+  paragraph x=120 y=235.2 w=602 h=50.4
+    | 16.8 @0 "3 word0 word1 word2 word"
+    | 16.8 @0 "word13 word14 word15 wor"
+    | 16.8 @0 "word25 word26 word27 wor"
+  paragraph x=120 y=289.6 w=602 h=50.4
+    | 16.8 @0 "4 word0 word1 word2 word"
+    | 16.8 @0 "word13 word14 word15 wor"
+    | 16.8 @0 "word25 word26 word27 wor"
+  paragraph x=120 y=344 w=602 h=16.8
+    | 16.8 @0 "one"
+  paragraph x=120 y=364.8 w=602 h=16.8
+    | 16.8 @0 "two"
+  paragraph x=168 y=385.6 w=554 h=50.4
+    | 16.8 @0 "word0 word1 word2 word3 "
+    | 16.8 @0 "word12 word13 word14 wor"
+    | 16.8 @0 "word23 word24 word25 wor"
+  paragraph x=72 y=440 w=650 h=16.8
+    | 16.8 @0 "after"
+## short pages, 888 tall
+page 1
+  paragraph x=120 y=72 w=602 h=50.4
+    | 16.8 @0 "0 word0 word1 word2 word"
+    | 16.8 @0 "word13 word14 word15 wor"
+    | 16.8 @0 "word25 word26 word27 wor"
+  paragraph x=120 y=126.4 w=602 h=50.4
+    | 16.8 @0 "1 word0 word1 word2 word"
+    | 16.8 @0 "word13 word14 word15 wor"
+    | 16.8 @0 "word25 word26 word27 wor"
+  paragraph x=120 y=180.8 w=602 h=50.4
+    | 16.8 @0 "2 word0 word1 word2 word"
+    | 16.8 @0 "word13 word14 word15 wor"
+    | 16.8 @0 "word25 word26 word27 wor"
+  paragraph x=120 y=235.2 w=602 h=50.4
+    | 16.8 @0 "3 word0 word1 word2 word"
+    | 16.8 @0 "word13 word14 word15 wor"
+    | 16.8 @0 "word25 word26 word27 wor"
+  paragraph x=120 y=289.6 w=602 h=50.4
+    | 16.8 @0 "4 word0 word1 word2 word"
+    | 16.8 @0 "word13 word14 word15 wor"
+    | 16.8 @0 "word25 word26 word27 wor"
+  paragraph x=120 y=344 w=602 h=16.8
+    | 16.8 @0 "one"
+page 2
+  paragraph x=120 y=72 w=602 h=16.8
+    | 16.8 @0 "two"
+  paragraph x=168 y=92.8 w=554 h=50.4
+    | 16.8 @0 "word0 word1 word2 word3 "
+    | 16.8 @0 "word12 word13 word14 wor"
+    | 16.8 @0 "word23 word24 word25 wor"
+  paragraph x=72 y=147.2 w=650 h=16.8
+    | 16.8 @0 "after"
+## pages with a header and footer, 888 tall
+page 1
+  paragraph x=120 y=132 w=602 h=50.4
+    | 16.8 @0 "0 word0 word1 word2 word"
+    | 16.8 @0 "word13 word14 word15 wor"
+    | 16.8 @0 "word25 word26 word27 wor"
+  paragraph x=120 y=186.4 w=602 h=50.4
+    | 16.8 @0 "1 word0 word1 word2 word"
+    | 16.8 @0 "word13 word14 word15 wor"
+    | 16.8 @0 "word25 word26 word27 wor"
+  paragraph x=120 y=240.8 w=602 h=50.4
+    | 16.8 @0 "2 word0 word1 word2 word"
+    | 16.8 @0 "word13 word14 word15 wor"
+    | 16.8 @0 "word25 word26 word27 wor"
+  paragraph x=120 y=295.2 w=602 h=33.6 continues
+    | 16.8 @0 "3 word0 word1 word2 word"
+    | 16.8 @0 "word13 word14 word15 wor"
+page 2
+  paragraph x=120 y=92 w=602 h=16.8 continued
+    | 16.8 @0 "word25 word26 word27 wor"
+  paragraph x=120 y=112.8 w=602 h=50.4
+    | 16.8 @0 "4 word0 word1 word2 word"
+    | 16.8 @0 "word13 word14 word15 wor"
+    | 16.8 @0 "word25 word26 word27 wor"
+  paragraph x=120 y=167.2 w=602 h=16.8
+    | 16.8 @0 "one"
+  paragraph x=120 y=188 w=602 h=16.8
+    | 16.8 @0 "two"
+  paragraph x=168 y=208.8 w=554 h=50.4
+    | 16.8 @0 "word0 word1 word2 word3 "
+    | 16.8 @0 "word12 word13 word14 wor"
+    | 16.8 @0 "word23 word24 word25 wor"
+  paragraph x=72 y=263.2 w=650 h=16.8
+    | 16.8 @0 "after"
+## no pages, 464.8 tall
+page 1
+  paragraph x=121 y=40 w=691 h=50.4
+    | 16.8 @0 "0 word0 word1 word2 word"
+    | 16.8 @0 "word15 word16 word17 wor"
+    | 16.8 @0 "word29"
+  paragraph x=121 y=94.4 w=691 h=50.4
+    | 16.8 @0 "1 word0 word1 word2 word"
+    | 16.8 @0 "word15 word16 word17 wor"
+    | 16.8 @0 "word29"
+  paragraph x=121 y=148.8 w=691 h=50.4
+    | 16.8 @0 "2 word0 word1 word2 word"
+    | 16.8 @0 "word15 word16 word17 wor"
+    | 16.8 @0 "word29"
+  paragraph x=121 y=203.2 w=691 h=50.4
+    | 16.8 @0 "3 word0 word1 word2 word"
+    | 16.8 @0 "word15 word16 word17 wor"
+    | 16.8 @0 "word29"
+  paragraph x=121 y=257.6 w=691 h=50.4
+    | 16.8 @0 "4 word0 word1 word2 word"
+    | 16.8 @0 "word15 word16 word17 wor"
+    | 16.8 @0 "word29"
+  paragraph x=121 y=312 w=691 h=16.8
+    | 16.8 @0 "one"
+  paragraph x=121 y=332.8 w=691 h=16.8
+    | 16.8 @0 "two"
+  paragraph x=169 y=353.6 w=643 h=50.4
+    | 16.8 @0 "word0 word1 word2 word3 "
+    | 16.8 @0 "word14 word15 word16 wor"
+    | 16.8 @0 "word27 word28 word29"
+  paragraph x=73 y=408 w=739 h=16.8
+    | 16.8 @0 "after"

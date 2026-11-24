@@ -1,0 +1,36 @@
+## A4 pages, 1123 tall
+page 1
+  paragraph x=72 y=72 w=650 h=16.8
+    | 16.8 @0 "a"
+  horizontalRule x=72 y=112.8 w=650 h=12
+  codeBlock x=72 y=148.8 w=650 h=15.6
+    | 15.6 @0 "const a = 1;\nconst b = 2"
+  paragraph x=72 y=178.4 w=650 h=16.8
+    | 16.8 @0 "b"
+## short pages, 444 tall
+page 1
+  paragraph x=72 y=72 w=650 h=16.8
+    | 16.8 @0 "a"
+  horizontalRule x=72 y=112.8 w=650 h=12
+  codeBlock x=72 y=148.8 w=650 h=15.6
+    | 15.6 @0 "const a = 1;\nconst b = 2"
+  paragraph x=72 y=178.4 w=650 h=16.8
+    | 16.8 @0 "b"
+## pages with a header and footer, 444 tall
+page 1
+  paragraph x=72 y=132 w=650 h=16.8
+    | 16.8 @0 "a"
+  horizontalRule x=72 y=172.8 w=650 h=12
+  codeBlock x=72 y=208.8 w=650 h=15.6
+    | 15.6 @0 "const a = 1;\nconst b = 2"
+  paragraph x=72 y=238.4 w=650 h=16.8
+    | 16.8 @0 "b"
+## no pages, 203.2 tall
+page 1
+  paragraph x=73 y=40 w=739 h=16.8
+    | 16.8 @0 "a"
+  horizontalRule x=73 y=80.8 w=739 h=12
+  codeBlock x=73 y=116.8 w=739 h=15.6
+    | 15.6 @0 "const a = 1;\nconst b = 2"
+  paragraph x=73 y=146.4 w=739 h=16.8
+    | 16.8 @0 "b"

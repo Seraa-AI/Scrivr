@@ -1,0 +1,44 @@
+## A4 pages, 4492 tall
+page 1
+  paragraph x=72 y=72 w=650 h=16.8
+    | 16.8 @0 "one"
+page 2
+  paragraph x=72 y=72 w=650 h=16.8
+    | 16.8 @0 "two"
+page 3
+page 4
+  paragraph x=72 y=72 w=650 h=16.8
+    | 16.8 @0 "three"
+## short pages, 1776 tall
+page 1
+  paragraph x=72 y=72 w=650 h=16.8
+    | 16.8 @0 "one"
+page 2
+  paragraph x=72 y=72 w=650 h=16.8
+    | 16.8 @0 "two"
+page 3
+page 4
+  paragraph x=72 y=72 w=650 h=16.8
+    | 16.8 @0 "three"
+## pages with a header and footer, 1776 tall
+page 1
+  paragraph x=72 y=132 w=650 h=16.8
+    | 16.8 @0 "one"
+page 2
+  paragraph x=72 y=92 w=650 h=16.8
+    | 16.8 @0 "two"
+page 3
+page 4
+  paragraph x=72 y=92 w=650 h=16.8
+    | 16.8 @0 "three"
+## no pages, 150.4 tall
+page 1
+  paragraph x=73 y=40 w=739 h=16.8
+    | 16.8 @0 "one"
+  pageBreak x=73 y=66.8 w=0 h=0
+  paragraph x=73 y=66.8 w=739 h=16.8
+    | 16.8 @0 "two"
+  pageBreak x=73 y=93.6 w=0 h=0
+  pageBreak x=73 y=93.6 w=0 h=0
+  paragraph x=73 y=93.6 w=739 h=16.8
+    | 16.8 @0 "three"

@@ -1,0 +1,94 @@
+## A4 pages, 1123 tall
+page 1
+  paragraph x=120 y=72 w=602 h=50.4
+    | 16.8 @0 "word0 word1 word2 word3 "
+    | 16.8 @0 "word8 word9 word10 word1"
+    | 16.8 @0 "word15 word16 word17 wor"
+  paragraph x=120 y=126.4 w=602 h=50.4
+    | 16.8 @0 "word0 word1 word2 word3 "
+    | 16.8 @0 "word8 word9 word10 word1"
+    | 16.8 @0 "word15 word16 word17 wor"
+  paragraph x=120 y=180.8 w=602 h=50.4
+    | 16.8 @0 "word0 word1 word2 word3 "
+    | 16.8 @0 "word8 word9 word10 word1"
+    | 16.8 @0 "word15 word16 word17 wor"
+  paragraph x=120 y=235.2 w=602 h=33.6
+    | 16.8 @0 "word0 word1 word2 word3 "
+    | 16.8 @0 "word8 word9 word10 word1"
+  paragraph x=120 y=272.8 w=602 h=33.6
+    | 16.8 @0 "word0 word1 word2 word3 "
+    | 16.8 @0 "word13 word14 word15 wor"
+  paragraph x=120 y=310.4 w=602 h=33.6
+    | 16.8 @0 "word0 word1 word2 word3 "
+    | 16.8 @0 "word13 word14 word15 wor"
+float page=1 x=502 y=72 220×160 square
+## short pages, 444 tall
+page 1
+  paragraph x=120 y=72 w=602 h=50.4
+    | 16.8 @0 "word0 word1 word2 word3 "
+    | 16.8 @0 "word8 word9 word10 word1"
+    | 16.8 @0 "word15 word16 word17 wor"
+  paragraph x=120 y=126.4 w=602 h=50.4
+    | 16.8 @0 "word0 word1 word2 word3 "
+    | 16.8 @0 "word8 word9 word10 word1"
+    | 16.8 @0 "word15 word16 word17 wor"
+  paragraph x=120 y=180.8 w=602 h=50.4
+    | 16.8 @0 "word0 word1 word2 word3 "
+    | 16.8 @0 "word8 word9 word10 word1"
+    | 16.8 @0 "word15 word16 word17 wor"
+  paragraph x=120 y=235.2 w=602 h=33.6
+    | 16.8 @0 "word0 word1 word2 word3 "
+    | 16.8 @0 "word8 word9 word10 word1"
+  paragraph x=120 y=272.8 w=602 h=33.6
+    | 16.8 @0 "word0 word1 word2 word3 "
+    | 16.8 @0 "word13 word14 word15 wor"
+  paragraph x=120 y=310.4 w=602 h=33.6
+    | 16.8 @0 "word0 word1 word2 word3 "
+    | 16.8 @0 "word13 word14 word15 wor"
+float page=1 x=502 y=72 220×160 square
+## pages with a header and footer, 888 tall
+page 1
+  paragraph x=120 y=132 w=602 h=50.4
+    | 16.8 @0 "word0 word1 word2 word3 "
+    | 16.8 @0 "word8 word9 word10 word1"
+    | 16.8 @0 "word15 word16 word17 wor"
+  paragraph x=120 y=186.4 w=602 h=50.4
+    | 16.8 @0 "word0 word1 word2 word3 "
+    | 16.8 @0 "word8 word9 word10 word1"
+    | 16.8 @0 "word15 word16 word17 wor"
+  paragraph x=120 y=240.8 w=602 h=50.4
+    | 16.8 @0 "word0 word1 word2 word3 "
+    | 16.8 @0 "word8 word9 word10 word1"
+    | 16.8 @0 "word15 word16 word17 wor"
+  paragraph x=120 y=295.2 w=602 h=33.6
+    | 16.8 @0 "word0 word1 word2 word3 "
+    | 16.8 @0 "word8 word9 word10 word1"
+page 2
+  paragraph x=120 y=92 w=602 h=33.6
+    | 16.8 @0 "word0 word1 word2 word3 "
+    | 16.8 @0 "word13 word14 word15 wor"
+  paragraph x=120 y=129.6 w=602 h=33.6
+    | 16.8 @0 "word0 word1 word2 word3 "
+    | 16.8 @0 "word13 word14 word15 wor"
+float page=1 x=502 y=132 220×160 square
+## no pages, 301.6 tall
+page 1
+  paragraph x=121 y=40 w=691 h=33.6
+    | 16.8 @0 "word0 word1 word2 word3 "
+    | 16.8 @0 "word15 word16 word17 wor"
+  paragraph x=121 y=77.6 w=691 h=33.6
+    | 16.8 @0 "word0 word1 word2 word3 "
+    | 16.8 @0 "word15 word16 word17 wor"
+  paragraph x=121 y=115.2 w=691 h=33.6
+    | 16.8 @0 "word0 word1 word2 word3 "
+    | 16.8 @0 "word15 word16 word17 wor"
+  paragraph x=121 y=152.8 w=691 h=33.6
+    | 16.8 @0 "word0 word1 word2 word3 "
+    | 16.8 @0 "word15 word16 word17 wor"
+  paragraph x=121 y=190.4 w=691 h=33.6
+    | 16.8 @0 "word0 word1 word2 word3 "
+    | 16.8 @0 "word15 word16 word17 wor"
+  paragraph x=121 y=228 w=691 h=33.6
+    | 16.8 @0 "word0 word1 word2 word3 "
+    | 16.8 @0 "word15 word16 word17 wor"
+float page=1 x=592 y=40 220×160 square
