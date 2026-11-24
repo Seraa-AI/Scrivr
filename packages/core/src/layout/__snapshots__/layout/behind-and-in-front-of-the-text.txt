@@ -1,0 +1,44 @@
+## A4 pages, 1123 tall
+page 1
+  paragraph x=72 y=72 w=650 h=33.6
+    | 16.8 @0 "word0 word1 word2 word3 "
+    | 16.8 @0 "word14 word15 word16 wor"
+  paragraph x=72 y=115.6 w=650 h=50.4
+    | 16.8 @0 "□word0 word1 word2 word3"
+    | 16.8 @0 "word14 word15 word16 wor"
+    | 16.8 @0 "word27 word28 word29 wor"
+float page=1 x=72 y=72 200×200 behind
+float page=1 x=72 y=115.6 100×100 front
+## short pages, 444 tall
+page 1
+  paragraph x=72 y=72 w=650 h=33.6
+    | 16.8 @0 "word0 word1 word2 word3 "
+    | 16.8 @0 "word14 word15 word16 wor"
+  paragraph x=72 y=115.6 w=650 h=50.4
+    | 16.8 @0 "□word0 word1 word2 word3"
+    | 16.8 @0 "word14 word15 word16 wor"
+    | 16.8 @0 "word27 word28 word29 wor"
+float page=1 x=72 y=72 200×200 behind
+float page=1 x=72 y=115.6 100×100 front
+## pages with a header and footer, 444 tall
+page 1
+  paragraph x=72 y=132 w=650 h=33.6
+    | 16.8 @0 "word0 word1 word2 word3 "
+    | 16.8 @0 "word14 word15 word16 wor"
+  paragraph x=72 y=175.6 w=650 h=50.4
+    | 16.8 @0 "□word0 word1 word2 word3"
+    | 16.8 @0 "word14 word15 word16 wor"
+    | 16.8 @0 "word27 word28 word29 wor"
+float page=1 x=72 y=132 200×200 behind
+float page=1 x=72 y=175.6 100×100 front
+## no pages, 174 tall
+page 1
+  paragraph x=73 y=40 w=739 h=33.6
+    | 16.8 @0 "word0 word1 word2 word3 "
+    | 16.8 @0 "word16 word17 word18 wor"
+  paragraph x=73 y=83.6 w=739 h=50.4
+    | 16.8 @0 "□word0 word1 word2 word3"
+    | 16.8 @0 "word16 word17 word18 wor"
+    | 16.8 @0 "word31 word32 word33 wor"
+float page=1 x=73 y=40 200×200 behind
+float page=1 x=73 y=83.6 100×100 front

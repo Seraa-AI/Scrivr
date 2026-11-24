@@ -18,6 +18,9 @@ const FONT_MARKS = /(name ?[!=]==? ?|case |includes\(|marks\[)["'`](bold|italic|
 /** A table's node names, or the table-shaped layout vocabulary composites replaced. */
 const TABLE_WORDS = /["'`](table|tableRow|tableCell|tableHeader)["'`]|\b(TableRow\w*|tableColumns|isLastRow|CellSubBlock|CellFloat|cellPos|CELL_PADDING\w*)\b/;
 
+/** A section's columns: layout is handed regions, and never asks what made them. */
+const COLUMN_WORDS = /\b(SectionColumns|columnCount|columnIndex|columnGap|columnBreak|equalWidth|snaking)\b|\.columns\b|["'`]columns["'`]/;
+
 /** A node read by name as an image: compared, or looked up in the schema. */
 const IMAGE_NODE = /name ?[!=]==? ?["'`]image["'`]|nodes\[["'`]image["'`]\]/;
 
@@ -52,6 +55,10 @@ describe("the engine's vocabulary", () => {
 
   it.each(["layout", "renderer", "input"])("no source file under %s/ lays out or paints a table as a table", (dir) => {
     expect(linesMatching(dir, TABLE_WORDS)).toEqual([]);
+  });
+
+  it("no source file under layout/ names a section's columns", () => {
+    expect(linesMatching("layout", COLUMN_WORDS)).toEqual([]);
   });
 
   it("input reaches a table only through the selection and extension seams", () => {

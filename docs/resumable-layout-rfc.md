@@ -72,9 +72,10 @@ after inside the cell, and collapses between siblings (§7).
 
 ### 1.5 A streamed layout is not the whole layout
 
-`carriedPlacements` keeps earlier chunks' floats, but earlier chunks are never
-settled again. A float in a later chunk that reaches back over an earlier one
-wraps nothing there. Reproduced on `main`: a paragraph of 5 wrapped lines in a
+`carriedPlacements` keeps earlier chunks' floats to paint, and nothing else: a
+later chunk does not wrap them, and an earlier chunk is never settled again for a
+float found later. So any chunk boundary beside a float shows. A float in a later
+chunk that reaches back over an earlier one wraps nothing there. Reproduced on `main`: a paragraph of 5 wrapped lines in a
 whole layout has 3 unwrapped lines when the cutoff falls between it and the
 float's anchor, with the image drawn over the text, and everything after it
 sits 38px higher. It stays that way until something lays the document out again.
@@ -914,6 +915,7 @@ Updated as each phase lands, with every difference from the design above and why
 | Phase | State |
 |---|---|
 | 0, a deleted block that stays (§1.6) | In #314. `findReusableTail` compares the remaining items, as §10 asks; `seenCacheMiss` and `remainingCacheMisses` stay until Phase 1, because a changed marker or width is still the counter's to catch. The same PR fixed what else made a reused layout differ: positions moved twice in the measure cache, hard breaks never moved, pageless height, a float's margin, and a node the document holds twice |
+| H, the harness (§15) | `src/test/layoutOracle.ts` (documents, page set-ups, the comparison), `layoutOracle.test.ts` (whole, streamed, edited and laid out again; headers; the frontier), `layoutBaseline.test.ts` (fixed-width snapshots), `layoutWork.test.ts` (lines broken, counted), `knownDefects.test.ts` (each defect above as the behaviour it should have, expected to fail). Against `main` before #314 the oracle fails 53 of 473 |
 | Everything else | Not started |
 
 The split at a page boundary in `paginateFlow` is the approach this replaces, not a

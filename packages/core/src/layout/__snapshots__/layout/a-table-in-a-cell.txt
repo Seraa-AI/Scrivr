@@ -1,0 +1,76 @@
+## A4 pages, 1123 tall
+page 1
+  tableRow x=72 y=72 w=650 h=120
+    region x=72 w=325 h=120
+      paragraph x=78 y=4 w=313 h=16.8
+        | 16.8 @0 "outer"
+      tableRow x=78 y=30.8 w=313 h=85.2
+        region x=78 w=156.5 h=85.2
+          paragraph x=84 y=4 w=144.5 h=16.8
+            | 16.8 @0 "inner"
+        region x=234.5 w=156.5 h=85.2
+          paragraph x=240.5 y=4 w=144.5 h=67.2
+            | 16.8 @0 "word0 word1 word2 "
+            | 16.8 @0 "word3 word4 word5 "
+            | 16.8 @0 "word6 word7 word8 "
+            | 16.8 @0 "word9 word10 word11"
+    region x=397 w=325 h=120
+      paragraph x=403 y=4 w=313 h=16.8
+        | 16.8 @0 "beside"
+## short pages, 444 tall
+page 1
+  tableRow x=72 y=72 w=650 h=120
+    region x=72 w=325 h=120
+      paragraph x=78 y=4 w=313 h=16.8
+        | 16.8 @0 "outer"
+      tableRow x=78 y=30.8 w=313 h=85.2
+        region x=78 w=156.5 h=85.2
+          paragraph x=84 y=4 w=144.5 h=16.8
+            | 16.8 @0 "inner"
+        region x=234.5 w=156.5 h=85.2
+          paragraph x=240.5 y=4 w=144.5 h=67.2
+            | 16.8 @0 "word0 word1 word2 "
+            | 16.8 @0 "word3 word4 word5 "
+            | 16.8 @0 "word6 word7 word8 "
+            | 16.8 @0 "word9 word10 word11"
+    region x=397 w=325 h=120
+      paragraph x=403 y=4 w=313 h=16.8
+        | 16.8 @0 "beside"
+## pages with a header and footer, 444 tall
+page 1
+  tableRow x=72 y=132 w=650 h=120
+    region x=72 w=325 h=120
+      paragraph x=78 y=4 w=313 h=16.8
+        | 16.8 @0 "outer"
+      tableRow x=78 y=30.8 w=313 h=85.2
+        region x=78 w=156.5 h=85.2
+          paragraph x=84 y=4 w=144.5 h=16.8
+            | 16.8 @0 "inner"
+        region x=234.5 w=156.5 h=85.2
+          paragraph x=240.5 y=4 w=144.5 h=67.2
+            | 16.8 @0 "word0 word1 word2 "
+            | 16.8 @0 "word3 word4 word5 "
+            | 16.8 @0 "word6 word7 word8 "
+            | 16.8 @0 "word9 word10 word11"
+    region x=397 w=325 h=120
+      paragraph x=403 y=4 w=313 h=16.8
+        | 16.8 @0 "beside"
+## no pages, 200 tall
+page 1
+  tableRow x=73 y=40 w=739 h=120
+    region x=73 w=369.5 h=120
+      paragraph x=79 y=4 w=357.5 h=16.8
+        | 16.8 @0 "outer"
+      tableRow x=79 y=30.8 w=357.5 h=85.2
+        region x=79 w=178.75 h=85.2
+          paragraph x=85 y=4 w=166.75 h=16.8
+            | 16.8 @0 "inner"
+        region x=257.75 w=178.75 h=85.2
+          paragraph x=263.75 y=4 w=166.75 h=67.2
+            | 16.8 @0 "word0 word1 word2 "
+            | 16.8 @0 "word3 word4 word5 "
+            | 16.8 @0 "word6 word7 word8 "
+            | 16.8 @0 "word9 word10 word11"
+    region x=442.5 w=369.5 h=120
+      paragraph x=448.5 y=4 w=357.5 h=16.8
+        | 16.8 @0 "beside"

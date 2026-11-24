@@ -1,0 +1,139 @@
+## A4 pages, 1123 tall
+page 1
+  heading x=72 y=72 w=650 h=33.6
+    | 33.6 @0 "Heading 0"
+  heading x=72 y=125.6 w=650 h=26.4
+    | 26.4 @0 "Heading 1"
+  heading x=72 y=168 w=650 h=21.6
+    | 21.6 @0 "Heading 2"
+  heading x=72 y=203.6 w=650 h=19.2
+    | 19.2 @0 "Heading 3"
+  heading x=72 y=234.8 w=650 h=16.8
+    | 16.8 @0 "Heading 4"
+  heading x=72 y=261.6 w=650 h=14.4
+    | 14.4 @0 "Heading 5"
+  heading x=72 y=300 w=650 h=33.6
+    | 33.6 @0 "Heading 6"
+  heading x=72 y=353.6 w=650 h=26.4
+    | 26.4 @0 "Heading 7"
+  heading x=72 y=396 w=650 h=21.6
+    | 21.6 @0 "Heading 8"
+  heading x=72 y=431.6 w=650 h=19.2
+    | 19.2 @0 "Heading 9"
+  heading x=72 y=462.8 w=650 h=16.8
+    | 16.8 @0 "Heading 10"
+  heading x=72 y=489.6 w=650 h=14.4
+    | 14.4 @0 "Heading 11"
+  paragraph x=72 y=506 w=650 h=16.8
+    | 16.8 @0 "​"
+  paragraph x=72 y=532.8 w=650 h=16.8
+    | 16.8 @0 "text"
+  paragraph x=72 y=559.6 w=650 h=16.8
+    | 16.8 @0 "​"
+  paragraph x=72 y=586.4 w=650 h=16.8
+    | 16.8 @0 "​"
+## short pages, 888 tall
+page 1
+  heading x=72 y=72 w=650 h=33.6
+    | 33.6 @0 "Heading 0"
+  heading x=72 y=125.6 w=650 h=26.4
+    | 26.4 @0 "Heading 1"
+  heading x=72 y=168 w=650 h=21.6
+    | 21.6 @0 "Heading 2"
+  heading x=72 y=203.6 w=650 h=19.2
+    | 19.2 @0 "Heading 3"
+  heading x=72 y=234.8 w=650 h=16.8
+    | 16.8 @0 "Heading 4"
+  heading x=72 y=261.6 w=650 h=14.4
+    | 14.4 @0 "Heading 5"
+  heading x=72 y=300 w=650 h=33.6
+    | 33.6 @0 "Heading 6"
+page 2
+  heading x=72 y=72 w=650 h=26.4
+    | 26.4 @0 "Heading 7"
+  heading x=72 y=114.4 w=650 h=21.6
+    | 21.6 @0 "Heading 8"
+  heading x=72 y=150 w=650 h=19.2
+    | 19.2 @0 "Heading 9"
+  heading x=72 y=181.2 w=650 h=16.8
+    | 16.8 @0 "Heading 10"
+  heading x=72 y=208 w=650 h=14.4
+    | 14.4 @0 "Heading 11"
+  paragraph x=72 y=224.4 w=650 h=16.8
+    | 16.8 @0 "​"
+  paragraph x=72 y=251.2 w=650 h=16.8
+    | 16.8 @0 "text"
+  paragraph x=72 y=278 w=650 h=16.8
+    | 16.8 @0 "​"
+  paragraph x=72 y=304.8 w=650 h=16.8
+    | 16.8 @0 "​"
+## pages with a header and footer, 1332 tall
+page 1
+  heading x=72 y=132 w=650 h=33.6
+    | 33.6 @0 "Heading 0"
+  heading x=72 y=185.6 w=650 h=26.4
+    | 26.4 @0 "Heading 1"
+  heading x=72 y=228 w=650 h=21.6
+    | 21.6 @0 "Heading 2"
+  heading x=72 y=263.6 w=650 h=19.2
+    | 19.2 @0 "Heading 3"
+  heading x=72 y=294.8 w=650 h=16.8
+    | 16.8 @0 "Heading 4"
+  heading x=72 y=321.6 w=650 h=14.4
+    | 14.4 @0 "Heading 5"
+page 2
+  heading x=72 y=92 w=650 h=33.6
+    | 33.6 @0 "Heading 6"
+  heading x=72 y=145.6 w=650 h=26.4
+    | 26.4 @0 "Heading 7"
+  heading x=72 y=188 w=650 h=21.6
+    | 21.6 @0 "Heading 8"
+  heading x=72 y=223.6 w=650 h=19.2
+    | 19.2 @0 "Heading 9"
+  heading x=72 y=254.8 w=650 h=16.8
+    | 16.8 @0 "Heading 10"
+  heading x=72 y=281.6 w=650 h=14.4
+    | 14.4 @0 "Heading 11"
+  paragraph x=72 y=298 w=650 h=16.8
+    | 16.8 @0 "​"
+  paragraph x=72 y=324.8 w=650 h=16.8
+    | 16.8 @0 "text"
+page 3
+  paragraph x=72 y=92 w=650 h=16.8
+    | 16.8 @0 "​"
+  paragraph x=72 y=118.8 w=650 h=16.8
+    | 16.8 @0 "​"
+## no pages, 611.2 tall
+page 1
+  heading x=73 y=40 w=739 h=33.6
+    | 33.6 @0 "Heading 0"
+  heading x=73 y=93.6 w=739 h=26.4
+    | 26.4 @0 "Heading 1"
+  heading x=73 y=136 w=739 h=21.6
+    | 21.6 @0 "Heading 2"
+  heading x=73 y=171.6 w=739 h=19.2
+    | 19.2 @0 "Heading 3"
+  heading x=73 y=202.8 w=739 h=16.8
+    | 16.8 @0 "Heading 4"
+  heading x=73 y=229.6 w=739 h=14.4
+    | 14.4 @0 "Heading 5"
+  heading x=73 y=268 w=739 h=33.6
+    | 33.6 @0 "Heading 6"
+  heading x=73 y=321.6 w=739 h=26.4
+    | 26.4 @0 "Heading 7"
+  heading x=73 y=364 w=739 h=21.6
+    | 21.6 @0 "Heading 8"
+  heading x=73 y=399.6 w=739 h=19.2
+    | 19.2 @0 "Heading 9"
+  heading x=73 y=430.8 w=739 h=16.8
+    | 16.8 @0 "Heading 10"
+  heading x=73 y=457.6 w=739 h=14.4
+    | 14.4 @0 "Heading 11"
+  paragraph x=73 y=474 w=739 h=16.8
+    | 16.8 @0 "​"
+  paragraph x=73 y=500.8 w=739 h=16.8
+    | 16.8 @0 "text"
+  paragraph x=73 y=527.6 w=739 h=16.8
+    | 16.8 @0 "​"
+  paragraph x=73 y=554.4 w=739 h=16.8
+    | 16.8 @0 "​"

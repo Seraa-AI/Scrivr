@@ -1,0 +1,85 @@
+## A4 pages, 1123 tall
+page 1
+  paragraph x=72 y=72 w=650 h=16.8
+    | 16.8 @0 "anchor□"
+  tableRow x=72 y=224 w=650 h=34.8
+    region x=72 w=325 h=34.8
+      paragraph x=78 y=4 w=313 h=16.8
+        | 16.8 @0 "a"
+    region x=397 w=325 h=34.8
+      paragraph x=403 y=4 w=313 h=16.8
+        | 16.8 @0 "b"
+  tableRow x=72 y=258.8 w=650 h=34.8
+    region x=72 w=325 h=34.8
+      paragraph x=78 y=4 w=313 h=16.8
+        | 16.8 @0 "c"
+    region x=397 w=325 h=34.8
+      paragraph x=403 y=4 w=313 h=16.8
+        | 16.8 @0 "d"
+  paragraph x=72 y=293.6 w=650 h=16.8
+    | 16.8 @0 "after"
+float page=1 x=422 y=72 300×140 square
+## short pages, 444 tall
+page 1
+  paragraph x=72 y=72 w=650 h=16.8
+    | 16.8 @0 "anchor□"
+  tableRow x=72 y=224 w=650 h=34.8
+    region x=72 w=325 h=34.8
+      paragraph x=78 y=4 w=313 h=16.8
+        | 16.8 @0 "a"
+    region x=397 w=325 h=34.8
+      paragraph x=403 y=4 w=313 h=16.8
+        | 16.8 @0 "b"
+  tableRow x=72 y=258.8 w=650 h=34.8
+    region x=72 w=325 h=34.8
+      paragraph x=78 y=4 w=313 h=16.8
+        | 16.8 @0 "c"
+    region x=397 w=325 h=34.8
+      paragraph x=403 y=4 w=313 h=16.8
+        | 16.8 @0 "d"
+  paragraph x=72 y=293.6 w=650 h=16.8
+    | 16.8 @0 "after"
+float page=1 x=422 y=72 300×140 square
+## pages with a header and footer, 888 tall
+page 1
+  paragraph x=72 y=132 w=650 h=16.8
+    | 16.8 @0 "anchor□"
+  tableRow x=72 y=284 w=650 h=34.8
+    region x=72 w=325 h=34.8
+      paragraph x=78 y=4 w=313 h=16.8
+        | 16.8 @0 "a"
+    region x=397 w=325 h=34.8
+      paragraph x=403 y=4 w=313 h=16.8
+        | 16.8 @0 "b"
+page 2
+  tableRow x=72 y=92 w=650 h=34.8
+    region x=72 w=325 h=34.8
+      paragraph x=78 y=4 w=313 h=16.8
+        | 16.8 @0 "c"
+    region x=397 w=325 h=34.8
+      paragraph x=403 y=4 w=313 h=16.8
+        | 16.8 @0 "d"
+  paragraph x=72 y=126.8 w=650 h=16.8
+    | 16.8 @0 "after"
+float page=1 x=422 y=132 300×140 square
+## no pages, 193.2 tall
+page 1
+  paragraph x=73 y=40 w=739 h=16.8
+    | 16.8 @0 "anchor□"
+  tableRow x=73 y=66.8 w=739 h=34.8
+    region x=73 w=369.5 h=34.8
+      paragraph x=79 y=4 w=357.5 h=16.8
+        | 16.8 @0 "a"
+    region x=442.5 w=369.5 h=34.8
+      paragraph x=448.5 y=4 w=357.5 h=16.8
+        | 16.8 @0 "b"
+  tableRow x=73 y=101.6 w=739 h=34.8
+    region x=73 w=369.5 h=34.8
+      paragraph x=79 y=4 w=357.5 h=16.8
+        | 16.8 @0 "c"
+    region x=442.5 w=369.5 h=34.8
+      paragraph x=448.5 y=4 w=357.5 h=16.8
+        | 16.8 @0 "d"
+  paragraph x=73 y=136.4 w=739 h=16.8
+    | 16.8 @0 "after"
+float page=1 x=512 y=40 300×140 square

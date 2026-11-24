@@ -1,0 +1,56 @@
+## A4 pages, 1123 tall
+page 1
+  paragraph x=72 y=72 w=650 h=232.8
+    | 40.8 @0 "word0 word1 word2 word3 "
+    | 40.8 @0 "here "
+    | 16.8 @0 "xxxxxxxxxxxxxxxxxxxxxxxx"
+    | 16.8 @0 "xxxxxxxxxxxxxxxxxxxxxxxx"
+    | 16.8 @0 "xxxxxxxxxxxxxxxxxxxxxxxx"
+    | 16.8 @0 "xxxxxxxxxxxxxxxxxxxxxxxx"
+    | 16.8 @0 "👩‍👩‍👧‍👦 👩‍👩‍👧‍👦 "
+    | 16.8 @0 "👩‍👩‍👧‍👦 👩‍👩‍👧‍👦 "
+    | 16.8 @0 "👩‍👩‍👧‍👦 👩‍👩‍👧‍👦 "
+    | 16.8 @0 "👩‍👩‍👧‍👦 👩‍👩‍👧‍👦 "
+    | 16.8 @0 "👩‍👩‍👧‍👦 👩‍👩‍👧‍👦 "
+## short pages, 444 tall
+page 1
+  paragraph x=72 y=72 w=650 h=232.8
+    | 40.8 @0 "word0 word1 word2 word3 "
+    | 40.8 @0 "here "
+    | 16.8 @0 "xxxxxxxxxxxxxxxxxxxxxxxx"
+    | 16.8 @0 "xxxxxxxxxxxxxxxxxxxxxxxx"
+    | 16.8 @0 "xxxxxxxxxxxxxxxxxxxxxxxx"
+    | 16.8 @0 "xxxxxxxxxxxxxxxxxxxxxxxx"
+    | 16.8 @0 "👩‍👩‍👧‍👦 👩‍👩‍👧‍👦 "
+    | 16.8 @0 "👩‍👩‍👧‍👦 👩‍👩‍👧‍👦 "
+    | 16.8 @0 "👩‍👩‍👧‍👦 👩‍👩‍👧‍👦 "
+    | 16.8 @0 "👩‍👩‍👧‍👦 👩‍👩‍👧‍👦 "
+    | 16.8 @0 "👩‍👩‍👧‍👦 👩‍👩‍👧‍👦 "
+## pages with a header and footer, 888 tall
+page 1
+  paragraph x=72 y=132 w=650 h=199.2 continues
+    | 40.8 @0 "word0 word1 word2 word3 "
+    | 40.8 @0 "here "
+    | 16.8 @0 "xxxxxxxxxxxxxxxxxxxxxxxx"
+    | 16.8 @0 "xxxxxxxxxxxxxxxxxxxxxxxx"
+    | 16.8 @0 "xxxxxxxxxxxxxxxxxxxxxxxx"
+    | 16.8 @0 "xxxxxxxxxxxxxxxxxxxxxxxx"
+    | 16.8 @0 "👩‍👩‍👧‍👦 👩‍👩‍👧‍👦 "
+    | 16.8 @0 "👩‍👩‍👧‍👦 👩‍👩‍👧‍👦 "
+    | 16.8 @0 "👩‍👩‍👧‍👦 👩‍👩‍👧‍👦 "
+page 2
+  paragraph x=72 y=92 w=650 h=33.6 continued
+    | 16.8 @0 "👩‍👩‍👧‍👦 👩‍👩‍👧‍👦 "
+    | 16.8 @0 "👩‍👩‍👧‍👦 👩‍👩‍👧‍👦 "
+## no pages, 255.2 tall
+page 1
+  paragraph x=73 y=40 w=739 h=175.2
+    | 40.8 @0 "word0 word1 word2 word3 "
+    | 16.8 @0 "xxxxxxxxxxxxxxxxxxxxxxxx"
+    | 16.8 @0 "xxxxxxxxxxxxxxxxxxxxxxxx"
+    | 16.8 @0 "xxxxxxxxxxxxxxxxxxxxxxxx"
+    | 16.8 @0 "👩‍👩‍👧‍👦 👩‍👩‍👧‍👦 "
+    | 16.8 @0 "👩‍👩‍👧‍👦 👩‍👩‍👧‍👦 "
+    | 16.8 @0 "👩‍👩‍👧‍👦 👩‍👩‍👧‍👦 "
+    | 16.8 @0 "👩‍👩‍👧‍👦 👩‍👩‍👧‍👦 "
+    | 16.8 @0 "👩‍👩‍👧‍👦 👩‍👩‍👧‍👦 "
