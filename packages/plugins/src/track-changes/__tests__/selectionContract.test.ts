@@ -66,7 +66,7 @@ describe("selection contract — an explicit selection is carried, not collapsed
     expect(selected(editor)).toContain("one");
   });
 
-  it("preserves a node selection", () => {
+  it("guards against losing a node selection", () => {
     const editor = new TestEditor(doc(p("one"), p("two")));
     const tr = editor.state.tr.insertText("!", 2);
     editor.dispatch(tr.setSelection(NodeSelection.create(tr.doc, 6)));
@@ -92,7 +92,7 @@ describe("selection contract — gestures that restructure without replacing", (
     return editor.dispatch(tr);
   };
 
-  it("keeps the caret at the end of the text it wrapped", () => {
+  it("guards against moving the caret off the end of the text it wrapped", () => {
     const editor = new TestEditor(doc(p("hello")));
     wrapInList(editor, 6);
 
@@ -112,7 +112,7 @@ describe("selection contract — gestures that restructure without replacing", (
 });
 
 describe("selection contract — the caret follows an insertion", () => {
-  it("lands after typed text", () => {
+  it("guards against the caret landing anywhere but after typed text", () => {
     const editor = new TestEditor(doc(p("ab")));
     type(editor, 2, "X");
 
