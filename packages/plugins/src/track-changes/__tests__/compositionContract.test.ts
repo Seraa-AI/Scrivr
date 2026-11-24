@@ -194,7 +194,7 @@ describe("placement is transport, not a content snapshot", () => {
     expect(editor.pendingChanges.map(c => c.id)).toEqual(bob);
   });
 
-  it("keeps a second author's edit made inside a move's shadow", () => {
+  it("guards against losing a second author's edit made inside a move's shadow", () => {
     const editor = moved();
     move(editor, "a", "c", "after");
     editor.setUserID("bob").insertAt(2, "X");
