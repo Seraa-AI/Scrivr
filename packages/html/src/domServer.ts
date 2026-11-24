@@ -11,8 +11,8 @@ export const withServerBody: WithHtmlBody = async (html, read) => {
     settings: {
       disableJavaScriptEvaluation: true,
       disableJavaScriptFileLoading: true,
-      disableCSSFileLoading: true,
-      disableIframePageLoading: true,
+      enableCSSFileLoading: false,
+      enableIframePageLoading: false,
     },
   });
   try {
