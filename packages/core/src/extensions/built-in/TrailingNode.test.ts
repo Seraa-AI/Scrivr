@@ -36,6 +36,8 @@ const lastLinePos = (e: ServerEditor) => e.getState().doc.content.size - 2;
 const edit = (e: ServerEditor, change: (tr: Transaction) => Transaction) =>
   e.applyTransaction(closeHistory(change(e.getState().tr)));
 
+const closeUndoGroup = (e: ServerEditor) => e.applyTransaction(closeHistory(e.getState().tr));
+
 describe("TrailingNode", () => {
   it("can be added by a host that leaves it out of StarterKit", () => {
     const e = new ServerEditor({ extensions: [StarterKit.configure({ trailingNode: false }), TrailingNode, Typography], content: { type: "doc", content: [p("one")] } });
@@ -121,6 +123,7 @@ describe("TrailingNode", () => {
     select(e, doc => new AllSelection(doc));
     firstToParagraph(e);
     expect(blocks(e)).toEqual(["paragraph:one"]);
+    expect(e.getState().selection).toBeInstanceOf(AllSelection);
   });
 
   it("takes its paragraph away after a selection that only runs into it", () => {
@@ -136,7 +139,7 @@ describe("TrailingNode", () => {
     const e = editor(p("one"));
     caretAt(e, 2);
     e.commands.setHeading({ level: 1 });
-    edit(e, tr => tr);
+    closeUndoGroup(e);
     firstToParagraph(e);
     e.commands.undo();
     expect(blocks(e)).toEqual(["heading:one", "paragraph:"]);
@@ -277,7 +280,7 @@ describe("TrailingNode", () => {
     const e = editor(p("one"));
     caretAt(e, 2);
     e.commands.setHeading({ level: 1 });
-    edit(e, tr => tr);
+    closeUndoGroup(e);
     select(e, doc => new AllSelection(doc));
     e.commands.toggleBulletList();
     e.commands.undo();
@@ -329,7 +332,7 @@ describe("TrailingNode", () => {
       const e = new ServerEditor({ extensions: [StarterKit, ...extensions], content: { type: "doc", content: [p("one")] } });
       caretAt(e, 2);
       e.commands.setHeading({ level: 1 });
-      edit(e, tr => tr);
+      closeUndoGroup(e);
       e.commands.setParagraph();
       const loaded = e.getState().schema.nodeFromJSON({ type: "doc", content: [h1("Demo"), p("body")] });
       e.applyTransaction(e.getState().tr.replaceWith(0, e.getState().doc.content.size, loaded.content).setMeta("addToHistory", false));
@@ -372,7 +375,7 @@ describe("TrailingNode", () => {
     expect(blocks(e)).toEqual(["paragraph:alpha"]);
   });
 
-  it("takes its paragraph away when a change to everything moves the caret into it", () => {
+  it("takes its paragraph away when a change made under Select All moves the caret into it", () => {
     const e = editor(p("one"));
     caretAt(e, 2);
     e.commands.setHeading({ level: 1 });
@@ -404,6 +407,33 @@ describe("TrailingNode", () => {
     expect(blocks(e)).toEqual(["paragraph:one"]);
   });
 
+  it.each([
+    { direction: "down", backward: false },
+    { direction: "up", backward: true },
+  ])("keeps the rest of a selection dragged $direction when it takes its paragraph away", ({ backward }) => {
+    const e = editor(p("alpha"), h1("beta"));
+    e.applyTransaction(e.getState().tr);
+    const start = 8;
+    const end = lastLinePos(e) + 1;
+    select(e, doc => backward ? TextSelection.create(doc, end, start) : TextSelection.create(doc, start, end));
+    e.commands.setParagraph();
+    expect(blocks(e)).toEqual(["paragraph:alpha", "paragraph:beta"]);
+    const { anchor, head } = e.getState().selection;
+    expect(backward ? [head, anchor] : [anchor, head]).toEqual([start, start + "beta".length]);
+  });
+
+  it("takes its paragraph away when a change that deletes nothing moves the caret into it", () => {
+    const e = editor(p("one"));
+    caretAt(e, 2);
+    e.commands.setHeading({ level: 1 });
+    select(e, doc => new AllSelection(doc));
+    const tr = e.getState().tr.setNodeAttribute(0, "align", "center");
+    e.applyTransaction(tr.setSelection(TextSelection.create(tr.doc, lastLinePos(e) + 1)));
+    select(e, doc => new AllSelection(doc));
+    firstToParagraph(e);
+    expect(blocks(e)).toEqual(["paragraph:one"]);
+  });
+
   it("keeps the marks waiting for the next typing when it adds its paragraph", () => {
     const e = editor(p("one"));
     const { schema } = e.getState();
@@ -428,7 +458,7 @@ describe("TrailingNode", () => {
     const e = editor(p("one"), p());
     caretAt(e, 2);
     e.commands.setHeading({ level: 1 });
-    edit(e, tr => tr);
+    closeUndoGroup(e);
     caretAt(e, lastLinePos(e) + 1);
     e.commands.setHeading({ level: 2 });
     e.commands.undo();

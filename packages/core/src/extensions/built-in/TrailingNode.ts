@@ -1,5 +1,5 @@
 import { isHistoryTransaction } from "prosemirror-history";
-import { Plugin, PluginKey, type EditorState, type Transaction } from "prosemirror-state";
+import { Plugin, PluginKey, TextSelection, type EditorState, type Transaction } from "prosemirror-state";
 import { Extension } from "../Extension";
 import { COLLAB_SYNC_META, NORMALIZATION_META } from "./UniqueId";
 
@@ -62,9 +62,13 @@ export const TrailingNode = Extension.create({
     };
 
     const onlyDeletes = (tr: Transaction): boolean => {
+      let deleted = 0;
       let inserted = 0;
-      tr.mapping.maps.forEach(map => map.forEach((_from, _to, newFrom, newTo) => { inserted += newTo - newFrom; }));
-      return inserted === 0;
+      tr.mapping.maps.forEach(map => map.forEach((oldStart, oldEnd, newStart, newEnd) => {
+        deleted += oldEnd - oldStart;
+        inserted += newEnd - newStart;
+      }));
+      return deleted > 0 && inserted === 0;
     };
 
     return [
@@ -96,8 +100,9 @@ export const TrailingNode = Extension.create({
               pos = lastId !== null && ours.has(lastId) ? lastPos : null;
             } else if (added !== null && pos !== null) {
               // An edit that moves the caret into the line does not claim it, since
-              // the edit is what made it unneeded. Deleting a selection that ran into
-              // it does: the line is what is left of what was selected.
+              // the edit is what made it unneeded. A deletion that leaves the caret
+              // there does, when the selection already reached into it: the line is
+              // what is left of what was selected.
               const leftInIt = oldState.selection.to > added && tr.selection.from >= pos && onlyDeletes(tr);
               if (leftInIt) pos = null;
             }
@@ -122,6 +127,13 @@ export const TrailingNode = Extension.create({
             const previous = doc.childCount > 1 ? doc.child(doc.childCount - 2) : null;
             if (!isEmptyLastParagraph(doc, added) || previous?.type !== paragraph) return null;
             tr = state.tr.delete(added, doc.content.size).setMeta(addedKey, null);
+            // Mapped, a selection that ends in the line would collapse to a caret.
+            const { selection } = state;
+            if (selection instanceof TextSelection && selection.to > added) {
+              const endAbove = added - 1;
+              const { anchor, head } = selection;
+              tr.setSelection(TextSelection.create(tr.doc, Math.min(anchor, endAbove), Math.min(head, endAbove)));
+            }
           }
           // A step clears the marks waiting for the next typing.
           tr.setStoredMarks(state.storedMarks);
