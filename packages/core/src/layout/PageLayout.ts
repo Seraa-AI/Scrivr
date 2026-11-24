@@ -2,7 +2,7 @@ import { Node } from "prosemirror-model";
 import type { FontResolutionId, LayoutFontResolver } from "../fonts/layoutResolver";
 import type { FontResolution } from "../fonts/types";
 import type { FontModifier } from "../extensions/types";
-import { TextMeasurer, type TextMeasurerLike } from "./TextMeasurer";
+import type { TextMeasurerLike } from "./TextMeasurer";
 import {
   FontConfig,
   defaultFontConfig,
@@ -12,7 +12,7 @@ import {
 } from "./FontConfig";
 import { layoutBlock, LayoutBlock, type LayoutBlockKind, type LaidRegion } from "./BlockLayout";
 import type { CompositeLayout, CompositeUnit, InlineRegistry } from "./BlockRegistry";
-import { LineBreaker, isSpacerLine, type InputSpan, type LayoutLine } from "./LineBreaker";
+import { isSpacerLine, type LayoutLine } from "./LineBreaker";
 import type { MarkerLine } from "./BlockLayout";
 import type { LaidMarker, MarkerFace } from "./markers";
 import {
@@ -55,7 +55,6 @@ import {
 export { collapseMargins } from "./FlowPlacement";
 import { resolveAnchoredObjects } from "./AnchoredObjectSolver";
 import { runChromeLoop } from "./aggregateChrome";
-import { parseFont } from "./StyleResolver";
 
 export interface PageConfig {
   pageWidth: number;
@@ -362,9 +361,7 @@ export interface FlowBlock {
   solverPushedThisFlow?: boolean;
   /** True when this flow's Y range intersected a Stage 3 square wrap zone. */
   overlapsWrapZone?: boolean;
-  /** Page whose anchored-object exclusion constraints were applied to this flow. */
-  wrapZonePage?: number;
-  /** Global y this flow's lines were last laid out at against `wrapZonePage`'s exclusions. */
+  /** Global y this flow's lines were last laid out at against the floats there. */
   wrapLaidAtY?: number;
   // Where the last run placed this block, read before this run's measurement.
   preCachedTargetY?: number;
@@ -768,7 +765,6 @@ export function runFlowPipeline(
     {
       tail: canReuseTail ? findReusableTail(items, previousLayout) : undefined,
       measureCache,
-      measurer,
       pageless: pageConfig.pageless,
       init: { pages, page: currentPage, y: initY, prevSpaceAfter: initPrevSpaceAfter },
     },
@@ -917,7 +913,6 @@ export interface PaginateFlowOptions {
   /** Absent: no tail is reused. */
   tail?: ReusableTail | undefined;
   measureCache?: WeakMap<Node, MeasureCacheEntry> | undefined;
-  measurer?: TextMeasurerLike | undefined;
   pageless?: boolean | undefined;
   /** Initial page cursor. Fresh run: pages=[], page=empty page 1. Resumption: from prior chunk. */
   init: {
@@ -962,7 +957,7 @@ export function paginateFlow(
 
   const metricsFor = geometry.metricsFor;
 
-  const { tail, measureCache, measurer = new TextMeasurer(), pageless, init } = opts;
+  const { tail, measureCache, pageless, init } = opts;
   const { margins } = pageConfig;
   const pages = init.pages;
   let currentPage = init.page;
@@ -1059,12 +1054,7 @@ export function paginateFlow(
       ...(flow.lastUnit ? { lastUnit: true } : {}),
     });
 
-    const block = normalizeWrappedBlockForPage(
-      buildBlock(blockX, targetY),
-      flow,
-      currentPage.pageNumber,
-      measurer,
-    );
+    const block = buildBlock(blockX, targetY);
 
     Object.assign(block, markerFields(flow));
 
@@ -1128,12 +1118,7 @@ export function paginateFlow(
         y = newPageContentTop;
         prevSpaceAfter = 0;
 
-        const reflow = normalizeWrappedBlockForPage(
-          buildBlock(blockX, newPageContentTop),
-          flow,
-          currentPage.pageNumber,
-          measurer,
-        );
+        const reflow = buildBlock(blockX, newPageContentTop);
         Object.assign(reflow, markerFields(flow));
 
         currentPage.blocks.push(reflow);
@@ -1197,10 +1182,7 @@ export function paginateFlow(
 
         const isLastPart = linesFit >= remainingLines.length;
         const isCont = hasPlacedAnyPart;
-        const rawPartLines = remainingLines.slice(0, linesFit);
-        const partLines = shouldNormalizeWrappedLines(flow, currentPage.pageNumber, isCont)
-          ? rebreakWrappedLinesWithoutExclusions(rawPartLines, blockWidth, measurer)
-          : rawPartLines;
+        const partLines = remainingLines.slice(0, linesFit);
         const partHeight = partLines.reduce((sum, line) => sum + line.lineHeight, 0);
 
         const partBlock: LayoutBlock = {
@@ -1501,84 +1483,6 @@ function shiftBlock(block: LayoutBlock, delta: number): LayoutBlock {
 /** A flow's marker, as the block that carries its first line takes it. */
 function markerFields(flow: FlowBlock): Pick<LayoutBlock, "marker"> {
   return flow.marker ? { marker: flow.marker } : {};
-}
-
-function rebreakWrappedLinesWithoutExclusions(
-  lines: LayoutLine[],
-  availableWidth: number,
-  measurer: TextMeasurerLike,
-): LayoutLine[] {
-  const spans: InputSpan[] = [];
-
-  for (const line of lines) {
-    if (line.spans.length === 0 && line.cursorHeight === 0) continue;
-    for (const span of line.spans) {
-      if (span.kind === "text") {
-        spans.push({
-          kind: "text",
-          text: span.text,
-          font: span.font,
-          docPos: span.docPos,
-          ...(span.marks !== undefined ? { marks: span.marks } : {}),
-          ...(span.resolution !== undefined ? { resolution: span.resolution } : {}),
-        });
-      } else {
-        spans.push({
-          kind: "object",
-          node: span.node,
-          width: span.width,
-          height: span.height,
-          docPos: span.docPos,
-          ...(span.font !== undefined ? { font: span.font } : {}),
-          ...(span.resolution !== undefined ? { resolution: span.resolution } : {}),
-          // Marks travel with the font, or an atom loses the fill it resolves
-          // from when a block is re-broken — its colour would then depend on
-          // whether its page happened to hold the float.
-          ...(span.marks !== undefined ? { marks: span.marks } : {}),
-          verticalAlign: span.verticalAlign,
-        });
-      }
-    }
-    if (line.terminalBreakDocPos !== undefined) {
-      spans.push({ kind: "break", docPos: line.terminalBreakDocPos });
-    }
-  }
-
-  if (spans.length === 0) return [];
-  const firstText = spans.find((span) => span.kind === "text");
-  const parsed = parseFont(firstText?.font ?? `14px ${DEFAULT_FONT_FAMILY}`);
-  return new LineBreaker(measurer).breakIntoLines(spans, availableWidth, {
-    defaultFontFamily: parsed.family,
-    defaultFontSize: parseFloat(parsed.size),
-  });
-}
-
-function shouldNormalizeWrappedLines(
-  flow: Pick<FlowBlock, "overlapsWrapZone" | "wrapZonePage" | "wrapLaidAtY" | "globalY">,
-  pageNumber: number,
-  isContinuation: boolean,
-): boolean {
-  if (!flow.overlapsWrapZone) return false;
-  // Lines laid out where the flow sits already broke at the page boundary
-  // and wrapped each page's floats.
-  if (flow.wrapLaidAtY !== undefined && flow.wrapLaidAtY === flow.globalY) return false;
-  return isContinuation || flow.wrapZonePage !== pageNumber;
-}
-
-function normalizeWrappedBlockForPage(
-  block: LayoutBlock,
-  flow: Pick<FlowBlock, "overlapsWrapZone" | "wrapZonePage" | "wrapLaidAtY" | "globalY">,
-  pageNumber: number,
-  measurer: TextMeasurerLike,
-): LayoutBlock {
-  if (!shouldNormalizeWrappedLines(flow, pageNumber, false)) return block;
-
-  const lines = rebreakWrappedLinesWithoutExclusions(block.lines, block.availableWidth, measurer);
-  return {
-    ...block,
-    lines,
-    height: lines.reduce((sum, line) => sum + line.lineHeight, 0),
-  };
 }
 
 /**

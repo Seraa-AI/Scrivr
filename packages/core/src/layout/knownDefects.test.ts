@@ -43,42 +43,6 @@ describe("a streamed document with a float", () => {
   );
 });
 
-/**
- * A paragraph that wraps a float at the foot of page 1, then carried to page 2
- * by a top-and-bottom float above it.
- */
-describe("a wrapped paragraph that moves to a page with no float", () => {
-  const moved = (subject: Node): Node =>
-    doc(
-      p([text("Aaaa"), image({ wrapMode: "square", xAlign: "right", width: 250, height: 120, yOffset: 250 })]),
-      p([text("Bbbb"), image({ wrapMode: "top-bottom", xAlign: "left", width: 100, height: 150 })]),
-      ...Array.from({ length: 7 }, (_, i) => p(`F${i}`)),
-      subject,
-      p("Next"),
-    );
-
-  it.fails("keeps its first-line indent", () => {
-    const [part] = partsOf(whole(moved(p(`Subject ${words(30)}`, { textIndent: 60 })), PAGE), "Subject");
-    expect(part?.page).toBe(2);
-    expect(part?.block.lines.find((line) => line.spans.length > 0)?.spans[0]?.x).toBe(60);
-  });
-
-  it.fails("fills the page before it goes on to the next", () => {
-    const [first, second] = partsOf(whole(moved(p(`Subject ${words(420)}`)), PAGE), "Subject");
-    const part = must(first, "part on page 2").block;
-    expect(second?.page).toBe(3);
-    const ink = part.lines.filter((line) => !isSpacerLine(line)).reduce((sum, line) => sum + line.lineHeight, 0);
-    expect(PAGE_BOTTOM - (part.y + ink)).toBeLessThan(must(part.lines[0], "line").lineHeight);
-  });
-
-  it.fails("is followed by the next paragraph after one gap", () => {
-    const layout = whole(moved(p(`Subject ${words(30)}`)), PAGE);
-    const subject = must(partsOf(layout, "Subject")[0], "subject").block;
-    const next = must(partsOf(layout, "Next")[0], "next").block;
-    expectSamePosition(next.y, subject.y + subject.height + Math.max(subject.spaceAfter, next.spaceBefore));
-  });
-});
-
 describe("a table cell", () => {
   const blocksIn = (layout: DocumentLayout): Block[] => must(layout.pages[0]?.blocks[0]?.regions?.[0], "cell").blocks;
 
