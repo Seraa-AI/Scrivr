@@ -29,15 +29,26 @@ const partsOf = (layout: DocumentLayout, start: string): { page: number; block: 
  * A paragraph that wraps a float at the foot of page 1, then carried to page 2
  * by a top-and-bottom float above it.
  */
+const moved = (subject: Node, next: Node = p("Next")): Node =>
+  doc(
+    p([text("Aaaa"), image({ wrapMode: "square", xAlign: "right", width: 250, height: 120, yOffset: 250 })]),
+    p([text("Bbbb"), image({ wrapMode: "top-bottom", xAlign: "left", width: 100, height: 150 })]),
+    ...Array.from({ length: 7 }, (_, i) => p(`F${i}`)),
+    subject,
+    next,
+  );
+
+const textLines = (block: Block): string[] =>
+  block.lines.filter((line) => line.spans.length > 0).map((line) => line.spans.map((span) => (span.kind === "text" ? span.text : "")).join(""));
+
 describe("a wrapped paragraph that moves to a page with no float", () => {
-  const moved = (subject: Node): Node =>
-    doc(
-      p([text("Aaaa"), image({ wrapMode: "square", xAlign: "right", width: 250, height: 120, yOffset: 250 })]),
-      p([text("Bbbb"), image({ wrapMode: "top-bottom", xAlign: "left", width: 100, height: 150 })]),
-      ...Array.from({ length: 7 }, (_, i) => p(`F${i}`)),
-      subject,
-      p("Next"),
-    );
+  it("breaks its lines at the width it has there", () => {
+    const subject = p(`Subject ${words(30)}`);
+    const [part] = partsOf(whole(moved(subject), PAGE), "Subject");
+    const [alone] = partsOf(whole(doc(subject), PAGE), "Subject");
+    expect(part?.page).toBe(2);
+    expect(textLines(must(part, "subject").block)).toEqual(textLines(must(alone, "subject alone").block));
+  });
 
   it("keeps its first-line indent", () => {
     const [part] = partsOf(whole(moved(p(`Subject ${words(30)}`, { textIndent: 60 })), PAGE), "Subject");
@@ -59,25 +70,21 @@ describe("a wrapped paragraph that moves to a page with no float", () => {
     const next = must(partsOf(layout, "Next")[0], "next").block;
     expectSamePosition(next.y, subject.y + subject.height + Math.max(subject.spaceAfter, next.spaceBefore));
   });
+});
 
-  it("wraps the float of the page it moves to", () => {
-    const node = doc(
-      p([text("Aaaa"), image({ wrapMode: "square", xAlign: "right", width: 250, height: 120, yOffset: 250 })]),
-      p([text("Bbbb"), image({ wrapMode: "top-bottom", xAlign: "left", width: 100, height: 150 })]),
-      ...Array.from({ length: 7 }, (_, i) => p(`F${i}`)),
-      p(`Subject ${words(30)}`),
-      p([text("Next"), image({ wrapMode: "square", xAlign: "right", width: 300, height: 60, yOffset: -60 })]),
-    );
-    const layout = whole(node, PAGE);
+describe("a wrapped paragraph that moves to a page with a float", () => {
+  it("wraps that float", () => {
+    const next = p([text("Next"), image({ wrapMode: "square", xAlign: "right", width: 300, height: 60, yOffset: -60 })]);
+    const layout = whole(moved(p(`Subject ${words(30)}`), next), PAGE);
     const subject = must(partsOf(layout, "Subject")[0], "subject");
     const float = must(layout.anchoredObjects?.find((object) => object.page === subject.page), "float on its page");
+    const beside: number[] = [];
     let y = subject.block.y;
     for (const line of subject.block.lines) {
-      if (y + line.lineHeight > float.y && y < float.y + float.height) {
-        const right = Math.max(...line.spans.map((span) => span.x + span.width));
-        expect(subject.block.x + right).toBeLessThanOrEqual(float.x);
-      }
+      if (y + line.lineHeight > float.y && y < float.y + float.height) beside.push(subject.block.x + Math.max(...line.spans.map((span) => span.x + span.width)));
       y += line.lineHeight;
     }
+    expect(beside).not.toEqual([]);
+    for (const right of beside) expect(right).toBeLessThanOrEqual(float.x);
   });
 });
