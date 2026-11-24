@@ -164,7 +164,14 @@ describe("a layout that reuses the last one's tail", () => {
     const previousLayout = runPipeline(doc(p("x"), a, b, numbered(1, one)), cached);
     const after = doc(p("y"), a, b, numbered(5, one));
     const partial = runPipeline(after, { ...cached, previousLayout, previousVersion: previousLayout.version, maxBlocks: 2 });
+
     expect(partial.isPartial).toBe(true);
+    expect(partial.pages.flatMap((page) => page.blocks).map((block) => block.node.textContent)).toEqual(["y", "A"]);
+  });
+
+  it("equals a fresh one: a paragraph that splits at another line, its last part starting where it did", () => {
+    const long = p("word ".repeat(1200).trim());
+    expectSameAsFresh(doc(p("x"), long, c), doc(p("word ".repeat(40).trim()), long, c));
   });
 });
 
