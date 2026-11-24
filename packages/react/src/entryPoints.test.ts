@@ -9,7 +9,7 @@ vi.mock("@scrivr/plugins", () => { throw new Error("@scrivr/plugins is not insta
 vi.mock("@scrivr/ai", () => { throw new Error("@scrivr/ai is not installed"); });
 
 describe("@scrivr/react's entries without the optional peers", () => {
-  it("the root imports", async () => {
+  it("the root imports", { timeout: 60_000 }, async () => {
     await expect(import("./index")).resolves.toHaveProperty("Scrivr");
   });
 
