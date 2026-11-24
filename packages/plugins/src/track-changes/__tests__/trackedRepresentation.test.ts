@@ -53,7 +53,7 @@ describe("tracked representation follows the schema", () => {
     ).not.toThrow();
   });
 
-  it("stamps a deleted block that admits no marks on the node, not its text", () => {
+  it("guards against marking the text of a deleted block that admits no marks", () => {
     const editor = new TestEditor(doc(unmarked("x = 1"), p("tail")));
     editor.deleteRange(0, 7);
 
@@ -62,7 +62,7 @@ describe("tracked representation follows the schema", () => {
     expect(() => editor.state.doc.check()).not.toThrow();
   });
 
-  it("still marks text where the schema admits marks", () => {
+  it("guards against leaving text unmarked where the schema admits marks", () => {
     const editor = new TestEditor(doc(p("tail")));
     editor.dispatch(editor.state.tr.insert(0, p("new")));
 
