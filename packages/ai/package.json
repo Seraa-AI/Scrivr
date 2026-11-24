@@ -49,18 +49,18 @@
     "build": "tsup",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.browser.json",
     "clean": "rm -rf dist"
   },
   "dependencies": {
     "@scrivr/core": "workspace:*",
     "@scrivr/export-semantic": "workspace:*",
     "@scrivr/plugins": "workspace:*",
-    "zod": "^4.3.6"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
-    "tsup": "^8.0.0",
-    "typescript": "^5.4.0",
-    "vitest": "^2.1.0"
+    "tsup": "^9.0.0",
+    "typescript": "^6.0.3",
+    "vitest": "^5.1.1"
   }
 }

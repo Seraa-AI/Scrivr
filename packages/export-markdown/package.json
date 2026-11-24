@@ -40,7 +40,7 @@
     "dev": "tsup --watch",
     "build": "tsup",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.browser.json",
     "clean": "rm -rf dist"
   },
   "peerDependencies": {
@@ -48,8 +48,8 @@
   },
   "devDependencies": {
     "@scrivr/core": "workspace:*",
-    "tsup": "^8.0.0",
-    "typescript": "^5.4.0",
-    "vitest": "^2.1.0"
+    "tsup": "^9.0.0",
+    "typescript": "^6.0.3",
+    "vitest": "^5.1.1"
   }
 }

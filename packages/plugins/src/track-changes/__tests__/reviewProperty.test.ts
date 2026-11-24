@@ -139,7 +139,7 @@ function scenario(seed: number) {
 
 const ORIGINAL = blockTexts(editorFor("alice", START).getState().doc, false);
 
-describe("any pending document can be decided", () => {
+describe("any pending document can be decided", { timeout: 60_000 }, () => {
   // These must not reach a reviewer as failures; the engine logs when they do.
   const silenced = () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});

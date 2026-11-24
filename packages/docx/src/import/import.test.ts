@@ -48,6 +48,14 @@ describe("importDocx — MVP (paragraph + text)", () => {
     expect(textOf(para)).toBe("hello world");
   });
 
+  it.each(["007", "1.50", "+5", "1e5", "0x1F"])("keeps the text %j as it was written", async (text) => {
+    const editor = new ServerEditor();
+    editor.setContent({ type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text }] }] });
+    const { doc } = await importDocx(new ServerEditor(), await exportDocxBytes(editor));
+
+    expect(textOf(doc.child(0))).toBe(text);
+  });
+
   it("preserves multiple paragraphs in document order", async () => {
     const editor = new ServerEditor();
     editor.setContent({

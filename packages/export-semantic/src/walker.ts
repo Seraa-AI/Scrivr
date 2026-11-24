@@ -4,6 +4,9 @@ import type { ResolvedHandlers } from "./collectHandlers";
 import { groupBlocks } from "./grouping";
 import { resolveNodeId, type BlockEntry } from "./id";
 
+// Absent in a browser.
+declare const process: { env: Record<string, string | undefined> } | undefined;
+
 const warnedTypes = new Set<string>();
 
 function warnUnknown(name: string): void {

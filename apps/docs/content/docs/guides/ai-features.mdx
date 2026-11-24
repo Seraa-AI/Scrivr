@@ -23,7 +23,7 @@ When `AiToolkit` is loaded, the playground gains three pieces of functionality:
 - **AI Suggestion Cards** — inline suggestion cards that appear next to the canvas, showing diffs from AI edits that you can accept/reject
 - **Ghost Text Completions** — inline completions shown as you type, similar to GitHub Copilot
 
-All three live in the `@scrivr/plugins` package as the `AiToolkit` extension, and all three are gated behind a build-time flag in `apps/docs/src/playground/Playground.tsx`:
+All three live in the `@scrivr/ai` package as the `AiToolkit` extension, and all three are gated behind a build-time flag in `apps/docs/src/playground/Playground.tsx`:
 
 ```ts
 const AI_ENABLED =
@@ -57,7 +57,7 @@ If you're adding a new env var to the docs app, ask: "should code behind this fl
 ### Prerequisites
 
 - A Claude API key from [console.anthropic.com](https://console.anthropic.com/settings/keys). A free-tier key works for basic testing; for sustained use you'll want a paid plan.
-- Node 24+ and pnpm 10 installed
+- Node 24 (24.11 or later) and pnpm 10 installed
 - The Scrivr repo cloned locally
 
 ### Setup
@@ -79,9 +79,9 @@ If you're adding a new env var to the docs app, ask: "should code behind this fl
 
 ### How it works
 
-The `AiToolkit` plugin reads the key from the Vite environment at startup and initializes an Anthropic SDK client in the browser. Because it's running in your local dev environment with your own key, there's no proxy, no rate limiting, and no third-party involvement — every request goes directly from your browser to `api.anthropic.com`.
+The chat panel posts to the docs server's own `/api/ai` route. That route reads `ANTHROPIC_API_KEY` from the server's environment, calls Anthropic and streams the answer back, so the key never reaches the browser.
 
-See `packages/plugins/src/ai-toolkit/` for the full implementation.
+See `apps/docs/src/routes/api/ai.ts` for the route and `packages/ai/src/ai-toolkit/` for the `AiToolkit` extension that applies the model's edits.
 
 ## Embedding AI features in your own app
 
@@ -89,14 +89,14 @@ If you're building an application that embeds Scrivr, you have three paths to of
 
 1. **Proxy through your backend** (recommended). Your server holds the API key, your app calls your server, and your server calls Anthropic. You control rate limiting, abuse detection, and spend. Most production apps take this path.
 
-2. **BYOK (Bring Your Own Key)** in your UI. Show a settings panel where users paste their own Anthropic key, store it in memory or `localStorage`, and pass it to the `AiToolkit` plugin. Your app never sees the key; your users pay their own bills.
+2. **BYOK (Bring Your Own Key)** in your UI. Show a settings panel where users paste their own Anthropic key, store it in memory or `localStorage`, and call the model with it from the browser. Your servers never see the key; your users pay their own bills.
 
 3. **Service account per user** via a managed Anthropic workspace. Appropriate for enterprise deployments where each user has their own billing relationship.
 
-The `@scrivr/plugins` `AiToolkit` extension accepts a custom Anthropic SDK instance at configure time, so any of these patterns drops in without touching core Scrivr code.
+The `AiToolkit` extension, in `@scrivr/ai`, never calls a model itself: your code does, and hands it the edits. So any of these works without touching Scrivr.
 
 ## Related
 
 - **Plugins guide** — [Creating Plugins](/docs/guides/plugins)
 - **Track Changes** — the AI suggestion workflow uses the same fragment-and-accept/reject model as [Track Changes](/docs/guides/plugins)
-- **Source** — `packages/plugins/src/ai-toolkit/` in the repo
+- **Source** — `packages/ai/src/ai-toolkit/` in the repo

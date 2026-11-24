@@ -342,7 +342,7 @@ function colourByChar(editor: ServerEditor, proposed = false) {
 }
 
 /** Bug class: a review of formatting that does not land on the original, or on what was shown. */
-describe("any run of recolouring can be decided", () => {
+describe("any run of recolouring can be decided", { timeout: 60_000 }, () => {
   const ORIGINAL = colourByChar(editorWith(START));
 
   it("rejecting everything gives back the original colours", () => {

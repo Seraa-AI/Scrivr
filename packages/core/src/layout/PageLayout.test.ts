@@ -376,7 +376,7 @@ describe("runPipeline — list item spacing", () => {
 
 describe("runPipeline — measureCache", () => {
   it("produces identical layout output when a cache is provided", () => {
-    const cache = new WeakMap<object, MeasureCacheEntry>();
+    const cache = new WeakMap<Node, MeasureCacheEntry>();
     const baseDoc = doc(p("Hello"), p("World"));
     const opts = { pageConfig: defaultPageConfig, measurer: createMeasurer() };
 
@@ -397,7 +397,7 @@ describe("runPipeline — measureCache", () => {
   });
 
   it("populates the cache after the first layout run", () => {
-    const cache = new WeakMap<object, MeasureCacheEntry>();
+    const cache = new WeakMap<Node, MeasureCacheEntry>();
     const para = p("Cached paragraph");
     const testDoc = doc(para);
     runPipeline(testDoc, { pageConfig: defaultPageConfig, measurer: createMeasurer(), measureCache: cache });
@@ -413,7 +413,7 @@ describe("runPipeline — measureCache", () => {
     // This test verifies the cache is actually consulted (not just populated).
     // We manually inject a fake cache entry with a doubled height and confirm
     // the second block's y-position shifts accordingly.
-    const cache = new WeakMap<object, MeasureCacheEntry>();
+    const cache = new WeakMap<Node, MeasureCacheEntry>();
     const firstPara = p("First paragraph");
     const secondPara = p("Second paragraph");
     const testDoc = doc(firstPara, secondPara);
@@ -450,7 +450,7 @@ describe("runPipeline — measureCache", () => {
     const doc1 = doc(p("A"),       para2); // para2.nodePos = 3  (p("A").nodeSize = 3)
     const doc2 = doc(p("AAAAAAA"), para2); // para2.nodePos = 9  (p("AAAAAAA").nodeSize = 9)
 
-    const cache = new WeakMap<object, MeasureCacheEntry>();
+    const cache = new WeakMap<Node, MeasureCacheEntry>();
     const measurer = createMeasurer();
     const opts = { pageConfig: defaultPageConfig, measurer, measureCache: cache };
 
@@ -468,7 +468,7 @@ describe("runPipeline — measureCache", () => {
   });
 
   it("re-measures when availableWidth changes (margin change)", () => {
-    const cache = new WeakMap<object, MeasureCacheEntry>();
+    const cache = new WeakMap<Node, MeasureCacheEntry>();
     const testDoc = doc(p("Text"));
     const measurer = createMeasurer();
     const narrow = { pageWidth: 400, pageHeight: 800, margins: { top: 20, right: 20, bottom: 20, left: 20 } };
@@ -491,7 +491,7 @@ describe("runPipeline — Phase 1b early termination", () => {
     const stableTail = p("stable tail");
     const doc1 = doc(p("prefix A"), stableMiddle, p("old later block"), stableTail);
     const doc2 = doc(p("prefix B"), stableMiddle, p("new later block"), stableTail);
-    const cache = new WeakMap<object, MeasureCacheEntry>();
+    const cache = new WeakMap<Node, MeasureCacheEntry>();
     const measurer = createMeasurer();
     const opts = { pageConfig: defaultPageConfig, measurer, measureCache: cache };
 
@@ -511,7 +511,7 @@ describe("runPipeline — Phase 1b early termination", () => {
     const stableTail = p("stable tail");
     const doc1 = doc(p("prefix A"), stableMiddle, pageBreak(), p("old later block"), stableTail);
     const doc2 = doc(p("prefix B"), stableMiddle, pageBreak(), p("new later block"), stableTail);
-    const cache = new WeakMap<object, MeasureCacheEntry>();
+    const cache = new WeakMap<Node, MeasureCacheEntry>();
     const measurer = createMeasurer();
     const opts = { pageConfig: defaultPageConfig, measurer, measureCache: cache };
 
@@ -534,7 +534,7 @@ describe("runPipeline — Phase 1b early termination", () => {
     const doc1 = doc(p("A"),       para2, para3);
     const doc2 = doc(p("AAAAAAA"), para2, para3);
 
-    const cache = new WeakMap<object, MeasureCacheEntry>();
+    const cache = new WeakMap<Node, MeasureCacheEntry>();
     const measurer = createMeasurer();
     const opts = { pageConfig: defaultPageConfig, measurer, measureCache: cache };
 
@@ -564,7 +564,7 @@ describe("runPipeline — Phase 1b early termination", () => {
     const doc1 = doc(p("A"),       para2, para3);
     const doc2 = doc(p("AAAAAAA"), para2, para3);
 
-    const cache = new WeakMap<object, MeasureCacheEntry>();
+    const cache = new WeakMap<Node, MeasureCacheEntry>();
     const measurer = createMeasurer();
     const opts = { pageConfig: defaultPageConfig, measurer, measureCache: cache };
 
@@ -614,7 +614,7 @@ describe("runPipeline — maxBlocks / streaming", () => {
     const blocks = Array.from({ length: 10 }, (_, i) => p(`Paragraph ${i + 1}`));
     const testDoc = doc(...blocks);
     const measurer = createMeasurer();
-    const cache = new WeakMap<object, MeasureCacheEntry>();
+    const cache = new WeakMap<Node, MeasureCacheEntry>();
     const opts = { pageConfig: defaultPageConfig, measurer, measureCache: cache };
 
     // Partial layout: first 5 blocks
@@ -1508,7 +1508,7 @@ describe("runPipeline — float image wrapping", () => {
 
     // Second layout reuses measureCache and previousLayout — exactly what the
     // editor does on each drag mousemove event.
-    const measureCache = new WeakMap();
+    const measureCache = new WeakMap<Node, MeasureCacheEntry>();
     const layout2 = runPipeline(doc2, { ...opts, previousLayout: layout1, measureCache });
 
     // All text blocks must be within the page bottom on every page.
@@ -1531,7 +1531,7 @@ describe("runPipeline — float image wrapping", () => {
   it("Phase 1b does not copy a cached tail after a changed square zone overlaps it", () => {
     const { schema, fontConfig } = buildStarterKitContext();
     const measurer = createMeasurer();
-    const cache = new WeakMap<object, MeasureCacheEntry>();
+    const cache = new WeakMap<Node, MeasureCacheEntry>();
     const opts = { pageConfig: defaultPageConfig, fontConfig, measurer, measureCache: cache };
     const floatText = "anchor";
     const wrappedText = "word ".repeat(60).trim();

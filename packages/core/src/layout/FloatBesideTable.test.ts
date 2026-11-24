@@ -338,7 +338,7 @@ describe("float beside a table — the table moves below the float", () => {
     for (const lead of [crossing - 2, crossing - 1, crossing, crossing + 1]) {
       const d = build(lead);
       const measurer = createMeasurer();
-      const measureCache = new WeakMap<object, MeasureCacheEntry>();
+      const measureCache = new WeakMap<Node, MeasureCacheEntry>();
       const opts = { pageConfig: defaultPageConfig, fontConfig, measurer, measureCache };
       const first = runPipeline(d, opts);
       const again = runPipeline(d, { ...opts, previousLayout: first });
@@ -534,7 +534,7 @@ describe("float beside a table — the table moves below the float", () => {
 
     function relayout(before: Node, after: Node): { cached: DocumentLayout; fresh: DocumentLayout } {
       const measurer = createMeasurer();
-      const measureCache = new WeakMap<object, MeasureCacheEntry>();
+      const measureCache = new WeakMap<Node, MeasureCacheEntry>();
       const opts = { pageConfig: defaultPageConfig, fontConfig, measurer, measureCache };
       const first = runPipeline(before, opts);
       const cached = runPipeline(after, { ...opts, previousLayout: first });
