@@ -6,7 +6,7 @@ import { COLLAB_SYNC_META, NORMALIZATION_META } from "./UniqueId";
 interface TrailingState {
   /** Where the paragraph this plugin added starts, while it is still the empty last block. */
   added: number | null;
-  /** Ids of paragraphs it added that are gone again, which an undo or redo can bring back. */
+  /** Ids of paragraphs it added that went before anyone claimed them, until they are back in the document. */
   gone: ReadonlySet<string>;
 }
 
@@ -55,42 +55,53 @@ export const TrailingNode = Extension.create({
       return missing;
     };
 
-    /** Whether `tr` changes the document as part of an edit, not of an undo or redo. */
-    const isAuthored = (tr: Transaction): boolean =>
-      tr.docChanged && !isHistoryTransaction(tr.getMeta("appendedTransaction") ?? tr);
+    /** What another plugin appends to an undo or redo counts as part of it. */
+    const isEditOutsideHistory = (tr: Transaction): boolean => {
+      const root: Transaction | undefined = tr.getMeta("appendedTransaction");
+      return tr.docChanged && !isHistoryTransaction(root ?? tr);
+    };
+
+    const onlyDeletes = (tr: Transaction): boolean => {
+      let inserted = 0;
+      tr.mapping.maps.forEach(map => map.forEach((_from, _to, newFrom, newTo) => { inserted += newTo - newFrom; }));
+      return inserted === 0;
+    };
 
     return [
       new Plugin<TrailingState>({
         key: addedKey,
         state: {
           init: () => ({ added: null, gone: new Set() }),
-          apply(tr, { added, gone }) {
-            const own = tr.getMeta(addedKey);
-            if (own === undefined && !tr.docChanged) {
-              // Someone who puts the caret in the line makes it theirs. A caret an
-              // edit moves there does not, since the edit is what made it unneeded.
-              // Nor does a selection that only runs into it, like Select All.
+          apply(tr, { added, gone }, oldState) {
+            if (!tr.docChanged) {
+              // Someone who puts the caret in the line makes it theirs. A selection
+              // that only runs into it, like Select All, does not.
               const claimed = added !== null && tr.selection.from >= added;
               return { added: claimed ? null : added, gone };
             }
 
-            const id = idAt(tr.before, added);
-            const known = id === null ? gone : new Set(gone).add(id);
-            const next = { gone: missingFrom(tr.doc, known) };
-            if (own !== undefined) return { ...next, added: own };
+            const own: number | null | undefined = tr.getMeta(addedKey);
+            const addedId = idAt(tr.before, added);
+            const ours = addedId === null ? gone : new Set(gone).add(addedId);
+            const stillGone = missingFrom(tr.doc, ours);
+            if (own !== undefined) return { added: own, gone: stillGone };
 
             // Positions cannot say whose line an undo brought back, so its id
             // does. A line without one keeps being followed by position.
-            const followedByPosition = added !== null && id === null;
+            const followedByPosition = added !== null && addedId === null;
+            let pos = added === null ? null : tr.mapping.map(added);
             if (isHistoryTransaction(tr) && !followedByPosition) {
               const lastPos = tr.doc.content.size - (tr.doc.lastChild?.nodeSize ?? 0);
               const lastId = idAt(tr.doc, lastPos);
-              const isOurs = lastId !== null && known.has(lastId);
-              return { ...next, added: isOurs ? lastPos : null };
+              pos = lastId !== null && ours.has(lastId) ? lastPos : null;
+            } else if (added !== null && pos !== null) {
+              // An edit that moves the caret into the line does not claim it, since
+              // the edit is what made it unneeded. Deleting a selection that ran into
+              // it does: the line is what is left of what was selected.
+              const leftInIt = oldState.selection.to > added && tr.selection.from >= pos && onlyDeletes(tr);
+              if (leftInIt) pos = null;
             }
-
-            const pos = added === null ? null : tr.mapping.map(added);
-            return { ...next, added: isEmptyLastParagraph(tr.doc, pos) ? pos : null };
+            return { added: isEmptyLastParagraph(tr.doc, pos) ? pos : null, gone: stillGone };
           },
         },
         appendTransaction(transactions, _oldState, state) {
@@ -105,13 +116,15 @@ export const TrailingNode = Extension.create({
               .setMeta(addedKey, doc.content.size);
           } else {
             // History does not map its older steps through what is appended to an
-            // undo or redo, so deleting here would make the next undo throw.
-            if (!transactions.some(isAuthored)) return null;
+            // undo or redo, so deleting here can make the next undo or redo throw.
+            if (!transactions.some(isEditOutsideHistory)) return null;
             const added = addedKey.getState(state)?.added ?? null;
             const previous = doc.childCount > 1 ? doc.child(doc.childCount - 2) : null;
             if (!isEmptyLastParagraph(doc, added) || previous?.type !== paragraph) return null;
             tr = state.tr.delete(added, doc.content.size).setMeta(addedKey, null);
           }
+          // A step clears the marks waiting for the next typing.
+          tr.setStoredMarks(state.storedMarks);
           tr.setMeta(NORMALIZATION_META, true);
           if (transactions.some((tx) => tx.docChanged && tx.getMeta(COLLAB_SYNC_META))) {
             tr.setMeta(COLLAB_SYNC_META, true);

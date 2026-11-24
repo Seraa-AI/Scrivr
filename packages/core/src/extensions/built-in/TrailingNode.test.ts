@@ -51,7 +51,7 @@ describe("TrailingNode", () => {
     expect(blocks(e)).toEqual(["heading:one", "paragraph:"]);
   });
 
-  it("takes its paragraph away once the last block is a paragraph again", () => {
+  it("takes its paragraph away once the block above it is a paragraph again", () => {
     const e = editor(p("one"));
     caretAt(e, 2);
     e.commands.setHeading({ level: 1 });
@@ -136,7 +136,7 @@ describe("TrailingNode", () => {
     const e = editor(p("one"));
     caretAt(e, 2);
     e.commands.setHeading({ level: 1 });
-    e.applyTransaction(closeHistory(e.getState().tr));
+    edit(e, tr => tr);
     firstToParagraph(e);
     e.commands.undo();
     expect(blocks(e)).toEqual(["heading:one", "paragraph:"]);
@@ -237,9 +237,9 @@ describe("TrailingNode", () => {
   });
 
   it.each([
-    { blocks: "with ids", starterKit: StarterKit },
-    { blocks: "without ids", starterKit: StarterKit.configure({ uniqueId: false }) },
-  ])("still takes its paragraph away after an undo of something else, for blocks $blocks", ({ starterKit }) => {
+    { ids: "with ids", starterKit: StarterKit },
+    { ids: "without ids", starterKit: StarterKit.configure({ uniqueId: false }) },
+  ])("still takes its paragraph away after an undo of something else, for blocks $ids", ({ starterKit }) => {
     const e = new ServerEditor({ extensions: [starterKit], content: { type: "doc", content: [p("one")] } });
     caretAt(e, 2);
     e.commands.setHeading({ level: 1 });
@@ -249,18 +249,51 @@ describe("TrailingNode", () => {
     expect(blocks(e)).toEqual(["paragraph:one"]);
   });
 
-  it("keeps a line someone was in while an undo had a paragraph below it", () => {
+  it("no longer takes its line away once an undo has put a paragraph below it", () => {
     const e = editor(p("one"), p("two"));
-    edit(e, tr => tr.delete(5, tr.doc.content.size));
-    e.applyTransaction(e.getState().tr.insert(5, create(e, "heading")).setMeta("addToHistory", false));
+    const heading = 5;
+    edit(e, tr => tr.delete(heading, tr.doc.content.size));
+    e.applyTransaction(e.getState().tr.insert(heading, create(e, "heading")).setMeta("addToHistory", false));
     e.commands.undo();
     expect(blocks(e)).toEqual(["paragraph:one", "heading:", "paragraph:", "paragraph:two"]);
-    caretAt(e, 8);
-    caretAt(e, 2);
     e.commands.redo();
     expect(blocks(e)).toEqual(["paragraph:one", "heading:", "paragraph:"]);
-    e.applyTransaction(e.getState().tr.setNodeMarkup(5, e.getState().schema.nodes.paragraph));
+    e.applyTransaction(e.getState().tr.setNodeMarkup(heading, e.getState().schema.nodes.paragraph));
     expect(blocks(e)).toEqual(["paragraph:one", "paragraph:", "paragraph:"]);
+  });
+
+  it("takes its paragraph away after an undo, a click elsewhere and a redo", () => {
+    const e = editor(p("one"));
+    caretAt(e, 2);
+    e.commands.setHeading({ level: 1 });
+    e.commands.undo();
+    caretAt(e, 3);
+    e.commands.redo();
+    firstToParagraph(e);
+    expect(blocks(e)).toEqual(["paragraph:one"]);
+  });
+
+  it("keeps the paragraph after an undo of a list it was made part of", () => {
+    const e = editor(p("one"));
+    caretAt(e, 2);
+    e.commands.setHeading({ level: 1 });
+    edit(e, tr => tr);
+    select(e, doc => new AllSelection(doc));
+    e.commands.toggleBulletList();
+    e.commands.undo();
+    expect(blocks(e)).toEqual(["heading:one", "paragraph:"]);
+    firstToParagraph(e);
+    expect(blocks(e)).toEqual(["paragraph:one", "paragraph:"]);
+  });
+
+  it("keeps the caret in the paragraph when a selection into it is deleted", () => {
+    const e = editor(p("alpha"), h1("beta"));
+    e.applyTransaction(e.getState().tr);
+    select(e, doc => TextSelection.create(doc, 8, doc.content.size - 1));
+    e.applyTransaction(e.getState().tr.deleteSelection());
+    expect(blocks(e)).toEqual(["paragraph:alpha", "paragraph:"]);
+    e.applyTransaction(e.getState().tr.insertText("new"));
+    expect(blocks(e)).toEqual(["paragraph:alpha", "paragraph:new"]);
   });
 
   it("does not take away a copy of its paragraph that someone put back", () => {
@@ -292,7 +325,7 @@ describe("TrailingNode", () => {
   });
 
   describe("when an undo brings its line back where it is not needed", () => {
-    function undone(...extensions: Extension[]) {
+    function undoneAfterUnrecordedLoad(...extensions: Extension[]) {
       const e = new ServerEditor({ extensions: [StarterKit, ...extensions], content: { type: "doc", content: [p("one")] } });
       caretAt(e, 2);
       e.commands.setHeading({ level: 1 });
@@ -305,14 +338,14 @@ describe("TrailingNode", () => {
     }
 
     it("can still undo", () => {
-      const e = undone();
+      const e = undoneAfterUnrecordedLoad();
       expect(blocks(e)).toEqual(["heading:Demo", "paragraph:body", "paragraph:"]);
       e.commands.undo();
       expect(blocks(e)).toEqual(["heading:Demo", "paragraph:body"]);
     });
 
     it("takes the line away at the next edit, not the next click", () => {
-      const e = undone();
+      const e = undoneAfterUnrecordedLoad();
       caretAt(e, 2);
       expect(blocks(e)).toEqual(["heading:Demo", "paragraph:body", "paragraph:"]);
       e.applyTransaction(e.getState().tr.insertText("!", 5));
@@ -327,15 +360,75 @@ describe("TrailingNode", () => {
             transactions.some(isHistoryTransaction) ? state.tr.insertText("!", 5) : null,
         })],
       });
-      expect(blocks(undone(marksUndo))).toEqual(["heading:Demo!", "paragraph:body", "paragraph:"]);
+      expect(blocks(undoneAfterUnrecordedLoad(marksUndo))).toEqual(["heading:Demo!", "paragraph:body", "paragraph:"]);
     });
+  });
+
+  it("takes its paragraph away when deleting the block above moves the caret into it", () => {
+    const e = editor(p("alpha"), { type: "horizontalRule" });
+    e.applyTransaction(e.getState().tr);
+    select(e, doc => NodeSelection.create(doc, 7));
+    e.applyTransaction(e.getState().tr.deleteSelection());
+    expect(blocks(e)).toEqual(["paragraph:alpha"]);
+  });
+
+  it("takes its paragraph away when a change to everything moves the caret into it", () => {
+    const e = editor(p("one"));
+    caretAt(e, 2);
+    e.commands.setHeading({ level: 1 });
+    select(e, doc => new AllSelection(doc));
+    const tr = e.getState().tr.setNodeMarkup(0, e.getState().schema.nodes.paragraph);
+    e.applyTransaction(tr.setSelection(TextSelection.create(tr.doc, lastLinePos(e) + 1)));
+    expect(blocks(e)).toEqual(["paragraph:one"]);
+  });
+
+  it("takes its paragraph away when a deletion leaves Select All on", () => {
+    const e = editor(p("alpha"), h1("beta"));
+    e.applyTransaction(e.getState().tr);
+    select(e, doc => new AllSelection(doc));
+    e.applyTransaction(e.getState().tr.delete(7, lastLinePos(e)));
+    expect(blocks(e)).toEqual(["paragraph:alpha"]);
+  });
+
+  it("takes its paragraph away when another plugin moves the caret after the edit", () => {
+    const movesCaret = Extension.create({
+      name: "movesCaret",
+      addProseMirrorPlugins: () => [new Plugin({
+        appendTransaction: (transactions, _old, state) =>
+          transactions.every(tr => tr.docChanged) ? state.tr.setSelection(TextSelection.create(state.doc, 1)) : null,
+      })],
+    });
+    const e = new ServerEditor({ extensions: [movesCaret, StarterKit], content: { type: "doc", content: [p("one")] } });
+    e.applyTransaction(e.getState().tr.setNodeMarkup(0, e.getState().schema.nodes.heading, { level: 1 }));
+    firstToParagraph(e);
+    expect(blocks(e)).toEqual(["paragraph:one"]);
+  });
+
+  it("keeps the marks waiting for the next typing when it adds its paragraph", () => {
+    const e = editor(p("one"));
+    const { schema } = e.getState();
+    const bold = schema.mark("bold");
+    e.applyTransaction(e.getState().tr.setNodeMarkup(0, schema.nodes.heading, { level: 1 }).setStoredMarks([bold]));
+    expect(blocks(e)).toEqual(["heading:one", "paragraph:"]);
+    expect(e.getState().storedMarks).toEqual([bold]);
+  });
+
+  it("keeps the marks waiting for the next typing when it takes its paragraph away", () => {
+    const e = editor(p("one"));
+    const { schema } = e.getState();
+    const bold = schema.mark("bold");
+    caretAt(e, 2);
+    e.commands.setHeading({ level: 1 });
+    e.applyTransaction(e.getState().tr.setNodeMarkup(0, schema.nodes.paragraph).setStoredMarks([bold]));
+    expect(blocks(e)).toEqual(["paragraph:one"]);
+    expect(e.getState().storedMarks).toEqual([bold]);
   });
 
   it("gives back a line it did not add when everything is undone", () => {
     const e = editor(p("one"), p());
     caretAt(e, 2);
     e.commands.setHeading({ level: 1 });
-    e.applyTransaction(closeHistory(e.getState().tr));
+    edit(e, tr => tr);
     caretAt(e, lastLinePos(e) + 1);
     e.commands.setHeading({ level: 2 });
     e.commands.undo();
