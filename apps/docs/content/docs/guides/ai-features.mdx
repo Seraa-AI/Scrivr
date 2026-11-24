@@ -23,7 +23,7 @@ When `AiToolkit` is loaded, the playground gains three pieces of functionality:
 - **AI Suggestion Cards** — inline suggestion cards that appear next to the canvas, showing diffs from AI edits that you can accept/reject
 - **Ghost Text Completions** — inline completions shown as you type, similar to GitHub Copilot
 
-All three live in the `@scrivr/plugins` package as the `AiToolkit` extension, and all three are gated behind a build-time flag in `apps/docs/src/playground/Playground.tsx`:
+All three live in the `@scrivr/ai` package as the `AiToolkit` extension, and all three are gated behind a build-time flag in `apps/docs/src/playground/Playground.tsx`:
 
 ```ts
 const AI_ENABLED =
@@ -99,4 +99,4 @@ The `AiToolkit` extension, in `@scrivr/ai`, never calls a model itself: your cod
 
 - **Plugins guide** — [Creating Plugins](/docs/guides/plugins)
 - **Track Changes** — the AI suggestion workflow uses the same fragment-and-accept/reject model as [Track Changes](/docs/guides/plugins)
-- **Source** — `packages/plugins/src/ai-toolkit/` in the repo
+- **Source** — `packages/ai/src/ai-toolkit/` in the repo

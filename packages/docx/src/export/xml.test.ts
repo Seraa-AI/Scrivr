@@ -48,7 +48,7 @@ describe("serializeXml", () => {
     expect(serializeXml(xml("w:t", { "w:val": illegal }, [illegal]))).toBe('<w:t w:val="ab">ab</w:t>');
   });
 
-  it("writes line ends so that a reader does not normalize them", () => {
+  it("writes tabs and line ends so that a reader does not normalize them", () => {
     expect(serializeXml(xml("w:t", { "w:val": "a\tb\r\nc" }, ["a\tb\r\nc"]))).toBe(
       '<w:t w:val="a&#9;b&#13;&#10;c">a\tb&#13;\nc</w:t>',
     );

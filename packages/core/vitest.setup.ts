@@ -8,9 +8,9 @@
  * package-level hook.
  *
  * Measurement still flows through the DI seam at `TextMeasurer` / `Editor`
- * (`createTestEditor` in `src/test-utils.ts`). The wiring here only matters
- * for paint paths (TileManager, PageRenderer, OverlayRenderer) that
- * construct their own canvas elements internally.
+ * (`createTestEditor` in `src/test-utils.ts`). The wiring here serves what
+ * constructs its own canvas: `TextMeasurer` by default, and the paint paths
+ * (TileManager, PageRenderer, OverlayRenderer).
  *
  * Cache invariant: per the HTML canvas spec, assigning `canvas.width` or
  * `canvas.height` resets the 2D context (transform, fillStyle, clip, etc.).
@@ -58,7 +58,7 @@ HTMLCanvasElement.prototype.getContext = function (
 } as typeof HTMLCanvasElement.prototype.getContext;
 
 // `TextMeasurer` prefers OffscreenCanvas, and happy-dom's returns no 2D
-// context either. Older happy-dom does not have it at all.
+// context either.
 if (typeof OffscreenCanvas !== "undefined") {
   const originalOffscreen = OffscreenCanvas.prototype.getContext;
   OffscreenCanvas.prototype.getContext = function (

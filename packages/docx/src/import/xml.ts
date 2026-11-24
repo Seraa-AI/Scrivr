@@ -23,11 +23,11 @@ export interface OoxmlElement {
 
 /** The parser throws on these names, which would lose the document over one element. */
 const RESERVED_NAMES = new Set(["__proto__", "constructor", "prototype"]);
-const readableName = (name: string) => (RESERVED_NAMES.has(name) ? `_${name}` : name);
+const renameReserved = (name: string) => (RESERVED_NAMES.has(name) ? `_${name}` : name);
 
 const parser = new XMLParser({
-  transformTagName: readableName,
-  transformAttributeName: readableName,
+  transformTagName: renameReserved,
+  transformAttributeName: renameReserved,
   ignoreAttributes: false,
   attributeNamePrefix: "",
   preserveOrder: true,
@@ -47,8 +47,8 @@ const parser = new XMLParser({
  * with `preserveOrder: true` emits the declaration as its own pseudo-node
  * keyed by `?xml`.
  *
- * Throws on XML it cannot read, and on a second root: a closing tag too many
- * ends the root early, and what follows would be lost unreported.
+ * Throws on XML it cannot read, and on a second root: closing tags too many
+ * can end the root early, and what follows would be lost unreported.
  */
 export function parseOoxml(xml: string): OoxmlElement | null {
   const raw = readXml(xml);
@@ -62,8 +62,8 @@ export function parseOoxml(xml: string): OoxmlElement | null {
 function readXml(xml: string): unknown {
   try {
     return parser.parse(xml);
-  } catch (cause) {
-    throw new Error("Invalid XML", { cause });
+  } catch {
+    throw new Error("Invalid XML");
   }
 }
 

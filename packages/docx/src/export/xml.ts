@@ -71,6 +71,8 @@ const escapeChar = (ch: string) => ESCAPES[ch] ?? ch;
 /** Not allowed in XML, not even as a reference: one makes the file unreadable. */
 const ILLEGAL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g;
 
+// A reader turns a raw CR in text into LF, and a raw tab or line end in an
+// attribute into a space.
 function escapeText(s: string): string {
   return s.replace(ILLEGAL, "").replace(/[&<>\r]/g, escapeChar);
 }

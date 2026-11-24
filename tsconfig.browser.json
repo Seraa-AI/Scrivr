@@ -1,0 +1,16 @@
+{
+  // Source that runs in browsers must not use Node's globals. The main pass
+  // allows them, because tests need them.
+  "compilerOptions": {
+    "noEmit": true,
+    "types": []
+  },
+  "exclude": [
+    "${configDir}/src/**/*.test.ts",
+    "${configDir}/src/**/*.test.tsx",
+    "${configDir}/src/**/*.spec.ts",
+    "${configDir}/src/**/__tests__/**",
+    "${configDir}/src/**/test-utils.ts",
+    "${configDir}/src/**/test-utils.tsx"
+  ]
+}
