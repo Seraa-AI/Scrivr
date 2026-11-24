@@ -1,7 +1,6 @@
 # Resumable Layout RFC
 
-> Status: **contract proposed, revised after two reviews, awaiting sign-off on
-> §14**. No engine code yet.
+> Status: **contract signed off 2026-11-24**, every decision in §14 as recommended.
 > Grounded in the code on `main` at `54b21ca3` and in Word 16.111 (measured,
 > [columns RFC](./columns-rfc.md#word-measured)). It is the contract behind
 > [columns](./columns-rfc.md) and splittable [composite](./composite-layout-rfc.md) units. Claims marked *prototyped* were run
@@ -780,7 +779,10 @@ one re-records it in its own PR, and says which documents moved and why. Section
 breaks and `<w:cols>` import come after Phase 5, with the `w:type` shift of the
 [columns RFC](./columns-rfc.md).
 
-## 14. Decisions needed
+## 14. Decisions
+
+All accepted as recommended, 2026-11-24. The ground first: the harness, the fixes and
+Phases 1–2 come before either feature track.
 
 1. **The fill loop alone accepts placement and advances regions**; producers and
    containers decide fit (§4). *Recommend yes.*

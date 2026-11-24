@@ -184,10 +184,10 @@ Deferred: unequal widths; column-spanning blocks.
 
 ## Open questions
 
-1. ~~**Fill strategy.**~~ Word balances before a continuous break and nowhere else (measured above). Decision pending in the resumable layout RFC §14.2.
+1. ~~**Fill strategy.**~~ Word balances before a continuous break and nowhere else (measured above). Accepted: resumable layout RFC §14.2.
 2. **Unequal column widths.** Needs the per-column cache key. Rare; defer.
 3. **Column-spanning blocks.** Word's "span all columns" for headings/figures. Needs the region loop to handle a full-width block mid-section (close the open regions, emit one full-width region, resume). Moderate; deferred.
-4. ~~**Float confinement.**~~ Word does not confine a float to its column. Decision pending in the resumable layout RFC §14.4.
+4. ~~**Float confinement.**~~ Word does not confine a float to its column. Accepted: resumable layout RFC §14.4.
 5. **Column rule line.** Cosmetic vertical rule between columns. Paint-only; low risk; with the toolbar control if wanted.
 
 ## Dependencies
