@@ -43,6 +43,17 @@ describe("serializeXml", () => {
     expect(serializeXml(node)).toBe("<w:t>foo &amp; &lt;bar&gt;</w:t>");
   });
 
+  it("leaves out characters XML cannot hold", () => {
+    const illegal = "a\u0000\u0008\u000B\uFFFE\uFFFFb";
+    expect(serializeXml(xml("w:t", { "w:val": illegal }, [illegal]))).toBe('<w:t w:val="ab">ab</w:t>');
+  });
+
+  it("writes line ends so that a reader does not normalize them", () => {
+    expect(serializeXml(xml("w:t", { "w:val": "a\tb\r\nc" }, ["a\tb\r\nc"]))).toBe(
+      '<w:t w:val="a&#9;b&#13;&#10;c">a\tb&#13;\nc</w:t>',
+    );
+  });
+
   it("escapes attribute values", () => {
     const node = xml("w:t", { "w:val": 'a "b" & <c>' });
     expect(serializeXml(node)).toBe(

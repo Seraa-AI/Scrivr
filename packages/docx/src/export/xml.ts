@@ -56,19 +56,25 @@ function serializeAttrs(attrs: XmlAttrs | undefined): string {
     .join("");
 }
 
+const ESCAPES: Record<string, string> = {
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  '"': "&quot;",
+  "\t": "&#9;",
+  "\n": "&#10;",
+  "\r": "&#13;",
+};
+
+const escapeChar = (ch: string) => ESCAPES[ch] ?? ch;
+
+/** Not allowed in XML, not even as a reference: one makes the file unreadable. */
+const ILLEGAL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g;
+
 function escapeText(s: string): string {
-  return s.replace(/[&<>]/g, (ch) => {
-    if (ch === "&") return "&amp;";
-    if (ch === "<") return "&lt;";
-    return "&gt;";
-  });
+  return s.replace(ILLEGAL, "").replace(/[&<>\r]/g, escapeChar);
 }
 
 function escapeAttr(s: string): string {
-  return s.replace(/[&<>"]/g, (ch) => {
-    if (ch === "&") return "&amp;";
-    if (ch === "<") return "&lt;";
-    if (ch === ">") return "&gt;";
-    return "&quot;";
-  });
+  return s.replace(ILLEGAL, "").replace(/[&<>"\t\n\r]/g, escapeChar);
 }
