@@ -3058,13 +3058,12 @@ describe("streamed pagination snapshots", () => {
 /**
  * A layout's `version` is the one key paint and hit-testing share: tiles skip
  * repainting when it is unchanged, and the charmap stamps itself with it. A
- * resumed chunk only appends, so pages already painted still match their stamp.
- * A replay re-paginates those pages, and must say so.
+ * chunk adds to a page that may be painted, if only blank, so each has its own.
  */
 describe("the version a streamed chunk publishes", () => {
-  const streamed = () => {
+  const streamed = (maxBlocks = 40) => {
     const d = doc(p("first"), pageBreak(), ...Array.from({ length: 99 }, (_, i) => p(`Block ${i}`)));
-    const options = { pageConfig: defaultPageConfig, measurer: createMeasurer(), maxBlocks: 40 };
+    const options = { pageConfig: defaultPageConfig, measurer: createMeasurer(), maxBlocks };
     return { d, options, first: runPipeline(d, options) };
   };
 
@@ -3074,12 +3073,12 @@ describe("the version a streamed chunk publishes", () => {
     render: () => {},
   }];
 
-  it("keeps it while the chunk only appends", () => {
-    const { d, options, first } = streamed();
+  it.each([["holds blocks", 40], ["is still blank", 1]])("advances when the page it goes on %s", (_name, maxBlocks) => {
+    const { d, options, first } = streamed(maxBlocks);
 
-    const next = runPipeline(d, { ...options, resumption: first.resumption!, previousLayout: first });
+    const next = runPipeline(d, { ...options, resumption: first.resumption! });
 
-    expect(next.version).toBe(first.version);
+    expect(next.version).toBeGreaterThan(first.version);
   });
 
   it("advances it when the prefix was re-paginated", () => {

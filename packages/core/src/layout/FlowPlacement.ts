@@ -174,7 +174,7 @@ export function landingAfter(
 /**
  * Stamp each flow with its continuous-flow Y.
  *
- * Omitting `initialSpaceAfter` means the document's first flow, whose leading
+ * Omitting `initialSpaceAfter` means the first flow on a page, whose leading
  * margin is suppressed. Passing `0` means a continuation whose predecessor
  * happened to end with no trailing space — that one still collapses, and so
  * still emits `spaceBefore`. The two are different pixels; `?? 0` would erase

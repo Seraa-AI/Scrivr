@@ -10,6 +10,7 @@
     "${configDir}/src/**/*.test.tsx",
     "${configDir}/src/**/*.spec.ts",
     "${configDir}/src/**/__tests__/**",
+    "${configDir}/src/test/**",
     "${configDir}/src/**/test-utils.ts",
     "${configDir}/src/**/test-utils.tsx"
   ]

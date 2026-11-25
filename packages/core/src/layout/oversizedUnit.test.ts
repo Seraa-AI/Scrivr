@@ -4,19 +4,19 @@
  */
 import { describe, expect, it } from "vitest";
 import type { Node } from "prosemirror-model";
-import { cell, differencesFromWhole, doc, image, inTurn, p, pageBreak, row, SETUPS, streamed, table, text, whole, type Setup } from "../test/layoutOracle";
-import { defaultPageConfig, defaultPagelessConfig, type DocumentLayout } from "./PageLayout";
+import {
+  cell, differencesFromWhole, doc, image, inTurn, must, p, pageBreak, partsOf, row, SETUPS, SHORT_PAGE as PAGE, SHORT_PAGE_TOP as PAGE_TOP, streamed, table, text, whole,
+} from "../test/layoutOracle";
+import { defaultPagelessConfig, type DocumentLayout } from "./PageLayout";
 
-const PAGE: Setup = { pageConfig: { ...defaultPageConfig, pageHeight: 72 * 2 + 400 } };
-const PAGE_TOP = 72;
 
 const tallCell = (): Node => cell(...Array.from({ length: 40 }, (_, i) => p(`${i}`)));
 
 /** The page and y of the block whose text starts with `start`. */
-const at = (layout: DocumentLayout, start: string): { page: number; y: number } | undefined =>
-  layout.pages.flatMap((page) =>
-    page.blocks.filter((block) => block.node.textContent.startsWith(start)).map((block) => ({ page: page.pageNumber, y: block.y })),
-  )[0];
+const at = (layout: DocumentLayout, start: string): { page: number; y: number } | undefined => {
+  const part = partsOf(layout, start)[0];
+  return part && { page: part.page, y: part.block.y };
+};
 
 describe("a row taller than a page", () => {
   const node = doc(p("before"), table(row(tallCell())), p("after"));
@@ -70,9 +70,8 @@ describe("a row taller than a page", () => {
   it("does not stop the rows after it moving clear of a float", () => {
     const node = doc(table(row(tallCell()), row(cell(p("second row")))), p([text("anchor"), square({ xAlign: "left", width: 150, yOffset: -140 })]));
     const layout = whole(node, PAGE);
-    const second = layout.pages.flatMap((page) => page.blocks.map((block) => ({ page: page.pageNumber, block }))).find(({ block }) => block.node.textContent === "second row");
-    const float = layout.anchoredObjects?.[0];
-    if (!second || !float) throw new Error("no second row or no float");
+    const second = must(partsOf(layout, "second row")[0], "second row");
+    const float = must(layout.anchoredObjects?.[0], "float");
     const overlap = float.page === second.page && float.y < second.block.y + second.block.height && second.block.y < float.y + float.height;
     expect(overlap).toBe(false);
   });

@@ -3,9 +3,9 @@
  * `breakIntoLines` call is one block's lines broken.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { doc, edit, inTurn, p, streamed, whole, words } from "../test/layoutOracle";
+import { cell, doc, edit, image, inTurn, p, row, streamed, table, text, whole, words } from "../test/layoutOracle";
 import { LineBreaker } from "./LineBreaker";
-import { defaultPageConfig } from "./PageLayout";
+import { defaultPageConfig, defaultPagelessConfig } from "./PageLayout";
 
 const broken = vi.spyOn(LineBreaker.prototype, "breakIntoLines");
 afterEach(() => broken.mockClear());
@@ -27,6 +27,20 @@ describe("the work of laying a document out", () => {
 
   it("breaks no more when the document is streamed", () => {
     expect(costOf(() => streamed(long, setup, 7))).toBe(BLOCKS);
+  });
+
+  it.each([["pages", defaultPageConfig], ["no pages", defaultPagelessConfig]])("breaks no more when a document with a float near its start is streamed: %s", (_name, pageConfig) => {
+    const floating = edit(long, (tr) => tr.insert(1, image({ wrapMode: "square", xAlign: "right", width: 100, height: 60 })));
+    const once = costOf(() => whole(floating, { pageConfig }));
+    expect(costOf(() => streamed(floating, { pageConfig }, 20))).toBe(once);
+  });
+
+  it("lays a table out once when a document without pages is streamed beside floats", () => {
+    const cells = () => cell(p("one"));
+    const node = doc(...Array.from({ length: 40 }, (_, i) =>
+      i % 4 === 0 ? p([text("anchor"), image({ wrapMode: "square", xAlign: "right", width: 100, height: 300 })]) : table(row(cells(), cells()))));
+    const setup = { pageConfig: defaultPagelessConfig };
+    expect(costOf(() => streamed(node, setup, 5))).toBe(costOf(() => whole(node, setup)));
   });
 
   it("breaks nothing again when nothing changed", () => {

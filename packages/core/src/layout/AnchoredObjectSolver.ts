@@ -219,13 +219,13 @@ export function resolveAnchoredObjects(
         : band);
     };
     // A page that had flows carried onto it needs a scan when it holds a
-    // float's rect, or when a flow still wraps where it was carried from; the
-    // page just reflowed already scanned to its bottom.
+    // float's rect, or when a flow was last laid out where it was carried from;
+    // the page just reflowed already scanned to its bottom.
     const markMoved = (moved: { from: number; to: number }, scanned = 0): void => {
       for (let i = moved.from; i < moved.to; i++) {
         const flow = flows[i];
         const page = geometry.pageAt(flow?.globalY ?? 0);
-        const wraps = flow?.overlapsWrapZone === true || exclusionsOn(page).hasExclusionsOnPage(page);
+        const wraps = flow?.wrapLaidAtY !== undefined || exclusionsOn(page).hasExclusionsOnPage(page);
         if (page > scanned && wraps && !dirty.has(page)) {
           dirty.set(page, undefined);
         }
@@ -462,10 +462,10 @@ function samePlacement(a: AnchoredObjectPlacement, b: AnchoredObjectPlacement): 
  *
  * Re-lays every text flow on the page that lies in `band` (where a float's
  * zone arrived or left), and every one whose wrap no longer matches where it
- * sits: it touches an exclusion and was not laid out at this y, or it was
- * wrapped before at another y, on this page or the one it came from. A composite that meets a float moves
- * below it. Growing a block or moving a composite restamps what follows, so the
- * scan runs to the page bottom.
+ * sits: it touches an exclusion, or was laid out around one before, and was not
+ * laid out at this y. A composite that meets a float moves below it. Growing a
+ * block or moving a composite restamps what follows, so the scan runs to the
+ * page bottom.
  *
  * This deliberately does not start at the anchor flow index. `yOffset` makes
  * the painted rectangle independent from anchor order, so an image anchored
@@ -519,15 +519,15 @@ function reflowFlowsAgainstExclusions(
 
     const blockContentX = zone.contentX + flow.indentLeft;
     const inBand = zone.band !== undefined && flowY < zone.band.bottom && flowY + flow.height > zone.band.top;
-    const wrapped = flow.overlapsWrapZone === true;
-    const laidHere = wrapped && flow.wrapLaidAtY === flowY;
+    const laidBefore = flow.wrapLaidAtY !== undefined;
+    const laidHere = flow.wrapLaidAtY === flowY;
     const touches = exclusions.getNextFreeY(page, flowY, flow.height, blockContentX, flow.availableWidth) !== flowY;
     if (!inBand && laidHere) continue;
-    if (!inBand && !wrapped && !touches) continue;
+    if (!inBand && !laidBefore && !touches) continue;
 
     // Lines are laid out where pagination will put them: a line that does
     // not fit above the page bottom starts the next page, and each line asks
-    // the page it falls on. So the wrap holds wherever the block lands.
+    // the page it falls on. So the wrap holds on every page the block reaches.
     const lineSpaceProvider: LineSpaceProvider = (absoluteLineY: number, lineHeight = 1) => {
       const linePage = pageConfig.pageless ? page : geometry.pageAt(absoluteLineY);
       if (
@@ -572,7 +572,6 @@ function reflowFlowsAgainstExclusions(
 
     const nextFlow: FlowBlock = {
       ...flow,
-      overlapsWrapZone: true,
       wrapLaidAtY: flowY,
       measuredLines: flow.measuredLines ?? flow.lines,
       lines: reflowed.lines,

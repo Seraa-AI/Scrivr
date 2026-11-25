@@ -717,8 +717,8 @@ section is what is true.
   margin when the item is first on a page — and in the fallback face, since
   the collapsed line holds no text (pinned: "keeps the image's paragraph a line
   for its number", and the PDF position test in `listFloatMarkers.test.ts`).
-  `rebreakWrappedLinesWithoutExclusions` drops the same settings when a wrapped
-  block moves page; probing could not reach it with a list item, because the
+  `rebreakWrappedLinesWithoutExclusions` (since deleted, #317) dropped the same
+  settings when a wrapped block moved page; probing could not reach it with a list item, because the
   float travels with its anchor onto the item's page.
 
   The fix: the first-line settings resolved when a block is measured — the

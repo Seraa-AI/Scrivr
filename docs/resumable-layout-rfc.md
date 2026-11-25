@@ -748,7 +748,7 @@ the oracle of §15 is unchanged unless a difference is listed here first.
 | 0 | Fix what the oracle would otherwise freeze, one PR each: a deleted block that stays (§1.6); streamed ≠ whole (§1.5); stale wrapped lines (§1.2); cell spacing (§7); oversized atomic blocks (§14.7). Each flips its expected failure | Yes, these five |
 | 1 | `FlowRegion`, cursor and progression, one region per page. Landing is data; `paginateFlow` emits; `FlowPlacement`'s model goes. Cache placement written once; reuse by dependencies | A page top no longer starts with a stray gap (§1.1) |
 | 2 | Paragraph continuation and the flow container. Line breaking stops at the offer's height; the solver's provider loses pages | A paragraph with nothing but clearance on a page (§3); a mixed-size line is no longer broken short at a page foot (§1.1) |
-| 3 | Exclusions by region, settle by touched region, checkpoints, `FlowPosition` | None: still one region per page |
+| 3 | Exclusions by region, settle by touched region, checkpoints, `FlowPosition` | Floats whose place depended on the path the settle took (recorded as a known defect) |
 | 4 | Runs from sections; sequential equal-width columns; closing; navigation, pageless, tail reuse, drag, PDF | Multi-column sections |
 | 5 | Balancing | Multi-column sections ending continuous |
 | 6 | Flow container inside composite regions, units atomic | None |
@@ -898,7 +898,7 @@ Not covered: the real settle and its lock, markers, real pages, caret mapping.
 ## 16. Entry points
 
 - `layout/PageLayout.ts`: `runFlowPipeline`, `buildBlockFlow`, `paginateFlow`,
-  `rebreakWrappedLinesWithoutExclusions`, `LayoutResumption`, `buildFragments`.
+  `LayoutResumption`, `buildFragments`.
 - `layout/FlowPlacement.ts`: the second authority.
 - `layout/AnchoredObjectSolver.ts`: settle, reflow, the third authority.
 - `layout/LineBreaker.ts`: whole-paragraph breaking. `splitLines.ts`: line fit.
@@ -920,6 +920,7 @@ Updated as each phase lands, with every difference from the design above and why
 | 0, cell spacing (§1.4, §7, §14.3) | As Word, at every depth. One DOCX layout baseline moved: two headings in the cells of fixture 25 now sit under their space before. No Word-comparison score changed |
 | 0, oversized blocks (§14.7) | A fresh page, measured in Word for a row that may not split. It also showed a second fault, fixed with it: what followed an overflowing block or line was placed by the overflow's full height, leaving blank pages. One DOCX layout baseline moved: fixture 11's 1,241px row starts page 3 instead of y 316 on page 2 |
 | 0, landing again (found in review) | A flow laid out around a float that then moved away was still landed by those lines, a tall gap first, and could be sent to a new page. Landing now reads the lines that hold where the flow starts, or the measured ones. 18 of 1,500 random float documents had a block stranded this way; none now |
+| 0, streamed = whole (§1.5, §14.11) | The floats placed so far travel in the resumption. A chunk starts over from the last page that starts a block of its own (this engine cannot resume inside a paragraph, so that is its frontier) when a float crosses the cutoff; otherwise it appends. Not without pages, where every restart would be from the document's start, and floats wrap nothing today. A chunk that adds to a page that may be painted takes a new version, so it is painted. Random documents dense with floats: 348 of 600 streams wrong before, 103 of 3,000 now; in those looked at the whole layout is the wrong one, by the page-foot spacer (Phase 2) or a settle whose answer depends on its path (Phase 3) |
 | Everything else | Not started |
 
 The split at a page boundary in `paginateFlow` is the approach this replaces, not a

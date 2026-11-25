@@ -31,7 +31,7 @@ For each `FlowBlock` it tracks a `y` cursor (starting at `margins.top`) and a `c
 3. **Overflow check**: `overflows = blockBottom > pageBottom && (!isFirstOnPage || flow.lines.length > 0)`. The `isFirstOnPage` guard prevents an over-tall leaf block from looping forever on fresh pages.
 4. **Three placement cases**:
    - **Fits** → push onto current page, advance `y`.
-   - **Leaf block** (no lines, e.g. image, HR) → move whole block to a new page. If it's taller than any page (`tooTallForAnyPage`), it's force-placed on the current page and allowed to overflow.
+   - **Leaf block** (no lines, e.g. image, HR) → move whole block to a new page. One taller than a page starts a page and overflows from there.
    - **Text block** → enter the split loop (`PageLayout.ts:606`–`723`). Greedily take as many lines as fit in `pageAvailable`, emit a `LayoutBlock` with `isContinuation` / `continuesOnNextPage` flags and a `fragmentIndex`, open a new page, slice remaining lines, repeat.
 5. The split loop has two edge cases worth knowing:
    - **The gap is kept** — as in Word, a block whose first line does not fit after the inter-block gap starts the next page, where the gap is dropped.

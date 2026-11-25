@@ -648,19 +648,17 @@ describe("float beside a table — the table moves below the float", () => {
       }
     });
 
-    // Known gap, pinned: each streamed chunk starts with no floats and no
-    // exclusions, so a float in an earlier chunk does not move a table in a
-    // later one. Text has the same gap on `main`.
-    it("36: streaming — a float in an earlier chunk does not move a table in a later one", () => {
+    it("36: streaming — a float in an earlier chunk moves a table in a later one", () => {
       const d = docOf(para(`Anchor ${words(5)}`, image({ wrapMode: "square", height: 150 })), table("T", 3));
       const measurer = createMeasurer();
       const opts = { pageConfig: defaultPageConfig, fontConfig, measurer, maxBlocks: 1 };
       let l = runPipeline(d, opts);
       for (let guard = 0; l.isPartial && l.resumption && guard < 20; guard++) {
-        l = runPipeline(d, { ...opts, resumption: l.resumption, previousLayout: l });
+        l = runPipeline(d, { ...opts, resumption: l.resumption });
       }
-      const first = must(rowsOf(l, "T")[0], "first row");
-      expect(first.y).toBe(naturalY(l, first));
+      const wholeRows = rowsOf(runPipeline(d, { pageConfig: defaultPageConfig, fontConfig, measurer }), "T");
+      expect(rowsOf(l, "T")).toHaveLength(3);
+      rowsOf(l, "T").forEach((r, i) => expectSamePosition(r.y, must(wholeRows[i], "row").y));
     });
 
     it("38: a move may not carry the table under a float that does not follow it", () => {

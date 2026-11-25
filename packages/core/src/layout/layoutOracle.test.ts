@@ -6,13 +6,14 @@
 import { describe, expect, it } from "vitest";
 import type { Node } from "prosemirror-model";
 import {
-  differences, differencesFromWhole, doc, edit, EDITS, FLOATING, FLOWING, inTurn, p, recordLayout, SETUPS, streamed, whole, words, type Setup,
+  differences, differencesFromWhole, doc, edit, EDITS, FLOATING, FLOWING, inTurn, p, recordLayout, SETUPS, streamed, whole, type Setup,
 } from "../test/layoutOracle";
 import { runMiniPipeline } from "./runMiniPipeline";
 import { createMeasurer } from "../test-utils";
 import { defaultPageConfig, runPipeline } from "./PageLayout";
 
 const CHUNKS = [1, 2, 5];
+const ALL = { ...FLOWING, ...FLOATING };
 
 const cases = (documents: Record<string, Node>): [string, string, Node, Setup][] =>
   Object.entries(SETUPS).flatMap(([setupName, setup]) =>
@@ -20,19 +21,19 @@ const cases = (documents: Record<string, Node>): [string, string, Node, Setup][]
   );
 
 describe("a document streamed in chunks", () => {
-  it.each(cases(FLOWING))("is the whole document's layout: %s, %s", (_name, _setup, node, setup) => {
+  it.each(cases(ALL))("is the whole document's layout: %s, %s", (_name, _setup, node, setup) => {
     for (const blocks of CHUNKS) expect(differencesFromWhole(streamed(node, setup, blocks), node, setup)).toEqual([]);
   });
 });
 
 describe("a document laid out again", () => {
-  it.each(cases({ ...FLOWING, ...FLOATING }))("is the whole document's layout: %s, %s", (_name, _setup, node, setup) => {
+  it.each(cases(ALL))("is the whole document's layout: %s, %s", (_name, _setup, node, setup) => {
     expect(differencesFromWhole(inTurn([node, node, node], setup), node, setup)).toEqual([]);
   });
 });
 
 describe("a document after an edit", () => {
-  it.each(cases({ ...FLOWING, ...FLOATING }))("is the whole document's layout: %s, %s", (_name, _setup, node, setup) => {
+  it.each(cases(ALL))("is the whole document's layout: %s, %s", (_name, _setup, node, setup) => {
     for (const [change, apply] of Object.entries(EDITS)) {
       const edited = edit(node, apply);
       expect({ change, differences: differencesFromWhole(inTurn([node, edited], setup), edited, setup) }).toEqual({ change, differences: [] });
@@ -41,7 +42,7 @@ describe("a document after an edit", () => {
     }
   });
 
-  it.each(cases({ ...FLOWING, ...FLOATING }))("is the whole document's layout after every edit in turn: %s, %s", (_name, _setup, node, setup) => {
+  it.each(cases(ALL))("is the whole document's layout after every edit in turn: %s, %s", (_name, _setup, node, setup) => {
     const history = Object.values(EDITS).reduce<Node[]>((nodes, apply) => [...nodes, edit(nodes.at(-1) ?? node, apply)], [node]);
     const last = history.at(-1) ?? node;
     expect(differencesFromWhole(inTurn(history, setup), last, setup)).toEqual([]);
@@ -49,9 +50,11 @@ describe("a document after an edit", () => {
 });
 
 describe("a streamed document after an edit", () => {
-  it.each(cases(FLOWING))("is the whole document's layout: %s, %s", (_name, _setup, node, setup) => {
-    const edited = edit(node, (tr) => tr.insert(0, p(words(12))));
-    expect(differencesFromWhole(streamed(edited, setup, 3), edited, setup)).toEqual([]);
+  it.each(cases(ALL))("is the whole document's layout: %s, %s", (_name, _setup, node, setup) => {
+    for (const [change, apply] of Object.entries(EDITS)) {
+      const edited = edit(node, apply);
+      expect({ change, differences: differencesFromWhole(inTurn([node, edited], setup, 2), edited, setup) }).toEqual({ change, differences: [] });
+    }
   });
 });
 
@@ -84,7 +87,7 @@ describe("the pages before the last one", () => {
       }),
     );
 
-  it.each(cases({ ...FLOWING, ...FLOATING }).filter(([, setupName]) => setupName !== "no pages"))(
+  it.each(cases(ALL).filter(([, setupName]) => setupName !== "no pages"))(
     "do not change with what follows: %s, %s",
     (_name, _setup, node, setup) => {
       const full = ink(node, setup);

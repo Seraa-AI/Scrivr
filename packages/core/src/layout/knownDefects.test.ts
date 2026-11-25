@@ -6,52 +6,23 @@
 import { describe, expect, it } from "vitest";
 import type { Node } from "prosemirror-model";
 import {
-  cell, differencesFromWhole, doc, fixedWidths, FLOATING, h, image, p, row, SETUPS, sized, streamed, table, text, whole, words, type Setup,
+  differencesFromWhole, doc, h, image, must, p, partsOf, SHORT_PAGE as PAGE, SHORT_PAGE_TOP, sized, streamed, text, textLines, whole, words,
 } from "../test/layoutOracle";
 import { expectSamePosition } from "../test-utils";
 import { isSpacerLine } from "./LineBreaker";
-import { defaultPageConfig, type DocumentLayout, type LayoutPage } from "./PageLayout";
+import { defaultPagelessConfig, type DocumentLayout } from "./PageLayout";
 
-const PAGE: Setup = { pageConfig: { ...defaultPageConfig, pageHeight: 72 * 2 + 400 }, measurer: fixedWidths };
-const PAGE_TOP = 72;
-const PAGE_BOTTOM = PAGE_TOP + 400;
-
-type Block = LayoutPage["blocks"][number];
-
-const must = <T>(value: T | undefined, what: string): T => {
-  if (value === undefined) throw new Error(`no ${what}`);
-  return value;
-};
-
-/** The parts of the block holding `start`, with the page each is on. */
-const partsOf = (layout: DocumentLayout, start: string): { page: number; block: Block }[] =>
-  layout.pages.flatMap((page) =>
-    page.blocks.filter((block) => block.node.textContent.startsWith(start)).map((block) => ({ page: page.pageNumber, block })),
-  );
-const lineText = (line: Block["lines"][number]): string => line.spans.map((span) => (span.kind === "text" ? span.text : "")).join("");
-const textLines = (block: Block): string[] => block.lines.filter((line) => line.spans.length > 0).map(lineText);
-
-describe("a streamed document with a float", () => {
-  const names = ["a square float beside several paragraphs", "a float reaching back over the paragraph before", "a float beside a list", "a float before a table"];
-
-  it.fails.each(names.flatMap((name) => Object.entries(SETUPS).filter(([setup]) => setup !== "no pages").map(([setup, options]): [string, string, Setup] => [name, setup, options])))(
-    "is the whole document's layout: %s, %s",
-    (name, _setup, options) => {
-      const node = must(FLOATING[name], name);
-      expect(differencesFromWhole(streamed(node, options, 1), node, options)).toEqual([]);
-    },
-  );
-});
+const float = (wrapMode: string, xAlign: string, width: number, height: number, yOffset = 0): Node =>
+  image({ wrapMode, xAlign, width, height, yOffset });
 
 describe("a paragraph that wraps a float across two pages", () => {
   /** A tall word starts its third line on page 1, where it does not fit. */
   const crossing = (after: Node[]): Node =>
     doc(...Array.from({ length: 12 }, (_, i) => p(`F${i}`)), p([text(`Subject ${words(30)} `), sized("large words here", 40), text(` ${words(40)}`)]), ...after);
-  const floatBelow = p([text("anchor"), image({ wrapMode: "square", xAlign: "right", width: 300, height: 100, yOffset: -60 })]);
 
   it.fails("breaks its lines on page 1 as it would without the float on page 2", () => {
     const plain = partsOf(whole(crossing([]), PAGE), "Subject");
-    const wrapped = partsOf(whole(crossing([floatBelow]), PAGE), "Subject");
+    const wrapped = partsOf(whole(crossing([p([text("anchor"), float("square", "right", 300, 100, -60)])]), PAGE), "Subject");
     expect(plain.map((part) => part.page)).toEqual([1, 2]);
     expect(textLines(must(wrapped[0], "first part").block)).toEqual(textLines(must(plain[0], "first part").block));
   });
@@ -60,37 +31,65 @@ describe("a paragraph that wraps a float across two pages", () => {
 describe("a wrapped paragraph that goes on to the next page", () => {
   it.fails("starts that page at its top", () => {
     const layout = whole(
-      doc(
-        ...Array.from({ length: 24 }, (_, i) => p(`F${i}`)),
-        h(1, "Heading"),
-        p(`Subject ${words(90)}`),
-        p([text("anchor"), image({ wrapMode: "square", xAlign: "right", width: 300, height: 40, yOffset: -60 })]),
-      ),
+      doc(...Array.from({ length: 24 }, (_, i) => p(`F${i}`)), h(1, "Heading"), p(`Subject ${words(90)}`), p([text("anchor"), float("square", "right", 300, 40, -60)])),
       PAGE,
     );
     const continuation = must(partsOf(layout, "Subject")[1], "second part").block;
-    expectSamePosition(continuation.y, PAGE_TOP);
+    expectSamePosition(continuation.y, SHORT_PAGE_TOP);
     expect(isSpacerLine(must(continuation.lines[0], "line"))).toBe(false);
+  });
+
+  it.fails("keeps no space at the foot of the page it leaves", () => {
+    const layout = whole(
+      doc(p([text(words(41)), float("square", "left", 340, 120, -130)]), p([text(words(51)), float("top-bottom", "right", 240, 190, -30)]), p(words(57)), p(`Subject ${words(18)}`)),
+      PAGE,
+    );
+    const left = must(partsOf(layout, "Subject")[0], "first part").block;
+    expect(left.continuesOnNextPage).toBe(true);
+    expect(isSpacerLine(must(left.lines.at(-1), "line"))).toBe(false);
   });
 });
 
 describe("a paragraph whose own float leaves it no line on the page", () => {
   const layout = (): DocumentLayout =>
-    whole(
-      doc(
-        ...Array.from({ length: 9 }, (_, i) => p(`F${i}`)),
-        p([text("Subject"), image({ wrapMode: "top-bottom", xAlign: "left", width: 100, height: 140 })]),
-        p("next"),
-      ),
-      PAGE,
-    );
+    whole(doc(...Array.from({ length: 9 }, (_, i) => p(`F${i}`)), p([text("Subject"), float("top-bottom", "left", 100, 140)]), p("next")), PAGE);
 
-  it.fails("puts nothing of it on that page but space", () => {
-    for (const { block } of partsOf(layout(), "Subject")) expect(textLines(block).join("")).not.toBe("");
+  it.fails("leaves no part of it that holds only space", () => {
+    const parts = partsOf(layout(), "Subject").map((part) => textLines(part.block).join(""));
+    expect(parts).toEqual(["Subject"]);
   });
 
   it.fails("takes the float with it, as Word does", () => {
     const subject = must(partsOf(layout(), "Subject").find((part) => textLines(part.block).join("") !== ""), "text");
     expect(layout().anchoredObjects?.[0]?.page).toBe(subject.page);
+  });
+});
+
+describe("a streamed document whose floats reach back over one another", () => {
+  it.fails("places them as the whole document does", () => {
+    const node = doc(
+      p([text(`P0 ${words(25)}`), float("square", "left", 240, 120, -150)]),
+      p([text(`P1 ${words(45)}`), float("square", "right", 140, 40, -170)]),
+      p([text(`P2 ${words(13)}`), float("top-bottom", "left", 160, 100, 60)]),
+      p([text(`P3 ${words(44)}`), float("top-bottom", "left", 100, 110, -90)]),
+    );
+    expect(differencesFromWhole(streamed(node, PAGE, 2), node, PAGE)).toEqual([]);
+  });
+});
+
+describe("a document without pages", () => {
+  const pageless = { ...PAGE, pageConfig: defaultPagelessConfig };
+
+  it.fails("wraps text beside a float", () => {
+    const layout = whole(doc(p([float("square", "right", 300, 100), text(words(60))])), pageless);
+    const placed = must(layout.anchoredObjects?.[0], "float");
+    const block = must(layout.pages[0]?.blocks[0], "paragraph");
+    const right = block.x + Math.max(...(block.lines[0]?.spans ?? []).map((span) => span.x + (span.kind === "text" ? span.text.trimEnd().length * 7 : span.width)));
+    expect(right).toBeLessThanOrEqual(placed.x);
+  });
+
+  it.fails("stacks a streamed float clear of one in an earlier chunk", () => {
+    const node = doc(p([text("a"), float("square", "right", 200, 150)]), p([text("b"), float("square", "right", 200, 150)]));
+    expect(differencesFromWhole(streamed(node, pageless, 1), node, pageless)).toEqual([]);
   });
 });

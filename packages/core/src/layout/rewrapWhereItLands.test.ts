@@ -4,26 +4,9 @@
  */
 import { describe, expect, it } from "vitest";
 import type { Node } from "prosemirror-model";
-import { doc, fixedWidths, image, p, text, whole, words, type Setup } from "../test/layoutOracle";
+import { doc, image, must, p, partsOf, SHORT_PAGE as PAGE, SHORT_PAGE_BOTTOM, text, textLines, whole, words } from "../test/layoutOracle";
 import { expectSamePosition } from "../test-utils";
 import { isSpacerLine } from "./LineBreaker";
-import { defaultPageConfig, type DocumentLayout, type LayoutPage } from "./PageLayout";
-
-const PAGE: Setup = { pageConfig: { ...defaultPageConfig, pageHeight: 72 * 2 + 400 }, measurer: fixedWidths };
-const PAGE_BOTTOM = 72 + 400;
-
-type Block = LayoutPage["blocks"][number];
-
-const must = <T>(value: T | undefined, what: string): T => {
-  if (value === undefined) throw new Error(`no ${what}`);
-  return value;
-};
-
-/** The parts of the block holding `start`, with the page each is on. */
-const partsOf = (layout: DocumentLayout, start: string): { page: number; block: Block }[] =>
-  layout.pages.flatMap((page) =>
-    page.blocks.filter((block) => block.node.textContent.startsWith(start)).map((block) => ({ page: page.pageNumber, block })),
-  );
 
 /**
  * A paragraph that wraps a float at the foot of page 1, then carried to page 2
@@ -37,9 +20,6 @@ const moved = (subject: Node, next: Node = p("Next")): Node =>
     subject,
     next,
   );
-
-const textLines = (block: Block): string[] =>
-  block.lines.filter((line) => line.spans.length > 0).map((line) => line.spans.map((span) => (span.kind === "text" ? span.text : "")).join(""));
 
 describe("a wrapped paragraph that moves to a page with no float", () => {
   it("breaks its lines at the width it has there", () => {
@@ -61,7 +41,7 @@ describe("a wrapped paragraph that moves to a page with no float", () => {
     const part = must(first, "part on page 2").block;
     expect(second?.page).toBe(3);
     const ink = part.lines.filter((line) => !isSpacerLine(line)).reduce((sum, line) => sum + line.lineHeight, 0);
-    expect(PAGE_BOTTOM - (part.y + ink)).toBeLessThan(must(part.lines[0], "line").lineHeight);
+    expect(SHORT_PAGE_BOTTOM - (part.y + ink)).toBeLessThan(must(part.lines[0], "line").lineHeight);
   });
 
   it("is followed by the next paragraph after one gap", () => {
