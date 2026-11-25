@@ -4,7 +4,6 @@
  */
 import type { PageGeometry } from "./PageMetrics";
 import { fitLinesInCapacity } from "./splitLines";
-import type { LayoutLine } from "./LineBreaker";
 import type { FlowBlock, PageConfig } from "./PageLayout";
 import type { PageStart } from "./layoutItems";
 
@@ -137,15 +136,6 @@ export function flowCursorAfter(
   };
 }
 
-/**
- * The lines a flow has starting at `start`: lines laid out around a float hold
- * only where they were laid, and elsewhere the measured ones stand in until the
- * flow is laid out there.
- */
-function linesAt(flow: FlowBlock, start: number): LayoutLine[] {
-  return flow.measuredLines && flow.wrapLaidAtY !== start ? flow.measuredLines : flow.lines;
-}
-
 /** Whether a line `lineHeight` tall starting at `y` fits, within half a pixel. */
 export function lineFitsAt(pageBottom: number, y: number, lineHeight: number): boolean {
   return pageBottom - y >= lineHeight - 0.5;
@@ -174,7 +164,8 @@ export function landingAfter(
   const bottom = geometry.bottomOf(page);
   if (start >= bottom) return geometry.startOf(page + 1);
 
-  const firstLine = flow.kind === "text" ? linesAt(flow, start)[0] : undefined;
+  // The measured line: one laid out around a float holds only where it was laid.
+  const firstLine = flow.kind === "text" ? (flow.measuredLines ?? flow.lines)[0] : undefined;
   if (!firstLine) return advanceFlowGlobalY(flow, start, pageConfig, geometry).startGlobalY;
   if (start === geometry.startOf(page) || lineFitsAt(bottom, start, firstLine.lineHeight)) return start;
   return geometry.startOf(page + 1);
