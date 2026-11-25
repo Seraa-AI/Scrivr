@@ -43,14 +43,6 @@ describe("a streamed document with a float", () => {
   );
 });
 
-describe("a row taller than a page", () => {
-  it.fails("starts a page of its own", () => {
-    const tall = cell(...Array.from({ length: 40 }, (_, i) => p(`${i}`)));
-    const layout = whole(doc(p("before"), table(row(tall)), p("after")), PAGE);
-    expect(partsOf(layout, "0")[0]?.page).toBe(2);
-  });
-});
-
 describe("a paragraph that wraps a float across two pages", () => {
   /** A tall word starts its third line on page 1, where it does not fit. */
   const crossing = (after: Node[]): Node =>

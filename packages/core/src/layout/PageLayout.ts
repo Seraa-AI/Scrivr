@@ -1068,12 +1068,11 @@ export function paginateFlow(
     // ── Page overflow check (disabled in pageless mode) ───────────────────────
     const blockBottom = targetY + block.height;
     const pageBottom = currentMetrics.contentBottom;
-    const contentHeight = currentMetrics.contentHeight;
-    // Text blocks can always be split; leaf and composite blocks need the
-    // !isFirstOnPage guard to avoid infinite empty-page loops when the block
-    // exceeds contentHeight (the "pathological row policy" — clip on next page).
+    // Text blocks can always be split. A leaf or composite already at the page
+    // top stays, however tall: moving it would only leave an empty page.
     const isAtomicBlock = flow.kind === "leaf" || flow.kind === "composite";
-    const overflows = !pageless && blockBottom > pageBottom && (!isFirstOnPage || !isAtomicBlock);
+    const isAtPageTop = targetY === currentMetrics.contentTop;
+    const overflows = !pageless && blockBottom > pageBottom && (!isAtomicBlock || !isAtPageTop);
 
     // ── Layout debug log ──────────────────────────────────────────────────────
     if ((globalThis as Record<string,unknown>).__LAYOUT_DEBUG__) {
@@ -1096,35 +1095,25 @@ export function paginateFlow(
       y = targetY + block.height;
       prevSpaceAfter = flow.spaceAfter;
     } else if (isAtomicBlock) {
-      // ── Leaf block (image, HR): move whole block to next page ──────────────
-      const tooTallForAnyPage = flow.height > contentHeight;
-      if (tooTallForAnyPage) {
-        if ((globalThis as Record<string,unknown>).__LAYOUT_DEBUG__) {
-          console.log(`  → LEAF too-tall: forced onto current page ${currentPage.pageNumber}`);
-        }
-        currentPage.blocks.push(block);
-        y = targetY + block.height;
-        prevSpaceAfter = flow.spaceAfter;
-      } else {
-        if ((globalThis as Record<string,unknown>).__LAYOUT_DEBUG__) {
-          console.log(`  → LEAF moved to page ${pages.length + 2}`);
-        }
-        pages.push(currentPage);
-        currentPage = newPage(pages.length + 1);
-        // Fetch the NEW page's metrics — differentFirstPage or footnote bands
-        // can make this differ from the page we just left.
-        const newPageContentTop = metricsFor(currentPage.pageNumber).contentTop;
-        metrics.push(metricsFor(currentPage.pageNumber));
-        y = newPageContentTop;
-        prevSpaceAfter = 0;
-
-        const reflow = buildBlock(blockX, newPageContentTop);
-        Object.assign(reflow, markerFields(flow));
-
-        currentPage.blocks.push(reflow);
-        y = newPageContentTop + reflow.height;
-        prevSpaceAfter = flow.spaceAfter;
+      // ── Leaf or composite: move the whole block to the next page ───────────
+      if ((globalThis as Record<string,unknown>).__LAYOUT_DEBUG__) {
+        console.log(`  → ATOMIC moved to page ${pages.length + 2}`);
       }
+      pages.push(currentPage);
+      currentPage = newPage(pages.length + 1);
+      // Fetch the NEW page's metrics — differentFirstPage or footnote bands
+      // can make this differ from the page we just left.
+      const newPageContentTop = metricsFor(currentPage.pageNumber).contentTop;
+      metrics.push(metricsFor(currentPage.pageNumber));
+      y = newPageContentTop;
+      prevSpaceAfter = 0;
+
+      const reflow = buildBlock(blockX, newPageContentTop);
+      Object.assign(reflow, markerFields(flow));
+
+      currentPage.blocks.push(reflow);
+      y = newPageContentTop + reflow.height;
+      prevSpaceAfter = flow.spaceAfter;
     } else {
       // ── Text block: split lines across page boundaries ─────────────────────
       if ((globalThis as Record<string,unknown>).__LAYOUT_DEBUG__) {

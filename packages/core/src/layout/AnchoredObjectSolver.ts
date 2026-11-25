@@ -508,8 +508,9 @@ function reflowFlowsAgainstExclusions(
     // Leaf flows (image, rule, page break) cannot be re-broken around a wrap zone.
     if (flow.kind === "leaf" || flowY + flow.height <= pageTop) continue;
     // A composite cannot be re-broken either, so it moves below the float instead.
+    // It is on the page it starts on alone, however far past the bottom it hangs.
     if (flow.kind === "composite") {
-      if (pageConfig.pageless) continue;
+      if (pageConfig.pageless || geometry.pageAt(flowY) !== page) continue;
       const composite = moveCompositeClearOfFloats(flows, idx, zone, floats, pageConfig, geometry);
       noteMoved(composite.moved);
       idx = composite.lastUnitIndex;
