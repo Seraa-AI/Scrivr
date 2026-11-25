@@ -1,0 +1,72 @@
+## A4 pages, 3369 tall
+page 1
+  paragraph x=72 y=72 w=650 h=16.8
+    | 16.8 @0 "one"
+page 2
+  heading x=72 y=72 w=650 h=26.4
+    | 26.4 @0 "two"
+  paragraph x=72 y=108.4 w=650 h=16.8
+    | 16.8 @0 "three"
+page 3
+  heading x=72 y=72 w=650 h=33.6
+    | 33.6 @0 "four"
+  paragraph x=72 y=117.6 w=650 h=16.8
+    | 16.8 @0 "five"
+  heading x=72 y=154.4 w=650 h=26.4
+    | 26.4 @0 "six"
+  paragraph x=72 y=190.8 w=650 h=16.8
+    | 16.8 @0 "seven"
+## short pages, 1332 tall
+page 1
+  paragraph x=72 y=72 w=650 h=16.8
+    | 16.8 @0 "one"
+page 2
+  heading x=72 y=72 w=650 h=26.4
+    | 26.4 @0 "two"
+  paragraph x=72 y=108.4 w=650 h=16.8
+    | 16.8 @0 "three"
+page 3
+  heading x=72 y=72 w=650 h=33.6
+    | 33.6 @0 "four"
+  paragraph x=72 y=117.6 w=650 h=16.8
+    | 16.8 @0 "five"
+  heading x=72 y=154.4 w=650 h=26.4
+    | 26.4 @0 "six"
+  paragraph x=72 y=190.8 w=650 h=16.8
+    | 16.8 @0 "seven"
+## pages with a header and footer, 1332 tall
+page 1
+  paragraph x=72 y=132 w=650 h=16.8
+    | 16.8 @0 "one"
+page 2
+  heading x=72 y=92 w=650 h=26.4
+    | 26.4 @0 "two"
+  paragraph x=72 y=128.4 w=650 h=16.8
+    | 16.8 @0 "three"
+page 3
+  heading x=72 y=92 w=650 h=33.6
+    | 33.6 @0 "four"
+  paragraph x=72 y=137.6 w=650 h=16.8
+    | 16.8 @0 "five"
+  heading x=72 y=174.4 w=650 h=26.4
+    | 26.4 @0 "six"
+  paragraph x=72 y=210.8 w=650 h=16.8
+    | 16.8 @0 "seven"
+## no pages, 349.6 tall
+page 1
+  paragraph x=73 y=40 w=739 h=16.8
+    | 16.8 @0 "one"
+  pageBreak x=73 y=66.8 w=0 h=0
+  heading x=73 y=86.8 w=739 h=26.4
+    | 26.4 @0 "two"
+  paragraph x=73 y=123.2 w=739 h=16.8
+    | 16.8 @0 "three"
+  sectionBreak x=73 y=150 w=0 h=0
+  heading x=73 y=174 w=739 h=33.6
+    | 33.6 @0 "four"
+  paragraph x=73 y=219.6 w=739 h=16.8
+    | 16.8 @0 "five"
+  heading x=73 y=256.4 w=739 h=26.4
+    | 26.4 @0 "six"
+  paragraph x=73 y=292.8 w=739 h=16.8
+    | 16.8 @0 "seven"

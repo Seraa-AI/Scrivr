@@ -97,7 +97,8 @@ export function advanceFlowGlobalY(
 /** Where the flow after this one continues from. */
 export interface FlowCursor {
   y: number;
-  prevSpaceAfter: number;
+  /** Absent at the top of a page nothing is on yet, where a leading margin is dropped. */
+  prevSpaceAfter?: number;
   /** The page it ended on. A `y` at a page's top does not say whether it filled the page above. */
   page: number;
 }
@@ -117,7 +118,7 @@ export function flowCursorAfter(
   const filledThePageAbove = endGlobalY > startGlobalY && geometry.startOf(page) === endGlobalY;
   return {
     y: endGlobalY,
-    prevSpaceAfter: flow.pageStart ? 0 : flow.spaceAfter,
+    ...(flow.pageStart && !pageConfig.pageless ? {} : { prevSpaceAfter: flow.spaceAfter }),
     page: filledThePageAbove ? page - 1 : page,
   };
 }
@@ -129,6 +130,11 @@ export function flowCursorAfter(
  */
 function linesAt(flow: FlowBlock, start: number): LayoutLine[] {
   return flow.measuredLines && flow.wrapLaidAtY !== start ? flow.measuredLines : flow.lines;
+}
+
+/** The gap above a block, after what the cursor leaves. */
+export function gapAfter(cursor: FlowCursor, spaceBefore: number): number {
+  return cursor.prevSpaceAfter === undefined ? 0 : collapseMargins(cursor.prevSpaceAfter, spaceBefore);
 }
 
 /** Whether a line `lineHeight` tall starting at `y` fits, within half a pixel. */
@@ -164,27 +170,18 @@ export function landingAfter(
 }
 
 /**
- * Stamp each flow with its continuous-flow Y.
- *
- * Omitting `initialSpaceAfter` means the first flow on a page, whose leading
- * margin is suppressed. Passing `0` means a continuation whose predecessor
- * happened to end with no trailing space — that one still collapses, and so
- * still emits `spaceBefore`. The two are different pixels; `?? 0` would erase
- * the distinction.
+ * Stamp each flow with its continuous-flow Y, going on from `from`.
  */
 export function assignGlobalY(
   flows: FlowBlock[],
-  initialY: number,
+  from: FlowCursor,
   pageConfig: PageConfig,
   geometry: PageGeometry,
-  initialSpaceAfter?: number,
-  initialPage: number = geometry.pageAt(initialY),
 ): FlowBlock[] {
-  let cursor: FlowCursor = { y: initialY, prevSpaceAfter: initialSpaceAfter ?? 0, page: initialPage };
+  let cursor = from;
 
-  return flows.map((flow, index) => {
-    const gap = index === 0 && initialSpaceAfter === undefined
-      ? 0 : collapseMargins(cursor.prevSpaceAfter, flow.spaceBefore);
+  return flows.map((flow) => {
+    const gap = gapAfter(cursor, flow.spaceBefore);
     const startGlobalY = landingAfter(flow, cursor, gap, pageConfig, geometry);
     cursor = flowCursorAfter(flow, startGlobalY, pageConfig, geometry);
     return { ...flow, globalY: startGlobalY, originalGlobalY: startGlobalY };

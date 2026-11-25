@@ -60,6 +60,7 @@ export const FLOWING: Record<string, Node> = {
   "a table over several pages": doc(p("before"), table(...some(30, (i) => row(cell(p(`${i}`)), cell(p(words(1 + (i % 20))))))), p("after")),
   "a table in a cell": doc(table(row(cell(p("outer"), table(row(cell(p("inner")), cell(p(words(12)))))), cell(p("beside"))))),
   "page breaks": doc(p("one"), pageBreak(), p("two"), pageBreak(), pageBreak(), p("three")),
+  "headings after breaks": doc(p("one"), pageBreak(), h(2, "two"), p("three"), sectionBreak("nextPage"), h(1, "four"), p("five"), sectionBreak("continuous"), h(2, "six"), p("seven")),
   "section breaks of every kind": doc(...["continuous", "nextPage", "evenPage", "oddPage"].flatMap((kind) => [p(`before ${kind}`), sectionBreak(kind)]), p("last")),
   "rules and code": doc(p("a"), schema.node("horizontalRule"), schema.node("codeBlock", null, [text("const a = 1;\nconst b = 2;")]), p("b")),
 };

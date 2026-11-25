@@ -29,6 +29,18 @@ describe("a float after page breaks", () => {
     for (const blocks of [1, 2]) expect(differencesFromWhole(streamed(node, PAGE, blocks), node, PAGE)).toEqual([]);
   });
 
+  it.each<[string, Node]>([["a page break", pageBreak()], ["a section that starts a page", sectionBreak("nextPage")]])(
+    "follows a heading at the top of the page after %s by one gap",
+    (_name, breaks) => {
+      const node = doc(p("one"), breaks, h(2, "Heading"), p("after"));
+      const [heading, after] = [partsOf(whole(node, PAGE), "Heading")[0]?.block, partsOf(whole(node, PAGE), "after")[0]?.block];
+      if (!heading || !after) throw new Error("missing a block");
+      expectSamePosition(heading.y, 72);
+      expectSamePosition(after.y, heading.y + heading.height + Math.max(heading.spaceAfter, after.spaceBefore));
+      for (const blocks of [1, 2]) expect(differencesFromWhole(streamed(node, PAGE, blocks), node, PAGE)).toEqual([]);
+    },
+  );
+
   it("keeps the space above a block that follows only an anchor at the page top", () => {
     const layout = whole(doc(anchorOnly(), h(2, "Heading"), anchored()), PAGE);
     const heading = partsOf(layout, "Heading")[0]?.block;

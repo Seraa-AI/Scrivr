@@ -652,8 +652,7 @@ interface FlowStart {
   page: LayoutPage;
   y: number;
   prevSpaceAfter: number;
-  /** Omits `prevSpaceAfter` at the top of a page, where a leading margin is dropped. */
-  flowCursor: Omit<FlowCursor, "prevSpaceAfter"> & { prevSpaceAfter?: number };
+  flowCursor: FlowCursor;
 }
 
 function startOfPage(pageNumber: number, itemIndex: number, pages: LayoutPage[], geometry: PageGeometry): FlowStart {
@@ -765,7 +764,7 @@ export function runFlowPipeline(
   // makes a chunk boundary change subsequent positions.
   const layFrom = (from: FlowStart) => {
     const measured = buildBlockFlow(items, from.itemIndex, flowConfig, measureCtx, blockBudget(from, snapshot, options.maxBlocks));
-    const placed = assignGlobalY(measured.flows, from.flowCursor.y, pageConfig, geometry, from.flowCursor.prevSpaceAfter, from.flowCursor.page);
+    const placed = assignGlobalY(measured.flows, from.flowCursor, pageConfig, geometry);
     return { flowResult: measured, anchoredFlow: resolveAnchoredObjects(placed, pageConfig, geometry, measureCtx) };
   };
   let start = resumed ?? startOfPage(1, 0, [], geometry);

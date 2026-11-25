@@ -18,7 +18,7 @@ import {
   type AnchorRef,
 } from "./AnchoredObjects";
 import type { PageGeometry } from "./PageMetrics";
-import { advanceFlowGlobalY, collapseMargins, flowCursorAfter, landingAfter, pageLocalYForGlobalY } from "./FlowPlacement";
+import { advanceFlowGlobalY, flowCursorAfter, gapAfter, landingAfter, pageLocalYForGlobalY } from "./FlowPlacement";
 import type { FlowBlock, MeasureContext, PageConfig } from "./PageLayout";
 
 /** Where flow `index` starts when only its predecessor decides. */
@@ -33,8 +33,7 @@ function naturalStartOf(
   if (!flow) return 0;
   if (!prev) return flow.originalGlobalY ?? flow.globalY ?? 0;
   const cursor = flowCursorAfter(prev, prev.globalY ?? 0, pageConfig, geometry);
-  const gap = prev.pageStart ? 0 : collapseMargins(cursor.prevSpaceAfter, flow.spaceBefore);
-  return landingAfter(flow, cursor, gap, pageConfig, geometry);
+  return landingAfter(flow, cursor, gapAfter(cursor, flow.spaceBefore), pageConfig, geometry);
 }
 
 /** Where flow `index` must start, given where it would start on its own. */
