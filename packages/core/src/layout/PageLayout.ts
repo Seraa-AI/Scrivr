@@ -356,6 +356,8 @@ export interface FlowBlock {
   solverPushedThisFlow?: boolean;
   /** Global y Stage 3 last laid this flow's lines out at, around the floats there. Absent when it did not. */
   wrapLaidAtY?: number;
+  /** The lines this flow was measured with, kept once Stage 3 lays it out around floats. */
+  measuredLines?: LayoutLine[];
   // Where the last run placed this block, read before this run's measurement.
   preCachedTargetY?: number;
   preCachedPage?: number;
