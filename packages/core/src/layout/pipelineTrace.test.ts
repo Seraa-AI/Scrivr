@@ -311,14 +311,14 @@ function pressurePagination(blocks: number): {
   metricsForCalls = 0;
   // Counted and timed separately — a counting wrapper on a seven-figure call
   // count would dominate the timed run.
-  assignGlobalY(flows, seedY, defaultPageConfig, geometry);
+  assignGlobalY(flows, { y: seedY, page: 1 }, defaultPageConfig, geometry);
   const globalYCalls = metricsForCalls;
   const globalYMs = median(
-    () => void assignGlobalY(flows, seedY, defaultPageConfig, inner),
+    () => void assignGlobalY(flows, { y: seedY, page: 1 }, defaultPageConfig, inner),
     3,
   );
 
-  const laidOut = assignGlobalY(flows, seedY, defaultPageConfig, inner);
+  const laidOut = assignGlobalY(flows, { y: seedY, page: 1 }, defaultPageConfig, inner);
   const paged = paginateFlow(
     laidOut,
     defaultPageConfig,

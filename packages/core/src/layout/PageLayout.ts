@@ -51,6 +51,7 @@ import {
   flowCursorAfter,
   pageLocalYForGlobalY,
   targetPageNumber,
+  type FlowCursor,
 } from "./FlowPlacement";
 export { collapseMargins } from "./FlowPlacement";
 import { resolveAnchoredObjects } from "./AnchoredObjectSolver";
@@ -234,7 +235,7 @@ export interface LayoutResumption {
   /** The page currently being built (may have partial blocks). */
   currentPage: LayoutPage;
   /** Continuous-flow cursor, kept separately from the paginated page cursor. */
-  flowCursor?: { y: number; prevSpaceAfter: number };
+  flowCursor?: FlowCursor;
   /** Y cursor position on currentPage. */
   currentY: number;
   /** spaceAfter of the last placed block, for margin collapsing. */
@@ -650,8 +651,7 @@ interface FlowStart {
   page: LayoutPage;
   y: number;
   prevSpaceAfter: number;
-  /** Omits `prevSpaceAfter` at the top of a page, where a leading margin is dropped. */
-  flowCursor: { y: number; prevSpaceAfter?: number };
+  flowCursor: FlowCursor;
 }
 
 function startOfPage(pageNumber: number, itemIndex: number, pages: LayoutPage[], geometry: PageGeometry): FlowStart {
@@ -661,12 +661,12 @@ function startOfPage(pageNumber: number, itemIndex: number, pages: LayoutPage[],
     page: newPage(pageNumber),
     y: geometry.metricsFor(pageNumber).contentTop,
     prevSpaceAfter: 0,
-    flowCursor: { y: geometry.startOf(pageNumber) },
+    flowCursor: { y: geometry.startOf(pageNumber), page: pageNumber },
   };
 }
 
 /** Where the snapshot stopped. */
-function afterSnapshot(snapshot: LayoutResumption, flowCursor: { y: number; prevSpaceAfter: number }): FlowStart {
+function afterSnapshot(snapshot: LayoutResumption, flowCursor: FlowCursor): FlowStart {
   return {
     itemIndex: snapshot.nextItemIndex,
     pages: [...snapshot.completedPages],
@@ -763,7 +763,7 @@ export function runFlowPipeline(
   // makes a chunk boundary change subsequent positions.
   const layFrom = (from: FlowStart) => {
     const measured = buildBlockFlow(items, from.itemIndex, flowConfig, measureCtx, blockBudget(from, snapshot, options.maxBlocks));
-    const placed = assignGlobalY(measured.flows, from.flowCursor.y, pageConfig, geometry, from.flowCursor.prevSpaceAfter);
+    const placed = assignGlobalY(measured.flows, from.flowCursor, pageConfig, geometry);
     return { flowResult: measured, anchoredFlow: resolveAnchoredObjects(placed, pageConfig, geometry, measureCtx) };
   };
   let start = resumed ?? startOfPage(1, 0, [], geometry);

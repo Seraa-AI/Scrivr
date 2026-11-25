@@ -7,24 +7,6 @@ import { fitLinesInCapacity } from "./splitLines";
 import type { FlowBlock, PageConfig } from "./PageLayout";
 import type { PageStart } from "./layoutItems";
 
-/**
- * Global Y of the start of the first page strictly below `y`. A content bottom
- * exactly on a page boundary belongs to the page above (it rendered there), so
- * the break advances one page past it — matching `paginateFlow`, which always
- * advances exactly one page per forced break.
- */
-function nextPageStartAfter(
-  geometry: PageGeometry,
-  y: number,
-  breakType: PageStart | undefined,
-): number {
-  let contentPage = geometry.pageAt(y);
-  if (contentPage > 1 && geometry.startOf(contentPage) === y) {
-    contentPage -= 1;
-  }
-  return geometry.startOf(targetPageNumber(contentPage, breakType));
-}
-
 export function targetPageNumber(
   currentPage: number,
   breakType: PageStart | undefined,
@@ -54,11 +36,8 @@ export function advanceFlowGlobalY(
   pageConfig: PageConfig,
   geometry: PageGeometry,
 ): { startGlobalY: number; endGlobalY: number } {
-  if (flow.pageStart && !pageConfig.pageless) {
-    const start = nextPageStartAfter(geometry, naturalStart, flow.pageStart);
-    return { startGlobalY: start, endGlobalY: start + flow.height };
-  }
-  if (pageConfig.pageless) {
+  // A break was landed on the page it starts.
+  if (flow.pageStart || pageConfig.pageless) {
     return { startGlobalY: naturalStart, endGlobalY: naturalStart + flow.height };
   }
 
@@ -117,7 +96,10 @@ export function advanceFlowGlobalY(
 /** Where the flow after this one continues from. */
 export interface FlowCursor {
   y: number;
-  prevSpaceAfter: number;
+  /** Absent at the top of a page nothing is on yet, where a leading margin is dropped. */
+  prevSpaceAfter?: number;
+  /** The page it ended on. A `y` at a page's top does not say whether it filled the page above. */
+  page: number;
 }
 
 /**
@@ -130,10 +112,19 @@ export function flowCursorAfter(
   pageConfig: PageConfig,
   geometry: PageGeometry,
 ): FlowCursor {
+  const { endGlobalY } = advanceFlowGlobalY(flow, startGlobalY, pageConfig, geometry);
+  const page = geometry.pageAt(endGlobalY);
+  const filledThePageAbove = endGlobalY > startGlobalY && geometry.startOf(page) === endGlobalY;
   return {
-    y: advanceFlowGlobalY(flow, startGlobalY, pageConfig, geometry).endGlobalY,
-    prevSpaceAfter: flow.pageStart ? 0 : flow.spaceAfter,
+    y: endGlobalY,
+    ...(flow.pageStart && !pageConfig.pageless ? {} : { prevSpaceAfter: flow.spaceAfter }),
+    page: filledThePageAbove ? page - 1 : page,
   };
+}
+
+/** The gap above a block, after what the cursor leaves. */
+export function gapAfter(cursor: FlowCursor, spaceBefore: number): number {
+  return cursor.prevSpaceAfter === undefined ? 0 : collapseMargins(cursor.prevSpaceAfter, spaceBefore);
 }
 
 /** Whether a line `lineHeight` tall starting at `y` fits, within half a pixel. */
@@ -142,25 +133,23 @@ export function lineFitsAt(pageBottom: number, y: number, lineHeight: number): b
 }
 
 /**
- * Where a flow starts when its predecessor ends at `prevEnd` and the collapsed
- * gap before it is `gap` — where `paginateFlow` paints it. As in Word, the gap
+ * Where a flow starts when its predecessor left `prev` and the collapsed gap
+ * before it is `gap` — where `paginateFlow` paints it. As in Word, the gap
  * is never given up to fit a line: a first line that does not fit after it
  * starts the next page, where the gap is dropped.
  * The first line is the flow's own, so a flow laid out again is landed again.
  */
 export function landingAfter(
   flow: FlowBlock,
-  prevEnd: number,
+  prev: Pick<FlowCursor, "y" | "page">,
   gap: number,
   pageConfig: PageConfig,
   geometry: PageGeometry,
 ): number {
-  const start = prevEnd + gap;
-  if (pageConfig.pageless || flow.pageStart) {
-    return advanceFlowGlobalY(flow, start, pageConfig, geometry).startGlobalY;
-  }
-  let page = geometry.pageAt(prevEnd);
-  if (page > 1 && geometry.startOf(page) === prevEnd) page -= 1;
+  const start = prev.y + gap;
+  if (pageConfig.pageless) return start;
+  const { page } = prev;
+  if (flow.pageStart) return geometry.startOf(targetPageNumber(page, flow.pageStart));
   const bottom = geometry.bottomOf(page);
   if (start >= bottom) return geometry.startOf(page + 1);
 
@@ -172,29 +161,20 @@ export function landingAfter(
 }
 
 /**
- * Stamp each flow with its continuous-flow Y.
- *
- * Omitting `initialSpaceAfter` means the first flow on a page, whose leading
- * margin is suppressed. Passing `0` means a continuation whose predecessor
- * happened to end with no trailing space — that one still collapses, and so
- * still emits `spaceBefore`. The two are different pixels; `?? 0` would erase
- * the distinction.
+ * Stamp each flow with its continuous-flow Y, going on from `from`.
  */
 export function assignGlobalY(
   flows: FlowBlock[],
-  initialY: number,
+  from: FlowCursor,
   pageConfig: PageConfig,
   geometry: PageGeometry,
-  initialSpaceAfter?: number,
 ): FlowBlock[] {
-  let y = initialY;
-  let prevSpaceAfter = initialSpaceAfter ?? 0;
+  let cursor = from;
 
-  return flows.map((flow, index) => {
-    const gap = index === 0 && initialSpaceAfter === undefined
-      ? 0 : collapseMargins(prevSpaceAfter, flow.spaceBefore);
-    const startGlobalY = landingAfter(flow, y, gap, pageConfig, geometry);
-    ({ y, prevSpaceAfter } = flowCursorAfter(flow, startGlobalY, pageConfig, geometry));
+  return flows.map((flow) => {
+    const gap = gapAfter(cursor, flow.spaceBefore);
+    const startGlobalY = landingAfter(flow, cursor, gap, pageConfig, geometry);
+    cursor = flowCursorAfter(flow, startGlobalY, pageConfig, geometry);
     return { ...flow, globalY: startGlobalY, originalGlobalY: startGlobalY };
   });
 }

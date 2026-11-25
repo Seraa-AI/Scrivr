@@ -93,7 +93,7 @@ function metricLookups(blocks: number): { calls: number; perBlock: number } {
 
   const seedY = geometry.metricsFor(1).contentTop;
   calls = 0;
-  assignGlobalY(flows, seedY, defaultPageConfig, geometry);
+  assignGlobalY(flows, { y: seedY, page: 1 }, defaultPageConfig, geometry);
   return { calls, perBlock: calls / blocks };
 }
 
