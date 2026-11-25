@@ -3,7 +3,7 @@
  * `breakIntoLines` call is one block's lines broken.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { doc, edit, image, inTurn, p, streamed, whole, words } from "../test/layoutOracle";
+import { cell, doc, edit, image, inTurn, p, row, streamed, table, text, whole, words } from "../test/layoutOracle";
 import { LineBreaker } from "./LineBreaker";
 import { defaultPageConfig, defaultPagelessConfig } from "./PageLayout";
 
@@ -33,6 +33,14 @@ describe("the work of laying a document out", () => {
     const floating = edit(long, (tr) => tr.insert(1, image({ wrapMode: "square", xAlign: "right", width: 100, height: 60 })));
     const once = costOf(() => whole(floating, { pageConfig }));
     expect(costOf(() => streamed(floating, { pageConfig }, 20))).toBe(once);
+  });
+
+  it("lays a table out once when a document without pages is streamed beside floats", () => {
+    const cells = () => cell(p("one"));
+    const node = doc(...Array.from({ length: 40 }, (_, i) =>
+      i % 4 === 0 ? p([text("anchor"), image({ wrapMode: "square", xAlign: "right", width: 100, height: 300 })]) : table(row(cells(), cells()))));
+    const setup = { pageConfig: defaultPagelessConfig };
+    expect(costOf(() => streamed(node, setup, 5))).toBe(costOf(() => whole(node, setup)));
   });
 
   it("breaks nothing again when nothing changed", () => {

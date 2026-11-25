@@ -700,22 +700,14 @@ const wrapsText = (float: AnchoredObjectPlacement): boolean => float.wrapMode ==
 const wrapEndOf = (float: AnchoredObjectPlacement): number =>
   float.globalY + float.height + Math.max(anchoredOf(float.node)?.margin ?? 0, ANCHORED_OBJECT_MARGIN);
 
-/**
- * Whether a float on one side of the snapshot's cutoff is wrapped, or moved
- * clear of, on the other: it reaches over the cutoff, or a composite does, whose
- * units move together.
- */
+/** Whether a float on one side of the snapshot's cutoff reaches over it, to be wrapped on the other. */
 function floatCrossesCutoff(
   snapshot: LayoutResumption,
   cutoffY: number,
   placed: readonly AnchoredObjectPlacement[],
 ): boolean {
-  const before = snapshot.floats.filter(wrapsText);
-  const after = placed.filter(wrapsText);
-  if (before.some((float) => wrapEndOf(float) > cutoffY) || after.some((float) => float.globalY < cutoffY)) return true;
-  const last = snapshot.items[snapshot.nextItemIndex - 1];
-  const compositeGoesOn = last?.unit !== undefined && !last.lastUnit;
-  return compositeGoesOn && (after.length > 0 || before.some((float) => float.page >= snapshot.currentPage.pageNumber));
+  return snapshot.floats.some((float) => wrapsText(float) && wrapEndOf(float) > cutoffY)
+    || placed.some((float) => wrapsText(float) && float.globalY < cutoffY);
 }
 
 /** A run that lays out again what the snapshot had still advances by a whole chunk. Boundaries are free. */
