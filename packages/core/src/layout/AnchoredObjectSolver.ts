@@ -574,6 +574,7 @@ function reflowFlowsAgainstExclusions(
       ...flow,
       overlapsWrapZone: true,
       wrapLaidAtY: flowY,
+      measuredLines: flow.measuredLines ?? flow.lines,
       lines: reflowed.lines,
       height: reflowed.height,
       blockType: reflowed.blockType,

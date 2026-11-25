@@ -164,7 +164,8 @@ export function landingAfter(
   const bottom = geometry.bottomOf(page);
   if (start >= bottom) return geometry.startOf(page + 1);
 
-  const firstLine = flow.kind === "text" ? flow.lines[0] : undefined;
+  // The measured line: one laid out around a float holds only where it was laid.
+  const firstLine = flow.kind === "text" ? (flow.measuredLines ?? flow.lines)[0] : undefined;
   if (!firstLine) return advanceFlowGlobalY(flow, start, pageConfig, geometry).startGlobalY;
   if (start === geometry.startOf(page) || lineFitsAt(bottom, start, firstLine.lineHeight)) return start;
   return geometry.startOf(page + 1);
