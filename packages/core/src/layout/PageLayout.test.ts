@@ -3057,8 +3057,8 @@ describe("streamed pagination snapshots", () => {
 
 /**
  * A layout's `version` is the one key paint and hit-testing share: tiles skip
- * repainting when it is unchanged, and the charmap stamps itself with it. Only a
- * chunk that leaves every painted page as it was may keep it.
+ * repainting when it is unchanged, and the charmap stamps itself with it. A
+ * chunk adds to a page that may be painted, if only blank, so each has its own.
  */
 describe("the version a streamed chunk publishes", () => {
   const streamed = (maxBlocks = 40) => {
@@ -3073,18 +3073,8 @@ describe("the version a streamed chunk publishes", () => {
     render: () => {},
   }];
 
-  it("keeps it when the chunk starts a page of its own", () => {
-    const { d, options, first } = streamed(1);
-    expect(first.pages.at(-1)?.blocks).toEqual([]);
-
-    const next = runPipeline(d, { ...options, resumption: first.resumption! });
-
-    expect(next.version).toBe(first.version);
-  });
-
-  it("advances it when the chunk adds to a page that may be painted", () => {
-    const { d, options, first } = streamed();
-    expect(first.pages.at(-1)?.blocks).not.toEqual([]);
+  it.each([["holds blocks", 40], ["is still blank", 1]])("advances when the page it goes on %s", (_name, maxBlocks) => {
+    const { d, options, first } = streamed(maxBlocks);
 
     const next = runPipeline(d, { ...options, resumption: first.resumption! });
 

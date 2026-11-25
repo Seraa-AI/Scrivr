@@ -16,7 +16,6 @@ import { isSpacerLine, type LayoutLine } from "./LineBreaker";
 import type { MarkerLine } from "./BlockLayout";
 import type { LaidMarker, MarkerFace } from "./markers";
 import {
-  ANCHORED_OBJECT_MARGIN,
   anchoredOf,
   floats,
   type AnchoredObjectPlacement,
@@ -696,9 +695,9 @@ function lastPageStartingABlock(snapshot: LayoutResumption, geometry: PageGeomet
 
 const wrapsText = (float: AnchoredObjectPlacement): boolean => float.wrapMode === "square" || float.wrapMode === "top-bottom";
 
-/** Where a float, with the room it keeps clear, ends in the flow. */
+/** Where a float, with its margin, ends in the flow. */
 const wrapEndOf = (float: AnchoredObjectPlacement): number =>
-  float.globalY + float.height + Math.max(anchoredOf(float.node)?.margin ?? 0, ANCHORED_OBJECT_MARGIN);
+  float.globalY + float.height + (anchoredOf(float.node)?.margin ?? 0);
 
 /** Whether a float on one side of the snapshot's cutoff reaches over it, to be wrapped on the other. */
 function floatCrossesCutoff(
@@ -776,13 +775,11 @@ export function runFlowPipeline(
   }
   const { flowResult, anchoredFlow } = laid;
   const appends = start === resumed;
-  // Tiles skip repainting while the version stands, so it stands only while no
-  // page that may be painted changes: otherwise the charmap moves to the new
-  // geometry over old pixels, and the caret is drawn against text that is no
-  // longer there.
-  const chunkVersion = snapshot
-    ? (appends && snapshot.currentPage.blocks.length === 0 ? snapshot.version : snapshot.version + 1)
-    : runId;
+  // Tiles skip repainting while the version stands. A chunk goes on from a page
+  // that may be painted, if only blank, so it takes a version of its own:
+  // otherwise the charmap moves to the new geometry over old pixels, and the
+  // caret is drawn against text that is no longer there.
+  const chunkVersion = snapshot ? snapshot.version + 1 : runId;
 
   // The floats this run did not place are the snapshot's, on the pages it left
   // alone.
