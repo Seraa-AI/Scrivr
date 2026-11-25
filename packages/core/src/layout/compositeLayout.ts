@@ -23,6 +23,7 @@ import { defaultFontConfig, type FontConfig } from "./FontConfig";
 import type { FontModifier } from "../extensions/types";
 import type { InlineRegistry, RegionPlacement } from "./BlockRegistry";
 import type { LayoutFontResolver } from "../fonts/layoutResolver";
+import { collapseMargins } from "./FlowPlacement";
 import { collectChildItems, layoutItem } from "./layoutItems";
 
 export interface RegionLayoutContext {
@@ -145,11 +146,13 @@ function layoutRegionBlocks(
   // Each block is resolved as the page body resolves it. A boundary (a page
   // or section break) has no meaning inside a region.
   const blocks: LayoutBlock[] = [];
-  let relY = box.top;
+  // As Word spaces a cell: the first block keeps its space before and the last
+  // its space after, and between two blocks the larger of theirs is kept.
+  let bottom = box.top;
+  let spaceAfter = 0;
   for (const item of collectChildItems(placement.node, placement.pos + 1)) {
     if (item.boundary) continue;
-    const childBlock = layoutItem(item, { x: box.contentX, width: box.contentWidth }, {
-      y: relY,
+    const childBlock = layoutItem(item, { x: box.contentX, width: box.contentWidth }, (spaceBefore) => bottom + collapseMargins(spaceAfter, spaceBefore), {
       page: ctx.page,
       measurer: ctx.measurer,
       // No `map`: the CharacterMap is populated at paint time, matching the
@@ -160,9 +163,10 @@ function layoutRegionBlocks(
       ...(ctx.fonts ? { fonts: ctx.fonts } : {}),
     }, lineSpaceIn);
     blocks.push(childBlock);
-    relY += childBlock.spaceBefore + childBlock.height + childBlock.spaceAfter;
+    bottom = childBlock.y + childBlock.height;
+    spaceAfter = childBlock.spaceAfter;
   }
-  return { blocks, contentBottom: relY };
+  return { blocks, contentBottom: bottom + spaceAfter };
 }
 
 /**

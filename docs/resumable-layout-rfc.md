@@ -917,6 +917,7 @@ Updated as each phase lands, with every difference from the design above and why
 | 0, a deleted block that stays (§1.6) | In #314. `findReusableTail` compares the remaining items, as §10 asks; `seenCacheMiss` and `remainingCacheMisses` stay until Phase 1, because a changed marker or width is still the counter's to catch. The same PR fixed what else made a reused layout differ: positions moved twice in the measure cache, hard breaks never moved, pageless height, a float's margin, and a node the document holds twice |
 | H, the harness (§15) | `src/test/layoutOracle.ts` (documents, page set-ups, the comparison), `layoutOracle.test.ts` (whole, streamed, edited and laid out again; headers; the frontier), `layoutBaseline.test.ts` (fixed-width snapshots), `layoutWork.test.ts` (lines broken, counted), `knownDefects.test.ts` (each defect above as the behaviour it should have, expected to fail). Against `main` before #314 the oracle fails 53 of 473 |
 | 0, stale wrapped lines (§1.2, §14.8) | The settle re-lays a wrapped flow wherever it was carried, and pagination's re-break, all three call sites, is deleted. No flow is left wrapped for another place in 600 random float documents (5,158 wrapped flows), and no baseline moved |
+| 0, cell spacing (§1.4, §7, §14.3) | As Word, at every depth. One DOCX layout baseline moved: two headings in the cells of fixture 25 now sit under their space before. No Word-comparison score changed |
 | Everything else | Not started |
 
 The split at a page boundary in `paginateFlow` is the approach this replaces, not a
