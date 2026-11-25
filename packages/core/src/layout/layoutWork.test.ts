@@ -3,9 +3,9 @@
  * `breakIntoLines` call is one block's lines broken.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { doc, edit, inTurn, p, streamed, whole, words } from "../test/layoutOracle";
+import { doc, edit, image, inTurn, p, streamed, whole, words } from "../test/layoutOracle";
 import { LineBreaker } from "./LineBreaker";
-import { defaultPageConfig } from "./PageLayout";
+import { defaultPageConfig, defaultPagelessConfig } from "./PageLayout";
 
 const broken = vi.spyOn(LineBreaker.prototype, "breakIntoLines");
 afterEach(() => broken.mockClear());
@@ -27,6 +27,12 @@ describe("the work of laying a document out", () => {
 
   it("breaks no more when the document is streamed", () => {
     expect(costOf(() => streamed(long, setup, 7))).toBe(BLOCKS);
+  });
+
+  it.each([["pages", defaultPageConfig], ["no pages", defaultPagelessConfig]])("breaks no more when a document with a float near its start is streamed: %s", (_name, pageConfig) => {
+    const floating = edit(long, (tr) => tr.insert(1, image({ wrapMode: "square", xAlign: "right", width: 100, height: 60 })));
+    const once = costOf(() => whole(floating, { pageConfig }));
+    expect(costOf(() => streamed(floating, { pageConfig }, 20))).toBe(once);
   });
 
   it("breaks nothing again when nothing changed", () => {

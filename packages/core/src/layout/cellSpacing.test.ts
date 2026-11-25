@@ -3,21 +3,13 @@
  * and the first and last their own, as Word keeps them.
  */
 import { describe, expect, it } from "vitest";
-import { cell, doc, fixedWidths, h, image, p, row, schema, table, text, whole, words, type Setup } from "../test/layoutOracle";
+import { cell, doc, h, image, must, p, row, schema, SHORT_PAGE as PAGE, table, text, whole, words } from "../test/layoutOracle";
 import { expectSamePosition } from "../test-utils";
-import { defaultPageConfig, type DocumentLayout, type LayoutPage } from "./PageLayout";
-
-const PAGE: Setup = { pageConfig: defaultPageConfig, measurer: fixedWidths };
-
-type Block = LayoutPage["blocks"][number];
-
-const must = <T>(value: T | undefined, what: string): T => {
-  if (value === undefined) throw new Error(`no ${what}`);
-  return value;
-};
+import type { LayoutBlock } from "./BlockLayout";
+import type { DocumentLayout } from "./PageLayout";
 
 describe("a table cell", () => {
-  const blocksIn = (layout: DocumentLayout): Block[] => must(layout.pages[0]?.blocks[0]?.regions?.[0], "cell").blocks;
+  const blocksIn = (layout: DocumentLayout): LayoutBlock[] => must(layout.pages[0]?.blocks[0]?.regions?.[0], "cell").blocks;
 
   it("keeps one gap between two blocks, as the page does", () => {
     const inCell = blocksIn(whole(doc(table(row(cell(p("one"), h(2, "two"))))), PAGE));

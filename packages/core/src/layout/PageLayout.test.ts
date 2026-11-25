@@ -3057,14 +3057,13 @@ describe("streamed pagination snapshots", () => {
 
 /**
  * A layout's `version` is the one key paint and hit-testing share: tiles skip
- * repainting when it is unchanged, and the charmap stamps itself with it. A
- * resumed chunk only appends, so pages already painted still match their stamp.
- * A replay re-paginates those pages, and must say so.
+ * repainting when it is unchanged, and the charmap stamps itself with it. Only a
+ * chunk that leaves every painted page as it was may keep it.
  */
 describe("the version a streamed chunk publishes", () => {
-  const streamed = () => {
+  const streamed = (maxBlocks = 40) => {
     const d = doc(p("first"), pageBreak(), ...Array.from({ length: 99 }, (_, i) => p(`Block ${i}`)));
-    const options = { pageConfig: defaultPageConfig, measurer: createMeasurer(), maxBlocks: 40 };
+    const options = { pageConfig: defaultPageConfig, measurer: createMeasurer(), maxBlocks };
     return { d, options, first: runPipeline(d, options) };
   };
 
@@ -3074,12 +3073,22 @@ describe("the version a streamed chunk publishes", () => {
     render: () => {},
   }];
 
-  it("keeps it while the chunk only appends", () => {
-    const { d, options, first } = streamed();
+  it("keeps it when the chunk starts a page of its own", () => {
+    const { d, options, first } = streamed(1);
+    expect(first.pages.at(-1)?.blocks).toEqual([]);
 
-    const next = runPipeline(d, { ...options, resumption: first.resumption!, previousLayout: first });
+    const next = runPipeline(d, { ...options, resumption: first.resumption! });
 
     expect(next.version).toBe(first.version);
+  });
+
+  it("advances it when the chunk adds to a page that may be painted", () => {
+    const { d, options, first } = streamed();
+    expect(first.pages.at(-1)?.blocks).not.toEqual([]);
+
+    const next = runPipeline(d, { ...options, resumption: first.resumption! });
+
+    expect(next.version).toBeGreaterThan(first.version);
   });
 
   it("advances it when the prefix was re-paginated", () => {

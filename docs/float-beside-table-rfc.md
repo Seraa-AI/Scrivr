@@ -342,11 +342,8 @@ the skip at `PageLayout.ts:931` becomes a branch:
    because a restamp re-derives later flows from their predecessors and drops
    any push they carry.
 
-The row does **not** get `overlapsWrapZone`. That flag tells
-`normalizeWrappedBlockForPage` (`PageLayout.ts:2101`) to re-break the block's
-lines when it lands on a page other than the zone's page, and a row's `lines`
-are `[]` (`layout/BlockLayout.ts:377`), so re-breaking would set its height to
-0. A push to the next page is exactly when that would happen.
+The row is never laid out around a float (`wrapLaidAtY` stays unset): it has no
+lines to break.
 
 ### Backward anchors
 
@@ -668,11 +665,9 @@ test that will catch a header painted at the old y.
 ### Page-break guards
 
 Rows are atomic. `advanceFlowGlobalY` moves an atomic block that overflows to
-the next page top unless it is first on its page or taller than a page
-(`PageLayout.ts:409-422`), and `paginateFlow` keeps the same guard
-(`PageLayout.ts:1587-1591`). The design routes the pushed y through
-`advanceFlowGlobalY`, so a row too tall for any page is not pushed into an
-infinite next-page loop. `paginateFlow` advances pages while `flow.globalY` is
+the next page top unless it is already at a page top, and `paginateFlow` keeps the
+same guard. The design routes the pushed y through `advanceFlowGlobalY`, so a row
+too tall for any page starts one and stays. `paginateFlow` advances pages while `flow.globalY` is
 past the page bottom (`PageLayout.ts:1514`), so a fragment pushed to exactly
 the page's content bottom lands at the next page's top. Scenario 8 covers it.
 

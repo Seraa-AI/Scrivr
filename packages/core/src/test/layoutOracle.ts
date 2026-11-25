@@ -1,7 +1,4 @@
-/**
- * The documents and the comparison the layout oracle is made of: one document
- * laid out whole, streamed, after an edit and again has one layout.
- */
+/** The documents, page set-ups and comparison behind the layout oracle. */
 import type { Node } from "prosemirror-model";
 import { EditorState, type Transaction } from "prosemirror-state";
 import { ExtensionManager } from "../extensions/ExtensionManager";
@@ -36,7 +33,7 @@ export const words = (count: number): string => Array.from({ length: count }, (_
 export const p = (content: string | Node[] = [], attrs: Record<string, unknown> | null = null): Node =>
   schema.node("paragraph", attrs, typeof content === "string" ? [text(content)] : content);
 export const h = (level: number, value: string): Node => schema.node("heading", { level }, [text(value)]);
-export const br = (): Node => schema.node("hardBreak");
+const br = (): Node => schema.node("hardBreak");
 export const image = (attrs: Record<string, unknown>): Node => schema.node("image", { src: "", ...attrs });
 export const pageBreak = (): Node => schema.node("pageBreak");
 export const sectionBreak = (breakType: string): Node =>
@@ -84,6 +81,33 @@ export const FLOATING: Record<string, Node> = {
 
 const shortPage: PageConfig = { ...defaultPageConfig, pageHeight: 72 * 2 + 300 };
 
+/**
+ * Glyphs all half as wide as their size, so a test can say which line a word is
+ * on: the same on every machine.
+ */
+export const fixedWidths: TextMeasurerLike = {
+  measureWidth: (value, font) => value.length * (sizeOf(font) / 2),
+  getFontMetrics: (font) => {
+    const size = sizeOf(font);
+    return { ascent: size * 0.8, descent: size * 0.2, lineHeight: size * 1.2, xHeight: size * 0.5 };
+  },
+  measureRun: (value, font) => {
+    const step = sizeOf(font) / 2;
+    return { totalWidth: value.length * step, charPositions: Array.from({ length: value.length }, (_, i) => i * step) };
+  },
+  invalidate: () => {},
+};
+
+function sizeOf(font: string): number {
+  const size = /(\d+(?:\.\d+)?)px/.exec(font)?.[1];
+  return size === undefined ? 16 : Number(size);
+}
+
+/** A page of 400px of content and fixed-width glyphs: what a test can say is on which page and line. */
+export const SHORT_PAGE: Setup = { pageConfig: { ...defaultPageConfig, pageHeight: 72 * 2 + 400 }, measurer: fixedWidths };
+export const SHORT_PAGE_TOP = 72;
+export const SHORT_PAGE_BOTTOM = SHORT_PAGE_TOP + 400;
+
 /** A header taller on the first page, and a footer: each page has its own room. */
 const chrome: PageChromeContribution = {
   name: "oracle-chrome",
@@ -112,7 +136,7 @@ export function streamed(node: Node, setup: Setup, blocks: number, options = cac
   let layout = runPipeline(node, { ...options, maxBlocks: blocks });
   while (layout.isPartial) {
     if (!layout.resumption) throw new Error("a partial layout with nothing to resume from");
-    layout = runPipeline(node, { ...options, maxBlocks: blocks, resumption: layout.resumption, previousLayout: layout });
+    layout = runPipeline(node, { ...options, maxBlocks: blocks, resumption: layout.resumption });
   }
   return layout;
 }
@@ -220,12 +244,12 @@ const recordBlock = (block: LayoutBlock): unknown => ({
 });
 
 /** Where the caret can go and what a click finds, page by page. */
-function recordCaret(layout: DocumentLayout, docSize: number): unknown {
+function recordCaret(layout: DocumentLayout, docSize: number, glyphs: TextMeasurerLike): unknown {
   const map = new CharacterMap();
   for (const page of layout.pages) {
     let line = 0;
     for (const block of page.blocks) {
-      populateCharMap(block, map, page.pageNumber, line, measurer);
+      populateCharMap(block, map, page.pageNumber, line, glyphs);
       line += registeredLineCount(block);
     }
   }
@@ -233,14 +257,14 @@ function recordCaret(layout: DocumentLayout, docSize: number): unknown {
 }
 
 /** Everything a layout decides, as data two layouts can be compared by. */
-export function recordLayout(layout: DocumentLayout, docSize: number): unknown {
+export function recordLayout(layout: DocumentLayout, docSize: number, glyphs: TextMeasurerLike = measurer): unknown {
   return {
     height: layout.totalContentHeight,
     pageStarts: layout.pageStarts,
     pages: layout.pages.map((page) => ({ page: page.pageNumber, blocks: page.blocks.map(recordBlock) })),
     fragments: (layout.fragments ?? []).map(({ fragmentIndex, fragmentCount, sourceNodePos, page, y, lineCount }) => ({ fragmentIndex, fragmentCount, sourceNodePos, page, y, lineCount })),
     floats: (layout.anchoredObjects ?? []).map(({ docPos, page, x, y, width, height, anchorPage, globalY }) => ({ docPos, page, x, y, width, height, anchorPage, globalY })),
-    caret: recordCaret(layout, docSize),
+    caret: recordCaret(layout, docSize, glyphs),
   };
 }
 
@@ -275,26 +299,24 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /** Where `layout` differs from the document laid out whole. */
 export const differencesFromWhole = (layout: DocumentLayout, node: Node, setup: Setup): string[] =>
-  differences(recordLayout(layout, node.content.size), recordLayout(whole(node, setup), node.content.size));
+  differences(
+    recordLayout(layout, node.content.size, setup.measurer),
+    recordLayout(whole(node, setup), node.content.size, setup.measurer),
+  );
 
-/**
- * Glyphs all half as wide as their size, so a test can say which line a word is
- * on: the same on every machine.
- */
-export const fixedWidths: TextMeasurerLike = {
-  measureWidth: (value, font) => value.length * (sizeOf(font) / 2),
-  getFontMetrics: (font) => {
-    const size = sizeOf(font);
-    return { ascent: size * 0.8, descent: size * 0.2, lineHeight: size * 1.2, xHeight: size * 0.5 };
-  },
-  measureRun: (value, font) => {
-    const step = sizeOf(font) / 2;
-    return { totalWidth: value.length * step, charPositions: Array.from({ length: value.length }, (_, i) => i * step) };
-  },
-  invalidate: () => {},
-};
+// ── Finding things in a layout ────────────────────────────────────────────────
 
-function sizeOf(font: string): number {
-  const size = /(\d+(?:\.\d+)?)px/.exec(font)?.[1];
-  return size === undefined ? 16 : Number(size);
+export function must<T>(value: T | undefined, what: string): T {
+  if (value === undefined) throw new Error(`no ${what}`);
+  return value;
 }
+
+/** The parts of the block whose text starts with `start`, with the page each is on. */
+export const partsOf = (layout: DocumentLayout, start: string): { page: number; block: LayoutBlock }[] =>
+  layout.pages.flatMap((page) =>
+    page.blocks.filter((block) => block.node.textContent.startsWith(start)).map((block) => ({ page: page.pageNumber, block })),
+  );
+
+/** The text of each of a block's lines that holds any. */
+export const textLines = (block: LayoutBlock): string[] =>
+  block.lines.filter((line) => line.spans.length > 0).map((line) => line.spans.map((span) => (span.kind === "text" ? span.text : "")).join(""));

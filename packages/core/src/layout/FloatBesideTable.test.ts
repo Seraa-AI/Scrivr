@@ -654,10 +654,11 @@ describe("float beside a table — the table moves below the float", () => {
       const opts = { pageConfig: defaultPageConfig, fontConfig, measurer, maxBlocks: 1 };
       let l = runPipeline(d, opts);
       for (let guard = 0; l.isPartial && l.resumption && guard < 20; guard++) {
-        l = runPipeline(d, { ...opts, resumption: l.resumption, previousLayout: l });
+        l = runPipeline(d, { ...opts, resumption: l.resumption });
       }
-      const whole = runPipeline(d, { pageConfig: defaultPageConfig, fontConfig, measurer });
-      expect(rowsOf(l, "T").map((r) => r.y)).toEqual(rowsOf(whole, "T").map((r) => r.y));
+      const wholeRows = rowsOf(runPipeline(d, { pageConfig: defaultPageConfig, fontConfig, measurer }), "T");
+      expect(rowsOf(l, "T")).toHaveLength(3);
+      rowsOf(l, "T").forEach((r, i) => expectSamePosition(r.y, must(wholeRows[i], "row").y));
     });
 
     it("38: a move may not carry the table under a float that does not follow it", () => {

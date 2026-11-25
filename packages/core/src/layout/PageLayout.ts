@@ -16,6 +16,7 @@ import { isSpacerLine, type LayoutLine } from "./LineBreaker";
 import type { MarkerLine } from "./BlockLayout";
 import type { LaidMarker, MarkerFace } from "./markers";
 import {
+  ANCHORED_OBJECT_MARGIN,
   anchoredOf,
   floats,
   type AnchoredObjectPlacement,
@@ -147,16 +148,15 @@ export interface DocumentLayout {
    */
   totalContentHeight: number;
   /**
-   * True when the layout was stopped early via `maxBlocks`. The pages
-   * present are correct; blocks beyond the cutoff have not been measured.
-   * Editor schedules a background pass to complete the layout.
+   * True when the layout was stopped early via `maxBlocks`. Blocks beyond the
+   * cutoff have not been measured, and a float among them can still change the
+   * last pages. Editor schedules a background pass to complete the layout.
    */
   isPartial?: boolean;
   /**
-   * Saved cursor state for O(N) incremental chunked layout.
-   * Present when isPartial:true. Pass back via PageLayoutOptions.resumption
-   * to continue where this run stopped, keeping each chunk O(chunkSize). Only
-   * a chrome geometry change costs a replay of the prefix.
+   * Saved cursor state for incremental chunked layout. Present when
+   * isPartial:true. Pass back via PageLayoutOptions.resumption to continue where
+   * this run stopped.
    */
   resumption?: LayoutResumption;
   /**
@@ -219,10 +219,9 @@ export interface DocumentLayout {
 
 /**
  * Saved cursor state from a partial layout pass.
- * Returned with isPartial:true; passed back as PageLayoutOptions.resumption
- * to resume from the exact item where the previous chunk stopped. This is a
- * replayable snapshot: a flow pass must not mutate its pages or cursor. If
- * chrome changes its geometry, the consumed prefix is paginated again.
+ * Returned with isPartial:true; passed back as PageLayoutOptions.resumption to
+ * go on from there. A float that crosses the cutoff, or a chrome change, makes
+ * the next run lay some of it out again, so a flow pass must not mutate it.
  */
 export interface LayoutResumption {
   /** The flat item list — cached to avoid re-walking the doc. */
@@ -231,7 +230,7 @@ export interface LayoutResumption {
   nextItemIndex: number;
   /** Geometry that placed the saved prefix. A mismatch forces a replay. */
   metrics: readonly PageMetrics[];
-  /** Pages completely finished by previous chunks. */
+  /** Pages before the one being built. */
   completedPages: LayoutPage[];
   /** The page currently being built (may have partial blocks). */
   currentPage: LayoutPage;
@@ -241,14 +240,10 @@ export interface LayoutResumption {
   currentY: number;
   /** spaceAfter of the last placed block, for margin collapsing. */
   prevSpaceAfter: number;
-  /** Layout version carried through all chunks. */
+  /** The floats placed so far, those in composite regions aside. */
+  floats: readonly AnchoredObjectPlacement[];
+  /** Version of the pages so far. */
   version: number;
-  /**
-   * Number of fully-completed pages as of the end of the previous chunk.
-   * Used by LayoutCoordinator to skip clearing charMap entries for pages
-   * that are already final and have not changed in this chunk.
-   */
-  prevPageCount: number;
 }
 
 /**
@@ -359,9 +354,7 @@ export interface FlowBlock {
   originalGlobalY?: number;
   /** True when Stage 3 intentionally moved this flow's globalY. */
   solverPushedThisFlow?: boolean;
-  /** True when this flow's Y range intersected a Stage 3 square wrap zone. */
-  overlapsWrapZone?: boolean;
-  /** Global y this flow's lines were last laid out at against the floats there. */
+  /** Global y Stage 3 last laid this flow's lines out at, around the floats there. Absent when it did not. */
   wrapLaidAtY?: number;
   // Where the last run placed this block, read before this run's measurement.
   preCachedTargetY?: number;
@@ -385,10 +378,7 @@ export interface FlowBlock {
  * its target page; the visual is no worse, but every consumer that loops
  * over pages can now trust `placement.page <= layout.pages.length`.
  *
- * Applied only to the **final** (non-partial) layout. Partial layouts feed
- * the next streaming chunk and must keep raw page indices so a placement
- * that lands on page 4 today survives a chunk-2 layout pass that grows the
- * page list back to 4 pages — clamping a partial would lose that.
+ * Applied only to the final layout: a partial one's page count is not settled.
  *
  * Returns the original array reference when no clamping was needed so the
  * common case stays allocation-free.
@@ -554,12 +544,11 @@ export interface PageLayoutOptions {
    */
   maxBlocks?: number;
   /**
-   * Resume a chunked layout pass from a previous partial result.
-   * Reuses saved cursors when page geometry is unchanged, so a chunk measures
-   * only new blocks. If chrome changed that geometry the saved cursors no
-   * longer describe anything, and the consumed prefix is paginated again along
-   * with this chunk — the budget grows to match, so progress still advances by
-   * one chunk.
+   * Resume a chunked layout pass from a previous partial result. A chunk lays
+   * out only new blocks, unless a float crosses the cutoff (it starts again from
+   * an earlier page) or chrome changed the page geometry (from the document's
+   * start). The budget grows by what is laid out again, so every chunk advances
+   * by a whole one.
    */
   resumption?: LayoutResumption;
   /**
@@ -662,23 +651,17 @@ interface FlowStart {
   prevSpaceAfter: number;
   /** Omits `prevSpaceAfter` at the top of a page, where a leading margin is dropped. */
   flowCursor: { y: number; prevSpaceAfter?: number };
-  /** Floats on pages before this one are kept as they were placed. */
-  firstPageLaid: number;
 }
 
-const startOfPage = (pageNumber: number, itemIndex: number, pages: LayoutPage[], y: number, flowY: number): FlowStart => ({
-  itemIndex,
-  pages,
-  page: newPage(pageNumber),
-  y,
-  prevSpaceAfter: 0,
-  flowCursor: { y: flowY },
-  firstPageLaid: pageNumber,
-});
-
-function startOfDocument(metricsFor: PageGeometry["metricsFor"]): FlowStart {
-  const { contentTop } = metricsFor(1);
-  return startOfPage(1, 0, [], contentTop, contentTop);
+function startOfPage(pageNumber: number, itemIndex: number, pages: LayoutPage[], geometry: PageGeometry): FlowStart {
+  return {
+    itemIndex,
+    pages,
+    page: newPage(pageNumber),
+    y: geometry.metricsFor(pageNumber).contentTop,
+    prevSpaceAfter: 0,
+    flowCursor: { y: geometry.startOf(pageNumber) },
+  };
 }
 
 /** Where the snapshot stopped. */
@@ -690,30 +673,47 @@ function afterSnapshot(snapshot: LayoutResumption, flowCursor: { y: number; prev
     y: snapshot.currentY,
     prevSpaceAfter: snapshot.prevSpaceAfter,
     flowCursor,
-    firstPageLaid: Infinity,
   };
 }
 
 /**
- * The last page the snapshot reached that starts with a whole block. A float
- * moves nothing on the pages before its own, so what is before this stands.
+ * The last page the snapshot reached that starts with a block of its own. A
+ * float re-lays a paragraph that goes on to its page from that paragraph's
+ * start; none before this page goes on past it.
  */
-function startOfLastWholePage(snapshot: LayoutResumption, geometry: PageGeometry): FlowStart {
-  const reached = [...snapshot.completedPages, snapshot.currentPage];
-  for (const page of reached.reverse()) {
+function lastPageStartingABlock(snapshot: LayoutResumption, geometry: PageGeometry): FlowStart {
+  for (const page of [snapshot.currentPage, ...[...snapshot.completedPages].reverse()]) {
     const first = page.blocks[0];
     if (!first || first.isContinuation) continue;
-    const itemIndex = snapshot.items.findIndex((item) => item.nodePos === first.nodePos && !item.boundary);
+    const itemIndex = snapshot.items.findIndex((item) => item.nodePos === first.nodePos);
     if (itemIndex < 0) continue;
-    return startOfPage(
-      page.pageNumber,
-      itemIndex,
-      snapshot.completedPages.slice(0, page.pageNumber - 1),
-      geometry.metricsFor(page.pageNumber).contentTop,
-      geometry.startOf(page.pageNumber),
-    );
+    return startOfPage(page.pageNumber, itemIndex, snapshot.completedPages.slice(0, page.pageNumber - 1), geometry);
   }
-  return startOfDocument(geometry.metricsFor);
+  return startOfPage(1, 0, [], geometry);
+}
+
+const wrapsText = (float: AnchoredObjectPlacement): boolean => float.wrapMode === "square" || float.wrapMode === "top-bottom";
+
+/** Where a float, with the room it keeps clear, ends in the flow. */
+const wrapEndOf = (float: AnchoredObjectPlacement): number =>
+  float.globalY + float.height + Math.max(anchoredOf(float.node)?.margin ?? 0, ANCHORED_OBJECT_MARGIN);
+
+/**
+ * Whether a float on one side of the snapshot's cutoff is wrapped, or moved
+ * clear of, on the other: it reaches over the cutoff, or a composite does, whose
+ * units move together.
+ */
+function floatCrossesCutoff(
+  snapshot: LayoutResumption,
+  cutoffY: number,
+  placed: readonly AnchoredObjectPlacement[],
+): boolean {
+  const before = snapshot.floats.filter(wrapsText);
+  const after = placed.filter(wrapsText);
+  if (before.some((float) => wrapEndOf(float) > cutoffY) || after.some((float) => float.globalY < cutoffY)) return true;
+  const last = snapshot.items[snapshot.nextItemIndex - 1];
+  const compositeGoesOn = last?.unit !== undefined && !last.lastUnit;
+  return compositeGoesOn && (after.length > 0 || before.some((float) => float.page >= snapshot.currentPage.pageNumber));
 }
 
 /** A run that lays out again what the snapshot had still advances by a whole chunk. Boundaries are free. */
@@ -746,11 +746,10 @@ export function runFlowPipeline(
   const metricsFor = geometry.metricsFor;
 
   // Resumption. The snapshot's items, version and progress are always usable.
-  // Its cursors are usable only while the geometry that placed them still
-  // holds, and only where no float can reach over the cutoff.
+  // Its cursors are usable only while the geometry that placed them still holds.
   const snapshot = options.resumption;
   const items = snapshot ? snapshot.items : collectLayoutItems(doc);
-  const appended = snapshot?.flowCursor !== undefined
+  const resumed = snapshot?.flowCursor !== undefined
     && snapshot.metrics.every((m) => samePageMetrics(m, metricsFor(m.pageNumber)))
     ? afterSnapshot(snapshot, snapshot.flowCursor)
     : undefined;
@@ -765,56 +764,43 @@ export function runFlowPipeline(
     ...(options.inlineRegistry ? { inlineRegistry: options.inlineRegistry } : {}),
     ...(options.fonts ? { fonts: options.fonts } : {}),
   };
-  const flowsFrom = (start: FlowStart) =>
-    buildBlockFlow(items, start.itemIndex, flowConfig, measureCtx, blockBudget(start, snapshot, options.maxBlocks));
-
-  // In-cell images are read off the rows after pagination, so only body
-  // placements carry over or decide whether the cached tail still holds.
-  const previousBodyPlacements = (previousLayout?.anchoredObjects ?? []).filter((p) => p.regionPos === undefined);
-  let start = appended ?? startOfDocument(metricsFor);
-  let flowResult = flowsFrom(start);
-  // A float is wrapped by everything on its page, on both sides of the cutoff,
-  // so a chunk that shares its first page with one starts that page again.
-  if (appended && snapshot && (
-    flowResult.flows.some((flow) => flow.hasAnchoredObject) ||
-    previousBodyPlacements.some((p) => p.page >= snapshot.currentPage.pageNumber)
-  )) {
-    start = startOfLastWholePage(snapshot, geometry);
-    flowResult = flowsFrom(start);
-  }
-  const { pages } = start;
-  // A chunk that only appends leaves the pages already painted as they were, and
-  // the version they were stamped with still describes them. One that lays some
-  // out again needs a version of its own, or paint keeps the old pixels while
-  // the charmap moves to the new geometry and the caret is drawn against text
-  // that is no longer there.
-  const chunkVersion = snapshot
-    ? (start === appended ? snapshot.version : snapshot.version + 1)
-    : runId;
-
   // Stage 2: assign continuous flow coordinates and resolve anchored objects.
   // The flow cursor and the paginated cursor are distinct: pagination may
   // suppress margins at page boundaries. Reconstructing one from the other
   // makes a chunk boundary change subsequent positions.
-  const seedGlobalY = start.flowCursor.y;
-  const flowsWithGlobalY = assignGlobalY(
-    flowResult.flows, seedGlobalY, pageConfig, geometry, start.flowCursor.prevSpaceAfter,
-  );
-  const anchoredFlow = resolveAnchoredObjects(
-    flowsWithGlobalY,
-    pageConfig,
-    geometry,
-    measureCtx,
-  );
+  const layFrom = (from: FlowStart) => {
+    const measured = buildBlockFlow(items, from.itemIndex, flowConfig, measureCtx, blockBudget(from, snapshot, options.maxBlocks));
+    const placed = assignGlobalY(measured.flows, from.flowCursor.y, pageConfig, geometry, from.flowCursor.prevSpaceAfter);
+    return { flowResult: measured, anchoredFlow: resolveAnchoredObjects(placed, pageConfig, geometry, measureCtx) };
+  };
+  let start = resumed ?? startOfPage(1, 0, [], geometry);
+  let laid = layFrom(start);
+  // Without pages every restart would be from the start of the document.
+  if (resumed && snapshot && !pageConfig.pageless && floatCrossesCutoff(snapshot, resumed.flowCursor.y, laid.anchoredFlow.placements)) {
+    start = lastPageStartingABlock(snapshot, geometry);
+    laid = layFrom(start);
+  }
+  const { flowResult, anchoredFlow } = laid;
+  const appends = start === resumed;
+  // Tiles skip repainting while the version stands, so it stands only while no
+  // page that may be painted changes: otherwise the charmap moves to the new
+  // geometry over old pixels, and the caret is drawn against text that is no
+  // longer there.
+  const chunkVersion = snapshot
+    ? (appends && snapshot.currentPage.blocks.length === 0 ? snapshot.version : snapshot.version + 1)
+    : runId;
 
-  // The floats of the pages this chunk does not lay out again carry over from
-  // the chunks that placed them.
-  const carriedPlacements = previousBodyPlacements.filter(
-    (p) => p.page < start.firstPageLaid && !anchoredFlow.placements.some((q) => q.docPos === p.docPos),
-  );
+  // The floats this run did not place are the snapshot's, on the pages it left
+  // alone.
+  const carriedPlacements = snapshot
+    ? snapshot.floats.filter((float) => appends || float.page < start.page.pageNumber)
+    : [];
   const mergedPlacements = carriedPlacements.length > 0
     ? [...carriedPlacements, ...anchoredFlow.placements]
     : anchoredFlow.placements;
+  // In-cell images are read off the rows after pagination, so only body
+  // placements decide whether the cached tail still holds.
+  const previousBodyPlacements = (previousLayout?.anchoredObjects ?? []).filter((p) => p.regionPos === undefined);
   // A partial layout has no tail, only a cutoff: copying from it would silently
   // truncate the document at the last streamed chunk. And past this run's own
   // cutoff nothing was measured, so nothing says what is there is unchanged.
@@ -829,7 +815,7 @@ export function runFlowPipeline(
       tail: canReuseTail ? findReusableTail(items, previousLayout) : undefined,
       measureCache,
       pageless: pageConfig.pageless,
-      init: { pages, page: start.page, y: start.y, prevSpaceAfter: start.prevSpaceAfter },
+      init: { pages: start.pages, page: start.page, y: start.y, prevSpaceAfter: start.prevSpaceAfter },
     },
   );
 
@@ -845,7 +831,7 @@ export function runFlowPipeline(
     const lastFlow = anchoredFlow.flows.at(-1);
     const flowCursor = lastFlow
       // `globalY` is optional on the type; assignGlobalY above always sets it.
-      ? flowCursorAfter(lastFlow, lastFlow.globalY ?? seedGlobalY, pageConfig, geometry)
+      ? flowCursorAfter(lastFlow, lastFlow.globalY ?? start.flowCursor.y, pageConfig, geometry)
       : snapshot?.flowCursor;
     const resumption: LayoutResumption = {
       items,
@@ -856,20 +842,12 @@ export function runFlowPipeline(
       currentPage: { ...pr.currentPage, blocks: [...pr.currentPage.blocks] },
       currentY: pr.y,
       prevSpaceAfter: pr.prevSpaceAfter,
+      floats: mergedPlacements,
       version: chunkVersion,
-      prevPageCount: pr.pages.length,
     };
     const partialPages = [...pr.pages, pr.currentPage];
     const partialPlacements = [...mergedPlacements, ...regionFloatPlacements(partialPages, geometry)];
-    // Intentionally NOT clamped: the partial layout's anchoredObjects gets
-    // carried forward to the next chunk as `previousLayout?.anchoredObjects`,
-    // and earlier chunks are never re-solved. Clamping a partial would
-    // permanently lose a placement's original page — e.g. a placement on
-    // page 4 clamped to partial-page count 2 cannot be restored when the
-    // next chunk grows the layout back to 4 pages. View consumers reading
-    // a partial layout may briefly see placement.page > pages.length during
-    // streaming; that window is bounded by the next chunk arriving, and the
-    // final non-partial layout below is clamped.
+    // Not clamped: the page count is not settled until the last chunk.
     const layout: DocumentLayout = {
       pages: partialPages,
       pageConfig,
@@ -977,7 +955,7 @@ export interface PaginateFlowOptions {
   tail?: ReusableTail | undefined;
   measureCache?: WeakMap<Node, MeasureCacheEntry> | undefined;
   pageless?: boolean | undefined;
-  /** Initial page cursor. Fresh run: pages=[], page=empty page 1. Resumption: from prior chunk. */
+  /** Where pagination goes on from: an empty page 1 for a fresh run. */
   init: {
     pages: LayoutPage[];
     page: LayoutPage;
@@ -1302,7 +1280,7 @@ export function paginateFlow(
 
     // This block landed where it did last run and everything after it is
     // unchanged, so the rest of the last layout holds.
-    const canUsePreviousLayoutTail = !flow.solverPushedThisFlow && !flow.overlapsWrapZone;
+    const canUsePreviousLayoutTail = !flow.solverPushedThisFlow && flow.wrapLaidAtY === undefined;
     if (
       tail &&
       canUsePreviousLayoutTail &&
@@ -1368,7 +1346,7 @@ export function paginateFlow(
  * This function is pure measurement: same inputs always produce the same output.
  *
  * @param items      Flat item list from collectLayoutItems() or resumption cache.
- * @param startIndex First item to process (0 for fresh layout, resumption.nextItemIndex for chunks).
+ * @param startIndex First item to process.
  * @param config     Content area geometry — no pageHeight, no pagination decisions.
  * @param maxBlocks  Stop early after this many blocks (streaming layout support).
  */
