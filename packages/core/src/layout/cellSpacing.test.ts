@@ -1,6 +1,9 @@
-/** Blocks in a table cell keep the space between them that blocks on a page do. */
-import { describe, it } from "vitest";
-import { cell, doc, fixedWidths, h, image, p, row, table, whole, type Setup } from "../test/layoutOracle";
+/**
+ * Blocks in a table cell keep the space between them that blocks on a page do,
+ * and the first and last their own, as Word keeps them.
+ */
+import { describe, expect, it } from "vitest";
+import { cell, doc, fixedWidths, h, image, p, row, schema, table, text, whole, words, type Setup } from "../test/layoutOracle";
 import { expectSamePosition } from "../test-utils";
 import { defaultPageConfig, type DocumentLayout, type LayoutPage } from "./PageLayout";
 
@@ -23,8 +26,9 @@ describe("a table cell", () => {
   });
 
   it("keeps its first block's space before, as Word does", () => {
-    const heading = must(blocksIn(whole(doc(table(row(cell(h(2, "one"), p("two"))))), PAGE))[0], "heading");
-    const region = must(whole(doc(table(row(cell(h(2, "one"))))), PAGE).pages[0]?.blocks[0]?.regions?.[0], "cell");
+    const layout = whole(doc(table(row(cell(h(2, "one"), p("two"))))), PAGE);
+    const region = must(layout.pages[0]?.blocks[0]?.regions?.[0], "cell");
+    const heading = must(region.blocks[0], "heading");
     expectSamePosition(heading.y, region.inset.top + heading.spaceBefore);
   });
 
@@ -42,11 +46,23 @@ describe("a table cell", () => {
     expectSamePosition(two.y, one.y + one.height + Math.max(one.spaceAfter, two.spaceBefore));
   });
 
-  it("gives no space of its own to a paragraph that only anchors a float", () => {
-    const anchor = p([image({ wrapMode: "behind", width: 20, height: 20 })]);
+  it("gives no space of its own to a block that only anchors a float", () => {
+    // A heading, so that the space it would keep above is not already none.
+    const anchor = schema.node("heading", { level: 2 }, [image({ wrapMode: "behind", width: 20, height: 20 })]);
     const inCell = blocksIn(whole(doc(table(row(cell(p("one"), anchor, h(2, "two"))))), PAGE));
     const [one, holder, two] = [must(inCell[0], "one"), must(inCell[1], "anchor"), must(inCell[2], "two")];
     expectSamePosition(holder.y, one.y + one.height + one.spaceAfter);
     expectSamePosition(two.y, holder.y + two.spaceBefore);
+  });
+
+  it("wraps a float from where the block's text starts, under the space it keeps above", () => {
+    const floating = p([image({ wrapMode: "square", xAlign: "left", width: 60, height: 20 }), text("one")]);
+    const layout = whole(doc(table(row(cell(floating, h(2, words(3)))))), PAGE);
+    const region = must(layout.pages[0]?.blocks[0]?.regions?.[0], "cell");
+    const [float, heading] = [must(region.floats?.[0], "float"), must(region.blocks[1], "heading")];
+    const floatEnds = float.y + float.height + float.margin;
+    expect(heading.y - heading.spaceBefore).toBeLessThan(floatEnds);
+    expect(heading.y).toBeGreaterThan(floatEnds);
+    expect(heading.lines[0]?.spans[0]?.x).toBe(0);
   });
 });

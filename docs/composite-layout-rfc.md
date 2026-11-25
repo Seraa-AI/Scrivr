@@ -185,11 +185,9 @@ details:
   inset are clamped to finite, non-negative numbers.
 - **A selection's own clipboard form that is not text** is ignored, and the
   document's own form is used.
-- **A region's spacing is not the body's.** `layoutRegionBlocks` adds each
-  block's space before *and* after below it: adjacent margins add instead of
-  collapsing, and a heading's space before is drawn under it. Word keeps the
-  first block's space before and the last one's after, and collapses between.
-  Found 2026-11-24; the resumable layout RFC §7 owns the policy.
+- **A region is spaced as Word spaces a cell**, its own policy and not the body's:
+  the first block keeps its space before and the last its space after, and between
+  two the larger is kept. Until #318 each block's spaces were both added below it.
 - **A `RegionPlacement` is both space and content** (it names a node). It stays
   what an extension declares; inside the engine it becomes a flow region and a
   prepared flow, so that a column, which has no node, can be a region too.

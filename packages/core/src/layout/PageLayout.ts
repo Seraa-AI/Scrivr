@@ -1131,12 +1131,11 @@ export function paginateFlow(
     // ── Page overflow check (disabled in pageless mode) ───────────────────────
     const blockBottom = targetY + block.height;
     const pageBottom = currentMetrics.contentBottom;
-    const contentHeight = currentMetrics.contentHeight;
-    // Text blocks can always be split; leaf and composite blocks need the
-    // !isFirstOnPage guard to avoid infinite empty-page loops when the block
-    // exceeds contentHeight (the "pathological row policy" — clip on next page).
+    // Text blocks can always be split. A leaf or composite already at the page
+    // top stays, however tall: moving it would only leave an empty page.
     const isAtomicBlock = flow.kind === "leaf" || flow.kind === "composite";
-    const overflows = !pageless && blockBottom > pageBottom && (!isFirstOnPage || !isAtomicBlock);
+    const isAtPageTop = targetY === currentMetrics.contentTop;
+    const overflows = !pageless && blockBottom > pageBottom && (!isAtomicBlock || !isAtPageTop);
 
     // ── Layout debug log ──────────────────────────────────────────────────────
     if ((globalThis as Record<string,unknown>).__LAYOUT_DEBUG__) {
@@ -1161,7 +1160,7 @@ export function paginateFlow(
     } else if (isAtomicBlock) {
       // ── Leaf or composite: move the whole block to the next page ───────────
       if ((globalThis as Record<string,unknown>).__LAYOUT_DEBUG__) {
-        console.log(`  → LEAF moved to page ${pages.length + 2}`);
+        console.log(`  → ATOMIC moved to page ${pages.length + 2}`);
       }
       pages.push(currentPage);
       currentPage = newPage(pages.length + 1);
