@@ -21,4 +21,12 @@ describe("a paragraph after a table that a float moved and left", () => {
     expect(end.node.textContent).toBe("end");
     expectSamePosition(end.y, before.y + before.height + Math.max(before.spaceAfter, end.spaceBefore));
   });
+
+  it("follows it after it was laid out around one float and then another", () => {
+    const float = (height: number) => image({ wrapMode: "top-bottom", xAlign: "right", width: 150, height, yOffset: -20 });
+    const layout = whole(doc(p("F0"), p([text("a1 x"), float(100)]), p([text("a2 x"), float(120)]), rows(2), p(`end ${words(20)}`), p("z")), PAGE);
+    const blocks = layout.pages[1]?.blocks ?? [];
+    expect(layout.pages).toHaveLength(2);
+    expect(blocks.slice(-2).map((block) => block.node.textContent.slice(0, 3))).toEqual(["end", "z"]);
+  });
 });
