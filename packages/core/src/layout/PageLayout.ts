@@ -363,6 +363,8 @@ export interface FlowBlock {
   overlapsWrapZone?: boolean;
   /** Global y this flow's lines were last laid out at against the floats there. */
   wrapLaidAtY?: number;
+  /** The lines this flow was measured with, kept once Stage 3 lays it out around floats. */
+  measuredLines?: LayoutLine[];
   // Where the last run placed this block, read before this run's measurement.
   preCachedTargetY?: number;
   preCachedPage?: number;

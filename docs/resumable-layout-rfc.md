@@ -919,6 +919,7 @@ Updated as each phase lands, with every difference from the design above and why
 | 0, stale wrapped lines (§1.2, §14.8) | The settle re-lays a wrapped flow wherever it was carried, and pagination's re-break, all three call sites, is deleted. No flow is left wrapped for another place in 600 random float documents (5,158 wrapped flows), and no baseline moved |
 | 0, cell spacing (§1.4, §7, §14.3) | As Word, at every depth. One DOCX layout baseline moved: two headings in the cells of fixture 25 now sit under their space before. No Word-comparison score changed |
 | 0, oversized blocks (§14.7) | A fresh page, measured in Word for a row that may not split. It also showed a second fault, fixed with it: what followed an overflowing block or line was placed by the overflow's full height, leaving blank pages. One DOCX layout baseline moved: fixture 11's 1,241px row starts page 3 instead of y 316 on page 2 |
+| 0, landing again (found in review) | A flow laid out around a float that then moved away was still landed by those lines, a tall gap first, and could be sent to a new page. Landing now reads the lines that hold where the flow starts, or the measured ones. 18 of 1,500 random float documents had a block stranded this way; none now |
 | Everything else | Not started |
 
 The split at a page boundary in `paginateFlow` is the approach this replaces, not a
