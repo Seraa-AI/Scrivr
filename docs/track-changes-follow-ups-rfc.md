@@ -1,6 +1,6 @@
 # Track Changes Follow-ups RFC — closing what #228's review left open
 
-Status: proposed (2026-11-24). Answers parts 1, 3, 4 and 5 of #232. Part 2 was
+Status: proposed (2026-11-24). Phase 2 run; see What shipped. Answers parts 1, 3, 4 and 5 of #232. Part 2 was
 answered by the [overlapping steps RFC](./overlapping-steps-rfc.md) (#257).
 
 **Answer:** each part closes in its own PR, stacked on this one:
@@ -310,4 +310,31 @@ issue can be weighed before the code phases.
 
 ## What shipped
 
-Nothing yet. Each phase adds its lines here.
+### Phase 2: the playground checks (2026-11-24)
+
+Run by hand in the docs playground, in a browser. Each failure was then
+reproduced in a test against main, to find its cause, and filed as its own
+issue.
+
+| Check | Result | Issue |
+|---|---|---|
+| 1. Conflict | Pass. Both buttons complete, and one undo restores the conflict | |
+| 2. One card | Pass. One card, and rejecting it removes the whole paragraph | |
+| 3. Paragraph break | The text is restored by rejecting both cards. The Changes panel has no Reject all to do it in one step | #300 |
+| 4. Two moves | Pass. No text lost or duplicated | |
+| 5. Dependent work | It asks before rejecting. But it counts each typed key as a dependent change ("8" for " details"), Alice's card shows the typed word as part of her addition, and the notice is unreadable in the dark theme | #297, #299 |
+| 6. Undo | Fails. In suggesting mode, one undo removes one letter, however fast the word was typed | #298 |
+
+**What the tests showed:**
+
+- **Check 5's count.** Typing " details" one key at a time inside another
+  author's pending insertion records 8 changes. The same typing in an
+  ordinary paragraph records 1.
+- **Check 6.** With tracking off, keys typed under 500 ms apart undo as one
+  step, which is the editor's rule (`newGroupDelay`). With tracking on, each key
+  undoes alone at any speed. With tracking off, keys more than 500 ms apart
+  also undo one at a time. That is the editor's rule too, not a fault in Track
+  Changes.
+- **Check 5's colours.** The notice's text uses `--scrivr-react-text`, which the
+  dark theme makes light. Its background `--scrivr-react-notice-surface` is set
+  nowhere, so it stays at its light fallback, `#fdf6e7`.
