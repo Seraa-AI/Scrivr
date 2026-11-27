@@ -317,13 +317,14 @@ issue can be weighed before the code phases.
 
 The checks were run by hand in the docs playground, in a browser. Each failure
 is filed as its own issue. Two were reproduced in a test against main (#297,
-#298); the other two were found in the code (#299, #300).
+#298); #299 was found in the code. #300 was raised in error: the control it
+asks for exists (see check 3).
 
 | Check | Result | Issue |
 |---|---|---|
 | 1. Conflict | Pass. Both buttons complete, and one undo restores the conflict | |
 | 2. One card | Pass. One card, the badge says 1, and rejecting it removes the whole paragraph | |
-| 3. Paragraph break | Pass, in two clicks. Rejecting both cards restores the text, but the Changes panel has no Reject all to do it in one | #300 |
+| 3. Paragraph break | Pass. Rejecting the cards restores the text, one at a time or all at once with the Changes tab's Reject, which is Reject all under a short label | |
 | 4. Two moves | Pass. No text lost or duplicated | |
 | 5. Dependent work | Partly. It asks before rejecting. But each typed key counts as its own dependent change ("8" for " details"), Alice's card shows the typed word as part of her addition, and the notice is unreadable in the dark theme | #297, #299 |
 | 6. Undo | Partly. The first undo brings the accepted change back to pending. The second removes the word one letter at a time, however fast it was typed | #298 |
@@ -336,20 +337,27 @@ is filed as its own issue. Two were reproduced in a test against main (#297,
   `dependsOn` is stamped only afterwards, by `composeGestureRecords`. So the key
   before already depends on Alice's paragraph, the new one doesn't yet, and they
   never merge. In an ordinary paragraph neither depends on anything, and the
-  keys merge into one change.
+  keys merge into one change. This is read from the code and not yet
+  demonstrated; #297's fix has to start with a test that shows it.
 - **#298: one undo, one letter.** With tracking off, keys typed under 500 ms
   apart undo as one step, which is the editor's rule (`newGroupDelay`). Keys
   further apart undo one at a time, by the same rule. With tracking on, even
   keys 10 ms apart undo one at a time. The replay takes the typed character out
   and writes it back marked. Mapped through those two steps, the range history
   keeps for the last key comes out empty and is dropped, so the next key is
-  never adjacent to it and starts a new undo step.
+  never adjacent to it and starts a new undo step. Demonstrated on
+  `undo-grouping-298-phase-2`: declaring the write-back the mirror of its undo
+  makes the word undo as one step, and its two tests fail without that.
 - **#299: unreadable notice.** The notice's text uses `--scrivr-react-text`,
   which the dark theme makes light. Its background `--scrivr-react-notice-surface`
   is set nowhere, so it stays at its light fallback, `#fdf6e7`. The playground's
   `TrackChangesInspector` reads the same unset variable.
-- **#300: no Reject all.** Accept all and Reject all exist only on the AI
-  suggestion cards.
+- **#300: raised in error.** The Changes panel has Reject all and Accept all
+  (`packages/react/src/components/TrackChangesPanel.tsx`), and the playground's
+  Changes tab has them as "Reject" and "Accept", shown whenever a change is
+  pending (`apps/docs/src/playground/Playground.tsx`). The check missed the
+  short labels. Rejecting all three cards of check 3 at once restores the one
+  original paragraph, so #300 can be closed.
 
 ### Phase 3: tests that prove their fix (2026-11-24)
 
@@ -384,7 +392,7 @@ would, so each is renamed "guards against …":
 | `trackedRepresentation`: "stamps a deleted block that admits no marks on the node, not its text" | "guards against marking the text of a deleted block that admits no marks" | ProseMirror's `addMark` already skips text whose parent admits no such mark |
 | `trackedRepresentation`: "still marks text where the schema admits marks" | "guards against leaving text unmarked where the schema admits marks" | It checks the schema fix doesn't go too far. The fix's own test is the inserted-block one, which fails without it |
 | `selectionContract`: "keeps the caret at the end of the text it wrapped" | "guards against moving the caret away from the end of the text it wrapped" | A caret at the end of the wrapped text survives a written-back wrap too |
-| `selectionContract`: "lands after typed text" | "guards against the caret landing anywhere but after typed text" | The code before #228 put the caret after typed text the same way |
+| `selectionContract`: "lands after typed text" | "guards against the caret staying in front of typed text" | The code before #228 put the caret after typed text the same way |
 
 Of `selectionContract`'s 12 tests, 10 now prove their fix and 2 are guards. The
 issue estimated that about 7 didn't prove theirs.
