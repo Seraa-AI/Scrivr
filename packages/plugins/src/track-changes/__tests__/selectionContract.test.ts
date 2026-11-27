@@ -66,11 +66,14 @@ describe("selection contract — an explicit selection is carried, not collapsed
     expect(selected(editor)).toContain("one");
   });
 
-  it("preserves a node selection", () => {
+  // The struck block is kept in front of the selected one, so the selection has
+  // to be carried past it rather than left where the deletion put it.
+  it("keeps a node selection on its block when the block before it is deleted", () => {
     const editor = new TestEditor(doc(p("one"), p("two")));
-    const tr = editor.state.tr.insertText("!", 2);
-    editor.dispatch(tr.setSelection(NodeSelection.create(tr.doc, 6)));
+    const tr = editor.state.tr.delete(0, 5);
+    editor.dispatch(tr.setSelection(NodeSelection.create(tr.doc, 0)));
 
+    expect(editor.state.doc.child(0).textContent).toBe("one");
     expect(editor.state.selection).toBeInstanceOf(NodeSelection);
     expect(editor.state.doc.nodeAt(editor.state.selection.from)?.textContent).toBe("two");
   });
@@ -92,7 +95,8 @@ describe("selection contract — gestures that restructure without replacing", (
     return editor.dispatch(tr);
   };
 
-  it("keeps the caret at the end of the text it wrapped", () => {
+  // A caret at the end of the wrapped text survives even a wrap that is written back.
+  it("guards against moving the caret away from the end of the text it wrapped", () => {
     const editor = new TestEditor(doc(p("hello")));
     wrapInList(editor, 6);
 
@@ -112,7 +116,7 @@ describe("selection contract — gestures that restructure without replacing", (
 });
 
 describe("selection contract — the caret follows an insertion", () => {
-  it("lands after typed text", () => {
+  it("guards against the caret staying in front of typed text", () => {
     const editor = new TestEditor(doc(p("ab")));
     type(editor, 2, "X");
 

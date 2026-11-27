@@ -53,7 +53,8 @@ describe("tracked representation follows the schema", () => {
     ).not.toThrow();
   });
 
-  it("stamps a deleted block that admits no marks on the node, not its text", () => {
+  // ProseMirror's addMark already skips text whose parent admits no such mark; this pins that we rely on it.
+  it("guards against marking the text of a deleted block that admits no marks", () => {
     const editor = new TestEditor(doc(unmarked("x = 1"), p("tail")));
     editor.deleteRange(0, 7);
 
@@ -62,7 +63,8 @@ describe("tracked representation follows the schema", () => {
     expect(() => editor.state.doc.check()).not.toThrow();
   });
 
-  it("still marks text where the schema admits marks", () => {
+  // Keeps the no-marks rule above from spreading to blocks that do admit marks.
+  it("guards against leaving text unmarked where the schema admits marks", () => {
     const editor = new TestEditor(doc(p("tail")));
     editor.dispatch(editor.state.tr.insert(0, p("new")));
 
