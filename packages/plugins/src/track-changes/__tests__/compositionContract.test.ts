@@ -194,7 +194,7 @@ describe("placement is transport, not a content snapshot", () => {
     expect(editor.pendingChanges.map(c => c.id)).toEqual(bob);
   });
 
-  // A guard: it held before the fix it was written for, so no revert makes it fail.
+  // Typing into a shadow's unmarked text is a plain insertion; this pins that it stays one.
   it("guards against losing a second author's edit made inside a move's shadow", () => {
     const editor = moved();
     move(editor, "a", "c", "after");
